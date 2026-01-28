@@ -1,41 +1,35 @@
-const express = require("express");
-const path = require("path");
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+require('dotenv').config();
+
+const authRoutes = require('./routes.auth');
+const userRoutes = require('./routes.user');
+const withdrawRoutes = require('./routes.withdraw');
+const adminRoutes = require('./admin');
+const verifyRoutes = require('./verification');
+
 const app = express();
 
+app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
-// =====================
-// FRONT CLIENTE
-// =====================
-app.use(
-  "/",
-  express.static(path.join(__dirname, "public_web"))
-);
+mongoose.connect(process.env.MONGO_URI)
+.then(()=>console.log('✅ MongoDB conectado'))
+.catch(err=>console.log(err));
 
-// =====================
-// FRONT ADMIN
-// =====================
-app.use(
-  "/admin",
-  express.static(path.join(__dirname, "public"))
-);
+app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/withdraw', withdrawRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/verify', verifyRoutes);
 
-// =====================
-// API
-// =====================
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/admin", require("./routes/admin"));
-app.use("/api/user", require("./routes/user"));
-app.use("/api/withdraw", require("./routes/withdraw"));
-
-// =====================
-app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "public_web", "index.html")
-  );
+app.get('/', (req,res)=>{
+  res.sendFile(__dirname + '/public/index.html');
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log("Servidor activo en puerto", PORT)
-);
+app.listen(PORT, ()=>{
+  console.log('🚀 Servidor corriendo en puerto', PORT);
+});
