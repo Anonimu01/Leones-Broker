@@ -17,10 +17,9 @@ router.post("/register", async (req, res) => {
     return res.status(400).json({ msg: "Correo ya registrado" });
 
   const hash = await bcrypt.hash(password, 10);
-
   const token = crypto.randomBytes(32).toString("hex");
 
-  const user = await User.create({
+  await User.create({
     name,
     email,
     password: hash,
