@@ -8,8 +8,7 @@ router.get("/email/:token", async (req, res) => {
     verificationToken: req.params.token
   });
 
-  if (!user)
-    return res.send("Token inválido");
+  if (!user) return res.send("Token inválido");
 
   user.verified = true;
   user.verificationToken = null;
