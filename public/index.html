@@ -550,7 +550,8 @@ function restorePublicHeader(){
 
 
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
-<!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
+<!-- Incluye HTML, CSS y JS corregidos (ahora con botón de abrir/ocultar menú en móviles y overlay). -->
+<!-- Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
 <!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
 <style>
@@ -567,9 +568,9 @@ function restorePublicHeader(){
   }
 
   /* Header */
-  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
+  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:80;height:64px}
   .header-left{display:flex;align-items:center;gap:12px}
-  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer;display:flex;align-items:center;justify-content:center;width:40px;height:40px}
   .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
   .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
   .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
@@ -577,7 +578,7 @@ function restorePublicHeader(){
   /* Layout */
   .main-wrap{padding-top:80px;max-width:none; width: auto; margin:0 2%;}
   .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
-  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px)}
+  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px);position:relative;z-index:85}
   .sidebar.hidden{transform:translateX(-110%)}
   .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
   .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
@@ -634,8 +635,21 @@ function restorePublicHeader(){
     .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
     #tv_chart_container{height:300px}
     .trade-panel{grid-template-columns:1fr}
-    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:260px;z-index:85;transform:translateX(-110%);box-shadow: 8px 0 24px rgba(0,0,0,0.6)}
+    .sidebar.visible-mobile{transform:translateX(0)}
+    .menu-toggle{display:flex}
   }
+
+  /* Overlay for mobile sidebar */
+  #sidebarOverlay{
+    display:none;
+    position:fixed;
+    left:0;top:0;right:0;bottom:0;
+    background: rgba(0,0,0,0.45);
+    z-index:82;
+    transition: opacity .18s ease;
+  }
+  #sidebarOverlay.visible{ display:block; opacity:1; }
 
   .muted-small{color:var(--muted);font-size:12px}
   .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
@@ -646,7 +660,8 @@ function restorePublicHeader(){
   <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
   <header class="header">
     <div class="header-left">
-      <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
+      <!-- menu-toggle visible always but behaves specially on mobile -->
+      <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú" aria-label="Abrir/Cerrar menú">☰</button>
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
@@ -660,10 +675,13 @@ function restorePublicHeader(){
     </div>
   </header>
 
+  <!-- Overlay for mobile sidebar -->
+  <div id="sidebarOverlay" onclick="closeSidebarOnMobile()"></div>
+
   <div class="main-wrap">
     <div class="layout">
       <!-- Sidebar -->
-      <aside class="sidebar" id="sidebar">
+      <aside class="sidebar hidden" id="sidebar" aria-hidden="true">
         <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
         <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
         <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
@@ -979,7 +997,6 @@ function showPrivateFull(user){
       const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item'));
       function activateSection(sectionId){
         menuItems.forEach(mi=>{
-          // support both data-section and data-target for compatibility
           const ds = mi.dataset.section || mi.dataset.target || '';
           mi.classList.toggle('active', ds === sectionId || mi.dataset.target === sectionId);
         });
@@ -1032,6 +1049,8 @@ function performLogoutFull(){
     // reattach CTAs safely if exist
     try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn').click()); }catch(e){}
     try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn').click()); }catch(e){}
+    // also hide sidebar overlay in case left open
+    closeSidebarOnMobile();
   }catch(e){ console.error('logout error', e); }
 }
 
@@ -1149,6 +1168,7 @@ let positions = [];
 /* DOM refs (obtained dynamically in DOMContentLoaded for safety) */
 let menuToggle, symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
 let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
+let sidebarEl, sidebarOverlayEl;
 
 /* UI: menu toggle and other DOM wiring */
 function wireDomRefs(){
@@ -1172,10 +1192,54 @@ function wireDomRefs(){
   posCountEl = document.getElementById('pos-count');
   posCountTop = document.getElementById('pos-count-top');
 
+  sidebarEl = document.getElementById('sidebar');
+  sidebarOverlayEl = document.getElementById('sidebarOverlay');
+
   menuToggle && menuToggle.addEventListener('click', ()=> {
-    const sb = document.getElementById('sidebar');
-    if(sb) sb.classList.toggle('hidden');
+    toggleSidebarOnMobile();
   });
+
+  // ensure overlay click closes sidebar
+  if(sidebarOverlayEl) sidebarOverlayEl.addEventListener('click', closeSidebarOnMobile);
+
+  // close sidebar when resizing to desktop
+  window.addEventListener('resize', ()=>{
+    if(window.innerWidth > 1000){
+      // ensure sidebar visible on desktop
+      if(sidebarEl) { sidebarEl.classList.remove('hidden'); sidebarEl.classList.remove('visible-mobile'); sidebarEl.setAttribute('aria-hidden','false'); }
+      if(sidebarOverlayEl) { sidebarOverlayEl.classList.remove('visible'); sidebarOverlayEl.style.display='none'; }
+    } else {
+      // on mobile keep it hidden by default
+      if(sidebarEl && !sidebarEl.classList.contains('visible-mobile')) { sidebarEl.classList.add('hidden'); sidebarEl.setAttribute('aria-hidden','true'); }
+    }
+  });
+}
+
+/* Toggle/open/close behavior for mobile sidebar */
+function toggleSidebarOnMobile(){
+  if(!sidebarEl) return;
+  const isOpen = sidebarEl.classList.contains('visible-mobile');
+  if(isOpen){
+    // close
+    sidebarEl.classList.remove('visible-mobile');
+    sidebarEl.classList.add('hidden');
+    sidebarEl.setAttribute('aria-hidden','true');
+    if(sidebarOverlayEl){ sidebarOverlayEl.classList.remove('visible'); sidebarOverlayEl.style.display='none'; }
+  } else {
+    // open
+    sidebarEl.classList.remove('hidden');
+    sidebarEl.classList.add('visible-mobile');
+    sidebarEl.setAttribute('aria-hidden','false');
+    if(sidebarOverlayEl){ sidebarOverlayEl.style.display='block'; setTimeout(()=> sidebarOverlayEl.classList.add('visible'), 10); }
+  }
+}
+
+function closeSidebarOnMobile(){
+  if(!sidebarEl) return;
+  sidebarEl.classList.remove('visible-mobile');
+  sidebarEl.classList.add('hidden');
+  sidebarEl.setAttribute('aria-hidden','true');
+  if(sidebarOverlayEl){ sidebarOverlayEl.classList.remove('visible'); sidebarOverlayEl.style.display='none'; }
 }
 
 /* NAV helpers */
@@ -1197,6 +1261,8 @@ function footerNavClick(e){
   const target = btn.dataset.target;
   showPanel(target);
   if(target === 'tradingPanel') initTradingIfNeeded();
+  // close mobile sidebar when user navigates (good UX)
+  if(window.innerWidth <= 1000) closeSidebarOnMobile();
 }
 
 function navSidebar(evt){
@@ -1212,6 +1278,8 @@ function navSidebar(evt){
   document.querySelectorAll('#privateArea_full .menu-item').forEach(item => item.classList.remove('active'));
   el.classList.add('active');
   if(panelId === 'tradingPanel') initTradingIfNeeded();
+  // close sidebar on mobile after selection
+  if(window.innerWidth <= 1000) closeSidebarOnMobile();
 }
 
 function showModalInfo(){ document.getElementById('infoModal').style.display = 'flex'; }
@@ -1291,7 +1359,6 @@ let tradingWidget = null;
 function createTradingViewWidget(containerId, symbol){
   try {
     if(typeof TradingView === 'undefined'){
-      // TradingView script not loaded
       document.getElementById(containerId).innerHTML = '<div style="padding:12px;color:var(--muted)">TradingView no está disponible en este entorno.</div>';
       return null;
     }
@@ -1669,3 +1736,13 @@ async function openTrade(symbol, qty, price){
   }
 }
 </script>
+
+
+
+
+</div>
+
+<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
+
+</body>
+</html>
