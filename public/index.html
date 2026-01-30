@@ -456,7 +456,7 @@
 <script>
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
-const SESSION_KEY = 'leones_images_session';
+
 
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
 function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
@@ -664,8 +664,8 @@ window.addEventListener('load', function(){
 });
 </script>
 
-<!-- ================= PARTE PRIVADA COMPLETA ================= -->
-<!-- Debajo está la parte privada (HTML + CSS + JS) tal y como la solicitaste, CON MEJORAS. -->
+<!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
+<!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
 <!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
 <style>
@@ -681,13 +681,10 @@ window.addEventListener('load', function(){
     line-height:1.35; font-size:14px; overflow:auto;
   }
 
-  /* prevent background scroll when sidebar open on mobile */
-  .no-scroll-sidebar { height:100vh; overflow:hidden; }
-
   /* Header */
-  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:100;height:64px}
+  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
   .header-left{display:flex;align-items:center;gap:12px}
-  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
   .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
   .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
   .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
@@ -748,17 +745,11 @@ window.addEventListener('load', function(){
   .fnav-item.active{color:var(--gold);font-weight:800}
   .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
 
-  /* sidebar overlay (mobile) */
-  #sidebarOverlay{display:none;position:fixed;left:0;top:64px;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:90;transition:opacity .2s ease}
-
   @media(max-width:1000px){
     .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
     #tv_chart_container{height:300px}
     .trade-panel{grid-template-columns:1fr}
-    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:95;transform:translateX(-110%)}
-    .sidebar:not(.hidden){transform:translateX(0)}
-    /* ensure overlay visible when sidebar open */
-    #sidebarOverlay{display:none}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
   }
 
   .muted-small{color:var(--muted);font-size:12px}
@@ -767,30 +758,27 @@ window.addEventListener('load', function(){
 
 <!-- MARCA: PARTE PRIVADA (HTML) -->
 <div id="privateArea_full" style="display:none;">
-  <!-- overlay for mobile sidebar -->
-  <div id="sidebarOverlay" aria-hidden="true"></div>
-
   <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
   <header class="header">
     <div class="header-left">
-      <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú" aria-label="Abrir o cerrar menú">☰</button>
+      <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
-    <div class="user" id="headerUserArea">
+    <div class="user">
       <div style="text-align:right">
         <div style="font-weight:800;color:var(--gold)" id="privateHeaderName">Usuario</div>
         <div style="font-size:12px;color:var(--muted)">Bienvenido</div>
       </div>
-      <div class="avatar" id="headerAvatar">P</div>
-      <button class="btn-primary" id="headerLogoutBtn" style="padding:8px 10px;margin-left:8px">Salir</button>
+      <div class="avatar" id="privateAvatar">P</div>
+      <button class="btn-primary" onclick="logout()" style="padding:8px 10px;margin-left:8px">Salir</button>
     </div>
   </header>
 
   <div class="main-wrap">
     <div class="layout">
       <!-- Sidebar -->
-      <aside class="sidebar" id="sidebar" role="navigation" aria-label="Menu lateral">
+      <aside class="sidebar" id="sidebar">
         <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
         <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
         <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
@@ -812,18 +800,18 @@ window.addEventListener('load', function(){
           </div>
           <div style="text-align:right">
             <div class="muted">Saldo disponible</div>
-            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">0.00</span></div>
+            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">10000.00</span></div>
           </div>
         </div>
 
         <div class="cards">
-          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">$0.00</div><div class="muted" style="margin-top:6px">Estado por el backend</div></div>
-          <div class="card"><div class="muted">Inversiones Activas</div><div class="value" id="investTotal">$0.00</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
-          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">$0.00</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
-          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">$0.00</div><div class="muted" style="margin-top:6px">Este periodo</div></div>
+          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">$125,430.50</div><div class="muted" style="margin-top:6px">Estado en tiempo real</div></div>
+          <div class="card"><div class="muted">Inversiones Activas</div><div class="value">$98,250.00</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
+          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">$10,000.00</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
+          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">+$8,430.50</div><div class="muted" style="margin-top:6px">Este mes</div></div>
         </div>
 
-        <!-- SYMBOL SEARCH + CATEGORIES -->
+        <!-- SYMBOL SEARCH + CATEGORIES (sin gráfico) -->
         <div>
           <div class="symbols-top">
             <div class="cat-tabs" id="catTabs"></div>
@@ -836,10 +824,10 @@ window.addEventListener('load', function(){
       <section class="panel" id="tradingPanel" style="display:none">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div>
-            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">—</span></div>
-            <div class="muted" id="trading-sub">Market: —</div>
+            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">BTC/USDT</span></div>
+            <div class="muted" id="trading-sub">Market: BINANCE</div>
           </div>
-          <div class="muted">Estado: <span id="ws-status">real</span></div>
+          <div class="muted">Estado: <span id="ws-status">demo</span></div>
         </div>
 
         <div class="market-list" id="market-list"></div>
@@ -849,17 +837,17 @@ window.addEventListener('load', function(){
             <div style="flex:1; min-width:320px; position:relative">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <div>
-                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">—</div>
-                  <div class="muted" id="op-exchange">Market: —</div>
+                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
+                  <div class="muted" id="op-exchange">Market: BINANCE</div>
                 </div>
                 <div style="text-align:right">
-                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">—</div>
+                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">87,243.3</div>
                   <div class="muted-small">Último</div>
                 </div>
               </div>
 
               <!-- chart: se carga solo aquí -->
-              <div id="tv_chart_container" style="margin-top:12px">El gráfico se cargará cuando haya un símbolo real y la librería TradingView esté disponible.</div>
+              <div id="tv_chart_container" style="margin-top:12px"></div>
 
               <div class="order-book-grid">
                 <div class="ob-col">
@@ -878,7 +866,7 @@ window.addEventListener('load', function(){
               <div class="trade-box">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                   <div style="font-weight:800;color:var(--gold)">Crear Orden</div>
-                  <div class="muted-small">Saldo: $<span id="bal-usdt">0.00</span></div>
+                  <div class="muted-small">Saldo USDT: $<span id="bal-usdt">10000.00</span></div>
                 </div>
 
                 <div style="margin-bottom:8px">
@@ -907,8 +895,8 @@ window.addEventListener('load', function(){
                 </div>
 
                 <div style="display:flex;gap:8px;margin-top:8px">
-                  <button class="btn-primary" id="btnBuy">Buy</button>
-                  <button class="btn-secondary" id="btnSell">Sell</button>
+                  <button class="btn-primary" onclick="createOrder('BUY')">Buy</button>
+                  <button class="btn-secondary" onclick="createOrder('SELL')">Sell</button>
                 </div>
 
                 <div class="orders-box" id="orders-box" style="margin-top:12px">
@@ -1026,550 +1014,756 @@ window.addEventListener('load', function(){
         <strong style="color:var(--gold)">BrokerPro — Info</strong>
         <button onclick="hideModalInfo()" style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
       </div>
-      <div style="color:var(--muted)">Para operar con capital real se requiere integración de APIs en back-end. Los datos mostrados aquí dependen del servidor administrativo.</div>
+      <div style="color:var(--muted)">Demo. Para operar con capital real se requiere integración de APIs en back-end.</div>
     </div>
   </div>
+</div>
 
-  <!-- Scripts (importados de la parte privada) -->
-  <script>
-  /* ---------------------------
-     Datos de símbolos — lista amplia de ejemplo (estática)
-     --------------------------- */
-  const ALL_SYMBOLS = [
-    {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
-    {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
-    {symbol:'BINANCE:SOLUSDT', label:'SOL/USDT', market:'Crypto'},
-    {symbol:'BINANCE:XRPUSDT', label:'XRP/USDT', market:'Crypto'},
-    {symbol:'BINANCE:ADAUSDT', label:'ADA/USDT', market:'Crypto'},
-    {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
-    {symbol:'NASDAQ:MSFT', label:'MSFT', market:'Stocks'},
-    {symbol:'NASDAQ:TSLA', label:'TSLA', market:'Stocks'},
-    {symbol:'NASDAQ:GOOGL', label:'GOOGL', market:'Stocks'},
-    {symbol:'NYSE:BRK.B', label:'BRK.B', market:'Stocks'},
-    {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
-    {symbol:'OANDA:GBP_USD', label:'GBP/USD', market:'Forex'},
-    {symbol:'OANDA:USD_JPY', label:'USD/JPY', market:'Forex'},
-    {symbol:'OANDA:AUD_USD', label:'AUD/USD', market:'Forex'},
-    {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'},
-    {symbol:'INDEX:NDAQ', label:'NASDAQ 100', market:'Indices'},
-    {symbol:'INDEX:DJI', label:'Dow Jones', market:'Indices'},
-    {symbol:'CME:ES1!', label:'ES (S&P Futures)', market:'Futures'},
-    {symbol:'CME:CL1!', label:'Crude Oil Futures', market:'Futures'},
-    {symbol:'US10Y', label:'US 10Y Bond', market:'Bonds'},
-    {symbol:'ECONOMY:US', label:'US Economic Calendar', market:'Economy'},
-    {symbol:'OPTIONS:AAPL', label:'AAPL Options', market:'Options'},
-    {symbol:'BINANCE:MNTUSDT', label:'MNT/USDT', market:'Crypto'},
-    {symbol:'INDEX:RUS', label:'Russell 2000', market:'Indices'},
-    {symbol:'FOREX:CHF_USD', label:'CHF/USD', market:'Forex'},
-    {symbol:'NASDAQ:AMZN', label:'AMZN', market:'Stocks'},
-    {symbol:'NYSE:WMT', label:'WMT', market:'Stocks'}
-  ];
+<!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
+<!-- TradingView official script (needed for real charts) -->
+<script src="https://s3.tradingview.com/tv.js"></script>
 
-  /* symbolPrices puede ser poblado por backend vía fetch; aquí hay valores estáticos como placeholder */
-  const symbolPrices = {
-    'BINANCE:BTCUSDT': 87243.3,
-    'BINANCE:ETHUSDT': 2925.8,
-    'BINANCE:SOLUSDT': 127.7,
-    'OANDA:EUR_USD': 1.0850,
-    'OANDA:GBP_USD': 1.2500,
-    'INDEX:SPX': 5200,
-    'NASDAQ:AAPL': 182.5,
-    'NASDAQ:TSLA': 238.9
-  };
+<script>
+/* -------------------------
+   PARTE PRIVADA - JS COMPLETO Y CORREGIDO
+   ------------------------- */
 
-  /* IMPORTANT: no más motor "demo" que modifica precios.
-     El backend o websockets deben proveer precios reales. */
-  let demo_usdt = 0.00; // balance por defecto 0 (el admin/ backend debe actualizar)
-  let demo_balances = {}; // sin balances locales por defecto
-  let pendingOrders = [];
-  let positions = []; // se pueden poblar desde backend
+/* session key */
+const SESSION_KEY = 'BROKERPRO_SESSION_USER';
 
-  /* DOM refs */
-  const menuToggle = document.getElementById('menuToggle');
-  const symbolSearch = document.getElementById('symbolSearch');
-  const symbolsGrid = document.getElementById('symbolsGrid');
-  const catTabs = document.getElementById('catTabs');
-  const marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
-  const marketSearch = document.getElementById('marketSearch');
-  const catTabsMarket = document.getElementById('catTabsMarket');
+/* safe escape helper */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
 
-  const opSymbolEl = document.getElementById('op-symbol');
-  const opExchangeEl = document.getElementById('op-exchange');
-  const opPriceEl = document.getElementById('op-price');
-  const obBidsEl = document.getElementById('ob-bids');
-  const obAsksEl = document.getElementById('ob-asks');
-  const ordersListEl = document.getElementById('orders-list');
-  const balUsdtEl = document.getElementById('bal-usdt');
-  const balUsdtTop = document.getElementById('bal-usdt-top');
-  const balanceTotalEl = document.getElementById('balanceTotal');
-  const posCountEl = document.getElementById('pos-count');
-  const posCountTop = document.getElementById('pos-count-top');
-  const sidebarOverlay = document.getElementById('sidebarOverlay');
+/* showPrivateFull: muestra la PARTE PRIVADA COMPLETA (usa el DOM de la sección privada) */
+function showPrivateFull(user){
+  try{
+    if(!user) return;
+    // hide public (wrap in try because publicMain may not exist in all embeds)
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display='none'; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display='none'; }catch(e){}
 
-  /* UI: menu toggle (already wired in showPrivateFull too) - ensure handlers exist */
-  if(menuToggle){
-    menuToggle.addEventListener('click', ()=> {
-      const sidebar = document.getElementById('sidebar');
-      if(!sidebar) return;
-      sidebar.classList.toggle('hidden');
-      if(sidebar.classList.contains('hidden')){
-        if(sidebarOverlay) sidebarOverlay.style.display = 'none';
-        document.body.classList.remove('no-scroll-sidebar');
-      } else {
-        if(sidebarOverlay) sidebarOverlay.style.display = 'block';
-        document.body.classList.add('no-scroll-sidebar');
+    // update header: show user + logout (headerActions might exist in your public header)
+    try{
+      const headerActions = document.getElementById('headerActions');
+      if(headerActions){
+        headerActions.innerHTML = '';
+        const profileBtn = document.createElement('div');
+        profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+        const nameEl = document.createElement('div'); nameEl.textContent = user.name || user.username || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
+        const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+        logoutBtn.addEventListener('click', performLogoutFull);
+        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+        headerActions.appendChild(profileBtn);
       }
-    });
-  }
-  if(sidebarOverlay){
-    sidebarOverlay.addEventListener('click', ()=> {
-      const sidebar = document.getElementById('sidebar');
-      if(sidebar) sidebar.classList.add('hidden');
-      sidebarOverlay.style.display = 'none';
-      document.body.classList.remove('no-scroll-sidebar');
-    });
-  }
+    }catch(e){}
 
-  /* NAV helpers */
-  function hideAllPanels(){
-    document.querySelectorAll('.panel').forEach(p => p.style.display = 'none');
-    document.querySelectorAll('.fnav-item').forEach(f => f.classList.remove('active'));
-  }
-  function showPanel(id){
-    hideAllPanels();
-    const panel = document.getElementById(id);
-    if(panel) panel.style.display = 'block';
-    document.querySelectorAll('.fnav-item').forEach(f=>{
-      if(f.dataset.target === id) f.classList.add('active');
-    });
-    // close sidebar overlay on mobile when navigating
-    const sidebar = document.getElementById('sidebar');
-    if(sidebar && !sidebar.classList.contains('hidden') && window.innerWidth <= 1000){
-      sidebar.classList.add('hidden');
-      if(sidebarOverlay) sidebarOverlay.style.display = 'none';
-      document.body.classList.remove('no-scroll-sidebar');
+    // show private container
+    const privateWrapper = document.getElementById('privateArea_full');
+    if(privateWrapper) {
+      privateWrapper.style.display = 'flex';
+
+      // set info inside private area (use safe fallbacks)
+      const nameVal = user.name || user.username || 'Usuario';
+      const emailVal = user.email || '';
+
+      const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = nameVal;
+      const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = emailVal;
+
+      // header name & welcome
+      const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = nameVal;
+      const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = nameVal;
+      const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (nameVal||'U').slice(0,1).toUpperCase();
+
+      // balances: set to real initial 0 (unless user has provided balances)
+      const balValue = (typeof user.balance === 'number') ? user.balance : 0.00;
+      const eqValue = (typeof user.equity === 'number') ? user.equity : 0.00;
+      const pnlValue = (typeof user.pnl === 'number') ? user.pnl : 0.00;
+
+      const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + (Number(balValue).toLocaleString('es-DO'));
+      const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (Number(eqValue).toLocaleString('es-DO'));
+      const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (Number(pnlValue).toLocaleString('es-DO'));
+
+      // top balances used inside UI
+      const balUsdtEl = document.getElementById('bal-usdt'); if(balUsdtEl) balUsdtEl.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const balUsdtTop = document.getElementById('bal-usdt-top'); if(balUsdtTop) balUsdtTop.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number((balValue||0)).toLocaleString(undefined,{maximumFractionDigits:2});
+      const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(balValue).toLocaleString(undefined,{maximumFractionDigits:2});
+      const pnlTotalEl = document.getElementById('pnlTotal'); if(pnlTotalEl) pnlTotalEl.innerText = '$' + Number(pnlValue).toLocaleString(undefined,{maximumFractionDigits:2});
+
+      // menu behaviors (activate dashboard by default)
+      const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item'));
+      function activateSection(sectionId){
+        menuItems.forEach(mi=>{
+          // support both data-section and data-target for compatibility
+          const ds = mi.dataset.section || mi.dataset.target || '';
+          mi.classList.toggle('active', ds === sectionId || mi.dataset.target === sectionId);
+        });
+        // show corresponding panel
+        const mapping = {
+          'dashboard':'dashboardPanel','trading':'tradingPanel',
+          'history':'historyPanel','verification':'verificationPanel',
+          'deposit':'depositPanel','withdraw':'withdrawPanel'
+        };
+        const panel = document.getElementById(mapping[sectionId] || (sectionId + 'Panel') || 'dashboardPanel');
+        if(panel) showPanel(panel.id);
+      }
+      menuItems.forEach(mi=>mi.addEventListener('click', ()=> activateSection(mi.dataset.target || mi.dataset.section || 'dashboard')));
+      activateSection('dashboard');
+
+      // logout handlers inside private area (buttons may or may not exist)
+      const leftLogout = document.getElementById('btnLogoutLeft_full'); if(leftLogout) leftLogout.onclick = performLogoutFull;
+      const topLogout = document.getElementById('logoutTop_full'); if(topLogout) topLogout.onclick = performLogoutFull;
     }
-  }
 
-  function footerNavClick(e){
-    const btn = e.currentTarget;
-    const target = btn.dataset.target;
-    showPanel(target);
-    if(target === 'tradingPanel') initTradingIfNeeded();
-  }
-
-  function navSidebar(evt){
-    const el = evt.currentTarget;
-    const target = el.dataset.target;
-    const mapping = {
-      'dashboard':'dashboardPanel','trading':'tradingPanel',
-      'history':'historyPanel','verification':'verificationPanel',
-      'deposit':'depositPanel','withdraw':'withdrawPanel'
+    // persist session (store minimal safe user)
+    const safeUser = {
+      id: user.id || user._id || null,
+      name: user.name || user.username || 'Usuario',
+      email: user.email || '',
+      balance: (typeof user.balance === 'number') ? user.balance : 0,
+      equity: (typeof user.equity === 'number') ? user.equity : 0,
+      pnl: (typeof user.pnl === 'number') ? user.pnl : 0
     };
-    const panelId = mapping[target] || 'dashboardPanel';
-    showPanel(panelId);
-    document.querySelectorAll('#privateArea_full .menu-item').forEach(item => item.classList.remove('active'));
-    el.classList.add('active');
-    if(panelId === 'tradingPanel') initTradingIfNeeded();
-    // close sidebar on mobile after click
-    const sidebar = document.getElementById('sidebar');
-    if(sidebar && window.innerWidth <= 1000){
-      sidebar.classList.add('hidden');
-      if(sidebarOverlay) sidebarOverlay.style.display = 'none';
-      document.body.classList.remove('no-scroll-sidebar');
+    try{ localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser)); }catch(e){}
+
+    // scroll to top
+    try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
+  }catch(e){
+    console.error('showPrivateFull error', e);
+  }
+}
+
+/* performLogoutFull: cierra sesión, restaura UI pública */
+function performLogoutFull(){
+  try{
+    localStorage.removeItem(SESSION_KEY);
+    // hide private
+    const privateWrapper = document.getElementById('privateArea_full');
+    if(privateWrapper) privateWrapper.style.display = 'none';
+    // restore public UI + header actions (wrapped in try)
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = ''; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = ''; }catch(e){}
+    try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
+    // reattach CTAs safely if exist
+    try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn').click()); }catch(e){}
+    try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn').click()); }catch(e){}
+  }catch(e){ console.error('logout error', e); }
+}
+
+/* On load: fix image paths, restore session and init deposit chart */
+window.addEventListener('load', function(){
+  try{ if(typeof ensureModalHooks === 'function') ensureModalHooks(); }catch(e){}
+
+  // fix filenames with spaces/parens
+  Array.from(document.images).forEach(img=>{
+    try{
+      let s = img.getAttribute('src')||'';
+      if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){
+        let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+        img.setAttribute('src', fixed);
+      }
+    }catch(e){}
+  });
+
+  // restore session
+  var s = localStorage.getItem(SESSION_KEY);
+  if(s){
+    try{
+      var u = JSON.parse(s);
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(u); }
+    }catch(e){}
+  }
+
+  // rotate circle-chart icons (defensive)
+  try{
+    const segments = document.querySelectorAll('.segment');
+    if(segments && segments.length){
+      const totalSegments = segments.length;
+      const degreesPerSegment = 360 / totalSegments;
+      segments.forEach((segment, index) => {
+          const rotation = index * degreesPerSegment;
+          const origin = segment.dataset.origin || '50% 50%';
+          segment.style.transformOrigin = origin;
+          segment.style.transform = `rotate(${rotation}deg)`;
+          const icon = segment.querySelector('i');
+          if (icon) {
+              icon.style.transform = `rotate(-${rotation}deg)`;
+              icon.style.position = 'absolute';
+              let top, right, bottom, left;
+              const offset = '30%';
+              switch (index) {
+                  case 0: top = offset; left = offset; break;
+                  case 1: top = offset; right = offset; break;
+                  case 2: bottom = offset; right = offset; break;
+                  case 3: bottom = offset; right = offset; break;
+                  case 4: bottom = offset; left = offset; break;
+              }
+              icon.style.top = top || '';
+              icon.style.right = right || '';
+              icon.style.bottom = bottom || '';
+              icon.style.left = left || '';
+          }
+      });
     }
+  }catch(e){}
+});
+
+/* =========================
+   DATOS Y LÓGICA DE TRADING
+   ========================= */
+
+/* ---------------------------
+   Datos de símbolos — lista amplia de ejemplo
+   --------------------------- */
+const ALL_SYMBOLS = [
+  {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+  {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+  {symbol:'BINANCE:SOLUSDT', label:'SOL/USDT', market:'Crypto'},
+  {symbol:'BINANCE:XRPUSDT', label:'XRP/USDT', market:'Crypto'},
+  {symbol:'BINANCE:ADAUSDT', label:'ADA/USDT', market:'Crypto'},
+  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
+  {symbol:'NASDAQ:MSFT', label:'MSFT', market:'Stocks'},
+  {symbol:'NASDAQ:TSLA', label:'TSLA', market:'Stocks'},
+  {symbol:'NASDAQ:GOOGL', label:'GOOGL', market:'Stocks'},
+  {symbol:'NYSE:BRK.B', label:'BRK.B', market:'Stocks'},
+  {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
+  {symbol:'OANDA:GBP_USD', label:'GBP/USD', market:'Forex'},
+  {symbol:'OANDA:USD_JPY', label:'USD/JPY', market:'Forex'},
+  {symbol:'OANDA:AUD_USD', label:'AUD/USD', market:'Forex'},
+  {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'},
+  {symbol:'INDEX:NDAQ', label:'NASDAQ 100', market:'Indices'},
+  {symbol:'INDEX:DJI', label:'Dow Jones', market:'Indices'},
+  {symbol:'CME:ES1!', label:'ES (S&P Futures)', market:'Futures'},
+  {symbol:'CME:CL1!', label:'Crude Oil Futures', market:'Futures'},
+  {symbol:'US10Y', label:'US 10Y Bond', market:'Bonds'},
+  {symbol:'ECONOMY:US', label:'US Economic Calendar', market:'Economy'},
+  {symbol:'OPTIONS:AAPL', label:'AAPL Options', market:'Options'},
+  {symbol:'BINANCE:MNTUSDT', label:'MNT/USDT', market:'Crypto'},
+  {symbol:'INDEX:RUS', label:'Russell 2000', market:'Indices'},
+  {symbol:'FOREX:CHF_USD', label:'CHF/USD', market:'Forex'},
+  {symbol:'NASDAQ:AMZN', label:'AMZN', market:'Stocks'},
+  {symbol:'NYSE:WMT', label:'WMT', market:'Stocks'}
+];
+
+const symbolPrices = {
+  'BINANCE:BTCUSDT': 87243.3,
+  'BINANCE:ETHUSDT': 2925.8,
+  'BINANCE:SOLUSDT': 127.7,
+  'OANDA:EUR_USD': 1.0850,
+  'OANDA:GBP_USD': 1.2500,
+  'INDEX:SPX': 5200,
+  'NASDAQ:AAPL': 182.5,
+  'NASDAQ:TSLA': 238.9
+};
+
+let demo_usdt = 10000.00;
+let demo_balances = {'BTC':0.054231, 'ETH':0.0, 'SOL':0.0, 'EUR':0.0, 'GBP':0.0};
+let pendingOrders = [];
+let positions = [];
+
+/* DOM refs (obtained dynamically in DOMContentLoaded for safety) */
+let menuToggle, symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
+let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
+
+/* UI: menu toggle and other DOM wiring */
+function wireDomRefs(){
+  menuToggle = document.getElementById('menuToggle');
+  symbolSearch = document.getElementById('symbolSearch');
+  symbolsGrid = document.getElementById('symbolsGrid');
+  catTabs = document.getElementById('catTabs');
+  marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
+  marketSearch = document.getElementById('marketSearch');
+  catTabsMarket = document.getElementById('catTabsMarket');
+
+  opSymbolEl = document.getElementById('op-symbol');
+  opExchangeEl = document.getElementById('op-exchange');
+  opPriceEl = document.getElementById('op-price');
+  obBidsEl = document.getElementById('ob-bids');
+  obAsksEl = document.getElementById('ob-asks');
+  ordersListEl = document.getElementById('orders-list');
+  balUsdtEl = document.getElementById('bal-usdt');
+  balUsdtTop = document.getElementById('bal-usdt-top');
+  balanceTotalEl = document.getElementById('balanceTotal');
+  posCountEl = document.getElementById('pos-count');
+  posCountTop = document.getElementById('pos-count-top');
+
+  menuToggle && menuToggle.addEventListener('click', ()=> {
+    const sb = document.getElementById('sidebar');
+    if(sb) sb.classList.toggle('hidden');
+  });
+}
+
+/* NAV helpers */
+function hideAllPanels(){
+  document.querySelectorAll('#privateArea_full .panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f => f.classList.remove('active'));
+}
+function showPanel(id){
+  hideAllPanels();
+  const panel = document.getElementById(id);
+  if(panel) panel.style.display = 'block';
+  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f=>{
+    if(f.dataset.target === id) f.classList.add('active');
+  });
+}
+
+function footerNavClick(e){
+  const btn = e.currentTarget;
+  const target = btn.dataset.target;
+  showPanel(target);
+  if(target === 'tradingPanel') initTradingIfNeeded();
+}
+
+function navSidebar(evt){
+  const el = evt.currentTarget;
+  const target = el.dataset.target;
+  const mapping = {
+    'dashboard':'dashboardPanel','trading':'tradingPanel',
+    'history':'historyPanel','verification':'verificationPanel',
+    'deposit':'depositPanel','withdraw':'withdrawPanel'
+  };
+  const panelId = mapping[target] || 'dashboardPanel';
+  showPanel(panelId);
+  document.querySelectorAll('#privateArea_full .menu-item').forEach(item => item.classList.remove('active'));
+  el.classList.add('active');
+  if(panelId === 'tradingPanel') initTradingIfNeeded();
+}
+
+function showModalInfo(){ document.getElementById('infoModal').style.display = 'flex'; }
+function hideModalInfo(){ document.getElementById('infoModal').style.display = 'none'; }
+
+/* SYMBOLS UI */
+const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
+let activeCategory = 'All';
+
+function buildCategoryTabs(container, onClick){
+  if(!container) return;
+  container.innerHTML = '';
+  CATEGORIES.forEach(cat=>{
+    const b = document.createElement('button');
+    b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
+    b.innerText = cat;
+    b.onclick = ()=> { activeCategory = cat; document.querySelectorAll('.cat-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); onClick(); };
+    container.appendChild(b);
+  });
+}
+
+function filterSymbols(q, category){
+  q = (q||'').trim().toLowerCase();
+  return ALL_SYMBOLS.filter(s=>{
+    if(category && category !== 'All' && s.market !== category) return false;
+    if(!q) return true;
+    return (s.label.toLowerCase().includes(q) || s.symbol.toLowerCase().includes(q));
+  });
+}
+
+function renderSymbolsGrid(container, query, category){
+  if(!container) return;
+  container.innerHTML = '';
+  const list = filterSymbols(query, category);
+  if(list.length === 0){
+    container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
+    return;
   }
+  list.forEach(s=>{
+    const el = document.createElement('div');
+    el.className = 'symbol-card';
+    el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market)} · ${escapeHtml(s.symbol)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:800;color:var(--text);font-size:14px">${displayPriceFor(s.symbol)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+      </div>
+    </div>`;
+    container.appendChild(el);
+  });
+}
 
-  function showModalInfo(){ document.getElementById('infoModal').style.display = 'flex'; }
-  function hideModalInfo(){ document.getElementById('infoModal').style.display = 'none'; }
+function displayPriceFor(sym){
+  const p = symbolPrices[sym];
+  const pn = Number(p);
+  if(!isFinite(pn)) return '--';
+  return (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6);
+}
 
-  /* SYMBOLS UI */
-  const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
-  let activeCategory = 'All';
-
-  function buildCategoryTabs(container, onClick){
-    if(!container) return;
-    container.innerHTML = '';
-    CATEGORIES.forEach(cat=>{
-      const b = document.createElement('button');
-      b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
-      b.innerText = cat;
-      b.onclick = ()=> { activeCategory = cat; document.querySelectorAll('.cat-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); onClick(); };
-      container.appendChild(b);
-    });
-  }
-
-  function filterSymbols(q, category){
-    q = (q||'').trim().toLowerCase();
-    return ALL_SYMBOLS.filter(s=>{
-      if(category && category !== 'All' && s.market !== category) return false;
-      if(!q) return true;
-      return (s.label.toLowerCase().includes(q) || s.symbol.toLowerCase().includes(q));
-    });
-  }
-
-  function renderSymbolsGrid(container, query, category){
-    if(!container) return;
-    container.innerHTML = '';
-    const list = filterSymbols(query, category);
-    if(list.length === 0){
-      container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
-      return;
-    }
-    list.forEach(s=>{
-      const el = document.createElement('div');
-      el.className = 'symbol-card';
-      el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
-      el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-weight:800;color:var(--gold)">${s.label}</div>
-          <div style="color:var(--muted);font-size:12px;margin-top:6px">${s.market} · ${s.symbol}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-weight:800;color:var(--text);font-size:14px">${displayPriceFor(s.symbol)}</div>
-          <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-        </div>
-      </div>`;
-      container.appendChild(el);
-    });
-  }
-
-  function displayPriceFor(sym){
-    const p = symbolPrices[sym];
-    if(!isFinite(p)) return '--';
-    return (Math.abs(p) > 1000) ? p.toLocaleString(undefined,{maximumFractionDigits:1}) : p.toFixed(6);
-  }
-
+/* wire category tabs and initial render - called after DOM ready */
+function initSymbolsUI(){
   buildCategoryTabs(catTabs, ()=> renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory));
   buildCategoryTabs(catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory));
   renderSymbolsGrid(symbolsGrid, '', 'All');
   renderSymbolsGrid(marketsSymbolsGrid, '', 'All');
 
-  if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
-  if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
+  symbolSearch && symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
+  marketSearch && marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
+}
 
-  /* Trading / Chart (uses TradingView widget if available) */
-  let tradingWidget = null;
-  function createTradingViewWidget(containerId, symbol){
-    try {
-      if(typeof TradingView === 'undefined'){
-        document.getElementById(containerId).innerHTML = '<div style="padding:12px;color:var(--muted)">TradingView no disponible: carga la librería tv.js en el <head>.</div>';
-        return null;
-      }
-      const cfg = {
-        "autosize": true,
-        "symbol": symbol,
-        "interval": "15",
-        "timezone": "Etc/UTC",
-        "theme": "dark",
-        "style": "1",
-        "container_id": containerId,
-        "allow_symbol_change": true,
-        "hide_top_toolbar": false,
-        "save_image": false,
-        "details": true
-      };
-      return new TradingView.widget(cfg);
-    } catch(e){
-      document.getElementById(containerId).innerHTML = '<div style="padding:12px;color:var(--muted)">No se pudo cargar el chart en este entorno.</div>';
+/* Trading / Chart (uses TradingView widget if available) */
+let tradingWidget = null;
+function createTradingViewWidget(containerId, symbol){
+  try {
+    if(typeof TradingView === 'undefined'){
+      // TradingView script not loaded
+      document.getElementById(containerId).innerHTML = '<div style="padding:12px;color:var(--muted)">TradingView no está disponible en este entorno.</div>';
       return null;
     }
+    const cfg = {
+      "autosize": true,
+      "symbol": symbol,
+      "interval": "15",
+      "timezone": "Etc/UTC",
+      "theme": "dark",
+      "style": "1",
+      "container_id": containerId,
+      "allow_symbol_change": true,
+      "hide_top_toolbar": false,
+      "save_image": false,
+      "details": true,
+      "locale": "es"
+    };
+    return new TradingView.widget(cfg);
+  } catch(e){
+    document.getElementById(containerId).innerHTML = '<div style="padding:12px;color:var(--muted)">No se pudo cargar el chart en este entorno.</div>';
+    return null;
   }
+}
 
-  function initTradingWidget(symbol){
-    const container = document.getElementById('tv_chart_container');
-    if(!container) return;
-    container.innerHTML = '';
-    tradingWidget = createTradingViewWidget('tv_chart_container', symbol);
-  }
+function initTradingWidget(symbol){
+  const container = document.getElementById('tv_chart_container');
+  if(!container) return;
+  container.innerHTML = '';
+  createTradingViewWidget('tv_chart_container', symbol);
+}
 
-  function selectSymbolAndOpenTrading(symbol, label){
-    document.getElementById('tradingSymbol').innerText = (label || symbol.split(':').pop()).replace('_','/');
-    document.getElementById('op-symbol').innerText = document.getElementById('tradingSymbol').innerText;
-    document.getElementById('op-exchange').innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: EXCHANGE');
-    currentSymbol = symbol;
-    showPanel('tradingPanel');
-    initTradingWidget(symbol);
-    updateDisplayedPrice(symbolPrices[symbol] || '--');
-    updateOrderBook(symbolPrices[symbol] || 0);
-  }
+function selectSymbolAndOpenTrading(symbol, label){
+  document.getElementById('tradingSymbol').innerText = (label || symbol.split(':').pop()).replace('_','/');
+  document.getElementById('op-symbol').innerText = document.getElementById('tradingSymbol').innerText;
+  document.getElementById('op-exchange').innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
+  currentSymbol = symbol;
+  showPanel('tradingPanel');
+  initTradingWidget(symbol);
+  updateDisplayedPrice(symbolPrices[symbol] || 0);
+  updateOrderBook(symbolPrices[symbol] || 0);
+}
 
-  /* Price engine removed: los precios deben venir del backend o websocket */
-  function updateDisplayedPrice(price){
-    if(!isFinite(price)) {
-      opPriceEl.innerText = '--';
-      return;
-    }
-    opPriceEl.innerText = (Math.abs(price) > 1000) ? price.toLocaleString(undefined,{maximumFractionDigits:1}) : Number(price).toFixed(6);
-  }
-
-  function updateOrderBook(base){
-    if(!base || !isFinite(base)) {
-      if(obBidsEl) obBidsEl.innerHTML = '<div style="color:var(--muted)">— sin datos —</div>';
-      if(obAsksEl) obAsksEl.innerHTML = '<div style="color:var(--muted)">— sin datos —</div>';
-      return;
-    }
-    let bidsHtml = '', asksHtml = '';
-    for(let i=0;i<8;i++){
-      bidsHtml += `<div class="ob-row"><span style="color:var(--gold)">${(base - (i+1)*(base*0.0008)).toFixed(6)}</span><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span></div>`;
-      asksHtml += `<div class="ob-row"><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span><span style="color:var(--muted)">${(base + (i+1)*(base*0.0008)).toFixed(6)}</span></div>`;
-    }
-    if(obBidsEl) obBidsEl.innerHTML = bidsHtml;
-    if(obAsksEl) obAsksEl.innerHTML = asksHtml;
-  }
-
-  function getBaseUnit(){
-    const lab = document.getElementById('tradingSymbol').innerText || '';
-    return lab.split('/')[0] || '';
-  }
-
-  /* Orders / Positions */
-  let currentSymbol = ALL_SYMBOLS[0].symbol;
-
-  /* createOrder ahora intenta usar backend si hay token; si no, solicita iniciar sesión.
-     así pasas de demo a real sin eliminar la UI */
-  document.getElementById('btnBuy').addEventListener('click', ()=> createOrder('BUY'));
-  document.getElementById('btnSell').addEventListener('click', ()=> createOrder('SELL'));
-
-  async function createOrder(side){
-    const type = document.getElementById('order-type').value;
-    const qty = parseFloat(document.getElementById('order-qty').value);
-    const price = parseFloat(document.getElementById('order-price').value);
-
-    if(!qty || qty <= 0){ alert('Cantidad inválida'); return; }
-
-    // si hay token, enviamos al backend
-    const token = localStorage.getItem('token');
-    if(token){
-      try{
-        const res = await fetch(`${API_URL}/trade/open`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': token
-          },
-          body: JSON.stringify({ symbol: currentSymbol, qty, price: isFinite(price)?price:null, side, type })
-        });
-        if(res.ok){
-          const d = await res.json().catch(()=>null);
-          alert('Orden enviada al backend.');
-          // opcional: refrescar posiciones/ wallet desde backend
-          try{ updateFromBackend(); }catch(e){}
-        } else {
-          const text = await res.text().catch(()=>null);
-          alert('Error al enviar orden: ' + (text || res.status));
-        }
-      } catch(e){
-        console.error('createOrder error', e);
-        alert('No se pudo conectar con el backend. Revisa tu conexión.');
+/* price engine (demo updater) */
+(function priceEngine(){
+  setInterval(()=>{
+    ALL_SYMBOLS.forEach(s=>{
+      if(!(s.symbol in symbolPrices)){
+        symbolPrices[s.symbol] = Number((Math.random()*100).toFixed(2));
+      } else {
+        const old = Number(symbolPrices[s.symbol]) || 0;
+        const change = (Math.random()-0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
+        symbolPrices[s.symbol] = Number(Math.max(0.00001, old + change).toFixed(6));
       }
-      return;
-    }
-
-    // si no hay token, pedimos login (no ejecutamos demo)
-    alert('Debes iniciar sesión para operar. Usa el login real desde el panel.');
-  }
-
-  function renderOrders(){
-    if(!ordersListEl) return;
-    if(pendingOrders.length === 0){
-      ordersListEl.innerHTML = '<div>— no hay órdenes —</div>';
-      return;
-    }
-    ordersListEl.innerHTML = '';
-    pendingOrders.slice().reverse().forEach(o=>{
-      const div = document.createElement('div');
-      div.style.padding='6px';
-      div.style.borderBottom='1px solid rgba(255,255,255,0.02)';
-      div.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${o.type}</strong> ${o.side} ${o.qty} ${getBaseFromSymbol(o.symbol)}</div><div style="color:var(--muted)">${o.symbol}</div></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px;gap:8px">
-          <button class="btn-secondary" onclick="cancelOrder('${o.id}')">Cancelar</button>
-        </div>`;
-      ordersListEl.appendChild(div);
     });
+    updateDisplayedPrice(symbolPrices[currentSymbol] || 0);
+    updateOrderBook(symbolPrices[currentSymbol] || 0);
+    try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
+    try{ renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory); }catch(e){}
+    updateWalletTotal();
+  }, 1200);
+})();
+
+function updateDisplayedPrice(price){
+  const pn = Number(price);
+  if(!isFinite(pn)) return;
+  opPriceEl && (opPriceEl.innerText = (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6));
+}
+
+function updateOrderBook(base){
+  const b = Number(base);
+  if(!b) return;
+  let bidsHtml = '', asksHtml = '';
+  for(let i=0;i<8;i++){
+    bidsHtml += `<div class="ob-row"><span style="color:var(--gold)">${(b - (i+1)*(b*0.0008)).toFixed(6)}</span><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span></div>`;
+    asksHtml += `<div class="ob-row"><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span><span style="color:var(--muted)">${(b + (i+1)*(b*0.0008)).toFixed(6)}</span></div>`;
+  }
+  obBidsEl && (obBidsEl.innerHTML = bidsHtml);
+  obAsksEl && (obAsksEl.innerHTML = asksHtml);
+}
+
+function getBaseUnit(){
+  const lab = document.getElementById('tradingSymbol').innerText || '';
+  return lab.split('/')[0] || '';
+}
+
+/* Orders / Positions (demo) */
+let currentSymbol = ALL_SYMBOLS[0].symbol;
+
+function createOrder(side){
+  const type = document.getElementById('order-type').value;
+  const qty = parseFloat(document.getElementById('order-qty').value);
+  const price = parseFloat(document.getElementById('order-price').value);
+  if(!qty || qty <= 0){ alert('Cantidad inválida'); return; }
+
+  const id = 'ORD-' + Date.now();
+  const createdAt = new Date().toISOString();
+
+  if(type === 'Market'){
+    executeMarketOrder({id,side,type,symbol:currentSymbol,qty,createdAt});
+    return;
   }
 
-  function cancelOrder(id){
-    pendingOrders = pendingOrders.filter(o=>o.id !== id);
-    renderOrders();
+  const order = {id,side,type,symbol:currentSymbol,qty,price:isFinite(price)?price:null,createdAt};
+  pendingOrders.push(order);
+  renderOrders();
+  alert('Orden pendiente creada (demo).');
+}
+
+function renderOrders(){
+  if(!ordersListEl) return;
+  if(pendingOrders.length === 0){
+    ordersListEl.innerHTML = '<div>— no hay órdenes —</div>';
+    return;
   }
+  ordersListEl.innerHTML = '';
+  pendingOrders.slice().reverse().forEach(o=>{
+    const div = document.createElement('div');
+    div.style.padding='6px';
+    div.style.borderBottom='1px solid rgba(255,255,255,0.02)';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${escapeHtml(o.type)}</strong> ${escapeHtml(o.side)} ${escapeHtml(String(o.qty))} ${escapeHtml(getBaseFromSymbol(o.symbol))}</div><div style="color:var(--muted)">${escapeHtml(o.symbol)}</div></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px;gap:8px">
+        <button class="btn-secondary" onclick="cancelOrder('${o.id}')">Cancelar</button>
+      </div>`;
+    ordersListEl.appendChild(div);
+  });
+}
 
-  /* NOTE: executeMarketOrder / closePosition / etc se mantienen por compatibilidad,
-     pero la lógica real de ejecución debe venir del backend. */
-  function executeMarketOrder(order){
-    console.warn('executeMarketOrder: operación local no permitida en modo real. Usa backend.');
+function cancelOrder(id){
+  pendingOrders = pendingOrders.filter(o=>o.id !== id);
+  renderOrders();
+}
+
+function executeMarketOrder(order){
+  const priceNow = Number(symbolPrices[order.symbol]) || 0;
+  const side = order.side;
+  const qty = order.qty;
+  const base = getBaseFromSymbol(order.symbol);
+  if(side === 'BUY'){
+    const cost = qty * priceNow;
+    if(cost > demo_usdt){ alert('Saldo USDT insuficiente'); return; }
+    demo_usdt -= cost;
+    demo_balances[base] = (demo_balances[base] || 0) + qty;
+    const pos = {id:'POS-'+Date.now(),symbol:order.symbol,side:'LONG',qty,entryPrice:priceNow,createdAt:new Date().toISOString()};
+    positions.push(pos);
+    alert(`Compra ejecutada (demo): ${qty} ${base} a ${formatPrice(priceNow)}`);
+  } else {
+    const baseBal = demo_balances[base] || 0;
+    if(qty > baseBal){ alert(`${base} insuficiente para vender`); return; }
+    demo_balances[base] = baseBal - qty;
+    const gain = qty * priceNow;
+    demo_usdt += gain;
+    alert(`Venta ejecutada (demo): ${qty} ${base} a ${formatPrice(priceNow)} — USDT recibidos: ${gain.toFixed(2)}`);
   }
+  renderOrders();
+  updateWalletTotal();
+  renderPositionsUI();
+}
 
-  function getBaseFromSymbol(symbol){
-    if(symbol.includes(':')){
-      const after = symbol.split(':')[1];
-      if(after.includes('_')) return after.split('_')[0];
-      if(after.includes('USDT')) return after.replace(/USDT.*$/,'').replace(/[^A-Za-z]/g,'');
-      return after.split('/')[0] || after;
-    }
-    return symbol;
+function getBaseFromSymbol(symbol){
+  if(symbol.includes(':')){
+    const after = symbol.split(':')[1];
+    if(after.includes('_')) return after.split('_')[0];
+    if(after.includes('USDT')) return after.replace(/USDT.*$/,'').replace(/[^A-Za-z]/g,'');
+    return after.split('/')[0] || after;
   }
-  function formatPrice(p){ if(!isFinite(p)) return p; if(Math.abs(p) > 1000) return p.toLocaleString(undefined,{maximumFractionDigits:1}); return p.toFixed(6); }
+  return symbol;
+}
+function formatPrice(p){ if(!isFinite(Number(p))) return p; if(Math.abs(Number(p)) > 1000) return Number(p).toLocaleString(undefined,{maximumFractionDigits:1}); return Number(p).toFixed(6); }
 
-  function renderPositionsUI(){
-    const container = document.getElementById('positionsList');
-    if(!container) return;
+function renderPositionsUI(){
+  const container = document.getElementById('positionsList');
+  if(!container) return;
 
-    container.innerHTML = '';
+  container.innerHTML = '';
 
-    if(positions.length === 0){
-      container.innerHTML = `
-        <div style="color:var(--muted);font-size:13px;padding:12px;text-align:center">
-          No hay posiciones abiertas
+  if(positions.length === 0){
+    container.innerHTML = `
+      <div style="color:var(--muted);font-size:13px;padding:12px;text-align:center">
+        No hay posiciones abiertas
+      </div>
+    `;
+  } else {
+    positions.forEach(p=>{
+      const price = symbolPrices[p.symbol] || p.entryPrice;
+      const unreal = (Number(price) - Number(p.entryPrice)) * Number(p.qty);
+
+      const el = document.createElement('div');
+      el.className = 'pos-card';
+      el.onclick = ()=> openPosition(p.id);
+
+      el.innerHTML = `
+        <div>
+          <div style="font-weight:700">${escapeHtml(p.symbol)}</div>
+          <div style="color:var(--muted);font-size:13px">
+            qty ${escapeHtml(String(p.qty))} • entrada ${escapeHtml(formatPrice(p.entryPrice))}
+          </div>
+        </div>
+
+        <div style="text-align:right">
+          <div style="font-weight:800;color:${unreal >= 0 ? 'var(--gold)' : 'var(--danger)'}">
+            ${unreal >= 0 ? '+' : ''}${escapeHtml(formatPrice(unreal))}
+          </div>
+          <div class="muted-small">PnL</div>
         </div>
       `;
-    } else {
-      positions.forEach(p=>{
-        const price = symbolPrices[p.symbol] || p.entryPrice || 0;
-        const unreal = (price - (p.entryPrice||0)) * p.qty;
 
-        const el = document.createElement('div');
-        el.className = 'pos-card';
-        el.onclick = ()=> openPosition(p.id);
-
-        el.innerHTML = `
-          <div>
-            <div style="font-weight:700">${p.symbol}</div>
-            <div style="color:var(--muted);font-size:13px">
-              qty ${p.qty} • entrada ${formatPrice(p.entryPrice||0)}
-            </div>
-          </div>
-
-          <div style="text-align:right">
-            <div style="font-weight:800;color:${unreal >= 0 ? 'var(--gold)' : 'var(--danger)'}">
-              ${unreal >= 0 ? '+' : ''}${formatPrice(unreal)}
-            </div>
-            <div class="muted-small">PnL</div>
-          </div>
-        `;
-
-        container.appendChild(el);
-      });
-    }
-
-    if(posCountEl) posCountEl.innerText = positions.length;
-    if(posCountTop) posCountTop.innerText = positions.length;
-  }
-
-  function openPosition(positionId){
-    const pos = positions.find(p=>p.id === positionId);
-    if(!pos) { alert('Posición no encontrada'); return; }
-    selectSymbolAndOpenTrading(pos.symbol, pos.symbol.replace(/.*:/,''));
-  }
-
-  function closePosition(id){
-    alert('Cerrar posición desde UI debe pedirse al backend. Implementa endpoint para cerrar posiciones.');
-  }
-
-  function updateWalletTotal(){
-    // show 0 by default; backend should update real values
-    if(balUsdtEl) balUsdtEl.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-    if(balUsdtTop) balUsdtTop.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-    let total = demo_usdt;
-    Object.keys(demo_balances).forEach(k=>{
-      const sym = findSymbolForBase(k);
-      const qty = demo_balances[k] || 0;
-      total += (symbolPrices[sym] || 0) * qty;
+      container.appendChild(el);
     });
-    if(balanceTotalEl) balanceTotalEl.innerText = '$' + total.toLocaleString(undefined,{maximumFractionDigits:2});
-    const cashAvailEl = document.getElementById('cashAvail');
-    if(cashAvailEl) cashAvailEl.innerText = '$' + demo_usdt.toLocaleString(undefined,{maximumFractionDigits:2});
   }
 
-  function findSymbolForBase(base){
-    if(base === 'BTC') return 'BINANCE:BTCUSDT';
-    if(base === 'ETH') return 'BINANCE:ETHUSDT';
-    if(base === 'SOL') return 'BINANCE:SOLUSDT';
-    if(base === 'EUR') return 'OANDA:EUR_USD';
-    if(base === 'GBP') return 'OANDA:GBP_USD';
-    return 'BINANCE:BTCUSDT';
-  }
+  posCountEl && (posCountEl.innerText = positions.length);
+  posCountTop && (posCountTop.innerText = positions.length);
+}
 
-  function initTradingIfNeeded(){
-    initTradingWidget(currentSymbol);
-    updateDisplayedPrice(symbolPrices[currentSymbol]||'--');
-    updateOrderBook(symbolPrices[currentSymbol]||0);
-    renderOrders();
-    renderPositionsUI();
-  }
+function openPosition(positionId){
+  const pos = positions.find(p=>p.id === positionId);
+  if(!pos) { alert('Posición no encontrada'); return; }
+  selectSymbolAndOpenTrading(pos.symbol, pos.symbol.replace(/.*:/,''));
+}
 
-  document.addEventListener('DOMContentLoaded', ()=>{
-    showPanel('dashboardPanel');
-    // no seed demo positions by default — si quieres datos de prueba, el admin los inyecta
-    renderPositionsUI();
-    updateWalletTotal();
-    renderOrders();
+function closePosition(id){
+  const idx = positions.findIndex(p=>p.id === id);
+  if(idx === -1) return;
+  const pos = positions[idx];
+  const priceNow = symbolPrices[pos.symbol] || 0;
+  const base = getBaseFromSymbol(pos.symbol);
+  const qty = pos.qty;
+  demo_balances[base] = Math.max(0,(demo_balances[base] || 0) - qty);
+  const gain = qty * priceNow;
+  demo_usdt += gain;
+  positions.splice(idx,1);
+  alert(`Posición cerrada (demo): ${qty} ${base} a ${formatPrice(priceNow)} — USDT recibidos: ${gain.toFixed(2)}`);
+  updateWalletTotal();
+  renderPositionsUI();
+}
+
+function updateWalletTotal(){
+  balUsdtEl && (balUsdtEl.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+  balUsdtTop && (balUsdtTop.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+  let total = demo_usdt;
+  Object.keys(demo_balances).forEach(k=>{
+    const sym = findSymbolForBase(k);
+    const qty = demo_balances[k] || 0;
+    total += (symbolPrices[sym] || 0) * qty;
   });
+  balanceTotalEl && (balanceTotalEl.innerText = '$' + total.toLocaleString(undefined,{maximumFractionDigits:2}));
+  const cashAvailEl = document.getElementById('cashAvail');
+  if(cashAvailEl) cashAvailEl.innerText = '$' + demo_usdt.toLocaleString(undefined,{maximumFractionDigits:2});
+}
 
-  function logout(){ if(confirm('¿Cerrar sesión?')) { performLogoutFull(); } }
-  function submitTransaction(e){ e.preventDefault(); alert('Solicitud enviada.'); e.target.reset(); }
-  function submitDoc(e){ e.preventDefault(); alert('Documento enviado.'); e.target.reset(); }
+function findSymbolForBase(base){
+  if(base === 'BTC') return 'BINANCE:BTCUSDT';
+  if(base === 'ETH') return 'BINANCE:ETHUSDT';
+  if(base === 'SOL') return 'BINANCE:SOLUSDT';
+  if(base === 'EUR') return 'OANDA:EUR_USD';
+  if(base === 'GBP') return 'OANDA:GBP_USD';
+  return 'BINANCE:BTCUSDT';
+}
 
-  // ---------------------------
-  // controladores para backend
-  // ---------------------------
-  const API_URL = "http://localhost:3000/api"; // ajusta a producción
+function initTradingIfNeeded(){
+  initTradingWidget(currentSymbol);
+  updateDisplayedPrice(symbolPrices[currentSymbol]||0);
+  updateOrderBook(symbolPrices[currentSymbol]||0);
+  renderOrders();
+  renderPositionsUI();
+}
 
-  async function loginUser(email, password){
-    try{
-      const res = await fetch(`${API_URL}/auth/login`,{
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      if(!res.ok) { alert('Error en login'); return null; }
-      const data = await res.json();
-      if(data.token){
-        localStorage.setItem('token', data.token);
-        alert('Login correcto');
-        // opcional: pedir datos del usuario y mostrar
-        if(data.user){
-          document.getElementById('privateHeaderName').innerText = data.user.name || data.user.email || 'Usuario';
-          document.getElementById('privateWelcomeName').innerText = data.user.name || data.user.email || 'Usuario';
-          document.getElementById('headerAvatar').innerText = (data.user.name||'U').charAt(0).toUpperCase();
-        }
-        return data;
-      } else {
-        alert('Credenciales incorrectas');
-        return null;
-      }
-    } catch(e){
-      console.error('loginUser error', e);
-      alert('No se pudo conectar con el backend.');
-      return null;
+/* DOMContentLoaded: inicialización segura y única */
+document.addEventListener('DOMContentLoaded', ()=>{
+  wireDomRefs();
+  initSymbolsUI();
+  showPanel('dashboardPanel');
+
+  // demo starting positions (kept as example)
+  positions.push({id:'POS-1',symbol:'BINANCE:BTCUSDT',side:'LONG',qty:0.02,entryPrice:86000,createdAt:new Date().toISOString()});
+  positions.push({id:'POS-2',symbol:'OANDA:EUR_USD',side:'LONG',qty:500,entryPrice:1.08,createdAt:new Date().toISOString()});
+  renderPositionsUI();
+  updateWalletTotal();
+  renderOrders();
+});
+
+/* acciones UI simples */
+function logout(){ if(confirm('¿Cerrar sesión?')) { try{ alert('Sesión cerrada (demo)'); }catch(e){} performLogoutFull(); } }
+function submitTransaction(e){ e.preventDefault(); alert('Transacción registrada (demo)'); try{ e.target.reset(); }catch(e){} }
+function submitDoc(e){ e.preventDefault(); alert('Documento subido (demo)'); try{ e.target.reset(); }catch(e){} }
+
+/* =========================
+   CONTROLADORES / API (FRONT)
+   ========================= */
+
+const API_URL = "http://localhost:3000/api";
+
+async function loginUser(email, password){
+  try{
+    const res = await fetch(`${API_URL}/auth/login`,{
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    if(!res.ok){
+      const t = await res.text().catch(()=>null);
+      throw new Error(t || 'Error en login');
     }
-  }
 
-  async function getMyWallet(){
-    const token = localStorage.getItem('token');
-    if(!token) { console.warn('No token'); return null; }
-    try{
-      const res = await fetch(`${API_URL}/wallet/me`,{
-        headers:{ 'Authorization': token }
+    const data = await res.json();
+
+    if(data.token && data.user){
+      localStorage.setItem('token', data.token);
+      // store session user for private UI
+      showPrivateFull({
+        id: data.user.id || data.user._id || null,
+        name: data.user.name || data.user.username || '',
+        email: data.user.email || '',
+        balance: typeof data.user.balance === 'number' ? data.user.balance : 0,
+        equity: typeof data.user.equity === 'number' ? data.user.equity : 0,
+        pnl: typeof data.user.pnl === 'number' ? data.user.pnl : 0
       });
-      if(!res.ok) { console.warn('wallet fetch error', res.status); return null; }
-      const data = await res.json();
-      console.log('Saldo:', data.balance);
-      // el admin puede devolver y aquí actualizamos la UI:
-      if(data.balance !== undefined){
-        demo_usdt = Number(data.balance) || 0;
-        updateWalletTotal();
-      }
-      return data;
-    } catch(e){
-      console.error('getMyWallet error', e);
-      return null;
+      alert('Login correcto');
+    } else {
+      alert('Credenciales incorrectas');
     }
+  }catch(err){
+    console.error('loginUser error', err);
+    alert('Error en login: ' + (err.message || err));
   }
+}
 
-  async function openTrade(symbol, qty, price){
+async function getMyWallet(){
+  try{
     const token = localStorage.getItem('token');
-    if(!token) throw new Error('No token');
+    if(!token) { console.warn('No token'); return; }
+    const res = await fetch(`${API_URL}/wallet/me`,{
+      headers:{
+        'Authorization': token
+      }
+    });
+    if(!res.ok) throw new Error('Error al obtener wallet');
+    const data = await res.json();
+    console.log('Saldo:', data.balance);
+    // update UI if needed
+    showPrivateFull({
+      name: data.name || undefined,
+      email: data.email || undefined,
+      balance: typeof data.balance === 'number' ? data.balance : undefined,
+      equity: typeof data.equity === 'number' ? data.equity : undefined,
+      pnl: typeof data.pnl === 'number' ? data.pnl : undefined
+    });
+  }catch(err){
+    console.error('getMyWallet error', err);
+  }
+}
+
+async function openTrade(symbol, qty, price){
+  try{
+    const token = localStorage.getItem('token');
+    if(!token) { alert('No autenticado'); return; }
     const res = await fetch(`${API_URL}/trade/open`,{
       method:'POST',
       headers:{
@@ -1578,18 +1772,19 @@ window.addEventListener('load', function(){
       },
       body: JSON.stringify({ symbol, qty, price })
     });
-    return res;
+    if(!res.ok){
+      const txt = await res.text().catch(()=>null);
+      throw new Error(txt || 'Error abriendo trade');
+    }
+    const data = await res.json();
+    return data;
+  }catch(err){
+    console.error('openTrade error', err);
+    alert('Error al abrir trade: ' + (err.message || err));
   }
+}
+</script>
 
-  // helper: intentar actualizar posiciones/saldo desde backend (si existen endpoints)
-  async function updateFromBackend(){
-    try{
-      await getMyWallet();
-      // puedes agregar fetch para posiciones, órdenes, etc.
-    }catch(e){}
-  }
-
-  </script>
   <!-- END: contenido importado -->
 </div>
 
