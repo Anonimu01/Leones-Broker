@@ -429,7 +429,7 @@
       <p class="muted">Cursos interactivos, webinars en vivo, noticias de mercado y calendario económico.</p>
 
       <h3 style="margin-top:18px">Soporte Dedicado: Siempre a Tu Lado</h3>
-      <p class="muted">Chat en Vivo · WhatsApp <strong>786-872-0660</strong> · Email <strong>multiserviciosem@gmail.com</strong></p>
+      <p class="muted">Chat en Vivo · WhatsApp <strong>786-872-0660</strong> · Email <strong>contactoleonesbroker@gmail.com</strong></p>
 
       <div style="margin-top:18px">
         <img src="/imge.img/Yy7o1e5hqgD_UtiDhBAU0.jpg" alt="licence" style="width:100%;max-width:480px;border-radius:12px" onerror="this.style.display='none'">
@@ -456,7 +456,7 @@
 <script>
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
-
+const SESSION_KEY = 'leones_images_session';
 
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
 function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
@@ -538,12 +538,11 @@ function restorePublicHeader(){
   document.getElementById('ctaLogin').addEventListener('click', ()=> loginBtn.click());
 }
 
-
-
-
-
-<!-- ================= PARTE PRIVADA COMPLETA (ACTUALIZADA) ================= -->
-
+/* -------------------------
+   PARTE PRIVADA COMPLETA
+   ------------------------- */
+/* Estilos y contenedor ya insertados más abajo (sección marcada PARTE PRIVADA) */
+/* showPrivateFull / performLogoutFull implementan la navegación automática desde login/register */
 
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
 
@@ -551,82 +550,46 @@ function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){retu
 function showPrivateFull(user){
   try{
     // hide public
-    const pm = document.getElementById('publicMain');
-    const pf = document.getElementById('publicFooter');
-    if(pm) pm.style.display='none';
-    if(pf) pf.style.display='none';
-
-    // update header: show user + logout (if headerActions exists in outer page)
+    document.getElementById('publicMain').style.display='none';
+    document.getElementById('publicFooter').style.display='none';
+    // update header: show user + logout
     const headerActions = document.getElementById('headerActions');
-    if(headerActions){
-      headerActions.innerHTML = '';
-      const profileBtn = document.createElement('div');
-      profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
-      const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
-      const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
-      logoutBtn.addEventListener('click', performLogoutFull);
-      profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
-      headerActions.appendChild(profileBtn);
-    }
+    headerActions.innerHTML = '';
+    const profileBtn = document.createElement('div');
+    profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+    const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
+    const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+    logoutBtn.addEventListener('click', performLogoutFull);
+    profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+    headerActions.appendChild(profileBtn);
 
-    // show private container (the block below)
+    // show private container (the block inserted below)
     const privateWrapper = document.getElementById('privateArea_full');
     if(privateWrapper) {
       privateWrapper.style.display = 'flex';
-      // set info inside private area (safe-fill)
+      // set info inside private area
       const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
       const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
-      // Balance placeholders: 0 — tu backend debe proveer valores reales
-      const bal = document.getElementById('priv_balance_full'); if(bal) bal.textContent = 'RD$0.00';
-      const eq = document.getElementById('priv_equity_full'); if(eq) eq.textContent = 'RD$0.00';
-      const pnl = document.getElementById('priv_pnl_full'); if(pnl) pnl.textContent = 'RD$0.00';
-
-      // sidebar button handlers (se asegura que el botón funcione)
-      const menuToggle = document.getElementById('menuToggle');
-      const sidebarOverlay = document.getElementById('sidebarOverlay');
-      if(menuToggle){
-        menuToggle.addEventListener('click', ()=> {
-          const sidebar = document.getElementById('sidebar');
-          if(!sidebar) return;
-          sidebar.classList.toggle('hidden');
-          // show overlay when menu visible on small screens
-          if(sidebar.classList.contains('hidden')){
-            if(sidebarOverlay) sidebarOverlay.style.display = 'none';
-            document.body.classList.remove('no-scroll-sidebar');
-          } else {
-            if(sidebarOverlay) sidebarOverlay.style.display = 'block';
-            document.body.classList.add('no-scroll-sidebar');
-          }
-        });
-      }
-      if(sidebarOverlay){
-        sidebarOverlay.addEventListener('click', ()=> {
-          const sidebar = document.getElementById('sidebar');
-          if(sidebar) sidebar.classList.add('hidden');
-          sidebarOverlay.style.display = 'none';
-          document.body.classList.remove('no-scroll-sidebar');
-        });
-      }
+      const bal = document.getElementById('priv_balance_full'); if(bal) bal.textContent = 'RD$'+(Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO');
+      const eq = document.getElementById('priv_equity_full'); if(eq) eq.textContent = 'RD$'+(Math.floor(Math.random()*40000)+500).toLocaleString('es-DO');
+      const pnl = document.getElementById('priv_pnl_full'); if(pnl) pnl.textContent = 'RD$'+(Math.floor(Math.random()*20000)-5000).toLocaleString('es-DO');
 
       // menu behaviors (activate dashboard by default)
       const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item'));
       function activateSection(sectionId){
-        menuItems.forEach(mi=>mi.classList.toggle('active', mi.dataset.target===sectionId || mi.dataset.section===sectionId));
+        menuItems.forEach(mi=>mi.classList.toggle('active', mi.dataset.section===sectionId));
+        // sections inside privateArea_full are minimal (dashboard only), expand later if needed
       }
-      menuItems.forEach(mi=>mi.addEventListener('click', ()=> {
-        activateSection(mi.dataset.target || mi.dataset.section);
-      }));
-      // default active
+      menuItems.forEach(mi=>mi.addEventListener('click', ()=> activateSection(mi.dataset.section)));
       activateSection('dashboard');
 
-      // logout handlers inside private area (if present)
+      // logout handlers inside private area
       const leftLogout = document.getElementById('btnLogoutLeft_full'); if(leftLogout) leftLogout.onclick = performLogoutFull;
       const topLogout = document.getElementById('logoutTop_full'); if(topLogout) topLogout.onclick = performLogoutFull;
     }
 
-    // persist session key name (SESSION_KEY must existir en la app)
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(user)); } catch(e){}
-
+    // persist session
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
     // scroll to top
     window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){
@@ -641,23 +604,19 @@ function performLogoutFull(){
     const privateWrapper = document.getElementById('privateArea_full');
     if(privateWrapper) privateWrapper.style.display = 'none';
     // restore public UI + header actions
-    const pm = document.getElementById('publicMain');
-    const pf = document.getElementById('publicFooter');
-    if(pm) pm.style.display = '';
-    if(pf) pf.style.display = '';
-    if(typeof restorePublicHeader === 'function') restorePublicHeader();
-    // reattach CTAs if they exist
-    const cAbrir = document.getElementById('ctaAbrir');
-    const cLogin = document.getElementById('ctaLogin');
-    if(cAbrir) cAbrir.addEventListener('click', ()=> { const b = document.getElementById('openAccountBtn'); if(b) b.click(); });
-    if(cLogin) cLogin.addEventListener('click', ()=> { const b = document.getElementById('loginBtn'); if(b) b.click(); });
+    document.getElementById('publicMain').style.display = '';
+    document.getElementById('publicFooter').style.display = '';
+    restorePublicHeader();
+    // reattach CTAs (they exist already, but ensure handlers present)
+    document.getElementById('ctaAbrir').addEventListener('click', ()=> document.getElementById('openAccountBtn').click());
+    document.getElementById('ctaLogin').addEventListener('click', ()=> document.getElementById('loginBtn').click());
   }catch(e){ console.error('logout error', e); }
 }
 
-/* On load: fix image paths, restore session and init small behaviors */
+/* On load: fix image paths, restore session and init deposit chart */
 window.addEventListener('load', function(){
-  try{ if(typeof ensureModalHooks === 'function') ensureModalHooks(); } catch(e){}
-  // fix filenames with spaces/parens on images
+  ensureModalHooks();
+  // fix filenames with spaces/parens
   Array.from(document.images).forEach(img=>{
     try{
       let s = img.getAttribute('src')||'';
@@ -668,41 +627,39 @@ window.addEventListener('load', function(){
     }catch(e){}
   });
 
-  // restore session and show private if available
+  // restore session
   var s = localStorage.getItem(SESSION_KEY);
   if(s){ try{ var u = JSON.parse(s); if(typeof showPrivateFull === 'function'){ showPrivateFull(u); } }catch(e){} }
 
-  // rotate circle icons if exist (non-critical)
+  // rotate circle-chart icons
   try{
     const segments = document.querySelectorAll('.segment');
     const totalSegments = segments.length;
-    if(totalSegments>0){
-      const degreesPerSegment = 360 / totalSegments;
-      segments.forEach((segment, index) => {
-          const rotation = index * degreesPerSegment;
-          const origin = segment.dataset.origin || '50% 50%';
-          segment.style.transformOrigin = origin;
-          segment.style.transform = `rotate(${rotation}deg)`;
-          const icon = segment.querySelector('i');
-          if (icon) {
-              icon.style.transform = `rotate(-${rotation}deg)`;
-              icon.style.position = 'absolute';
-              let top, right, bottom, left;
-              const offset = '30%';
-              switch (index) {
-                  case 0: top = offset; left = offset; break;
-                  case 1: top = offset; right = offset; break;
-                  case 2: bottom = offset; right = offset; break;
-                  case 3: bottom = offset; right = offset; break;
-                  case 4: bottom = offset; left = offset; break;
-              }
-              icon.style.top = top || '';
-              icon.style.right = right || '';
-              icon.style.bottom = bottom || '';
-              icon.style.left = left || '';
-          }
-      });
-    }
+    const degreesPerSegment = 360 / totalSegments;
+    segments.forEach((segment, index) => {
+        const rotation = index * degreesPerSegment;
+        const origin = segment.dataset.origin || '50% 50%';
+        segment.style.transformOrigin = origin;
+        segment.style.transform = `rotate(${rotation}deg)`;
+        const icon = segment.querySelector('i');
+        if (icon) {
+            icon.style.transform = `rotate(-${rotation}deg)`;
+            icon.style.position = 'absolute';
+            let top, right, bottom, left;
+            const offset = '30%';
+            switch (index) {
+                case 0: top = offset; left = offset; break;
+                case 1: top = offset; right = offset; break;
+                case 2: bottom = offset; right = offset; break;
+                case 3: bottom = offset; right = offset; break;
+                case 4: bottom = offset; left = offset; break;
+            }
+            icon.style.top = top || '';
+            icon.style.right = right || '';
+            icon.style.bottom = bottom || '';
+            icon.style.left = left || '';
+        }
+    });
   }catch(e){}
 });
 </script>
@@ -1635,6 +1592,7 @@ window.addEventListener('load', function(){
   </script>
   <!-- END: contenido importado -->
 </div>
+
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
 
 </body>
