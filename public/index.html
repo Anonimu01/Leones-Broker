@@ -1803,6 +1803,19 @@ async function openTrade(symbol, qty, price){
     alert('Error al abrir trade: ' + (err.message || err));
   }
 }
+
+ // menu lasteral izquierdo
+
+ 
+  const menuToggle = document.getElementById("menuToggle");
+  const sidebar = document.querySelector(".sidebar");
+
+  menuToggle.addEventListener("click", () => {
+    sidebar.classList.toggle("open");
+  });
+
+
+ 
 </script>
 
   <!-- END: contenido importado -->
