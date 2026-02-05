@@ -746,33 +746,30 @@ window.addEventListener('load', function(){
   .fnav-item.active{color:var(--gold);font-weight:800}
   .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
 
-  .menu-toggle{
-    display:inline-flex !important;
-    align-items:center;
-    justify-content:center;
-    font-size:22px;
-    z-index:9999;
+.menu-toggle{
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  font-size:22px;
+  cursor:pointer;
+}
+
+@media (max-width: 768px){
+  .sidebar{
+    position:fixed;
+    left:0;
+    top:64px;
+    bottom:0;
+    width:220px;
+    z-index:70;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
   }
 
-  @media (max-width: 768px){
-    .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
-    #tv_chart_container{height:300px}
-    .trade-panel{grid-template-columns:1fr}
-    .sidebar{
-      position:fixed;
-      left:0;
-      top:64px;
-      bottom:0;
-      width:220px;
-      z-index:70;
-      transform: translateX(-100%);
-      transition: transform 0.3s ease;
-    }
-    .sidebar.open{
-      transform: translateX(0);
-    }
+  .sidebar.open{
+    transform: translateX(0);
   }
-
+}
   .muted-small{color:var(--muted);font-size:12px}
   .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
 </style>
@@ -1807,24 +1804,34 @@ async function openTrade(symbol, qty, price){
 
  // menu lasteral izquierdo
 
- document.addEventListener('DOMContentLoaded', function () {
-  const menuBtn = document.querySelector('.menu-toggle');
-  const sidebar = document.querySelector('.sidebar');
+ 
 
-  if (!menuBtn || !sidebar) return;
 
-  menuBtn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    sidebar.classList.toggle('open');
-  });
+ document.addEventListener("DOMContentLoaded", () => {
+    const menuBtn = document.getElementById("menuToggle");
+    const sidebar = document.getElementById("sidebar");
 
-  // Cerrar menú tocando fuera (opcional pero recomendado)
-  document.addEventListener('click', function (e) {
-    if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
-      sidebar.classList.remove('open');
+    if (!menuBtn || !sidebar) {
+      console.warn("menuToggle o sidebar no encontrados");
+      return;
     }
+
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sidebar.classList.toggle("open");
+    });
+
+    // Cerrar menú tocando fuera (móvil)
+    document.addEventListener("click", (e) => {
+      if (
+        window.innerWidth <= 768 &&
+        !sidebar.contains(e.target) &&
+        !menuBtn.contains(e.target)
+      ) {
+        sidebar.classList.remove("open");
+      }
+    });
   });
-});
  
 
  
