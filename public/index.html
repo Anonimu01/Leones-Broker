@@ -747,11 +747,11 @@ window.addEventListener('load', function(){
   .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
 
 
- .header-left{
+.header{
   display:flex;
-  flex-direction:column; /* 👈 esto lo pone debajo */
-  align-items:flex-start;
-  gap:6px;
+  flex-direction:column;
+  align-items:stretch;
+  justify-content:center;
 }
 
 .menu-toggle{
@@ -764,6 +764,17 @@ window.addEventListener('load', function(){
   font-size:20px;
 }
 
+ .menu-toggle{
+  margin-top:8px;
+  align-self:flex-start;
+}
+
+ .header-left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+ 
 @media (max-width: 768px){
   .sidebar{
     position:fixed;
