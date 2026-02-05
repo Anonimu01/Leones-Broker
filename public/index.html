@@ -669,7 +669,7 @@ window.addEventListener('load', function(){
 
 <!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
 
- <style>
+<style>
   :root{
     --bg:#070707; --surface:#0f0f0f; --muted:#9aa0a6; --text:#e9e6e0;
     --gold:#d4af37; --danger:#cf304a; --line:rgba(255,255,255,0.06);
@@ -776,7 +776,6 @@ window.addEventListener('load', function(){
   .muted-small{color:var(--muted);font-size:12px}
   .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
 </style>
-
  
     <!-- MARCA: PARTE PRIVADA (HTML) -->
 <div id="privateArea_full" style="display:none;">
@@ -1808,7 +1807,24 @@ async function openTrade(symbol, qty, price){
 
  // menu lasteral izquierdo
 
- 
+ document.addEventListener('DOMContentLoaded', function () {
+  const menuBtn = document.querySelector('.menu-toggle');
+  const sidebar = document.querySelector('.sidebar');
+
+  if (!menuBtn || !sidebar) return;
+
+  menuBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    sidebar.classList.toggle('open');
+  });
+
+  // Cerrar menú tocando fuera (opcional pero recomendado)
+  document.addEventListener('click', function (e) {
+    if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
+      sidebar.classList.remove('open');
+    }
+  });
+});
  
 
  
