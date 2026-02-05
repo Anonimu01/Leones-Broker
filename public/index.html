@@ -765,10 +765,9 @@ window.addEventListener('load', function(){
 }
 
  .menu-toggle{
-  margin-top:18px;
+  margin-top:38px;
   align-self:flex-start;
 }
-
  .header-left{
   display:flex;
   align-items:center;
@@ -1862,13 +1861,21 @@ async function openTrade(symbol, qty, price){
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
-<script>
-const btn = document.getElementById("menuToggle");
-const sidebar = document.getElementById("sidebar");
 
-btn.addEventListener("click", () => {
-  sidebar.classList.toggle("open");
+
+ 
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const btnMenu = document.getElementById("menuToggle");
+  const sidebar = document.getElementById("sidebar");
+
+  if (!btnMenu || !sidebar) return;
+
+  btnMenu.addEventListener("click", () => {
+    sidebar.classList.toggle("open");
+  });
 });
-                     </script>
+</script>
+ 
 </body>
 </html>
