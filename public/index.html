@@ -754,19 +754,29 @@ window.addEventListener('load', function(){
   justify-content:center;
 }
 
+/* BOTÓN */
 .menu-toggle{
+  display:none;
+  margin-top:8px;
+  padding:10px;
+  font-size:18px;
   background:transparent;
-  border:1px solid rgba(255,255,255,0.08);
-  padding:6px 10px;
-  border-radius:6px;
-  color:var(--gold);
-  cursor:pointer;
-  font-size:20px;
+  color:#d4af37;
+  border:1px solid #333;
+  border-radius:8px;
 }
 
- .menu-toggle{
-  margin-top:60px;
-  align-self:flex-start;
+
+/* MENÚ */
+.mobile-menu{
+  display:none;
+  flex-direction:column;
+  background:#0b0b0b;
+  border-top:1px solid #222;
+}
+
+.mobile-menu.open{
+  display:flex;
 }
  .header-left{
   display:flex;
@@ -775,6 +785,9 @@ window.addEventListener('load', function(){
 }
  
 @media (max-width: 768px){
+   .menu-toggle{
+    display:block;
+   }
   .sidebar{
     position:fixed;
     left:0;
@@ -1866,16 +1879,15 @@ async function openTrade(symbol, qty, price){
  
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-  const btnMenu = document.getElementById("menuToggle");
-  const sidebar = document.getElementById("sidebar");
+  const btn = document.getElementById("menuToggle");
+  const menu = document.getElementById("mobileMenu");
 
-  if (!btnMenu || !sidebar) return;
-
-  btnMenu.addEventListener("click", () => {
-    sidebar.classList.toggle("open");
+  btn.addEventListener("click", () => {
+    menu.classList.toggle("open");
   });
 });
 </script>
+
  
 </body>
 </html>
