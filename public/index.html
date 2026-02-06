@@ -770,8 +770,8 @@ window.addEventListener('load', function(){
 <div id="privateArea_full" style="display:none;">
   <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
   <header class="header">
-    <div class="header-left">
-    <button id="menuToggle" class="menu-btn">☰</button>
+  <div class="header-left">
+    <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
     <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
   </div>
 
@@ -787,20 +787,20 @@ window.addEventListener('load', function(){
 
   <div class="main-wrap">
     <div class="layout">
-      <!-- Sidebar -->
-      <aside class="sidebar" id="sidebar">
-        <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
-        <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
-        <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
-        <div class="menu-item" data-target="verification" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
-        <div class="menu-item" data-target="deposit" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
-        <div class="menu-item" data-target="withdraw" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+      
+       <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
+      <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
+      <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+      <div class="menu-item" data-target="verification" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+      <div class="menu-item" data-target="deposit" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+      <div class="menu-item" data-target="withdraw" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
 
-        <div style="height:8px"></div>
-        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
-        <div class="menu-item" onclick="showModalInfo()"><i class="fa-solid fa-circle-info"></i> Info</div>
-      </aside>
-
+      <div style="height:8px"></div>
+      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
+      <div class="menu-item" onclick="showModalInfo()"><i class="fa-solid fa-circle-info"></i> Info</div>
+    </aside>
       <!-- Panels -->
       <section class="panel" id="dashboardPanel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
