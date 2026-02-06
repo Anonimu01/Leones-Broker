@@ -691,8 +691,8 @@ window.addEventListener('load', function(){
   .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
 
   /* Layout */
-  .main-wrap{padding-top:80px;max-width:none; width: auto; margin:0 2%;}
-  .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
+  .main-wrap{padding-top:80px;max-width:1600px;margin:0 auto}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
   .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px)}
   .sidebar.hidden{transform:translateX(-110%)}
   .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
@@ -746,63 +746,13 @@ window.addEventListener('load', function(){
   .fnav-item.active{color:var(--gold);font-weight:800}
   .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
 
-
-.header{
-  display:flex;
-  flex-direction:column;
-  align-items:stretch;
-  justify-content:center;
-}
-
-/* BOTÓN */
-.menu-toggle{
-  display:none;
-  margin-top:8px;
-  padding:10px;
-  font-size:18px;
-  background:transparent;
-  color:#d4af37;
-  border:1px solid #333;
-  border-radius:8px;
-}
-
-
-/* MENÚ */
-.mobile-menu{
-  display:none;
-  flex-direction:column;
-  background:#0b0b0b;
-  border-top:1px solid #222;
-}
-
-.mobile-menu.open{
-  display:flex;
-}
- .header-left{
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
- 
-@media (max-width: 768px){
-   .menu-toggle{
-    display:block;
-   }
-  .sidebar{
-    position:fixed;
-    left:0;
-    top:64px;
-    bottom:0;
-    width:220px;
-    z-index:70;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
+  @media(max-width:1000px){
+    .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
+    #tv_chart_container{height:300px}
+    .trade-panel{grid-template-columns:1fr}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
   }
 
-  .sidebar.open{
-    transform: translateX(0);
-  }
-}
   .muted-small{color:var(--muted);font-size:12px}
   .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
 </style>
@@ -812,9 +762,9 @@ window.addEventListener('load', function(){
   <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
   <header class="header">
     <div class="header-left">
-       <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
-      <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
-    </div>
+    <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
+    <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
+  </div>
 
     <div class="user">
       <div style="text-align:right">
@@ -1866,6 +1816,14 @@ async function openTrade(symbol, qty, price){
     });
   });
  
+const menuToggle = document.getElementById('menuToggle');
+
+ /* ---------------------------
+   UI: menu toggle
+   --------------------------- */
+menuToggle.addEventListener('click', ()=> {
+  document.getElementById('sidebar').classList.toggle('hidden');
+});
 
  
 </script>
