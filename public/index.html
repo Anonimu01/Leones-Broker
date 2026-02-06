@@ -1033,48 +1033,87 @@ const SESSION_KEY = 'BROKERPRO_SESSION_USER';
 
 /* safe escape helper */
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
-
-/* showPrivateFull: muestra la PARTE PRIVADA COMPLETA (usa el DOM de la sección privada) */
+/* =========================
+   FUNCIÓN ACTUALIZADA: showPrivateFull (COMPLETA)
+   ========================= */
 function showPrivateFull(user){
   try{
     if(!user) return;
-    // hide public (wrap in try because publicMain may not exist in all embeds)
-    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display='none'; }catch(e){}
-    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display='none'; }catch(e){}
 
-    // update header: show user + logout (headerActions might exist in your public header)
+    // ocultar la parte pública (con defensas por si no existen los elementos)
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = 'none'; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = 'none'; }catch(e){}
+
+    // headerActions: construimos UI privada aquí, sin tocar el menú público
     try{
       const headerActions = document.getElementById('headerActions');
       if(headerActions){
+        // limpiamos solo la zona de headerActions
         headerActions.innerHTML = '';
+
+        // -- BOTÓN DEL MENÚ PRIVADO (ID único para que no choque con otro menuToggle)
+        // si ya existía, lo removemos antes para evitar duplicados
+        const existing = document.getElementById('menuTogglePrivate');
+        if(existing) existing.remove();
+
+        const menuBtn = document.createElement('button');
+        menuBtn.id = 'menuTogglePrivate';
+        menuBtn.className = 'menu-toggle';
+        menuBtn.title = 'Abrir/Cerrar menú';
+        menuBtn.setAttribute('aria-label','Abrir/Cerrar menú');
+        menuBtn.type = 'button';
+        menuBtn.textContent = '☰';
+
+        // toggle del sidebar (defensivo: comprueba existencia)
+        menuBtn.addEventListener('click', () => {
+          const sidebar = document.getElementById('sidebar');
+          if(sidebar) sidebar.classList.toggle('hidden');
+        });
+
+        // -- Bloque de perfil + logout
         const profileBtn = document.createElement('div');
-        profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
-        const nameEl = document.createElement('div'); nameEl.textContent = user.name || user.username || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
-        const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+        profileBtn.style.display = 'flex';
+        profileBtn.style.alignItems = 'center';
+        profileBtn.style.gap = '10px';
+
+        const nameEl = document.createElement('div');
+        nameEl.textContent = user.name || user.username || 'Usuario';
+        nameEl.style.color = 'var(--gold)';
+        nameEl.style.fontWeight = '700';
+
+        const logoutBtn = document.createElement('button');
+        logoutBtn.className = 'btn ghost';
+        logoutBtn.type = 'button';
+        logoutBtn.textContent = 'Cerrar sesión';
         logoutBtn.addEventListener('click', performLogoutFull);
-        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+
+        profileBtn.appendChild(nameEl);
+        profileBtn.appendChild(logoutBtn);
+
+        // Insertamos el botón de menú privado y el perfil.
+        // Usamos appendChild para mantener orden; si prefieres a la izquierda usa headerActions.prepend(menuBtn)
+        headerActions.appendChild(menuBtn);
         headerActions.appendChild(profileBtn);
       }
-    }catch(e){}
+    }catch(e){
+      // no bloquear el flujo si falla el header
+      console.error('showPrivateFull header error', e);
+    }
 
-    // show private container
-    const privateWrapper = document.getElementById('privateArea_full');
-    if(privateWrapper) {
-      privateWrapper.style.display = 'flex';
+    // mostrar el contenedor privado y rellenar campos internos
+    try{
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'flex';
 
-      // set info inside private area (use safe fallbacks)
       const nameVal = user.name || user.username || 'Usuario';
       const emailVal = user.email || '';
 
       const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = nameVal;
       const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = emailVal;
-
-      // header name & welcome
       const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = nameVal;
       const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = nameVal;
       const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (nameVal||'U').slice(0,1).toUpperCase();
 
-      // balances: set to real initial 0 (unless user has provided balances)
       const balValue = (typeof user.balance === 'number') ? user.balance : 0.00;
       const eqValue = (typeof user.equity === 'number') ? user.equity : 0.00;
       const pnlValue = (typeof user.pnl === 'number') ? user.pnl : 0.00;
@@ -1083,126 +1122,126 @@ function showPrivateFull(user){
       const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (Number(eqValue).toLocaleString('es-DO'));
       const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (Number(pnlValue).toLocaleString('es-DO'));
 
-      // top balances used inside UI
       const balUsdtEl = document.getElementById('bal-usdt'); if(balUsdtEl) balUsdtEl.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
       const balUsdtTop = document.getElementById('bal-usdt-top'); if(balUsdtTop) balUsdtTop.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
       const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number((balValue||0)).toLocaleString(undefined,{maximumFractionDigits:2});
       const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(balValue).toLocaleString(undefined,{maximumFractionDigits:2});
       const pnlTotalEl = document.getElementById('pnlTotal'); if(pnlTotalEl) pnlTotalEl.innerText = '$' + Number(pnlValue).toLocaleString(undefined,{maximumFractionDigits:2});
-
-      // menu behaviors (activate dashboard by default)
-      const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item'));
-      function activateSection(sectionId){
-        menuItems.forEach(mi=>{
-          // support both data-section and data-target for compatibility
-          const ds = mi.dataset.section || mi.dataset.target || '';
-          mi.classList.toggle('active', ds === sectionId || mi.dataset.target === sectionId);
-        });
-        // show corresponding panel
-        const mapping = {
-          'dashboard':'dashboardPanel','trading':'tradingPanel',
-          'history':'historyPanel','verification':'verificationPanel',
-          'deposit':'depositPanel','withdraw':'withdrawPanel'
-        };
-        const panel = document.getElementById(mapping[sectionId] || (sectionId + 'Panel') || 'dashboardPanel');
-        if(panel) showPanel(panel.id);
-      }
-      menuItems.forEach(mi=>mi.addEventListener('click', ()=> activateSection(mi.dataset.target || mi.dataset.section || 'dashboard')));
-      activateSection('dashboard');
-
-      // logout handlers inside private area (buttons may or may not exist)
-      const leftLogout = document.getElementById('btnLogoutLeft_full'); if(leftLogout) leftLogout.onclick = performLogoutFull;
-      const topLogout = document.getElementById('logoutTop_full'); if(topLogout) topLogout.onclick = performLogoutFull;
+    }catch(e){
+      console.error('showPrivateFull private area error', e);
     }
 
-    // persist session (store minimal safe user)
-    const safeUser = {
-      id: user.id || user._id || null,
-      name: user.name || user.username || 'Usuario',
-      email: user.email || '',
-      balance: (typeof user.balance === 'number') ? user.balance : 0,
-      equity: (typeof user.equity === 'number') ? user.equity : 0,
-      pnl: (typeof user.pnl === 'number') ? user.pnl : 0
-    };
-    try{ localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser)); }catch(e){}
+    // persistir sesión mínimamente
+    try{
+      const safeUser = {
+        id: user.id || user._id || null,
+        name: user.name || user.username || 'Usuario',
+        email: user.email || '',
+        balance: (typeof user.balance === 'number') ? user.balance : 0,
+        equity: (typeof user.equity === 'number') ? user.equity : 0,
+        pnl: (typeof user.pnl === 'number') ? user.pnl : 0
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
+    }catch(e){ /* ignore storage errors */ }
 
-    // scroll to top
     try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
-  }catch(e){
-    console.error('showPrivateFull error', e);
+  }catch(err){
+    console.error('showPrivateFull error', err);
   }
 }
 
-/* performLogoutFull: cierra sesión, restaura UI pública */
+/* =========================
+   FUNCIÓN ACTUALIZADA: performLogoutFull (COMPLETA)
+   ========================= */
 function performLogoutFull(){
   try{
-    localStorage.removeItem(SESSION_KEY);
-    // hide private
-    const privateWrapper = document.getElementById('privateArea_full');
-    if(privateWrapper) privateWrapper.style.display = 'none';
-    // restore public UI + header actions (wrapped in try)
+    // limpiar storage
+    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+
+    // ocultar wrapper privado
+    try{
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'none';
+    }catch(e){}
+
+    // restaurar UI pública (defensivo)
     try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = ''; }catch(e){}
     try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = ''; }catch(e){}
+
+    // restaurar header público si existe función
     try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
-    // reattach CTAs safely if exist
-    try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn').click()); }catch(e){}
-    try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn').click()); }catch(e){}
-  }catch(e){ console.error('logout error', e); }
+
+    // remover botón de menú privado si quedó
+    try{
+      const privateMenu = document.getElementById('menuTogglePrivate');
+      if(privateMenu) privateMenu.remove();
+    }catch(e){}
+
+    // reatachar CTAs de la parte pública si existen
+    try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn')?.click()); }catch(e){}
+    try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn')?.click()); }catch(e){}
+  }catch(e){
+    console.error('performLogoutFull error', e);
+  }
 }
 
-/* On load: fix image paths, restore session and init deposit chart */
+/* =========================
+   ON LOAD: restauración de sesión y correcciones de rutas
+   ========================= */
 window.addEventListener('load', function(){
   try{ if(typeof ensureModalHooks === 'function') ensureModalHooks(); }catch(e){}
 
-  // fix filenames with spaces/parens
-  Array.from(document.images).forEach(img=>{
-    try{
-      let s = img.getAttribute('src')||'';
-      if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){
-        let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-        img.setAttribute('src', fixed);
-      }
-    }catch(e){}
-  });
+  // corregir rutas de imágenes con espacios/paréntesis
+  try{
+    Array.from(document.images).forEach(img=>{
+      try{
+        const s = img.getAttribute('src')||'';
+        if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){
+          const fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+          img.setAttribute('src', fixed);
+        }
+      }catch(ie){}
+    });
+  }catch(e){}
 
-  // restore session
-  var s = localStorage.getItem(SESSION_KEY);
-  if(s){
-    try{
-      var u = JSON.parse(s);
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(u); }
-    }catch(e){}
-  }
+  // restaurar sesión si existe
+  try{
+    const s = localStorage.getItem(SESSION_KEY);
+    if(s){
+      const u = JSON.parse(s);
+      if(typeof showPrivateFull === 'function') showPrivateFull(u);
+    }
+  }catch(e){}
 
-  // rotate circle-chart icons (defensive)
+  // rotar íconos (defensivo)
   try{
     const segments = document.querySelectorAll('.segment');
     if(segments && segments.length){
       const totalSegments = segments.length;
       const degreesPerSegment = 360 / totalSegments;
       segments.forEach((segment, index) => {
-          const rotation = index * degreesPerSegment;
-          const origin = segment.dataset.origin || '50% 50%';
-          segment.style.transformOrigin = origin;
-          segment.style.transform = `rotate(${rotation}deg)`;
-          const icon = segment.querySelector('i');
-          if (icon) {
-              icon.style.transform = `rotate(-${rotation}deg)`;
-              icon.style.position = 'absolute';
-              let top, right, bottom, left;
-              const offset = '30%';
-              switch (index) {
-                  case 0: top = offset; left = offset; break;
-                  case 1: top = offset; right = offset; break;
-                  case 2: bottom = offset; right = offset; break;
-                  case 3: bottom = offset; right = offset; break;
-                  case 4: bottom = offset; left = offset; break;
-              }
-              icon.style.top = top || '';
-              icon.style.right = right || '';
-              icon.style.bottom = bottom || '';
-              icon.style.left = left || '';
+        const rotation = index * degreesPerSegment;
+        const origin = segment.dataset.origin || '50% 50%';
+        segment.style.transformOrigin = origin;
+        segment.style.transform = `rotate(${rotation}deg)`;
+        const icon = segment.querySelector('i');
+        if (icon) {
+          icon.style.transform = `rotate(-${rotation}deg)`;
+          icon.style.position = 'absolute';
+          let top, right, bottom, left;
+          const offset = '30%';
+          switch (index) {
+            case 0: top = offset; left = offset; break;
+            case 1: top = offset; right = offset; break;
+            case 2: bottom = offset; right = offset; break;
+            case 3: bottom = offset; right = offset; break;
+            case 4: bottom = offset; left = offset; break;
           }
+          icon.style.top = top || '';
+          icon.style.right = right || '';
+          icon.style.bottom = bottom || '';
+          icon.style.left = left || '';
+        }
       });
     }
   }catch(e){}
@@ -1784,15 +1823,7 @@ async function openTrade(symbol, qty, price){
   }
 }
 
-const menuToggle = document.createElement('button');
-menuToggle.id = 'menuToggle';
-menuToggle.className = 'menu-toggle';
-menuToggle.innerText = '☰';
-headerActions.prepend(menuToggle);
 
-menuToggle.addEventListener('click', () => {
-  document.getElementById('sidebar')?.classList.toggle('hidden');
-});
 </script>
 
   <!-- END: contenido importado -->
