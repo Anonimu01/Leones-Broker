@@ -1793,15 +1793,14 @@ async function openTrade(symbol, qty, price){
   }
 }
 
- document.addEventListener('DOMContentLoaded', () => {
-  const menuToggle = document.getElementById('menuToggle');
-  const sidebar = document.getElementById('sidebar');
+const menuToggle = document.createElement('button');
+menuToggle.id = 'menuToggle';
+menuToggle.className = 'menu-toggle';
+menuToggle.innerText = '☰';
+headerActions.prepend(menuToggle);
 
-  if(menuToggle && sidebar){
-    menuToggle.addEventListener('click', () => {
-      sidebar.classList.toggle('hidden');
-    });
-  }
+menuToggle.addEventListener('click', () => {
+  document.getElementById('sidebar')?.classList.toggle('hidden');
 });
 </script>
 
