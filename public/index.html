@@ -1784,19 +1784,15 @@ async function openTrade(symbol, qty, price){
   }
 }
 
- function initMenuToggle(){
-  menuToggle = document.getElementById('menuToggle');
-  const sidebar = document.getElementById('sidebar');
+const menuToggle = document.createElement('button');
+menuToggle.id = 'menuToggle';
+menuToggle.className = 'menu-toggle';
+menuToggle.innerText = '☰';
+headerActions.prepend(menuToggle);
 
-  if(!menuToggle || !sidebar){
-    console.warn('menuToggle o sidebar no encontrados');
-    return;
-  }
-
-  menuToggle.addEventListener('click', ()=>{
-    sidebar.classList.toggle('hidden');
-  });
-}
+menuToggle.addEventListener('click', () => {
+  document.getElementById('sidebar')?.classList.toggle('hidden');
+});
 </script>
 
   <!-- END: contenido importado -->
