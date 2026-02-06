@@ -1034,6 +1034,25 @@ window.addEventListener('load', function(){
 <script src="https://s3.tradingview.com/tv.js"></script>
 
 <script>
+/* CONFIG */
+const SESSION_KEY = 'BROKERPRO_SESSION_USER';
+const API_URL = "http://localhost:3000/api";
+
+/* safe escape helper */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+
+/* =========================
+   SHOW / HIDE PRIVATE UI
+   ========================= */
+function showPrivateFull(user){
+  try{
+    if(!user) return;
+    // hide public (wrapped in try because publicMain may not exist)
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display='none'; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display='none'; }catch(e){}
+
+
+ 
 /* ---------------------------
    Datos de símbolos — lista amplia de ejemplo
    --------------------------- */
