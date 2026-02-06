@@ -1783,6 +1783,20 @@ async function openTrade(symbol, qty, price){
     alert('Error al abrir trade: ' + (err.message || err));
   }
 }
+
+ function initMenuToggle(){
+  menuToggle = document.getElementById('menuToggle');
+  const sidebar = document.getElementById('sidebar');
+
+  if(!menuToggle || !sidebar){
+    console.warn('menuToggle o sidebar no encontrados');
+    return;
+  }
+
+  menuToggle.addEventListener('click', ()=>{
+    sidebar.classList.toggle('hidden');
+  });
+}
 </script>
 
   <!-- END: contenido importado -->
