@@ -455,9 +455,7 @@
 
 <script>
 /* CONFIG */
-const API = location.hostname.includes("render.com") ? location.origin + "/api" : "http://localhost:4000/api";
-const USERS_KEY = 'leones_images_users';
-const SESSION_KEY = 'leones_session_user';
+
 
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
