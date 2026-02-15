@@ -1111,7 +1111,7 @@ window.addEventListener('load', function(){
 
 <script>
 /* -------------------------
-   PARTE PRIVADA - JS COMPLETO Y CORREGIDO
+   PARTE PRIVADA - JS COMPLETO Y ACTUALIZADO (Chart full + más símbolos)
    ------------------------- */
 
 /* CONFIG & KEYS */
@@ -1129,17 +1129,13 @@ function showPrivateFull(user){
   try{
     if(!user) return;
 
-    // ocultar la parte pública (con defensas por si no existen los elementos)
     try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = 'none'; }catch(e){}
     try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = 'none'; }catch(e){}
 
-    // headerActions: construimos UI privada aquí, sin tocar el menú público
     try{
       const headerActions = document.getElementById('headerActions');
       if(headerActions){
         headerActions.innerHTML = '';
-
-        // remove existing private toggle if any
         const existing = document.getElementById('menuTogglePrivate');
         if(existing) existing.remove();
 
@@ -1147,10 +1143,8 @@ function showPrivateFull(user){
         menuBtn.id = 'menuTogglePrivate';
         menuBtn.className = 'menu-toggle';
         menuBtn.title = 'Abrir/Cerrar menú';
-        menuBtn.setAttribute('aria-label','Abrir/Cerrar menú');
         menuBtn.type = 'button';
         menuBtn.textContent = '☰';
-
         menuBtn.addEventListener('click', () => {
           const sidebar = document.getElementById('sidebar');
           if(sidebar) sidebar.classList.toggle('hidden');
@@ -1182,7 +1176,6 @@ function showPrivateFull(user){
       console.error('showPrivateFull header error', e);
     }
 
-    // mostrar el contenedor privado y rellenar campos internos
     try{
       const privateWrapper = document.getElementById('privateArea_full');
       if(privateWrapper) privateWrapper.style.display = 'flex';
@@ -1213,7 +1206,6 @@ function showPrivateFull(user){
       console.error('showPrivateFull private area error', e);
     }
 
-    // persistir sesión mínimamente (guarda user summary)
     try{
       const safeUser = {
         id: user.id || user._id || null,
@@ -1224,7 +1216,7 @@ function showPrivateFull(user){
         pnl: (typeof user.pnl === 'number') ? user.pnl : (user.pnl ? Number(user.pnl) : 0)
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-    }catch(e){ /* ignore storage errors */ }
+    }catch(e){}
 
     try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
   }catch(err){
@@ -1323,38 +1315,57 @@ window.addEventListener('load', function(){
 
 /* =========================
    DATOS Y LÓGICA DE TRADING
-   (Se mantienen exactamente como tenías)
+   (Lista ampliada y chart full)
    ========================= */
 
-/* --------------------------- Symbols & demo data */
+/* Symbols ampliados (varios mercados) */
 const ALL_SYMBOLS = [
   {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
   {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
   {symbol:'BINANCE:SOLUSDT', label:'SOL/USDT', market:'Crypto'},
   {symbol:'BINANCE:XRPUSDT', label:'XRP/USDT', market:'Crypto'},
   {symbol:'BINANCE:ADAUSDT', label:'ADA/USDT', market:'Crypto'},
-  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
-  {symbol:'NASDAQ:MSFT', label:'MSFT', market:'Stocks'},
-  {symbol:'NASDAQ:TSLA', label:'TSLA', market:'Stocks'},
-  {symbol:'NASDAQ:GOOGL', label:'GOOGL', market:'Stocks'},
-  {symbol:'NYSE:BRK.B', label:'BRK.B', market:'Stocks'},
+  {symbol:'BINANCE:MATICUSDT', label:'MATIC/USDT', market:'Crypto'},
+  {symbol:'BINANCE:BNBUSDT', label:'BNB/USDT', market:'Crypto'},
+  {symbol:'COINBASE:BTCUSD', label:'BTC/USD (Coinbase)', market:'Crypto'},
+  {symbol:'KRAKEN:ETHUSD', label:'ETH/USD (Kraken)', market:'Crypto'},
+  {symbol:'BITSTAMP:BTCUSD', label:'BTC/USD (Bitstamp)', market:'Crypto'},
+
   {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
   {symbol:'OANDA:GBP_USD', label:'GBP/USD', market:'Forex'},
   {symbol:'OANDA:USD_JPY', label:'USD/JPY', market:'Forex'},
   {symbol:'OANDA:AUD_USD', label:'AUD/USD', market:'Forex'},
+  {symbol:'FOREX:CHF_USD', label:'CHF/USD', market:'Forex'},
+
+  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
+  {symbol:'NASDAQ:MSFT', label:'MSFT', market:'Stocks'},
+  {symbol:'NASDAQ:TSLA', label:'TSLA', market:'Stocks'},
+  {symbol:'NASDAQ:AMZN', label:'AMZN', market:'Stocks'},
+  {symbol:'NYSE:WMT', label:'WMT', market:'Stocks'},
+  {symbol:'NYSE:BRK.B', label:'BRK.B', market:'Stocks'},
+  {symbol:'NYSE:BA', label:'BA', market:'Stocks'},
+
   {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'},
   {symbol:'INDEX:NDAQ', label:'NASDAQ 100', market:'Indices'},
   {symbol:'INDEX:DJI', label:'Dow Jones', market:'Indices'},
+  {symbol:'INDEX:RUS', label:'Russell 2000', market:'Indices'},
+
   {symbol:'CME:ES1!', label:'ES (S&P Futures)', market:'Futures'},
   {symbol:'CME:CL1!', label:'Crude Oil Futures', market:'Futures'},
+  {symbol:'CME:NG1!', label:'Natural Gas Futures', market:'Futures'},
+
+  {symbol:'COMEX:GC1!', label:'Gold Futures (GC)', market:'Commodities'},
+  {symbol:'COMEX:SI1!', label:'Silver Futures (SI)', market:'Commodities'},
+
   {symbol:'US10Y', label:'US 10Y Bond', market:'Bonds'},
   {symbol:'ECONOMY:US', label:'US Economic Calendar', market:'Economy'},
   {symbol:'OPTIONS:AAPL', label:'AAPL Options', market:'Options'},
-  {symbol:'BINANCE:MNTUSDT', label:'MNT/USDT', market:'Crypto'},
-  {symbol:'INDEX:RUS', label:'Russell 2000', market:'Indices'},
-  {symbol:'FOREX:CHF_USD', label:'CHF/USD', market:'Forex'},
-  {symbol:'NASDAQ:AMZN', label:'AMZN', market:'Stocks'},
-  {symbol:'NYSE:WMT', label:'WMT', market:'Stocks'}
+
+  // extras
+  {symbol:'BINANCE:LTCUSDT', label:'LTC/USDT', market:'Crypto'},
+  {symbol:'BINANCE:DOGEUSDT', label:'DOGE/USDT', market:'Crypto'},
+  {symbol:'NASDAQ:GOOGL', label:'GOOGL', market:'Stocks'},
+  {symbol:'OANDA:XAU_USD', label:'GOLD XAU/USD', market:'Commodities'}
 ];
 
 const symbolPrices = {
@@ -1375,6 +1386,7 @@ let positions = [];
 
 /* DOM refs */
 let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
+let symbolsGrid, symbolSearch, marketsSymbolsGrid, marketSearch, catTabs, catTabsMarket;
 
 /* UI wiring */
 function wireDomRefs(){
@@ -1438,7 +1450,7 @@ function navSidebar(evt){
   if(panelId === 'tradingPanel') initTradingIfNeeded();
 }
 
-/* SYMBOLS UI helpers (kept) */
+/* SYMBOLS UI helpers */
 const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
 let activeCategory = 'All';
 
@@ -1463,19 +1475,20 @@ function filterSymbols(q, category){
   });
 }
 
+/* Render symbols into the symbolsGrid (full list) */
 function renderSymbolsGrid(container, query, category){
   if(!container) return;
   container.innerHTML = '';
   const list = filterSymbols(query, category);
   if(list.length === 0){
-    container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
+    container.innerHTML = '<div style="color:var(--muted);padding:12px">— no se encontraron símbolos —</div>';
     return;
   }
   list.forEach(s=>{
     const el = document.createElement('div');
     el.className = 'symbol-card';
     el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
-    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid rgba(255,255,255,0.02)">
       <div>
         <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label)}</div>
         <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market)} · ${escapeHtml(s.symbol)}</div>
@@ -1489,6 +1502,7 @@ function renderSymbolsGrid(container, query, category){
   });
 }
 
+/* display price helper */
 function displayPriceFor(sym){
   const p = symbolPrices[sym];
   const pn = Number(p);
@@ -1496,42 +1510,50 @@ function displayPriceFor(sym){
   return (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6);
 }
 
-/* Trading / Chart helpers (kept) */
+/* TradingView handling: remove previous widget and create a full-sized one */
 let tradingWidget = null;
-function createTradingViewWidget(containerId, symbol){
-  try {
-    if(typeof TradingView === 'undefined'){
-      const container = document.getElementById(containerId);
-      if(container) container.innerHTML = '<div style="padding:12px;color:var(--muted)">TradingView no está disponible en este entorno.</div>';
-      return null;
-    }
-    const cfg = {
-      "autosize": true,
-      "symbol": symbol,
-      "interval": "15",
-      "timezone": "Etc/UTC",
-      "theme": "dark",
-      "style": "1",
-      "container_id": containerId,
-      "allow_symbol_change": true,
-      "hide_top_toolbar": false,
-      "save_image": false,
-      "details": true,
-      "locale": "es"
-    };
-    return new TradingView.widget(cfg);
-  } catch(e){
-    const container = document.getElementById(containerId);
-    if(container) container.innerHTML = '<div style="padding:12px;color:var(--muted)">No se pudo cargar el chart en este entorno.</div>';
-    return null;
+function loadChart(symbol){
+  try{
+    // remove existing widget cleanly
+    try{ if(tradingWidget && typeof tradingWidget.remove === 'function') tradingWidget.remove(); }catch(e){}
+    tradingWidget = null;
+
+    const container = document.getElementById('tv_chart_container');
+    if(!container) return;
+
+    // ensure inner container fills available space
+    container.innerHTML = '<div id="tv_chart_inner" style="width:100%;height:100%;"></div>';
+
+    // create widget full-size
+    tradingWidget = new TradingView.widget({
+      autosize: true,
+      symbol: symbol,
+      interval: "15",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      container_id: "tv_chart_inner",
+      allow_symbol_change: true,
+      hide_top_toolbar: false,
+      enable_publishing: false,
+      withdateranges: true,
+      details: true,
+      locale: "es"
+    });
+
+    // store currentSymbol
+    currentSymbol = symbol;
+  }catch(err){
+    console.error('loadChart error', err);
+    const container = document.getElementById('tv_chart_container');
+    if(container) container.innerHTML = '<div style="padding:12px;color:var(--muted)">No se pudo cargar TradingView aquí.</div>';
   }
 }
 
-function initTradingWidget(symbol){
-  const container = document.getElementById('tv_chart_container');
-  if(!container) return;
-  container.innerHTML = '';
-  createTradingViewWidget('tv_chart_container', symbol);
+/* helpers previously used to init (kept for compatibility) */
+function createTradingViewWidget(containerId, symbol){
+  // wrapper to call loadChart with container usage
+  loadChart(symbol);
 }
 
 /* select symbol */
@@ -1540,9 +1562,7 @@ function selectSymbolAndOpenTrading(symbol, label){
   if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
   const opSym = document.getElementById('op-symbol'); if(opSym) opSym.innerText = document.getElementById('tradingSymbol')?.innerText || '';
   const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
-  currentSymbol = symbol;
-  showPanel('tradingPanel');
-  initTradingWidget(symbol);
+  loadChart(symbol);
   updateDisplayedPrice(symbolPrices[symbol] || 0);
   updateOrderBook(symbolPrices[symbol] || 0);
 }
@@ -1567,30 +1587,7 @@ function selectSymbolAndOpenTrading(symbol, label){
   }, 1200);
 })();
 
-function updateDisplayedPrice(price){
-  const pn = Number(price);
-  if(!isFinite(pn)) return;
-  if(opPriceEl) opPriceEl.innerText = (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6);
-}
-
-function updateOrderBook(base){
-  const b = Number(base);
-  if(!b) return;
-  let bidsHtml = '', asksHtml = '';
-  for(let i=0;i<8;i++){
-    bidsHtml += `<div class="ob-row"><span style="color:var(--gold)">${(b - (i+1)*(b*0.0008)).toFixed(6)}</span><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span></div>`;
-    asksHtml += `<div class="ob-row"><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span><span style="color:var(--muted)">${(b + (i+1)*(b*0.0008)).toFixed(6)}</span></div>`;
-  }
-  if(obBidsEl) obBidsEl.innerHTML = bidsHtml;
-  if(obAsksEl) obAsksEl.innerHTML = asksHtml;
-}
-
-function getBaseUnit(){
-  const lab = document.getElementById('tradingSymbol')?.innerText || '';
-  return lab.split('/')[0] || '';
-}
-
-/* Orders / Positions (demo) - kept as before */
+/* Orders / Positions (demo) */
 let currentSymbol = ALL_SYMBOLS[0].symbol;
 
 function createOrder(side){
@@ -1719,53 +1716,19 @@ function renderPositionsUI(){
   if(posCountTop) posCountTop.innerText = positions.length;
 }
 
-function openPosition(positionId){
-  const pos = positions.find(p=>p.id === positionId);
-  if(!pos) { alert('Posición no encontrada'); return; }
-  selectSymbolAndOpenTrading(pos.symbol, pos.symbol.replace(/.*:/,''));
-}
+/* INIT and DOM ready wiring */
+function initSymbolsUI(){
+  buildCategoryTabs(catTabs, ()=> renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory));
+  buildCategoryTabs(catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory));
+  renderSymbolsGrid(symbolsGrid, '', 'All');
+  renderSymbolsGrid(marketsSymbolsGrid, '', 'All');
 
-function closePosition(id){
-  const idx = positions.findIndex(p=>p.id === id);
-  if(idx === -1) return;
-  const pos = positions[idx];
-  const priceNow = symbolPrices[pos.symbol] || 0;
-  const base = getBaseFromSymbol(pos.symbol);
-  const qty = pos.qty;
-  demo_balances[base] = Math.max(0,(demo_balances[base] || 0) - qty);
-  const gain = qty * priceNow;
-  demo_usdt += gain;
-  positions.splice(idx,1);
-  alert(`Posición cerrada (demo): ${qty} ${base} a ${formatPrice(priceNow)} — USDT recibidos: ${gain.toFixed(2)}`);
-  updateWalletTotal();
-  renderPositionsUI();
-}
-
-function updateWalletTotal(){
-  if(balUsdtEl) balUsdtEl.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  if(balUsdtTop) balUsdtTop.innerText = demo_usdt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  let total = demo_usdt;
-  Object.keys(demo_balances).forEach(k=>{
-    const sym = findSymbolForBase(k);
-    const qty = demo_balances[k] || 0;
-    total += (symbolPrices[sym] || 0) * qty;
-  });
-  if(balanceTotalEl) balanceTotalEl.innerText = '$' + total.toLocaleString(undefined,{maximumFractionDigits:2});
-  const cashAvailEl = document.getElementById('cashAvail');
-  if(cashAvailEl) cashAvailEl.innerText = '$' + demo_usdt.toLocaleString(undefined,{maximumFractionDigits:2});
-}
-
-function findSymbolForBase(base){
-  if(base === 'BTC') return 'BINANCE:BTCUSDT';
-  if(base === 'ETH') return 'BINANCE:ETHUSDT';
-  if(base === 'SOL') return 'BINANCE:SOLUSDT';
-  if(base === 'EUR') return 'OANDA:EUR_USD';
-  if(base === 'GBP') return 'OANDA:GBP_USD';
-  return 'BINANCE:BTCUSDT';
+  if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
+  if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
 }
 
 function initTradingIfNeeded(){
-  initTradingWidget(currentSymbol);
+  loadChart(currentSymbol);
   updateDisplayedPrice(symbolPrices[currentSymbol]||0);
   updateOrderBook(symbolPrices[currentSymbol]||0);
   renderOrders();
@@ -1784,6 +1747,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
   renderPositionsUI();
   updateWalletTotal();
   renderOrders();
+
+  // ensure chart loads full page area if tradingPanel is visible
+  try{
+    if(document.querySelector('#privateArea_full #tradingPanel') && document.getElementById('tv_chart_container')){
+      loadChart(currentSymbol);
+    }
+  }catch(e){}
 });
 
 /* acciones UI simples */
