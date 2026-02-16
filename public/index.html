@@ -458,6 +458,63 @@
 const USERS_KEY = 'leones_images_users';
 
 
+function openModal(html,onConfirm){
+  ensureModalHooks();
+  var modal=document.getElementById('modal');
+  if(!modal) {
+    console.warn('Modal element not found: #modal');
+    return;
+  }
+  document.getElementById('modalBody').innerHTML=html;
+  modal.style.display='flex';
+  document.body.style.overflow='hidden';
+  modal._onConfirm=onConfirm;
+
+  // Add enter key submit and password toggle inside modal
+  setTimeout(()=>{ // next tick to ensure elements are in DOM
+    const firstInput = modal.querySelector('input');
+    if(firstInput) firstInput.focus();
+
+    // Enter key handler
+    const enterHandler = (e)=>{
+      if(e.key==='Enter'){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){} closeModal(); }
+    };
+    modal._enterHandler = enterHandler;
+    modal.addEventListener('keydown', enterHandler);
+
+    // add toggle eye buttons for password inputs
+    modal.querySelectorAll('input[type="password"]').forEach(pw=>{
+      // avoid duplicating button
+      if(pw.nextSibling && pw.nextSibling.classList && pw.nextSibling.classList.contains('pw-toggle')) return;
+      const btn = document.createElement('button');
+      btn.type='button';
+      btn.className='pw-toggle';
+      btn.style.marginLeft='8px';
+      btn.style.padding='6px';
+      btn.style.background='transparent';
+      btn.style.color='#ddd';
+      btn.style.border='1px solid rgba(255,255,255,0.03)';
+      btn.style.borderRadius='6px';
+      btn.textContent='👁️';
+      btn.addEventListener('click', ()=> {
+        pw.type = pw.type === 'password' ? 'text' : 'password';
+        // keep focus on input
+        pw.focus();
+      });
+      // place after input
+      pw.parentNode.style.position='relative';
+      pw.parentNode.appendChild(btn);
+    });
+  },50);
+}
+
+
+
+
+
+ 
+
+
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
 function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
 
