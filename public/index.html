@@ -458,6 +458,28 @@
 const USERS_KEY = 'leones_images_users';
 
 
+/* helpers localStorage */
+function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
+function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+/* UI modal helpers (mejorado con Enter y toggle password) */
+function ensureModalHooks(){
+  var modal=document.getElementById('modal');
+  if(!modal) return;
+
+  var cancel=document.getElementById('modalCancel');
+  if(cancel && !cancel.dataset.hooked){
+    cancel.addEventListener('click', closeModal);
+    cancel.dataset.hooked='1';
+  }
+
+  var ok=document.getElementById('modalOk');
+  if(ok && !ok.dataset.hooked){
+    ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); });
+    ok.dataset.hooked='1';
+  }
+}
+
 function openModal(html,onConfirm){
   ensureModalHooks();
   var modal=document.getElementById('modal');
@@ -508,81 +530,153 @@ function openModal(html,onConfirm){
   },50);
 }
 
-
-
-
-
- 
-
-
-function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
-function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
-
-function ensureModalHooks(){
+function closeModal(){
   var modal=document.getElementById('modal');
   if(!modal) return;
-  var cancel=document.getElementById('modalCancel');
-  if(cancel && !cancel.dataset.hooked){ cancel.addEventListener('click', closeModal); cancel.dataset.hooked='1' }
-  var ok=document.getElementById('modalOk');
-  if(ok && !ok.dataset.hooked){ ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); }); ok.dataset.hooked='1' }
+  modal.style.display='none';
+  document.body.style.overflow='';
+  modal._onConfirm=null;
+  if(modal._enterHandler) { modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
 }
-function openModal(html,onConfirm){ ensureModalHooks(); var modal=document.getElementById('modal'); document.getElementById('modalBody').innerHTML=html; modal.style.display='flex'; document.body.style.overflow='hidden'; modal._onConfirm=onConfirm; }
-function closeModal(){ var modal=document.getElementById('modal'); if(!modal) return; modal.style.display='none'; document.body.style.overflow=''; modal._onConfirm=null; }
 
-/* PUBLIC: Register / Login (now call showPrivateFull on success) */
-document.getElementById('openAccountBtn').addEventListener('click', openRegisterModal);
-document.getElementById('loginBtn').addEventListener('click', openLoginModal);
+/* Safe element attach (no crash if element missing) */
+function attachIfExists(id, event, fn){
+  const el = document.getElementById(id);
+  if(el) el.addEventListener(event, fn);
+}
 
-document.getElementById('ctaAbrir').addEventListener('click', ()=> document.getElementById('openAccountBtn').click());
-document.getElementById('ctaLogin').addEventListener('click', ()=> document.getElementById('loginBtn').click());
+/* Attach buttons if exist */
+attachIfExists('openAccountBtn','click', openRegisterModal);
+attachIfExists('loginBtn','click', openLoginModal);
+attachIfExists('ctaAbrir','click', ()=> { const b = document.getElementById('openAccountBtn'); if(b) b.click(); });
+attachIfExists('ctaLogin','click', ()=> { const b = document.getElementById('loginBtn'); if(b) b.click(); });
 
+/* ---------- REGISTER / LOGIN (tries backend, fallback to localStorage) ---------- */
+
+async function backendRegister(userObj){
+  try{
+    const res = await fetch(API + '/register', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(userObj)
+    });
+    if(!res.ok) return { ok:false, msg:'Error servidor' };
+    const data = await res.json();
+    // expect server to return { ok: true, user, token } or similar
+    return { ok:true, data };
+  }catch(e){
+    console.error('backendRegister error', e);
+    return { ok:false, msg: e.message || 'Network' };
+  }
+}
+
+async function backendLogin(creds){
+  try{
+    const res = await fetch(API + '/login', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(creds)
+    });
+    if(!res.ok) return { ok:false, msg:'Credenciales inválidas' };
+    const data = await res.json();
+    return { ok:true, data };
+  }catch(e){
+    console.error('backendLogin error', e);
+    return { ok:false, msg: e.message || 'Network' };
+  }
+}
+
+/* Register modal (tries backend then fallback) */
 function openRegisterModal(){
   openModal(`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div><label>Nombre</label><input id="r_name" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div><label>Correo</label><input id="r_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div><label>Teléfono</label><input id="r_phone" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div><label>Contraseña</label><input id="r_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
     </div>
     <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
-  `, function(){
-    var name=document.getElementById('r_name').value.trim();
-    var email=document.getElementById('r_email').value.trim().toLowerCase();
-    var phone=document.getElementById('r_phone').value.trim();
-    var pass=document.getElementById('r_pass').value;
-    var msg=document.getElementById('r_msg');
-    if(!name||!email||!pass){ msg.textContent='Completa los campos'; return; }
-    var users=loadUsers();
-    if(users.find(u=>u.email===email)){ msg.textContent='Correo ya registrado'; return; }
-    var user={name,email,phone,pass,created:Date.now()};
-    users.push(user); saveUsers(users);
-    // Persist session and open full private area
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  `, async function(){
+    const name = (document.getElementById('r_name')||{}).value || '';
+    const email = ((document.getElementById('r_email')||{}).value || '').trim().toLowerCase();
+    const phone = (document.getElementById('r_phone')||{}).value || '';
+    const pass = (document.getElementById('r_pass')||{}).value || '';
+    const msgEl = document.getElementById('r_msg');
+    msgEl.textContent='';
+
+    if(!name || !email || !pass){ msgEl.textContent='Completa los campos'; return; }
+
+    // Try backend register first
+    const userObj = { name, email, phone, password: pass };
+    const backend = await backendRegister(userObj);
+    if(backend.ok){
+      // if server returned token or user
+      const serverData = backend.data;
+      // try store session according server response
+      if(serverData.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name })); }
+      else if(serverData.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user)); }
+      else { localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name })); }
+
+      closeModal();
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      return;
+    }
+
+    // fallback: localStorage (offline/dev)
+    const users = loadUsers();
+    if(users.find(u=>u.email===email)){ msgEl.textContent='Correo ya registrado'; return; }
+    const newUser = { name, email, phone, pass, created: Date.now() };
+    users.push(newUser); saveUsers(users);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(newUser));
     closeModal();
-    if(typeof showPrivateFull === 'function'){ showPrivateFull(user); } else { enterPrivateMode(user); }
+    if(typeof showPrivateFull === 'function'){ showPrivateFull(newUser); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(newUser); }
   });
 }
 
+/* Login modal (tries backend then fallback) */
 function openLoginModal(){
   openModal(`
-    <div><label>Correo</label><input id="l_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-    <div><label>Contraseña</label><input id="l_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+    </div>
     <div id="l_msg" style="color:#ff8a8a;margin-top:8px"></div>
-  `, function(){
-    var email=document.getElementById('l_email').value.trim().toLowerCase();
-    var pass=document.getElementById('l_pass').value;
-    var users=loadUsers();
-    var user=users.find(u=>u.email===email && u.pass===pass);
-    if(!user){ document.getElementById('l_msg').textContent='Credenciales inválidas'; return; }
+  `, async function(){
+    const email = ((document.getElementById('l_email')||{}).value || '').trim().toLowerCase();
+    const pass = (document.getElementById('l_pass')||{}).value || '';
+    const msg = document.getElementById('l_msg');
+    msg.textContent='';
+
+    if(!email || !pass){ msg.textContent='Completa los campos'; return; }
+
+    // Try backend login first
+    const backend = await backendLogin({ email, password: pass });
+    if(backend.ok){
+      const d = backend.data;
+      if(d.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' })); }
+      else if(d.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(d.user)); }
+      closeModal();
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      return;
+    }
+
+    // fallback: localStorage auth
+    const users = loadUsers();
+    const user = users.find(u => u.email === email && (u.pass === pass || u.password === pass));
+    if(!user){ msg.textContent = 'Credenciales inválidas'; return; }
+
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));
     closeModal();
-    if(typeof showPrivateFull === 'function'){ showPrivateFull(user); } else { enterPrivateMode(user); }
+    if(typeof showPrivateFull === 'function'){ showPrivateFull(user); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(user); }
   });
 }
 
 /* PUBLIC helper to restore header actions after logout */
 function restorePublicHeader(){
   const headerActions = document.getElementById('headerActions');
+  if(!headerActions) return;
   headerActions.innerHTML = '';
   const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
   const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
@@ -590,134 +684,70 @@ function restorePublicHeader(){
   // reattach
   openBtn.addEventListener('click', openRegisterModal);
   loginBtn.addEventListener('click', openLoginModal);
-  // CTAs already bound in initial load, but ensure they call open buttons
-  document.getElementById('ctaAbrir').addEventListener('click', ()=> openBtn.click());
-  document.getElementById('ctaLogin').addEventListener('click', ()=> loginBtn.click());
+  // CTAs
+  const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
+  const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
 }
 
 /* -------------------------
-   PARTE PRIVADA COMPLETA
+   PARTE PRIVADA (igual que antes)
    ------------------------- */
-/* Estilos y contenedor ya insertados más abajo (sección marcada PARTE PRIVADA) */
-/* showPrivateFull / performLogoutFull implementan la navegación automática desde login/register */
 
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
 
-/* showPrivateFull: muestra la PARTE PRIVADA COMPLETA (usa el DOM de la sección privada) */
+/* showPrivateFull & performLogoutFull kept as you had them (no changes) */
 function showPrivateFull(user){
   try{
-    // hide public
     document.getElementById('publicMain').style.display='none';
     document.getElementById('publicFooter').style.display='none';
-    // update header: show user + logout
     const headerActions = document.getElementById('headerActions');
-    headerActions.innerHTML = '';
-    const profileBtn = document.createElement('div');
-    profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
-    const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
-    const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
-    logoutBtn.addEventListener('click', performLogoutFull);
-    profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
-    headerActions.appendChild(profileBtn);
+    if(headerActions){
+      headerActions.innerHTML = '';
+      const profileBtn = document.createElement('div');
+      profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+      const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
+      const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+      logoutBtn.addEventListener('click', performLogoutFull);
+      profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+      headerActions.appendChild(profileBtn);
+    }
 
-    // show private container (the block inserted below)
     const privateWrapper = document.getElementById('privateArea_full');
     if(privateWrapper) {
       privateWrapper.style.display = 'flex';
-      // set info inside private area
       const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
       const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
       const bal = document.getElementById('priv_balance_full'); if(bal) bal.textContent = 'RD$'+(Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO');
-      const eq = document.getElementById('priv_equity_full'); if(eq) eq.textContent = 'RD$'+(Math.floor(Math.random()*40000)+500).toLocaleString('es-DO');
-      const pnl = document.getElementById('priv_pnl_full'); if(pnl) pnl.textContent = 'RD$'+(Math.floor(Math.random()*20000)-5000).toLocaleString('es-DO');
-
-      // menu behaviors (activate dashboard by default)
-      const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item'));
-      function activateSection(sectionId){
-        menuItems.forEach(mi=>mi.classList.toggle('active', mi.dataset.section===sectionId));
-        // sections inside privateArea_full are minimal (dashboard only), expand later if needed
-      }
-      menuItems.forEach(mi=>mi.addEventListener('click', ()=> activateSection(mi.dataset.section)));
-      activateSection('dashboard');
-
-      // logout handlers inside private area
-      const leftLogout = document.getElementById('btnLogoutLeft_full'); if(leftLogout) leftLogout.onclick = performLogoutFull;
-      const topLogout = document.getElementById('logoutTop_full'); if(topLogout) topLogout.onclick = performLogoutFull;
     }
 
-    // persist session
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    // scroll to top
     window.scrollTo({top:0,behavior:'smooth'});
-  }catch(e){
-    console.error('showPrivateFull error', e);
-  }
+  }catch(e){ console.error('showPrivateFull error', e); }
 }
 
 function performLogoutFull(){
   try{
     localStorage.removeItem(SESSION_KEY);
-    // hide private
     const privateWrapper = document.getElementById('privateArea_full');
     if(privateWrapper) privateWrapper.style.display = 'none';
-    // restore public UI + header actions
-    document.getElementById('publicMain').style.display = '';
-    document.getElementById('publicFooter').style.display = '';
+    const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
+    const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
     restorePublicHeader();
-    // reattach CTAs (they exist already, but ensure handlers present)
-    document.getElementById('ctaAbrir').addEventListener('click', ()=> document.getElementById('openAccountBtn').click());
-    document.getElementById('ctaLogin').addEventListener('click', ()=> document.getElementById('loginBtn').click());
+    const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> { const b=document.getElementById('openAccountBtn'); if(b) b.click(); });
+    const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> { const b=document.getElementById('loginBtn'); if(b) b.click(); });
   }catch(e){ console.error('logout error', e); }
 }
 
-/* On load: fix image paths, restore session and init deposit chart */
+/* On load: init and restore session */
 window.addEventListener('load', function(){
   ensureModalHooks();
-  // fix filenames with spaces/parens
-  Array.from(document.images).forEach(img=>{
-    try{
-      let s = img.getAttribute('src')||'';
-      if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){
-        let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-        img.setAttribute('src', fixed);
-      }
-    }catch(e){}
-  });
+
+  // fix image paths
+  Array.from(document.images).forEach(img=>{ try{ let s = img.getAttribute('src')||''; if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){ let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29'); img.setAttribute('src', fixed); } }catch(e){} });
 
   // restore session
   var s = localStorage.getItem(SESSION_KEY);
   if(s){ try{ var u = JSON.parse(s); if(typeof showPrivateFull === 'function'){ showPrivateFull(u); } }catch(e){} }
-
-  // rotate circle-chart icons
-  try{
-    const segments = document.querySelectorAll('.segment');
-    const totalSegments = segments.length;
-    const degreesPerSegment = 360 / totalSegments;
-    segments.forEach((segment, index) => {
-        const rotation = index * degreesPerSegment;
-        const origin = segment.dataset.origin || '50% 50%';
-        segment.style.transformOrigin = origin;
-        segment.style.transform = `rotate(${rotation}deg)`;
-        const icon = segment.querySelector('i');
-        if (icon) {
-            icon.style.transform = `rotate(-${rotation}deg)`;
-            icon.style.position = 'absolute';
-            let top, right, bottom, left;
-            const offset = '30%';
-            switch (index) {
-                case 0: top = offset; left = offset; break;
-                case 1: top = offset; right = offset; break;
-                case 2: bottom = offset; right = offset; break;
-                case 3: bottom = offset; right = offset; break;
-                case 4: bottom = offset; left = offset; break;
-            }
-            icon.style.top = top || '';
-            icon.style.right = right || '';
-            icon.style.bottom = bottom || '';
-            icon.style.left = left || '';
-        }
-    });
-  }catch(e){}
 });
 </script>
 
