@@ -9,16 +9,12 @@ export const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ msg: "Acceso no autorizado" });
 
     const token = header.split(" ")[1];
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id).select("-password -verificationToken");
-
-    if (!user)
-      return res.status(401).json({ msg: "Usuario no válido" });
+    if (!user) return res.status(401).json({ msg: "Usuario no válido" });
 
     req.user = user;
-
     next();
 
   } catch (error) {
