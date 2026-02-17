@@ -8,63 +8,100 @@ import { sendEmail } from "../utils/sendEmail.js";
 
 const router = express.Router();
 
+
+// ============================
 // REGISTRO
+// ============================
 router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
+  try {
+    let { name, email, password } = req.body;
 
-  const exists = await User.findOne({ email });
-  if (exists)
-    return res.status(400).json({ msg: "Correo ya registrado" });
+    if (!name || !email || !password)
+      return res.status(400).json({ msg: "Todos los campos son obligatorios" });
 
-  const hash = await bcrypt.hash(password, 10);
-  const token = crypto.randomBytes(32).toString("hex");
+    email = email.toLowerCase().trim();
 
-  await User.create({
-    name,
-    email,
-    password: hash,
-    verificationToken: token
-  });
+    const exists = await User.findOne({ email });
+    if (exists)
+      return res.status(400).json({ msg: "Correo ya registrado" });
 
-  const link = `${process.env.BASE_URL}/api/verify/email/${token}`;
+    const hash = await bcrypt.hash(password, 10);
+    const token = crypto.randomBytes(32).toString("hex");
 
-  await sendEmail(
-    email,
-    "Confirma tu cuenta",
-    `
-    <h2>Bienvenido a Leones Broker</h2>
-    <p>Haz clic para confirmar tu correo:</p>
-    <a href="${link}">${link}</a>
-    `
-  );
+    const user = await User.create({
+      name,
+      email,
+      password: hash,
+      verificationToken: token
+    });
 
-  res.json({
-    msg: "Registro exitoso. Revisa tu correo."
-  });
+    const link = `${process.env.BASE_URL}/api/verify/email/${token}`;
+
+    await sendEmail(
+      email,
+      "Confirma tu cuenta",
+      `
+      <h2>Bienvenido a Leones Broker</h2>
+      <p>Haz clic para confirmar tu correo:</p>
+      <a href="${link}">${link}</a>
+      `
+    );
+
+    res.json({
+      msg: "Registro exitoso. Revisa tu correo."
+    });
+
+  } catch (error) {
+    console.error("Error registro:", error);
+    res.status(500).json({ msg: "Error del servidor" });
+  }
 });
 
+
+// ============================
 // LOGIN
+// ============================
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    let { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user)
-    return res.status(400).json({ msg: "Credenciales inválidas" });
+    if (!email || !password)
+      return res.status(400).json({ msg: "Datos incompletos" });
 
-  if (!user.verified)
-    return res.status(401).json({ msg: "Correo no verificado" });
+    email = email.toLowerCase().trim();
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid)
-    return res.status(400).json({ msg: "Credenciales inválidas" });
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.status(400).json({ msg: "Credenciales inválidas" });
 
-  const token = jwt.sign(
-    { id: user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+    if (!user.verified)
+      return res.status(401).json({ msg: "Correo no verificado" });
 
-  res.json({ token, user });
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid)
+      return res.status(400).json({ msg: "Credenciales inválidas" });
+
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        balance: user.balance
+      }
+    });
+
+  } catch (error) {
+    console.error("Error login:", error);
+    res.status(500).json({ msg: "Error del servidor" });
+  }
 });
+
 
 export default router;
