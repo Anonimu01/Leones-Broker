@@ -1823,7 +1823,10 @@ function submitDoc(e){ e.preventDefault(); alert('Documento subido (demo)'); try
    CONTROLADORES / API (FRONT)
    ========================= */
 
-const API_URL = "http://localhost:3000/api";
+const API_URL =
+ location.hostname === "localhost"
+   ? "http://localhost:3000/api"
+   : "https://leones-broker.onrender.com/api";
 
 async function loginUser(email, password){
   try{
