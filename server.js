@@ -13,6 +13,11 @@ import verificationRoutes from "./routes/verification.routes.js";
 dotenv.config();
 
 const app = express();
+
+// Permite que Express confíe en el proxy (útil en Render, Heroku u otros proxies)
+// Esto ayuda con cookies seguras y sesiones cuando tu app está detrás de un proxy.
+app.set("trust proxy", 1);
+
 connectDB();
 
 const __filename = fileURLToPath(import.meta.url);
