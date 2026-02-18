@@ -4,53 +4,92 @@ import crypto from "crypto";
 import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
-
 // ============================
 // REGISTER
 // ============================
 export const registerUser = async (req, res) => {
   try {
-    let { name, email, password } = req.body;
+    let { name, email, password, phone, address } = req.body;
 
-    if (!name || !email || !password)
+    // validaciones básicas
+    if (!name || !email || !password || !phone || !address) {
       return res.status(400).json({ msg: "Todos los campos son obligatorios" });
+    }
 
-    email = email.toLowerCase().trim();
+    // normalizar
+    name = String(name).trim();
+    email = String(email).toLowerCase().trim();
+    phone = String(phone).trim();
+    address = String(address).trim();
 
+    // verificar si existe email
     const exists = await User.findOne({ email });
-    if (exists)
+    if (exists) {
       return res.status(400).json({ msg: "Correo ya registrado" });
+    }
 
+    // hashear contraseña
     const hash = await bcrypt.hash(password, 10);
     const token = crypto.randomBytes(32).toString("hex");
 
-    await User.create({
+    // crear usuario
+    const user = await User.create({
       name,
       email,
       password: hash,
+      phone,
+      address,
+      verified: false,
       verificationToken: token
     });
 
-    const link = `${process.env.BASE_URL}/api/verify/email/${token}`;
+    // enlace de verificación
+    const link = `${process.env.BASE_URL?.replace(/\/+$/,'') || ""}/api/verify/email/${token}`;
 
-    await sendEmail(
-      email,
-      "Confirma tu cuenta",
-      `
-      <h2>Bienvenido a Leones Broker</h2>
-      <p>Haz clic para confirmar tu correo:</p>
-      <a href="${link}">${link}</a>
-      `
-    );
+    // enviar correo (si falla, no borramos usuario, solo informamos en logs)
+    try {
+      await sendEmail(
+        email,
+        "Confirma tu cuenta",
+        `
+        <h2>Bienvenido a Leones Broker</h2>
+        <p>Haz clic para confirmar tu correo:</p>
+        <a href="${link}">${link}</a>
+        `
+      );
+    } catch (mailErr) {
+      console.error("sendEmail error:", mailErr);
+      // opcional: podrías decidir borrar el user aquí o marcar un flag; por ahora solo avisamos.
+    }
 
-    res.json({ msg: "Registro exitoso. Revisa tu correo." });
+    // responder sin exponer campos sensibles
+    return res.status(201).json({
+      msg: "Registro exitoso. Revisa tu correo para verificar la cuenta.",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        address: user.address
+      },
+      verificationSent: true
+    });
 
   } catch (error) {
     console.error("Error register:", error);
-    res.status(500).json({ msg: "Error del servidor" });
+
+    // Si es error de validación de mongoose podemos devolver más detalle (opcional)
+    if (error.name === "ValidationError") {
+      const details = {};
+      for (const key in error.errors) {
+        details[key] = error.errors[key].message || error.errors[key].kind;
+      }
+      return res.status(400).json({ msg: "Validation error", errors: details });
+    }
+
+    return res.status(500).json({ msg: "Error del servidor" });
   }
 };
-
 
 
 // ============================
@@ -63,7 +102,7 @@ export const loginUser = async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ msg: "Datos incompletos" });
 
-    email = email.toLowerCase().trim();
+    email = String(email).toLowerCase().trim();
 
     const user = await User.findOne({ email });
     if (!user)
@@ -82,18 +121,21 @@ export const loginUser = async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    res.json({
+    // devolver token y datos básicos del usuario (sin password ni verificationToken)
+    return res.json({
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        balance: user.balance
+        balance: user.balance ?? 0,
+        phone: user.phone || "",
+        address: user.address || ""
       }
     });
 
   } catch (error) {
     console.error("Error login:", error);
-    res.status(500).json({ msg: "Error del servidor" });
+    return res.status(500).json({ msg: "Error del servidor" });
   }
 };
