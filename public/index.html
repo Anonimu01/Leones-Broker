@@ -457,11 +457,10 @@
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
 
-const API_URL =
+window.API =
  location.hostname === "localhost"
    ? "http://localhost:3000/api"
    : "https://leones-broker.onrender.com/api";
- 
 
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
