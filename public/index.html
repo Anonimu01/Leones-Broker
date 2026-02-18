@@ -462,6 +462,7 @@ window.API =
    ? "http://localhost:3000/api"
    : "https://leones-broker.onrender.com/api";
 
+
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
 function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
@@ -559,15 +560,23 @@ attachIfExists('ctaLogin','click', ()=> { const b = document.getElementById('log
 
 async function backendRegister(userObj){
   try{
-    const res = await fetch(API + '/register', {
+    // CALL the correct backend route: /api/auth/register
+    const res = await fetch(`${API}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(userObj)
     });
-    if(!res.ok) return { ok:false, msg:'Error servidor' };
-    const data = await res.json();
-    // expect server to return { ok: true, user, token } or similar
-    return { ok:true, data };
+
+    // Try to parse JSON body (server may return msg only)
+    const payload = await res.json().catch(()=>null);
+
+    if(!res.ok){
+      const msg = (payload && (payload.msg || payload.error)) || 'Error servidor';
+      return { ok:false, msg };
+    }
+
+    // OK
+    return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendRegister error', e);
     return { ok:false, msg: e.message || 'Network' };
@@ -576,14 +585,22 @@ async function backendRegister(userObj){
 
 async function backendLogin(creds){
   try{
-    const res = await fetch(API + '/login', {
+    // CALL the correct backend route: /api/auth/login
+    const res = await fetch(`${API}/auth/login`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify(creds)
     });
-    if(!res.ok) return { ok:false, msg:'Credenciales inválidas' };
-    const data = await res.json();
-    return { ok:true, data };
+
+    // parse body
+    const payload = await res.json().catch(()=>null);
+
+    if(!res.ok){
+      const msg = (payload && (payload.msg || payload.error)) || 'Credenciales inválidas';
+      return { ok:false, msg };
+    }
+
+    return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendLogin error', e);
     return { ok:false, msg: e.message || 'Network' };
@@ -617,8 +634,8 @@ function openRegisterModal(){
       // if server returned token or user
       const serverData = backend.data;
       // try store session according server response
-      if(serverData.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name })); }
-      else if(serverData.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user)); }
+      if(serverData && serverData.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name })); }
+      else if(serverData && serverData.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user)); }
       else { localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name })); }
 
       closeModal();
@@ -658,8 +675,8 @@ function openLoginModal(){
     const backend = await backendLogin({ email, password: pass });
     if(backend.ok){
       const d = backend.data;
-      if(d.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' })); }
-      else if(d.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(d.user)); }
+      if(d && d.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' })); }
+      else if(d && d.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(d.user)); }
       closeModal();
       const session = JSON.parse(localStorage.getItem(SESSION_KEY));
       if(typeof showPrivateFull === 'function'){ showPrivateFull(session); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
@@ -721,7 +738,9 @@ function showPrivateFull(user){
       privateWrapper.style.display = 'flex';
       const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
       const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
-      const bal = document.getElementById('priv_balance_full'); if(bal) bal.textContent = 'RD$'+(Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO');
+      // use actual balance if available, otherwise fallback to random for demo content
+      const bal = document.getElementById('priv_balance_full');
+      if(bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO'));
     }
 
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));
