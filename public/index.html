@@ -457,6 +457,11 @@
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
 
+const API_URL =
+ location.hostname === "localhost"
+   ? "http://localhost:3000/api"
+   : "https://leones-broker.onrender.com/api";
+ 
 
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
@@ -1823,10 +1828,6 @@ function submitDoc(e){ e.preventDefault(); alert('Documento subido (demo)'); try
    CONTROLADORES / API (FRONT)
    ========================= */
 
-const API_URL =
- location.hostname === "localhost"
-   ? "http://localhost:3000/api"
-   : "https://leones-broker.onrender.com/api";
 
 async function loginUser(email, password){
   try{
