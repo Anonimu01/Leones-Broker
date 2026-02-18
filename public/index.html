@@ -456,12 +456,15 @@
 <script>
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
-
+/* --- API URL dinámica --- */
 window.API =
  location.hostname === "localhost"
    ? "http://localhost:3000/api"
    : "https://leones-broker.onrender.com/api";
 
+/* --- Keys para localStorage (defaults seguros) --- */
+const USERS_KEY = window.USERS_KEY || "USERS_V1";
+const SESSION_KEY = window.SESSION_KEY || "SESSION_V1";
 
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
@@ -614,6 +617,7 @@ function openRegisterModal(){
       <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
       <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
       <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
       <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
     </div>
     <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
@@ -621,14 +625,16 @@ function openRegisterModal(){
     const name = (document.getElementById('r_name')||{}).value || '';
     const email = ((document.getElementById('r_email')||{}).value || '').trim().toLowerCase();
     const phone = (document.getElementById('r_phone')||{}).value || '';
+    const address = (document.getElementById('r_address')||{}).value || '';
     const pass = (document.getElementById('r_pass')||{}).value || '';
     const msgEl = document.getElementById('r_msg');
     msgEl.textContent='';
 
-    if(!name || !email || !pass){ msgEl.textContent='Completa los campos'; return; }
+    if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
 
     // Try backend register first
-    const userObj = { name, email, phone, password: pass };
+    const userObj = { name, email, phone, address, password: pass };
+    console.log('Register payload:', userObj);
     const backend = await backendRegister(userObj);
     if(backend.ok){
       // if server returned token or user
@@ -732,6 +738,8 @@ function showPrivateFull(user){
       profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
       headerActions.appendChild(profileBtn);
     }
+
+ 
 
     const privateWrapper = document.getElementById('privateArea_full');
     if(privateWrapper) {
@@ -1136,17 +1144,53 @@ window.addEventListener('load', function(){
 <script>
 /* -------------------------
    PARTE PRIVADA - JS COMPLETO Y CORREGIDO
+   (Actualizado: envío de address/phone en registro + session/token persistente)
    ------------------------- */
 
 /* session key */
 const SESSION_KEY = 'BROKERPRO_SESSION_USER';
 
+/* API URL: usa la variable global si existe, si no deja vacío para que lo configures */
+const API_URL = (typeof API_URL !== 'undefined' && API_URL) ? API_URL : (window.API_URL || '');
+
 /* safe escape helper */
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g,function(m){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+  });
+}
+
+/* =========================
+   SESIÓN: guardar/recuperar
+   ========================= */
+function saveSession(userObj, token){
+  try{
+    if(userObj) localStorage.setItem(SESSION_KEY, JSON.stringify(userObj));
+    if(token) localStorage.setItem('token', token);
+  }catch(e){ console.warn('saveSession error', e); }
+}
+
+function clearSessionStorage(){
+  try{
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('token');
+    localStorage.removeItem('expires');
+  }catch(e){}
+}
+
+function getSavedSession(){
+  try{
+    const s = localStorage.getItem(SESSION_KEY);
+    if(!s) return null;
+    return JSON.parse(s);
+  }catch(e){ return null; }
+}
+
 /* =========================
    FUNCIÓN ACTUALIZADA: showPrivateFull (COMPLETA)
+   - ahora acepta opcionalmente token como 2º parámetro y lo persiste
    ========================= */
-function showPrivateFull(user){
+function showPrivateFull(user, token){
   try{
     if(!user) return;
 
@@ -1201,12 +1245,10 @@ function showPrivateFull(user){
         profileBtn.appendChild(logoutBtn);
 
         // Insertamos el botón de menú privado y el perfil.
-        // Usamos appendChild para mantener orden; si prefieres a la izquierda usa headerActions.prepend(menuBtn)
         headerActions.appendChild(menuBtn);
         headerActions.appendChild(profileBtn);
       }
     }catch(e){
-      // no bloquear el flujo si falla el header
       console.error('showPrivateFull header error', e);
     }
 
@@ -1224,16 +1266,16 @@ function showPrivateFull(user){
       const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = nameVal;
       const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (nameVal||'U').slice(0,1).toUpperCase();
 
-      const balValue = (typeof user.balance === 'number') ? user.balance : 0.00;
-      const eqValue = (typeof user.equity === 'number') ? user.equity : 0.00;
-      const pnlValue = (typeof user.pnl === 'number') ? user.pnl : 0.00;
+      const balValue = (typeof user.balance === 'number') ? user.balance : (user.balance ? Number(user.balance) : 0.00);
+      const eqValue = (typeof user.equity === 'number') ? user.equity : (user.equity ? Number(user.equity) : 0.00);
+      const pnlValue = (typeof user.pnl === 'number') ? user.pnl : (user.pnl ? Number(user.pnl) : 0.00);
 
       const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + (Number(balValue).toLocaleString('es-DO'));
       const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (Number(eqValue).toLocaleString('es-DO'));
       const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (Number(pnlValue).toLocaleString('es-DO'));
 
-      const balUsdtEl = document.getElementById('bal-usdt'); if(balUsdtEl) balUsdtEl.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-      const balUsdtTop = document.getElementById('bal-usdt-top'); if(balUsdtTop) balUsdtTop.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const balUsdtElLocal = document.getElementById('bal-usdt'); if(balUsdtElLocal) balUsdtElLocal.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const balUsdtTopLocal = document.getElementById('bal-usdt-top'); if(balUsdtTopLocal) balUsdtTopLocal.innerText = Number(balValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
       const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number((balValue||0)).toLocaleString(undefined,{maximumFractionDigits:2});
       const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(balValue).toLocaleString(undefined,{maximumFractionDigits:2});
       const pnlTotalEl = document.getElementById('pnlTotal'); if(pnlTotalEl) pnlTotalEl.innerText = '$' + Number(pnlValue).toLocaleString(undefined,{maximumFractionDigits:2});
@@ -1241,17 +1283,19 @@ function showPrivateFull(user){
       console.error('showPrivateFull private area error', e);
     }
 
-    // persistir sesión mínimamente
+    // persistir sesión mínimamente (guardamos user y token si se da)
     try{
       const safeUser = {
         id: user.id || user._id || null,
         name: user.name || user.username || 'Usuario',
         email: user.email || '',
-        balance: (typeof user.balance === 'number') ? user.balance : 0,
-        equity: (typeof user.equity === 'number') ? user.equity : 0,
-        pnl: (typeof user.pnl === 'number') ? user.pnl : 0
+        phone: user.phone || user.telefono || '',
+        address: user.address || user.adress || '',
+        balance: (typeof user.balance === 'number') ? user.balance : (user.balance ? Number(user.balance) : 0),
+        equity: (typeof user.equity === 'number') ? user.equity : (user.equity ? Number(user.equity) : 0),
+        pnl: (typeof user.pnl === 'number') ? user.pnl : (user.pnl ? Number(user.pnl) : 0)
       };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
+      saveSession(safeUser, token);
     }catch(e){ /* ignore storage errors */ }
 
     try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
@@ -1262,11 +1306,12 @@ function showPrivateFull(user){
 
 /* =========================
    FUNCIÓN ACTUALIZADA: performLogoutFull (COMPLETA)
+   - ahora limpia token y session key
    ========================= */
 function performLogoutFull(){
   try{
     // limpiar storage
-    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+    clearSessionStorage();
 
     // ocultar wrapper privado
     try{
@@ -1316,10 +1361,11 @@ window.addEventListener('load', function(){
 
   // restaurar sesión si existe
   try{
-    const s = localStorage.getItem(SESSION_KEY);
+    const s = getSavedSession();
     if(s){
-      const u = JSON.parse(s);
-      if(typeof showPrivateFull === 'function') showPrivateFull(u);
+      // si hay token lo mantiene; showPrivateFull sin token no reescribe token
+      const token = localStorage.getItem('token');
+      showPrivateFull(s, token);
     }
   }catch(e){}
 
@@ -1359,6 +1405,7 @@ window.addEventListener('load', function(){
 
 /* =========================
    DATOS Y LÓGICA DE TRADING
+   (sin cambios funcionales importantes respecto al original)
    ========================= */
 
 /* ---------------------------
@@ -1835,6 +1882,31 @@ document.addEventListener('DOMContentLoaded', ()=>{
   renderPositionsUI();
   updateWalletTotal();
   renderOrders();
+
+  // if there's a registration form in the page, hook it defensivamente
+  try{
+    const regForm = document.getElementById('registerForm');
+    if(regForm && !regForm._hookedForRegister){
+      regForm.addEventListener('submit', function(e){
+        e.preventDefault();
+        const fd = new FormData(regForm);
+        const name = (fd.get('name') || fd.get('fullname') || '').trim();
+        const email = (fd.get('email') || '').trim();
+        const password = (fd.get('password') || '').trim();
+        const address = (fd.get('address') || fd.get('direccion') || '').trim();
+        const phone = (fd.get('phone') || fd.get('telefono') || '').trim();
+
+        // validaciones simples
+        if(!name || !email || !password){
+          alert('Nombre, correo y contraseña son requeridos.');
+          return;
+        }
+        // envío
+        registerUser({ name, email, password, address, phone });
+      }, {once:false});
+      regForm._hookedForRegister = true;
+    }
+  }catch(e){ console.warn('hook register form error', e); }
 });
 
 /* acciones UI simples */
@@ -1846,9 +1918,83 @@ function submitDoc(e){ e.preventDefault(); alert('Documento subido (demo)'); try
    CONTROLADORES / API (FRONT)
    ========================= */
 
+/**
+ * registerUser(payload)
+ * payload: { name, email, password, address, phone }
+ * Envía address y phone al backend. También incluye 'adress' por compatibilidad con typos.
+ */
+async function registerUser(payload){
+  try{
+    if(!API_URL){
+      alert('API_URL no configurada. Configura la constante API_URL en tu entorno.');
+      return;
+    }
+
+    // validaciones básicas
+    if(!payload || !payload.email || !payload.password || !payload.name){
+      alert('Faltan datos para el registro.');
+      return;
+    }
+
+    const body = {
+      name: payload.name,
+      email: payload.email,
+      password: payload.password,
+      address: payload.address || '',
+      adress: payload.address || '', // enviar también con la clave "adress" por compatibilidad si el backend la espera mal escrita
+      phone: payload.phone || ''
+    };
+
+    const res = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if(!res.ok){
+      // intentar leer json o text con mensaje de error
+      let msg = 'Error en registro';
+      try{
+        const t = await res.json();
+        msg = t.message || t.error || JSON.stringify(t);
+      }catch(js){
+        try{ msg = await res.text(); }catch(tt){}
+      }
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+
+    if(data.token && data.user){
+      // persistir token + session y mostrar UI privada
+      showPrivateFull({
+        id: data.user.id || data.user._id || null,
+        name: data.user.name || data.user.username || payload.name,
+        email: data.user.email || payload.email,
+        phone: data.user.phone || payload.phone || data.user.telefono || '',
+        address: data.user.address || data.user.adress || payload.address || '',
+        balance: typeof data.user.balance === 'number' ? data.user.balance : 0,
+        equity: typeof data.user.equity === 'number' ? data.user.equity : 0,
+        pnl: typeof data.user.pnl === 'number' ? data.user.pnl : 0
+      }, data.token);
+
+      alert('Registro correcto. Bienvenido/a.');
+    } else {
+      alert('Registro completado pero sin token/user devuelto por el servidor.');
+    }
+  }catch(err){
+    console.error('registerUser error', err);
+    alert('Error registrando: ' + (err.message || err));
+  }
+}
 
 async function loginUser(email, password){
   try{
+    if(!API_URL){
+      alert('API_URL no configurada. Configura la constante API_URL en tu entorno.');
+      return;
+    }
+
     const res = await fetch(`${API_URL}/auth/login`,{
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -1863,16 +2009,18 @@ async function loginUser(email, password){
     const data = await res.json();
 
     if(data.token && data.user){
-      localStorage.setItem('token', data.token);
-      // store session user for private UI
+      // guardamos sesión y mostramos UI privada
       showPrivateFull({
         id: data.user.id || data.user._id || null,
         name: data.user.name || data.user.username || '',
         email: data.user.email || '',
+        phone: data.user.phone || data.user.telefono || '',
+        address: data.user.address || data.user.adress || '',
         balance: typeof data.user.balance === 'number' ? data.user.balance : 0,
         equity: typeof data.user.equity === 'number' ? data.user.equity : 0,
         pnl: typeof data.user.pnl === 'number' ? data.user.pnl : 0
-      });
+      }, data.token);
+
       alert('Login correcto');
     } else {
       alert('Credenciales incorrectas');
@@ -1931,7 +2079,6 @@ async function openTrade(symbol, qty, price){
     alert('Error al abrir trade: ' + (err.message || err));
   }
 }
-
 
 </script>
 
