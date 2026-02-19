@@ -11,7 +11,20 @@ import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
 
-dotenv.config();
+/**
+ * Calcular __dirname para ESM y luego cargar .env desde la misma carpeta del server.js.
+ * En producción (process.env.NODE_ENV === "production") dotenv no cargará archivo,
+ * permitiendo que el proveedor (Render, Heroku) use sus env vars.
+ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({
+  path:
+    process.env.NODE_ENV === "production"
+      ? undefined
+      : path.resolve(__dirname, ".env"),
+});
 
 const app = express();
 
@@ -19,6 +32,7 @@ const app = express();
 app.set("trust proxy", 1);
 
 // Conectar a la base de datos (connectDB debería encargarse de la conexión mongoose)
+// Se ejecuta después de dotenv.config para garantizar que MONGO_URI esté presente.
 connectDB();
 
 // Monitoreo simple de la conexión mongoose (útil para debug)
@@ -31,9 +45,6 @@ mongoose.connection.on("error", (err) => {
 mongoose.connection.on("disconnected", () => {
   console.warn("⚠️ MongoDB desconectado");
 });
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Middlewares
 const corsOptions = {
@@ -103,10 +114,19 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Servidor activo en puerto ${PORT} (env: ${process.env.NODE_ENV || "development"})`);
-  // Log mínimo para verificar que las variables de correo están disponibles (no imprime valores)
+  console.log(
+    `🚀 Servidor activo en puerto ${PORT} (env: ${process.env.NODE_ENV || "development"})`
+  );
+
+  // MOSTRAR estado de variables sin imprimir secretos
+  console.log("📌 Env check:");
+  console.log("  - EMAIL_USER set:", !!process.env.EMAIL_USER);
+  console.log("  - EMAIL_PASS set:", !!process.env.EMAIL_PASS);
+  console.log("  - MONGO_URI set:", !!process.env.MONGO_URI);
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn("⚠️ Variables de correo no configuradas (EMAIL_USER / EMAIL_PASS). El envío de emails fallará si no están definidas.");
+    console.warn(
+      "⚠️ Variables de correo no configuradas (EMAIL_USER / EMAIL_PASS). El envío de emails fallará si no están definidas."
+    );
   }
 });
 
