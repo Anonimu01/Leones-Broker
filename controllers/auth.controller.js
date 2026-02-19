@@ -2,8 +2,8 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-// IMPORT CORREGIDO: apunta a tu archivo real en /models (User.js)
-import User from "../models/User.js";
+// IMPORT CORREGIDO: apunta al archivo real en /models (user.model.js)
+import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
 // ============================
