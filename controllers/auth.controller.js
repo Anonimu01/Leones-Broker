@@ -6,6 +6,18 @@ import crypto from "crypto";
 import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
+/**
+ * Helper: construir base URL para los links de verificación.
+ * Prefiere process.env.BASE_URL (si la defines), sino usa el origin de la petición,
+ * y como último recurso reconstruye con protocolo + host.
+ */
+const getBaseUrlFromReq = (req) => {
+  const fromEnv = (process.env.BASE_URL || "").replace(/\/+$/, "");
+  if (fromEnv) return fromEnv;
+  if (req.get("origin")) return req.get("origin").replace(/\/+$/, "");
+  return `${req.protocol}://${req.get("host")}`.replace(/\/+$/, "");
+};
+
 // ============================
 // REGISTER
 // ============================
@@ -23,6 +35,11 @@ export const registerUser = async (req, res) => {
     email = String(email).toLowerCase().trim();
     phone = String(phone).trim();
     address = String(address).trim();
+
+    // Verificación simple de formato de correo (no sustituye validación avanzada)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ msg: "Correo inválido" });
+    }
 
     // verificar si existe email
     const exists = await User.findOne({ email });
@@ -45,25 +62,36 @@ export const registerUser = async (req, res) => {
       verificationToken: token
     });
 
-    // enlace de verificación (asegura que BASE_URL no tenga slash al final)
-    const base = (process.env.BASE_URL || "").replace(/\/+$/, "");
-    const link = `${base || ""}/api/verify/email/${token}`;
+    // enlace de verificación (asegura que base no tenga slash al final)
+    const base = getBaseUrlFromReq(req);
+    const link = `${base}/api/verify/email/${token}`;
 
     // enviar correo (si falla, no borramos usuario; solo registramos en logs y devolvemos flag)
     let mailSent = false;
+    let mailErrorMsg = null;
     try {
+      console.log(`[MAIL] Intentando enviar correo de verificación a: ${email}`);
+      console.log(`[MAIL] Link de verificación: ${link}`);
+
       await sendEmail(
         email,
-        "Confirma tu cuenta",
+        "Confirma tu cuenta - Leones Broker",
         `
-        <h2>Bienvenido a Leones Broker</h2>
-        <p>Haz clic para confirmar tu correo:</p>
-        <a href="${link}">${link}</a>
+          <h2>Bienvenido a Leones Broker</h2>
+          <p>Gracias por registrarte, ${name}.</p>
+          <p>Haz clic en el siguiente enlace para confirmar tu correo:</p>
+          <p><a href="${link}">${link}</a></p>
+          <p>Si no solicitaste este registro, ignora este correo.</p>
         `
       );
+
+      console.log(`[MAIL] Enviado OK a ${email}`);
       mailSent = true;
     } catch (mailErr) {
-      console.error("sendEmail error:", mailErr);
+      // Log detallado para debugging en backend (no exponemos stack entero al cliente)
+      console.error("[MAIL] sendEmail error:", mailErr && (mailErr.message || mailErr));
+      if (mailErr && mailErr.response) console.error("[MAIL] response:", mailErr.response);
+      mailErrorMsg = (mailErr && (mailErr.message || String(mailErr))) || "Error al enviar email";
       // mailSent queda false; usuario sigue creado con verificationToken para verificar más tarde
     }
 
@@ -77,7 +105,8 @@ export const registerUser = async (req, res) => {
         phone: user.phone,
         address: user.address
       },
-      verificationSent: mailSent
+      verificationSent: mailSent,
+      mailError: mailSent ? null : mailErrorMsg
     });
 
   } catch (error) {
@@ -92,6 +121,51 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ msg: "Validation error", errors: details });
     }
 
+    return res.status(500).json({ msg: "Error del servidor" });
+  }
+};
+
+// ============================
+// RESEND VERIFICATION (UTIL)
+// ============================
+// Permite re-enviar el email de verificación al usuario (sin crear nuevo usuario).
+// Puedes montar esto en una ruta POST /api/auth/resend-verification
+export const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ msg: "Email requerido" });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ msg: "Usuario no encontrado" });
+    if (user.verified) return res.status(400).json({ msg: "Cuenta ya verificada" });
+
+    // generar un nuevo token y guardar
+    const token = crypto.randomBytes(32).toString("hex");
+    user.verificationToken = token;
+    await user.save();
+
+    const base = getBaseUrlFromReq(req);
+    const link = `${base}/api/verify/email/${token}`;
+
+    try {
+      console.log(`[MAIL] Reenviando verificación a ${email}`);
+      await sendEmail(
+        email,
+        "Reenvío: Confirma tu cuenta - Leones Broker",
+        `
+          <h2>Leones Broker - Reenvío de verificación</h2>
+          <p>Haz clic en el siguiente enlace para confirmar tu correo:</p>
+          <p><a href="${link}">${link}</a></p>
+        `
+      );
+      return res.json({ msg: "Email de verificación reenviado", verificationSent: true });
+    } catch (mailErr) {
+      console.error("[MAIL] resend sendEmail error:", mailErr && (mailErr.message || mailErr));
+      return res.status(500).json({ msg: "No se pudo enviar el email de verificación", verificationSent: false, mailError: mailErr?.message || String(mailErr) });
+    }
+
+  } catch (err) {
+    console.error("Error resendVerification:", err);
     return res.status(500).json({ msg: "Error del servidor" });
   }
 };
