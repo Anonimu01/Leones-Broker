@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import mongoose from "mongoose";
 
 import { connectDB } from "./config/db.js";
 
@@ -17,25 +18,59 @@ const app = express();
 // En entornos detrás de un proxy (Render, Heroku...) ayuda con cookies seguras/sesiones
 app.set("trust proxy", 1);
 
-// Conectar a la base de datos
+// Conectar a la base de datos (connectDB debería encargarse de la conexión mongoose)
 connectDB();
+
+// Monitoreo simple de la conexión mongoose (útil para debug)
+mongoose.connection.on("connected", () => {
+  console.log("✅ MongoDB conectado. DB name:", mongoose.connection.name);
+});
+mongoose.connection.on("error", (err) => {
+  console.error("❌ MongoDB connection error:", err);
+});
+mongoose.connection.on("disconnected", () => {
+  console.warn("⚠️ MongoDB desconectado");
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Middlewares
-app.use(cors());
+const corsOptions = {
+  origin: process.env.CLIENT_URL || true,
+  credentials: true,
+};
+app.use(cors(corsOptions));
+
+// Logger simple para debug (puedes quitarlo en producción)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} › ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Ruta de estado (healthcheck)
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, environment: process.env.NODE_ENV || "development" });
+  res.json({
+    ok: true,
+    environment: process.env.NODE_ENV || "development",
+    emailConfigured: !!process.env.EMAIL_USER,
+    db: mongoose.connection.name || null,
+  });
 });
 
 // RUTAS API
 app.use("/api/auth", authRoutes);
+
+// Montar rutas de usuario en ambas variantes para compatibilidad (no romper front existente)
+// preferible usar "/api/users" (plural) pero dejamos "/api/user" también si hay llamadas viejas.
+app.use("/api/users", userRoutes);
 app.use("/api/user", userRoutes);
+
+// Montar rutas de verificación en dos prefijos (compatibilidad)
+app.use("/api/verification", verificationRoutes);
 app.use("/api/verify", verificationRoutes);
 
 // Si la petición comienza con /api y llegó hasta aquí, la ruta no existe: devolver 404 JSON.
@@ -48,28 +83,55 @@ app.use("/api", (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // Catch-all: devolver index.html para las rutas del frontend (SPA)
+// Esto solo se ejecutará en peticiones que no empiecen por /api
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-// Error handler básico
+// Error handler básico (mejor detalle en desarrollo)
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Server error" });
+  const status = err.status || 500;
+  const payload = { error: "Server error" };
+  if (process.env.NODE_ENV === "development") {
+    payload.message = err.message;
+    payload.stack = err.stack;
+  }
+  res.status(status).json(payload);
 });
 
 const PORT = process.env.PORT || 3000;
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Servidor activo en puerto ${PORT}`);
+  console.log(`🚀 Servidor activo en puerto ${PORT} (env: ${process.env.NODE_ENV || "development"})`);
+  // Log mínimo para verificar que las variables de correo están disponibles (no imprime valores)
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn("⚠️ Variables de correo no configuradas (EMAIL_USER / EMAIL_PASS). El envío de emails fallará si no están definidas.");
+  }
 });
 
 // Manejo de promesas no atrapadas / excepciones (evita app en estado inconsistente)
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  // aquí puedes decidir reiniciar el proceso o continuar
 });
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
   // opcional: cerrar el servidor si quieres reiniciarlo en fallo severo
   // server.close(()=> process.exit(1));
 });
+
+// Graceful shutdown (SIGINT/SIGTERM)
+const gracefulShutdown = (signal) => {
+  console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
+  server.close(() => {
+    mongoose.connection.close(false, () => {
+      console.log("MongoDB connection closed. Saliendo.");
+      process.exit(0);
+    });
+  });
+};
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+export default app;
