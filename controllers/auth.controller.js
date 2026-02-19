@@ -1,7 +1,9 @@
+// controllers/auth.controller.js
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import User from "../models/user.model.js";
+// IMPORT CORREGIDO: apunta a tu archivo real en /models (User.js)
+import User from "../models/User.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
 // ============================
@@ -32,7 +34,7 @@ export const registerUser = async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const token = crypto.randomBytes(32).toString("hex");
 
-    // crear usuario
+    // crear usuario (guardamos con los campos esperados por el schema)
     const user = await User.create({
       name,
       email,
@@ -43,10 +45,12 @@ export const registerUser = async (req, res) => {
       verificationToken: token
     });
 
-    // enlace de verificación
-    const link = `${process.env.BASE_URL?.replace(/\/+$/,'') || ""}/api/verify/email/${token}`;
+    // enlace de verificación (asegura que BASE_URL no tenga slash al final)
+    const base = (process.env.BASE_URL || "").replace(/\/+$/, "");
+    const link = `${base || ""}/api/verify/email/${token}`;
 
-    // enviar correo (si falla, no borramos usuario, solo informamos en logs)
+    // enviar correo (si falla, no borramos usuario; solo registramos en logs y devolvemos flag)
+    let mailSent = false;
     try {
       await sendEmail(
         email,
@@ -57,9 +61,10 @@ export const registerUser = async (req, res) => {
         <a href="${link}">${link}</a>
         `
       );
+      mailSent = true;
     } catch (mailErr) {
       console.error("sendEmail error:", mailErr);
-      // opcional: podrías decidir borrar el user aquí o marcar un flag; por ahora solo avisamos.
+      // mailSent queda false; usuario sigue creado con verificationToken para verificar más tarde
     }
 
     // responder sin exponer campos sensibles
@@ -72,14 +77,14 @@ export const registerUser = async (req, res) => {
         phone: user.phone,
         address: user.address
       },
-      verificationSent: true
+      verificationSent: mailSent
     });
 
   } catch (error) {
     console.error("Error register:", error);
 
-    // Si es error de validación de mongoose podemos devolver más detalle (opcional)
-    if (error.name === "ValidationError") {
+    // Si es error de validación de mongoose devolvemos detalle útil
+    if (error && error.name === "ValidationError" && error.errors) {
       const details = {};
       for (const key in error.errors) {
         details[key] = error.errors[key].message || error.errors[key].kind;
@@ -90,7 +95,6 @@ export const registerUser = async (req, res) => {
     return res.status(500).json({ msg: "Error del servidor" });
   }
 };
-
 
 // ============================
 // LOGIN
