@@ -1,5 +1,5 @@
 import express from "express";
-import authMiddleware from "../middleware/auth.middleware.js";
+import authMiddleware from "../middlewares/auth.middleware.js";
 import User from "../models/user.model.js";
 
 const router = express.Router();
@@ -10,7 +10,8 @@ const router = express.Router();
 // ==========================
 router.get("/profile", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password -verificationToken");
+    const user = await User.findById(req.user.id)
+      .select("-password -verificationToken");
 
     if (!user)
       return res.status(404).json({ msg: "Usuario no encontrado" });
@@ -29,7 +30,6 @@ router.get("/profile", authMiddleware, async (req, res) => {
 // ==========================
 router.get("/wallet/me", authMiddleware, async (req, res) => {
   try {
-
     const user = await User.findById(req.user.id);
 
     if (!user)
@@ -38,7 +38,7 @@ router.get("/wallet/me", authMiddleware, async (req, res) => {
     res.json({
       balance: user.balance || 0,
       currency: "USD",
-      positions: [] // ← luego aquí pondremos trades reales
+      positions: []
     });
 
   } catch (err) {
