@@ -1,5 +1,6 @@
+// routes/auth.routes.js
 import express from "express";
-import { registerUser, loginUser } from "../controllers/auth.controller.js";
+import { registerUser, loginUser, resendVerification } from "../controllers/auth.controller.js";
 
 const router = express.Router();
 
@@ -40,6 +41,21 @@ router.post("/login", async (req, res, next) => {
       return res.status(400).json({ msg: "Email y contraseña requeridos" });
 
     await loginUser(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================
+// RESEND VERIFICATION
+// ============================
+// POST /api/auth/resend-verification { email }
+router.post("/resend-verification", async (req, res, next) => {
+  try {
+    // validación mínima
+    if (!req.body?.email) return res.status(400).json({ msg: "Email requerido" });
+
+    await resendVerification(req, res);
   } catch (err) {
     next(err);
   }
