@@ -462,18 +462,6 @@ window.API =
    ? "http://localhost:3000/api"
    : "https://leones-broker.onrender.com/api";
 
-/* --- API URL dinámica --- */
-window.API =
- location.hostname === "localhost"
-   ? "http://localhost:3000/api"
-   : "https://leones-broker.onrender.com/api";
-
-/* --- Keys para localStorage (defaults seguros) --- */
-window.USERS_KEY ??= "USERS_v1";
-window.SESSION_KEY ??= "SESSION_v1";
-
-const USERS_KEY = window.USERS_KEY;
-const SESSION_KEY = window.SESSION_KEY;
 
 /* helpers localStorage */
 function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
