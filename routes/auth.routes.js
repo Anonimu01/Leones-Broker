@@ -1,64 +1,113 @@
 // routes/auth.routes.js
 import express from "express";
-import { registerUser, loginUser, resendVerification } from "../controllers/auth.controller.js";
+import {
+  registerUser,
+  loginUser,
+  resendVerification
+} from "../controllers/auth.controller.js";
 
 const router = express.Router();
 
-// ============================
-// HEALTH CHECK AUTH ROUTES
-// ============================
+/*
+============================
+ HEALTH CHECK
+============================
+*/
 router.get("/ping", (req, res) => {
-  res.json({ msg: "Auth routes funcionando ✅" });
+  res.json({
+    ok: true,
+    route: "auth",
+    status: "working"
+  });
 });
 
-// ============================
-// REGISTRO
-// ============================
-router.post("/register", async (req, res, next) => {
-  try {
-    // validar campos obligatorios: ahora requerimos name,email,password,address,phone
-    const { name, email, password, address, phone } = req.body;
+/*
+============================
+ VALIDATORS
+============================
+*/
 
-    if (!name || !email || !password || !address || !phone) {
-      return res.status(400).json({ msg: "Todos los campos (name, email, password, address, phone) son obligatorios" });
+const validateRegister = (req, res, next) => {
+  const { name, email, password, address, phone } = req.body;
+
+  if (!name || !email || !password || !address || !phone) {
+    return res.status(400).json({
+      error: "Missing fields",
+      required: ["name", "email", "password", "address", "phone"]
+    });
+  }
+
+  if (password.length < 6)
+    return res.status(400).json({ error: "Password must be at least 6 chars" });
+
+  next();
+};
+
+const validateLogin = (req, res, next) => {
+  const { email, password } = req.body;
+
+  if (!email || !password)
+    return res.status(400).json({ error: "Email and password required" });
+
+  next();
+};
+
+const validateEmail = (req, res, next) => {
+  if (!req.body?.email)
+    return res.status(400).json({ error: "Email required" });
+
+  next();
+};
+
+/*
+============================
+ REGISTER
+============================
+*/
+router.post(
+  "/register",
+  validateRegister,
+  async (req, res, next) => {
+    try {
+      await registerUser(req, res);
+    } catch (err) {
+      next(err);
     }
-
-    // delegar al controlador (manteniendo compatibilidad con la firma existente)
-    await registerUser(req, res);
-  } catch (err) {
-    next(err);
   }
-});
+);
 
-// ============================
-// LOGIN
-// ============================
-router.post("/login", async (req, res, next) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password)
-      return res.status(400).json({ msg: "Email y contraseña requeridos" });
-
-    await loginUser(req, res);
-  } catch (err) {
-    next(err);
+/*
+============================
+ LOGIN
+============================
+*/
+router.post(
+  "/login",
+  validateLogin,
+  async (req, res, next) => {
+    try {
+      await loginUser(req, res);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-// ============================
-// RESEND VERIFICATION
-// ============================
-// POST /api/auth/resend-verification { email }
-router.post("/resend-verification", async (req, res, next) => {
-  try {
-    // validación mínima
-    if (!req.body?.email) return res.status(400).json({ msg: "Email requerido" });
-
-    await resendVerification(req, res);
-  } catch (err) {
-    next(err);
+/*
+============================
+ RESEND VERIFICATION
+============================
+*/
+router.post(
+  "/resend-verification",
+  validateEmail,
+  async (req, res, next) => {
+    try {
+      await resendVerification(req, res);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 export default router;
