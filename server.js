@@ -26,8 +26,10 @@ const app = express();
 
 app.set("trust proxy", 1);
 
+// connect to DB (connectDB should call mongoose.connect and handle errors)
 connectDB();
 
+// listeners for mongoose lifecycle
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB name:", mongoose.connection.name);
 });
@@ -108,34 +110,87 @@ const server = app.listen(PORT, () => {
   }
 });
 
+// Generic handlers for unexpected errors — log and attempt graceful shutdown
 process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  // try to shutdown gracefully
+  gracefulShutdown("unhandledRejection").catch((e) => {
+    console.error("Error during shutdown after unhandledRejection:", e);
+    process.exit(1);
+  });
 });
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
+  // try to shutdown gracefully
+  gracefulShutdown("uncaughtException").catch((e) => {
+    console.error("Error during shutdown after uncaughtException:", e);
+    process.exit(1);
+  });
 });
 
-// Graceful shutdown: usar promesas para mongoose.close()
-const gracefulShutdown = (signal) => {
-  console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
-  server.close(async () => {
-    try {
-      await mongoose.connection.close(false); // devuelve promise en mongoose v6+
-      console.log("MongoDB connection closed. Saliendo.");
-      process.exit(0);
-    } catch (err) {
-      console.error("Error closing MongoDB connection:", err);
-      process.exit(1);
-    }
-  });
+/**
+ * Graceful shutdown helper:
+ * - stop accepting new connections (server.close)
+ * - wait for server to close
+ * - disconnect mongoose via mongoose.disconnect() (returns a Promise)
+ * - if something hangs, force exit after timeout
+ */
+let shuttingDown = false;
+const gracefulShutdown = async (signal) => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
 
-  // fallback timeout si algo queda colgado
-  setTimeout(() => {
+  console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
+
+  // start a fallback timer to force exit if shutdown stalls
+  const forceTimeout = setTimeout(() => {
     console.warn("Forzando salida después de timeout...");
     process.exit(1);
-  }, 30_000).unref();
+  }, 30_000);
+  forceTimeout.unref();
+
+  try {
+    // stop accepting new connections
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          // If server.close errors, still proceed to try to disconnect mongoose
+          console.error("Error closing HTTP server:", err);
+          return reject(err);
+        }
+        console.log("HTTP server closed.");
+        resolve();
+      });
+    });
+
+    // disconnect mongoose cleanly
+    // prefer mongoose.disconnect() over mongoose.connection.close(callback)
+    await mongoose.disconnect();
+    console.log("MongoDB connection closed. Saliendo.");
+
+    clearTimeout(forceTimeout);
+    process.exit(0);
+  } catch (err) {
+    console.error("Error during graceful shutdown:", err);
+    clearTimeout(forceTimeout);
+    process.exit(1);
+  }
 };
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+// Hook signals
+process.on("SIGINT", () => {
+  gracefulShutdown("SIGINT").catch((e) => {
+    console.error("Shutdown failed on SIGINT:", e);
+    process.exit(1);
+  });
+});
+process.on("SIGTERM", () => {
+  gracefulShutdown("SIGTERM").catch((e) => {
+    console.error("Shutdown failed on SIGTERM:", e);
+    process.exit(1);
+  });
+});
 
 export default app;
