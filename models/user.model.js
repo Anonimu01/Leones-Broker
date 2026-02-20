@@ -15,55 +15,58 @@ const documentSchema = new mongoose.Schema({
   }
 });
 
-const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true
+    },
+
+    password: {
+      type: String,
+      required: true
+    },
+
+    // ⚠️ YA NO OBLIGATORIOS
+    phone: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+
+    address: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+
+    documents: [documentSchema],
+
+    balance: {
+      type: Number,
+      default: 0
+    },
+
+    verified: {
+      type: Boolean,
+      default: false
+    },
+
+    verificationToken: {
+      type: String,
+      default: null
+    }
   },
-
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-
-  password: {
-    type: String,
-    required: true
-  },
-
-  phone: {
-    type: String,
-    required: true,
-    trim: true
-  },
-
-  address: {
-    type: String,
-    required: true,
-    trim: true
-  },
-
-  documents: [documentSchema],
-
-  balance: {
-    type: Number,
-    default: 0
-  },
-
-  verified: {
-    type: Boolean,
-    default: false
-  },
-
-  verificationToken: {
-    type: String,
-    default: null
-  }
-
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 export default mongoose.model("User", userSchema);
