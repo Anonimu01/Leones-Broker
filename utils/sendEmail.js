@@ -1,6 +1,6 @@
 // utils/sendEmail.js
 import nodemailer from "nodemailer";
-import Resend from "resend";
+import { Resend } from "resend";
 
 const {
   RESEND_API_KEY,
@@ -9,31 +9,28 @@ const {
   EMAIL_PASS
 } = process.env;
 
-/**
- * Strategy:
- * - Si RESEND_API_KEY está definido => usar Resend (producción, Render).
- * - Si no => fallback a Nodemailer (útil en dev local).
- *
- * Siempre lanza (throw) el error para que el controller lo capture.
- */
+/*
+ Strategy:
+ - Si RESEND_API_KEY existe → usar Resend (producción)
+ - Si no → usar Nodemailer (dev local)
+*/
 
-// Inicializar cliente Resend si hay API key
 let resendClient = null;
+
 if (RESEND_API_KEY) {
   try {
     resendClient = new Resend(RESEND_API_KEY);
     console.log("✅ Resend cliente inicializado.");
   } catch (err) {
     console.error("❌ Error inicializando Resend:", err);
-    // no throw aquí para permitir fallback a nodemailer en dev
   }
 }
 
-// Preparar transporter nodemailer (fallback)
 let transporter = null;
+
 if (!resendClient) {
   if (!EMAIL_USER || !EMAIL_PASS) {
-    console.warn("⚠️ EMAIL_USER o EMAIL_PASS no definidos. Nodemailer no estará disponible como fallback.");
+    console.warn("⚠️ No hay credenciales SMTP para fallback.");
   } else {
     transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
@@ -45,74 +42,52 @@ if (!resendClient) {
       }
     });
 
-    // verify transporter (solo en arranque)
-    transporter.verify((err, success) => {
-      if (err) {
-        console.error("❌ Nodemailer verify error:", err);
-      } else {
-        console.log("✅ Nodemailer transporter listo (SMTP verified).");
-      }
+    transporter.verify((err) => {
+      if (err) console.error("SMTP error:", err);
+      else console.log("✅ SMTP listo");
     });
   }
 }
 
-/**
- * sendEmail(to, subject, html)
- * - to: string or array
- * - subject: string
- * - html: string (HTML body)
- *
- * Lanza error si falla.
- */
 export const sendEmail = async (to, subject, html) => {
-  // Validaciones básicas
-  if (!to) throw new Error("Missing 'to' in sendEmail");
-  if (!subject) throw new Error("Missing 'subject' in sendEmail");
-  if (!html) html = "";
 
-  // 1) Usar Resend si está disponible
+  if (!to) throw new Error("Missing 'to'");
+  if (!subject) throw new Error("Missing 'subject'");
+
+  // ---------- RESEND ----------
   if (resendClient) {
-    if (!SENDER_EMAIL) {
-      throw new Error("SENDER_EMAIL no definido (necesario para Resend).");
-    }
+    if (!SENDER_EMAIL)
+      throw new Error("SENDER_EMAIL no definido");
+
     try {
-      console.log(`[MAIL][Resend] Enviando a: ${to} - subject: ${subject}`);
+      console.log("[MAIL] usando Resend");
+
       const resp = await resendClient.emails.send({
         from: SENDER_EMAIL,
         to: Array.isArray(to) ? to : [to],
         subject,
-        html,
+        html
       });
-      console.log("[MAIL][Resend] Enviado OK. id:", resp?.id);
+
+      console.log("Email enviado:", resp?.id);
       return resp;
+
     } catch (err) {
-      console.error("[MAIL][Resend] Error enviando email:", err);
-      // Re-throw para que el controller capture y responda adecuadamente
-      const e = new Error(err?.message || "Resend send error");
-      e.original = err;
-      throw e;
+      console.error("Resend error:", err);
+      throw err;
     }
   }
 
-  // 2) Fallback nodemailer
-  if (!transporter) {
-    throw new Error("No email transporter disponible (ni Resend ni Nodemailer configurados).");
-  }
+  // ---------- SMTP fallback ----------
+  if (!transporter)
+    throw new Error("No email provider configurado");
 
-  try {
-    console.log(`[MAIL][Nodemailer] Enviando a: ${to} - subject: ${subject}`);
-    const info = await transporter.sendMail({
-      from: `"Leones Broker" <${EMAIL_USER}>`,
-      to,
-      subject,
-      html,
-    });
-    console.log("[MAIL][Nodemailer] Enviado OK. messageId:", info?.messageId);
-    return info;
-  } catch (err) {
-    console.error("[MAIL][Nodemailer] Error enviando email:", err);
-    const e = new Error(err?.message || "Nodemailer send error");
-    e.original = err;
-    throw e;
-  }
+  const info = await transporter.sendMail({
+    from: `"Leones Broker" <${EMAIL_USER}>`,
+    to,
+    subject,
+    html
+  });
+
+  return info;
 };
