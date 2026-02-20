@@ -67,7 +67,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     environment: process.env.NODE_ENV || "development",
-    emailConfigured: !!process.env.EMAIL_USER,
+    emailConfigured: !!(process.env.RESEND_API_KEY || (process.env.EMAIL_USER && process.env.EMAIL_PASS)),
     db: mongoose.connection.name || null,
   });
 });
@@ -120,12 +120,14 @@ const server = app.listen(PORT, () => {
 
   // MOSTRAR estado de variables sin imprimir secretos
   console.log("📌 Env check:");
+  console.log("  - RESEND_API_KEY set:", !!process.env.RESEND_API_KEY);
+  console.log("  - SENDER_EMAIL set:", !!process.env.SENDER_EMAIL);
   console.log("  - EMAIL_USER set:", !!process.env.EMAIL_USER);
   console.log("  - EMAIL_PASS set:", !!process.env.EMAIL_PASS);
   console.log("  - MONGO_URI set:", !!process.env.MONGO_URI);
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  if (!process.env.RESEND_API_KEY && (!process.env.EMAIL_USER || !process.env.EMAIL_PASS)) {
     console.warn(
-      "⚠️ Variables de correo no configuradas (EMAIL_USER / EMAIL_PASS). El envío de emails fallará si no están definidas."
+      "⚠️ No hay proveedor de email completamente configurado. Define RESEND_API_KEY + SENDER_EMAIL (recomendado) o EMAIL_USER + EMAIL_PASS para SMTP."
     );
   }
 });
@@ -141,17 +143,34 @@ process.on("uncaughtException", (err) => {
   // server.close(()=> process.exit(1));
 });
 
-// Graceful shutdown (SIGINT/SIGTERM)
-const gracefulShutdown = (signal) => {
-  console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
-  server.close(() => {
-    mongoose.connection.close(false, () => {
-      console.log("MongoDB connection closed. Saliendo.");
-      process.exit(0);
+/**
+ * Graceful shutdown (SIGINT/SIGTERM)
+ * - mongoose.connection.close() ya no acepta callback; usamos promise/await.
+ */
+const gracefulShutdown = async (signal) => {
+  try {
+    console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
+    // cerrar servidor primero para dejar de aceptar conexiones nuevas
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
     });
-  });
+
+    // luego cerrar conexión mongoose (await)
+    try {
+      await mongoose.connection.close();
+      console.log("MongoDB connection closed. Saliendo.");
+    } catch (err) {
+      console.error("Error cerrando conexión MongoDB:", err);
+    }
+  } catch (err) {
+    console.error("Error during graceful shutdown:", err);
+  } finally {
+    // Aseguramos salida
+    process.exit(0);
+  }
 };
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+process.on("SIGINT", async () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", async () => gracefulShutdown("SIGTERM"));
 
 export default app;
