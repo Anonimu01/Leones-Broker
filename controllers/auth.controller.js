@@ -2,15 +2,9 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-// IMPORT CORREGIDO: apunta al archivo real en /models (user.model.js)
 import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
-/**
- * Helper: construir base URL para los links de verificación.
- * Prefiere process.env.BASE_URL (si la defines), sino usa el origin de la petición,
- * y como último recurso reconstruye con protocolo + host.
- */
 const getBaseUrlFromReq = (req) => {
   const fromEnv = (process.env.BASE_URL || "").replace(/\/+$/, "");
   if (fromEnv) return fromEnv;
@@ -18,24 +12,14 @@ const getBaseUrlFromReq = (req) => {
   return `${req.protocol}://${req.get("host")}`.replace(/\/+$/, "");
 };
 
-/**
- * Environment toggles:
- * - AUTO_VERIFY=true  -> marca usuarios verificados automáticamente al registrarse (testing)
- * - ENFORCE_EMAIL_VERIFICATION=true -> exige verificación antes de permitir login (production)
- *
- * Nota: por seguridad activa ENFORCE_EMAIL_VERIFICATION en producción.
- */
 const AUTO_VERIFY = String(process.env.AUTO_VERIFY || "").toLowerCase() === "true";
 const ENFORCE_EMAIL_VERIFICATION = String(process.env.ENFORCE_EMAIL_VERIFICATION || "").toLowerCase() === "true";
 
-/**
- * Normalizar campos (acepta typos comunes del frontend)
- */
 const extractAddress = (body) => {
-  return (body.address || body.adress || body.direccion || "").toString().trim();
+  return (body.address || body.adress || body.direccion || body.dir || "").toString().trim();
 };
 const extractPhone = (body) => {
-  return (body.phone || body.telefono || "").toString().trim();
+  return (body.phone || body.telefono || body.tel || body.mobile || "").toString().trim();
 };
 
 // ============================
@@ -43,47 +27,63 @@ const extractPhone = (body) => {
 // ============================
 export const registerUser = async (req, res) => {
   try {
-    // extraer campos; aceptamos 'adress' por compatibilidad con front
-    let name = (req.body.name || req.body.fullname || "").toString().trim();
-    let email = (req.body.email || "").toString().toLowerCase().trim();
-    let password = req.body.password || req.body.pass || "";
+    // aceptar múltiples variantes de campos enviados desde distintos frontends
+    let name =
+      (req.body.name ||
+        req.body.fullname ||
+        req.body.fullName ||
+        req.body.username ||
+        req.body.nombre ||
+        req.body.nick ||
+        "")
+        .toString()
+        .trim();
+
+    let email = (req.body.email || req.body.mail || req.body.usernameEmail || "").toString().toLowerCase().trim();
+    let password = req.body.password || req.body.pass || req.body.pwd || "";
     let phone = extractPhone(req.body);
     let address = extractAddress(req.body);
 
-    // validaciones básicas (pero tolerantes)
+    // validaciones básicas
     if (!name || !email || !password) {
-      return res.status(400).json({ msg: "Nombre, correo y contraseña son obligatorios" });
+      return res.status(400).json({
+        msg: "Nombre, correo y contraseña son obligatorios",
+        missing: {
+          name: !!name,
+          email: !!email,
+          password: !!password,
+        },
+      });
     }
 
-    // formato email simple
+    // validación simple de email
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ msg: "Correo inválido" });
     }
 
-    // verificar si existe email
-    const exists = await User.findOne({ email });
+    // comprobar existencia (indice único en modelo)
+    const exists = await User.findOne({ email }).lean();
     if (exists) {
-      return res.status(400).json({ msg: "Correo ya registrado" });
+      return res.status(409).json({ msg: "Correo ya registrado" });
     }
 
     // hashear contraseña
     const hash = await bcrypt.hash(password, 10);
     const token = crypto.randomBytes(32).toString("hex");
 
-    // crear usuario: incluimos address/phone solo si vienen (no romper schema)
     const payload = {
       name,
       email,
       password: hash,
       verified: false,
-      verificationToken: token
+      verificationToken: token,
     };
     if (phone) payload.phone = phone;
     if (address) payload.address = address;
 
     const user = await User.create(payload);
 
-    // Si AUTO_VERIFY está activo (útil para pruebas), marcamos verificado
+    // AUTO_VERIFY -> marcar verificado sin enviar mail
     let autoVerified = false;
     if (AUTO_VERIFY) {
       user.verified = true;
@@ -93,18 +93,18 @@ export const registerUser = async (req, res) => {
       console.log(`[AUTH] AUTO_VERIFY active: user ${email} auto-verified.`);
     }
 
-    // enlace de verificación (asegura que base no tenga slash al final)
     const base = getBaseUrlFromReq(req);
     const link = `${base}/api/verify/email/${token}`;
 
-    // enviar correo (si falla, no borramos usuario; solo registramos en logs y devolvemos flag)
     let mailSent = false;
     let mailErrorMsg = null;
+
     if (!autoVerified) {
       try {
         console.log(`[MAIL] Intentando enviar correo de verificación a: ${email}`);
         console.log(`[MAIL] Link de verificación: ${link}`);
 
+        // sendEmail debe lanzar si no hay configuración; si no, devolverá ok
         await sendEmail(
           email,
           "Confirma tu cuenta - Leones Broker",
@@ -122,15 +122,14 @@ export const registerUser = async (req, res) => {
       } catch (mailErr) {
         console.error("[MAIL] sendEmail error:", mailErr && (mailErr.message || mailErr));
         mailErrorMsg = (mailErr && (mailErr.message || String(mailErr))) || "Error al enviar email";
-        // mailSent queda false; usuario sigue creado con verificationToken para verificar después
+        // No eliminamos al usuario: permitimos verificación manual/re-envío
       }
     } else {
-      // autoVerified => no intentamos enviar correo, pero marcamos verificationSent = true por UX
+      // Si autoVerified, consideramos que no es necesario enviar correo
       mailSent = true;
       mailErrorMsg = null;
     }
 
-    // responder sin exponer campos sensibles
     return res.status(201).json({
       msg: "Registro exitoso. Revisa tu correo para verificar la cuenta.",
       user: {
@@ -138,17 +137,15 @@ export const registerUser = async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone || "",
-        address: user.address || ""
+        address: user.address || "",
       },
       verificationSent: mailSent,
       mailError: mailSent ? null : mailErrorMsg,
-      autoVerified
+      autoVerified,
     });
-
   } catch (error) {
     console.error("Error register:", error);
 
-    // Si es error de validación de mongoose devolvemos detalle útil
     if (error && error.name === "ValidationError" && error.errors) {
       const details = {};
       for (const key in error.errors) {
@@ -157,9 +154,8 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ msg: "Validation error", errors: details });
     }
 
-    // si hay clave duplicada por índice único (email), devolver 400 con mensaje claro
     if (error && error.code === 11000) {
-      return res.status(400).json({ msg: "Correo ya registrado" });
+      return res.status(409).json({ msg: "Correo ya registrado" });
     }
 
     return res.status(500).json({ msg: "Error del servidor" });
@@ -167,18 +163,18 @@ export const registerUser = async (req, res) => {
 };
 
 // ============================
-// RESEND VERIFICATION (UTIL)
+// RESEND VERIFICATION
 // ============================
 export const resendVerification = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email: rawEmail } = req.body;
+    const email = (rawEmail || "").toString().toLowerCase().trim();
     if (!email) return res.status(400).json({ msg: "Email requerido" });
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ msg: "Usuario no encontrado" });
     if (user.verified) return res.status(400).json({ msg: "Cuenta ya verificada" });
 
-    // generar un nuevo token y guardar
     const token = crypto.randomBytes(32).toString("hex");
     user.verificationToken = token;
     await user.save();
@@ -200,9 +196,12 @@ export const resendVerification = async (req, res) => {
       return res.json({ msg: "Email de verificación reenviado", verificationSent: true });
     } catch (mailErr) {
       console.error("[MAIL] resend sendEmail error:", mailErr && (mailErr.message || mailErr));
-      return res.status(500).json({ msg: "No se pudo enviar el email de verificación", verificationSent: false, mailError: mailErr?.message || String(mailErr) });
+      return res.status(500).json({
+        msg: "No se pudo enviar el email de verificación",
+        verificationSent: false,
+        mailError: mailErr?.message || String(mailErr),
+      });
     }
-
   } catch (err) {
     console.error("Error resendVerification:", err);
     return res.status(500).json({ msg: "Error del servidor" });
@@ -214,35 +213,28 @@ export const resendVerification = async (req, res) => {
 // ============================
 export const loginUser = async (req, res) => {
   try {
-    let { email, password } = req.body;
+    let { email: rawEmail, password } = req.body;
 
-    if (!email || !password)
-      return res.status(400).json({ msg: "Datos incompletos" });
+    if (!rawEmail || !password) return res.status(400).json({ msg: "Datos incompletos" });
 
-    email = String(email).toLowerCase().trim();
+    const email = String(rawEmail).toLowerCase().trim();
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res.status(400).json({ msg: "Credenciales inválidas" });
+    if (!user) return res.status(401).json({ msg: "Credenciales inválidas" });
 
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid)
-      return res.status(400).json({ msg: "Credenciales inválidas" });
+    if (!valid) return res.status(401).json({ msg: "Credenciales inválidas" });
 
-    // Si ENFORCE_EMAIL_VERIFICATION está activo -> bloquear login si no verificado
     if (ENFORCE_EMAIL_VERIFICATION && !user.verified) {
       return res.status(401).json({ msg: "Correo no verificado", verificationRequired: true });
     }
 
-    // Generar token JWT
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, email: user.email },
       process.env.JWT_SECRET || "dev_jwt_secret",
       { expiresIn: "7d" }
     );
 
-    // Devolver token y datos básicos del usuario (sin password ni verificationToken)
-    // Incluimos flag 'verified' para que el frontend muestre mensaje si es necesario.
     return res.json({
       token,
       user: {
@@ -252,12 +244,11 @@ export const loginUser = async (req, res) => {
         balance: user.balance ?? 0,
         phone: user.phone || "",
         address: user.address || "",
-        verified: !!user.verified
+        verified: !!user.verified,
       },
       verified: !!user.verified,
-      verificationRequired: !!ENFORCE_EMAIL_VERIFICATION
+      verificationRequired: !!ENFORCE_EMAIL_VERIFICATION,
     });
-
   } catch (error) {
     console.error("Error login:", error);
     return res.status(500).json({ msg: "Error del servidor" });
