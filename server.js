@@ -11,10 +11,12 @@ import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
+import walletRoutes from "./routes/wallet.routes.js"; // ✅ AÑADIDO
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ENV CONFIG
 dotenv.config({
   path:
     process.env.NODE_ENV === "production"
@@ -23,174 +25,135 @@ dotenv.config({
 });
 
 const app = express();
-
 app.set("trust proxy", 1);
 
-// connect to DB (connectDB should call mongoose.connect and handle errors)
+// DB CONNECT
 connectDB();
 
-// listeners for mongoose lifecycle
+// mongoose listeners
 mongoose.connection.on("connected", () => {
-  console.log("✅ MongoDB conectado. DB name:", mongoose.connection.name);
+  console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 });
 mongoose.connection.on("error", (err) => {
-  console.error("❌ MongoDB connection error:", err);
+  console.error("❌ Mongo error:", err);
 });
 mongoose.connection.on("disconnected", () => {
-  console.warn("⚠️ MongoDB desconectado");
+  console.warn("⚠️ Mongo desconectado");
 });
 
+// CORS
 const corsOptions = {
   origin: process.env.CLIENT_URL || true,
   credentials: true,
 };
 app.use(cors(corsOptions));
 
+// logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} › ${req.method} ${req.originalUrl}`);
   next();
 });
 
+// body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// HEALTH CHECK
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    environment: process.env.NODE_ENV || "development",
-    emailConfigured: !!process.env.EMAIL_USER || !!process.env.RESEND_API_KEY,
+    env: process.env.NODE_ENV || "dev",
+    emailProvider: process.env.RESEND_API_KEY ? "resend" : "smtp",
     db: mongoose.connection.name || null,
   });
 });
 
+// ROUTES
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/user", userRoutes);
 app.use("/api/verification", verificationRoutes);
-app.use("/api/verify", verificationRoutes);
+app.use("/api/wallet", walletRoutes); // ✅ AÑADIDO
 
+// 404 API
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
 });
 
+// STATIC FRONTEND
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
+// ERROR HANDLER
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  const status = err.status || 500;
-  const payload = { error: "Server error" };
-  if (process.env.NODE_ENV === "development") {
-    payload.message = err.message;
-    payload.stack = err.stack;
-  }
-  res.status(status).json(payload);
+  res.status(err.status || 500).json({
+    error: "Server error",
+    message:
+      process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
 });
 
 const PORT = process.env.PORT || 3000;
 
 const server = app.listen(PORT, () => {
-  console.log(
-    `🚀 Servidor activo en puerto ${PORT} (env: ${process.env.NODE_ENV || "development"})`
-  );
+  console.log(`🚀 Server running on ${PORT}`);
 
-  console.log("📌 Env check:");
-  console.log("  - RESEND_API_KEY set:", !!process.env.RESEND_API_KEY);
-  console.log("  - SENDER_EMAIL set:", !!process.env.SENDER_EMAIL);
-  console.log("  - EMAIL_USER set:", !!process.env.EMAIL_USER);
-  console.log("  - EMAIL_PASS set:", !!process.env.EMAIL_PASS);
-  console.log("  - MONGO_URI set:", !!process.env.MONGO_URI);
+  console.log("ENV STATUS:");
+  console.log("RESEND:", !!process.env.RESEND_API_KEY);
+  console.log("SENDER:", !!process.env.SENDER_EMAIL);
+  console.log("MONGO:", !!process.env.MONGO_URI);
 
-  if (!process.env.RESEND_API_KEY && (!process.env.EMAIL_USER || !process.env.EMAIL_PASS)) {
-    console.warn(
-      "⚠️ No hay proveedor de email configurado (ni RESEND_API_KEY ni EMAIL_USER/EMAIL_PASS). Los envíos fallarán."
-    );
-  }
+  if (!process.env.RESEND_API_KEY)
+    console.warn("⚠️ Resend no configurado — emails fallarán");
 });
 
-// Generic handlers for unexpected errors — log and attempt graceful shutdown
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
-  // try to shutdown gracefully
-  gracefulShutdown("unhandledRejection").catch((e) => {
-    console.error("Error during shutdown after unhandledRejection:", e);
-    process.exit(1);
-  });
-});
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-  // try to shutdown gracefully
-  gracefulShutdown("uncaughtException").catch((e) => {
-    console.error("Error during shutdown after uncaughtException:", e);
-    process.exit(1);
-  });
-});
-
-/**
- * Graceful shutdown helper:
- * - stop accepting new connections (server.close)
- * - wait for server to close
- * - disconnect mongoose via mongoose.disconnect() (returns a Promise)
- * - if something hangs, force exit after timeout
- */
+// GRACEFUL SHUTDOWN
 let shuttingDown = false;
+
 const gracefulShutdown = async (signal) => {
-  if (shuttingDown) {
-    return;
-  }
+  if (shuttingDown) return;
   shuttingDown = true;
 
-  console.log(`📴 Recibido ${signal}. Cerrando servidor...`);
+  console.log(`📴 ${signal} recibido. Cerrando...`);
 
-  // start a fallback timer to force exit if shutdown stalls
-  const forceTimeout = setTimeout(() => {
-    console.warn("Forzando salida después de timeout...");
+  const timeout = setTimeout(() => {
+    console.warn("Forzando cierre...");
     process.exit(1);
-  }, 30_000);
-  forceTimeout.unref();
+  }, 30000);
+  timeout.unref();
 
   try {
-    // stop accepting new connections
     await new Promise((resolve, reject) => {
       server.close((err) => {
-        if (err) {
-          // If server.close errors, still proceed to try to disconnect mongoose
-          console.error("Error closing HTTP server:", err);
-          return reject(err);
-        }
-        console.log("HTTP server closed.");
+        if (err) return reject(err);
+        console.log("HTTP cerrado");
         resolve();
       });
     });
 
-    // disconnect mongoose cleanly
-    // prefer mongoose.disconnect() over mongoose.connection.close(callback)
     await mongoose.disconnect();
-    console.log("MongoDB connection closed. Saliendo.");
+    console.log("Mongo cerrado");
 
-    clearTimeout(forceTimeout);
+    clearTimeout(timeout);
     process.exit(0);
   } catch (err) {
-    console.error("Error during graceful shutdown:", err);
-    clearTimeout(forceTimeout);
+    console.error("Shutdown error:", err);
+    clearTimeout(timeout);
     process.exit(1);
   }
 };
 
-// Hook signals
-process.on("SIGINT", () => {
-  gracefulShutdown("SIGINT").catch((e) => {
-    console.error("Shutdown failed on SIGINT:", e);
-    process.exit(1);
-  });
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("unhandledRejection", (r) => {
+  console.error("UnhandledRejection:", r);
+  gracefulShutdown("unhandledRejection");
 });
-process.on("SIGTERM", () => {
-  gracefulShutdown("SIGTERM").catch((e) => {
-    console.error("Shutdown failed on SIGTERM:", e);
-    process.exit(1);
-  });
+process.on("uncaughtException", (e) => {
+  console.error("UncaughtException:", e);
+  gracefulShutdown("uncaughtException");
 });
 
 export default app;
