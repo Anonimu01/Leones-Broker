@@ -452,7 +452,6 @@
     </div>
   </div>
 </div>
-
 <script>
 /* ----------------------------
    FRONTEND: modal + register/login
@@ -681,13 +680,19 @@ function openRegisterModal(){
       }
 
       // try store session according server response
-      if(serverData && serverData.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name })); }
-      else if(serverData && serverData.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user)); }
+      if(serverData && serverData.token){
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name }));
+        localStorage.setItem('token', serverData.token);
+      }
+      else if(serverData && serverData.user){
+        localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
+        if(serverData.user.token) localStorage.setItem('token', serverData.user.token);
+      }
       else { localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name })); }
 
       closeModal();
       const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
       return;
     }
 
@@ -722,11 +727,17 @@ function openLoginModal(){
     const backend = await backendLogin({ email, password: pass });
     if(backend.ok){
       const d = backend.data;
-      if(d && d.token){ localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' })); }
-      else if(d && d.user){ localStorage.setItem(SESSION_KEY, JSON.stringify(d.user)); }
+      if(d && d.token){
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' }));
+        localStorage.setItem('token', d.token);
+      }
+      else if(d && d.user){
+        localStorage.setItem(SESSION_KEY, JSON.stringify(d.user));
+        if(d.user.token) localStorage.setItem('token', d.user.token);
+      }
       closeModal();
       const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, d?.token); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
       return;
     }
 
@@ -826,7 +837,6 @@ window.addEventListener('load', function(){
   if(s){ try{ var u = JSON.parse(s); if(typeof showPrivateFull === 'function'){ showPrivateFull(u, localStorage.getItem('token')); } }catch(e){} }
 });
 </script>
-
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
@@ -1243,7 +1253,7 @@ async function apiFetch(path, opts = {}){
   const token = localStorage.getItem('token');
   const headers = opts.headers || {};
   headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-  if(token) headers['Authorization'] = token;
+  if(token) headers['Authorization'] = `Bearer ${token}`; // <- CORRECCIÓN importante
 
   // Use absolute path if provided, else join
   const url = path.startsWith('http') ? path : (API_BASE.replace(/\/+$/,'') + (path.startsWith('/') ? path : '/' + path));
@@ -1451,18 +1461,37 @@ function computePositionUnrealized(position){
   return (priceNow - entry) * qty * sign;
 }
 
+/*
+  computeWalletMetrics espera que backend devuelva:
+  - balanceOwn: saldo propio disponible (retirable)
+  - credit: apalancamiento otorgado por admin (no retirable)
+  - marginUsed: margen usado por posiciones abiertas
+  - pnl: pnl flotante
+*/
 function computeWalletMetrics(wallet, positionsList){
   const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own ?? wallet.balance) || 0;
-  const borrowed = Number(wallet.borrowed ?? 0) || 0;
-  const equityBase = balanceOwn + borrowed;
+  const credit = Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0;
+  const marginUsed = Number(wallet.marginUsed ?? wallet.usedMargin ?? wallet.borrowed ?? 0) || 0;
+  const pnlReported = Number(wallet.pnl ?? wallet.pnlReported ?? 0) || 0;
+
+  // unrealized based on positions if backend doesn't provide pnl
   let unreal = 0;
-  (positionsList || []).forEach(p => {
-    unreal += computePositionUnrealized(p);
-  });
-  const equity = equityBase + unreal;
-  const marginRatio = borrowed > 0 ? (equity / borrowed) * 100 : Infinity;
-  const usedMargin = borrowed;
-  return { balanceOwn, borrowed, unreal, equity, marginRatio, usedMargin };
+  (positionsList || []).forEach(p => { unreal += computePositionUnrealized(p); });
+
+  const pnl = pnlReported || unreal;
+  const equity = balanceOwn + credit + pnl;
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : Infinity;
+  const freeMargin = equity - marginUsed;
+
+  return {
+    balanceOwn,
+    credit,
+    marginUsed,
+    pnl,
+    equity,
+    marginLevel,
+    freeMargin
+  };
 }
 
 function showMarginAlert(msg, allowDismiss = true){
@@ -1515,26 +1544,27 @@ async function refreshWalletAndPositionsUI(){
     const remotePositions = await apiFetch('/positions');
 
     const walletNormalized = {
-      balanceOwn: Number(wallet.balance ?? wallet.balanceOwn ?? wallet.balance_own) || 0,
-      borrowed: Number(wallet.borrowed ?? 0) || 0,
-      leverageFactor: Number(wallet.leverageFactor ?? wallet.leverage ?? wallet.leverage_factor) || 0,
+      balanceOwn: Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own) || 0,
+      credit: Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0,
+      marginUsed: Number(wallet.marginUsed ?? wallet.usedMargin ?? 0) || 0,
       equityReported: Number(wallet.equity ?? 0) || 0,
-      pnlReported: Number(wallet.pnl ?? 0) || 0
+      pnlReported: Number(wallet.pnl ?? 0) || 0,
+      leverageFactor: Number(wallet.leverageFactor ?? wallet.leverage ?? wallet.leverage_factor) || 0
     };
 
     positions = Array.isArray(remotePositions) ? remotePositions : [];
 
     // update UI elements (if exist)
     const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + walletNormalized.balanceOwn.toLocaleString('es-DO');
-    const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (walletNormalized.equityReported || (walletNormalized.balanceOwn + walletNormalized.borrowed)).toLocaleString('es-DO');
+    const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (walletNormalized.equityReported || (walletNormalized.balanceOwn + walletNormalized.credit)).toLocaleString('es-DO');
     const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (walletNormalized.pnlReported || 0).toLocaleString('es-DO');
-    const borrowedEl = document.getElementById('priv_borrowed_full'); if(borrowedEl) borrowedEl.textContent = 'RD$' + (walletNormalized.borrowed).toLocaleString('es-DO');
+    const borrowedEl = document.getElementById('priv_borrowed_full'); if(borrowedEl) borrowedEl.textContent = 'RD$' + (walletNormalized.credit).toLocaleString('es-DO');
 
     const metrics = computeWalletMetrics(walletNormalized, positions);
 
     const balUsdtTopLocal = document.getElementById('bal-usdt-top'); if(balUsdtTopLocal) balUsdtTopLocal.innerText = Number(metrics.balanceOwn).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
     const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number(metrics.equity).toLocaleString(undefined,{maximumFractionDigits:2});
-    const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(metrics.balanceOwn + (metrics.borrowed||0)).toLocaleString(undefined,{maximumFractionDigits:2});
+    const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(metrics.balanceOwn).toLocaleString(undefined,{maximumFractionDigits:2});
 
     lastKnownWalletSnapshot = walletNormalized;
     saveSession({...getSavedSession(), ...walletNormalized}, localStorage.getItem('token'));
@@ -1559,7 +1589,7 @@ function startMarginWatcher(){
       try{
         const { metrics } = await refreshWalletAndPositionsUI();
 
-        const marginRatio = metrics.marginRatio;
+        const marginRatio = metrics.marginLevel;
         if(!isFinite(marginRatio)){
           clearMarginAlert();
           return;
@@ -1687,7 +1717,7 @@ async function closePositionServer(id){
 
 /* =========================
    TRADINGVIEW & SYMBOLS
-   (helpers mínimos para que UI funcione sin errores)
+   (helpers mínimos para que UI funcione without errors)
    ========================= */
 
 const ALL_SYMBOLS = window.ALL_SYMBOLS || [
@@ -1808,59 +1838,6 @@ function initSymbolsUI(){
 
   if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
   if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
-}
-
-/* trading widget helpers (lightweight) */
-function initTradingWidget(symbol){
-  // keep TradingView usage as before; if not available show message
-  const container = document.getElementById('tv_chart_container');
-  if(!container) return;
-  container.innerHTML = '';
-  if(typeof TradingView === 'undefined'){
-    container.innerHTML = '<div style="padding:12px;color:var(--muted)">TradingView no está disponible en este entorno.</div>';
-    return;
-  }
-  try{
-    new TradingView.widget({
-      autosize: true,
-      symbol,
-      interval: "15",
-      timezone: "Etc/UTC",
-      theme: "dark",
-      style: "1",
-      container_id: 'tv_chart_container',
-      allow_symbol_change: true,
-      hide_top_toolbar: false,
-      save_image: false,
-      details: true,
-      locale: "es"
-    });
-  }catch(e){
-    container.innerHTML = '<div style="padding:12px;color:var(--muted)">No se pudo cargar el chart en este entorno.</div>';
-  }
-}
-
-function updateDisplayedPrice(price){
-  const pn = Number(price);
-  if(!isFinite(pn)) return;
-  opPriceEl && (opPriceEl.innerText = (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6));
-}
-
-function updateOrderBook(base){
-  const b = Number(base);
-  if(!b) return;
-  let bidsHtml = '', asksHtml = '';
-  for(let i=0;i<8;i++){
-    bidsHtml += `<div class="ob-row"><span style="color:var(--gold)">${(b - (i+1)*(b*0.0008)).toFixed(6)}</span><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span></div>`;
-    asksHtml += `<div class="ob-row"><span>${(Math.random()*3).toFixed(6)} ${getBaseUnit()}</span><span style="color:var(--muted)">${(b + (i+1)*(b*0.0008)).toFixed(6)}</span></div>`;
-  }
-  obBidsEl && (obBidsEl.innerHTML = bidsHtml);
-  obAsksEl && (obAsksEl.innerHTML = asksHtml);
-}
-
-function getBaseUnit(){
-  const lab = document.getElementById('tradingSymbol') ? document.getElementById('tradingSymbol').innerText : '';
-  return lab.split('/')[0] || '';
 }
 
 function selectSymbolAndOpenTrading(symbol, label){
