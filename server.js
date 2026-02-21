@@ -12,6 +12,10 @@ import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
 import walletRoutes from "./routes/wallet.routes.js"; // ✅ AÑADIDO
+import positionsRoutes from "./routes/positions.routes.js"; // ✅ AÑADIDO
+import tradeRoutes from "./routes/trade.routes.js"; // ✅ AÑADIDO
+
+import { startRiskWatcher } from "./jobs/risk.job.js"; // ✅ AÑADIDO: monitor de riesgo
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +37,25 @@ connectDB();
 // mongoose listeners
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
+
+  // START RISK WATCHER after DB is connected
+  try {
+    const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30_000;
+    const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
+    const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
+
+    startRiskWatcher({
+      intervalMs,
+      alertThreshold,
+      closeThreshold,
+    });
+
+    console.log(
+      `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
+    );
+  } catch (e) {
+    console.error("Error iniciando risk watcher:", e);
+  }
 });
 mongoose.connection.on("error", (err) => {
   console.error("❌ Mongo error:", err);
@@ -65,6 +88,7 @@ app.get("/api/health", (req, res) => {
     env: process.env.NODE_ENV || "dev",
     emailProvider: process.env.RESEND_API_KEY ? "resend" : "smtp",
     db: mongoose.connection.name || null,
+    adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
 });
 
@@ -72,7 +96,11 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes); // ✅ AÑADIDO
+
+// CLIENT WALLET / POSITIONS / TRADE endpoints (protected routes used by client UI)
+app.use("/api/wallet", walletRoutes);
+app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
 
 // 404 API
 app.use("/api", (req, res) => {
@@ -104,6 +132,7 @@ const server = app.listen(PORT, () => {
   console.log("RESEND:", !!process.env.RESEND_API_KEY);
   console.log("SENDER:", !!process.env.SENDER_EMAIL);
   console.log("MONGO:", !!process.env.MONGO_URI);
+  console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
 
   if (!process.env.RESEND_API_KEY)
     console.warn("⚠️ Resend no configurado — emails fallarán");
@@ -132,6 +161,16 @@ const gracefulShutdown = async (signal) => {
         resolve();
       });
     });
+
+    // stop risk watcher if module exposes stop (optional)
+    try {
+      // eslint-disable-next-line no-unused-vars
+      if (typeof global?.stopRiskWatcher === "function") {
+        global.stopRiskWatcher();
+      }
+    } catch (e) {
+      // ignore
+    }
 
     await mongoose.disconnect();
     console.log("Mongo cerrado");
