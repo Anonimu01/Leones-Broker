@@ -454,7 +454,7 @@
 </div>
 <script>
 /* ----------------------------
-   FRONTEND: modal + register/login
+   JS Nº1 - FRONTEND: modal + register/login (COMPLETO - ACTUALIZADO)
    ---------------------------- */
 
 /* GLOBAL KEYS / HELPERS */
@@ -463,52 +463,92 @@ const SESSION_KEY = 'BROKERPRO_SESSION_USER';
 
 /* --- API URL dinámica --- */
 window.API =
- location.hostname === "localhost"
-   ? "http://localhost:3000/api"
-   : (window.API || "https://leones-broker.onrender.com/api");
+  location.hostname === "localhost"
+    ? "http://localhost:3000/api"
+    : (window.API || "https://leones-broker.onrender.com/api");
 
 /* helpers localStorage */
-function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY)||'[]'); }catch(e){return[]} }
-function saveUsers(u){ localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch (e) { return []; } }
+function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+/* Apply permanent glow to all interactive fields (inputs/selects/textareas/file) */
+function applyInputGlow(root = document){
+  try{
+    const selector = 'input, textarea, select';
+    Array.from(root.querySelectorAll(selector)).forEach(el=>{
+      // skip buttons
+      if(el.type && ['button','submit','reset'].includes(el.type)) return;
+      // base styles - keep them minimal to avoid overriding your CSS too much
+      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+      // focus handler to intensify
+      if(!el._glowHandlersAttached){
+        el.addEventListener('focus', ()=> {
+          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
+          el.style.borderColor = 'rgba(212,175,55,0.45)';
+          el.style.transform = 'translateY(-1px)';
+        });
+        el.addEventListener('blur', ()=> {
+          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
+          el.style.borderColor = 'rgba(212,175,55,0.14)';
+          el.style.transform = '';
+        });
+        el._glowHandlersAttached = true;
+      }
+    });
+  }catch(e){ console.warn('applyInputGlow error', e); }
+}
 
 /* UI modal helpers (mejorado con Enter y toggle password) */
 function ensureModalHooks(){
-  var modal=document.getElementById('modal');
+  var modal = document.getElementById('modal');
   if(!modal) return;
 
-  var cancel=document.getElementById('modalCancel');
+  var cancel = document.getElementById('modalCancel');
   if(cancel && !cancel.dataset.hooked){
     cancel.addEventListener('click', closeModal);
     cancel.dataset.hooked='1';
   }
 
-  var ok=document.getElementById('modalOk');
+  var ok = document.getElementById('modalOk');
   if(ok && !ok.dataset.hooked){
     ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); });
     ok.dataset.hooked='1';
   }
 }
 
-function openModal(html,onConfirm){
+function openModal(html, onConfirm){
   ensureModalHooks();
-  var modal=document.getElementById('modal');
-  if(!modal) {
+  var modal = document.getElementById('modal');
+  if(!modal){
     console.warn('Modal element not found: #modal');
     return;
   }
-  document.getElementById('modalBody').innerHTML=html;
-  modal.style.display='flex';
-  document.body.style.overflow='hidden';
-  modal._onConfirm=onConfirm;
+  var body = document.getElementById('modalBody');
+  if(!body) {
+    console.warn('Modal body element not found: #modalBody');
+    return;
+  }
+  body.innerHTML = html;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  modal._onConfirm = onConfirm;
 
   // Add enter key submit and password toggle inside modal
   setTimeout(()=>{ // next tick to ensure elements are in DOM
-    const firstInput = modal.querySelector('input');
+    // apply glow inside modal inputs
+    applyInputGlow(body);
+
+    const firstInput = modal.querySelector('input, textarea, select');
     if(firstInput) firstInput.focus();
 
     // Enter key handler
     const enterHandler = (e)=>{
-      if(e.key==='Enter'){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){} closeModal(); }
+      if(e.key === 'Enter'){
+        try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){}
+        closeModal();
+      }
     };
     modal._enterHandler = enterHandler;
     modal.addEventListener('keydown', enterHandler);
@@ -531,26 +571,31 @@ function openModal(html,onConfirm){
         pw.type = pw.type === 'password' ? 'text' : 'password';
         pw.focus();
       });
-      // place after input
-      pw.parentNode.style.position='relative';
-      pw.parentNode.appendChild(btn);
+      // place after input (safe)
+      try{
+        pw.parentNode.style.position = pw.parentNode.style.position || 'relative';
+        pw.parentNode.appendChild(btn);
+      }catch(e){}
     });
   },50);
 }
 
 function closeModal(){
-  var modal=document.getElementById('modal');
+  var modal = document.getElementById('modal');
   if(!modal) return;
-  modal.style.display='none';
-  document.body.style.overflow='';
-  modal._onConfirm=null;
-  if(modal._enterHandler) { modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+  modal._onConfirm = null;
+  if(modal._enterHandler){ modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
 }
 
 /* Safe element attach (no crash if element missing) */
 function attachIfExists(id, event, fn){
   const el = document.getElementById(id);
-  if(el) el.addEventListener(event, fn);
+  if(el && !el._hooked){
+    el.addEventListener(event, fn);
+    el._hooked = true;
+  }
 }
 
 /* Attach buttons if exist */
@@ -568,9 +613,7 @@ async function backendRegister(userObj){
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(userObj)
     });
-
     const payload = await res.json().catch(()=>null);
-
     if(!res.ok){
       const msg = (payload && (payload.msg || payload.error)) || 'Error servidor';
       return { ok:false, msg, data: payload || null };
@@ -589,14 +632,11 @@ async function backendLogin(creds){
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify(creds)
     });
-
     const payload = await res.json().catch(()=>null);
-
     if(!res.ok){
       const msg = (payload && (payload.msg || payload.error)) || 'Credenciales inválidas';
       return { ok:false, msg };
     }
-
     return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendLogin error', e);
@@ -812,12 +852,15 @@ if(typeof window.performLogoutFull !== 'function'){
   };
 }
 
-/* On load: init and restore session */
+/* On load: init and restore session; apply input glow globally */
 window.addEventListener('load', function(){
   ensureModalHooks();
 
   // fix image paths
   Array.from(document.images).forEach(img=>{ try{ let s = img.getAttribute('src')||''; if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){ let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29'); img.setAttribute('src', fixed); } }catch(e){} });
+
+  // apply permanent glow to inputs across the page
+  applyInputGlow(document);
 
   // restore session
   var s = localStorage.getItem(SESSION_KEY);
@@ -1282,10 +1325,9 @@ window.addEventListener('load', function(){
     window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
   })();
 </script>
-
 <script>
 /* -------------------------
-   PARTE PRIVADA - JS COMPLETO Y CORREGIDO
+   JS Nº2 - PARTE PRIVADA - JS COMPLETO Y CORREGIDO (COMPLETO - ACTUALIZADO)
    ------------------------- */
 
 /* API URL: usa la variable global window.API si existe, si no usa tu URL de render por defecto. */
@@ -1387,7 +1429,7 @@ async function apiFetch(path, opts = {}){
 }
 
 /* =========================
-   showPrivateFull: ahora obtiene wallet y posiciones reales y arranca margin watcher
+   showPrivateFull: obtiene wallet y posiciones reales y arranca margin watcher
    ========================= */
 let marginWatcherId = null;
 let marginWatcherRunning = false;
@@ -1405,19 +1447,25 @@ window.showPrivateFull = async function(user, token){
       if(headerActions){
         headerActions.innerHTML = '';
 
-        const existing = document.getElementById('menuTogglePrivate');
-        if(existing) existing.remove();
-
-        const menuBtn = document.createElement('button');
-        menuBtn.id = 'menuTogglePrivate';
-        menuBtn.className = 'menu-toggle';
-        menuBtn.title = 'Abrir/Cerrar menú';
-        menuBtn.type = 'button';
-        menuBtn.textContent = '☰';
-        menuBtn.addEventListener('click', () => {
-          const sidebar = document.getElementById('sidebar');
-          if(sidebar) sidebar.classList.toggle('hidden');
-        });
+        // Reuse existing menuToggle if present (user requested to keep original)
+        const existingMenuToggle = document.getElementById('menuToggle');
+        if(existingMenuToggle){
+          try{ headerActions.appendChild(existingMenuToggle); }catch(e){}
+          existingMenuToggle.onclick = function(){ const sidebar = document.getElementById('sidebar'); if(sidebar) sidebar.classList.toggle('hidden'); };
+        } else {
+          // fallback create only if missing
+          const menuBtn = document.createElement('button');
+          menuBtn.id = 'menuTogglePrivate';
+          menuBtn.className = 'menu-toggle';
+          menuBtn.title = 'Abrir/Cerrar menú';
+          menuBtn.type = 'button';
+          menuBtn.textContent = '☰';
+          menuBtn.addEventListener('click', () => {
+            const sidebar = document.getElementById('sidebar');
+            if(sidebar) sidebar.classList.toggle('hidden');
+          });
+          headerActions.appendChild(menuBtn);
+        }
 
         const profileBtn = document.createElement('div');
         profileBtn.style.display = 'flex';
@@ -1438,7 +1486,6 @@ window.showPrivateFull = async function(user, token){
         profileBtn.appendChild(nameEl);
         profileBtn.appendChild(logoutBtn);
 
-        headerActions.appendChild(menuBtn);
         headerActions.appendChild(profileBtn);
       }
     }catch(e){
@@ -1725,7 +1772,7 @@ function renderPositionsUI(){
       const unreal = computePositionUnrealized(p);
       const el = document.createElement('div');
       el.className = 'pos-card';
-      el.onclick = ()=> openPosition(p.id);
+      el.onclick = ()=> openPosition && openPosition(p.id);
       el.innerHTML = `
         <div>
           <div style="font-weight:700">${escapeHtml(p.symbol)}</div>
@@ -1793,6 +1840,32 @@ let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTab
 let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
 let menuToggle;
 
+/* Apply permanent glow to fields (same function as in js1) */
+function applyInputGlow(root = document){
+  try{
+    const selector = 'input, textarea, select';
+    Array.from(root.querySelectorAll(selector)).forEach(el=>{
+      if(el.type && ['button','submit','reset'].includes(el.type)) return;
+      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+      if(!el._glowHandlersAttached){
+        el.addEventListener('focus', ()=> {
+          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
+          el.style.borderColor = 'rgba(212,175,55,0.45)';
+          el.style.transform = 'translateY(-1px)';
+        });
+        el.addEventListener('blur', ()=> {
+          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
+          el.style.borderColor = 'rgba(212,175,55,0.14)';
+          el.style.transform = '';
+        });
+        el._glowHandlersAttached = true;
+      }
+    });
+  }catch(e){ console.warn('applyInputGlow error', e); }
+}
+
 /* Wire DOM refs defensively */
 function wireDomRefs(){
   // look for several possible IDs to avoid mismatch with HTML edits
@@ -1816,10 +1889,13 @@ function wireDomRefs(){
   posCountEl = document.getElementById('pos-count');
   posCountTop = document.getElementById('pos-count-top');
 
-  if(menuToggle) menuToggle.addEventListener('click', ()=> {
-    const sb = document.getElementById('sidebar');
-    if(sb) sb.classList.toggle('hidden');
-  });
+  if(menuToggle && !menuToggle._attached){
+    menuToggle.addEventListener('click', ()=> {
+      const sb = document.getElementById('sidebar');
+      if(sb) sb.classList.toggle('hidden');
+    });
+    menuToggle._attached = true;
+  }
 
   document.querySelectorAll('.menu-item[data-target]').forEach(item=>{
     try{ item.addEventListener('click', navSidebar); }catch(e){}
@@ -1981,6 +2057,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     renderPositionsUI();
     updateWalletTotal();
   }catch(e){}
+  // ensure inputs have glow
+  try{ applyInputGlow(document); }catch(e){}
 });
 
 /* NAV helpers */
@@ -2028,8 +2106,16 @@ function navSidebar(evt){
 
 window.navSidebar = navSidebar;
 window.footerNavClick = footerNavClick;
-</script>
 
+/* small helpers for modal/info */
+window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
+window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
+
+// Stub helpers to avoid errors if not provided elsewhere
+window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
+window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
+window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+</script>
   <!-- END: contenido importado -->
 </div>
 
