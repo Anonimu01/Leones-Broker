@@ -529,7 +529,6 @@ function openModal(html,onConfirm){
       btn.textContent='👁️';
       btn.addEventListener('click', ()=> {
         pw.type = pw.type === 'password' ? 'text' : 'password';
-        // keep focus on input
         pw.focus();
       });
       // place after input
@@ -564,22 +563,18 @@ attachIfExists('ctaLogin','click', ()=> { const b = document.getElementById('log
 
 async function backendRegister(userObj){
   try{
-    // CALL the correct backend route: /api/auth/register
     const res = await fetch(`${window.API}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(userObj)
     });
 
-    // Try to parse JSON body (server may return msg only)
     const payload = await res.json().catch(()=>null);
 
     if(!res.ok){
       const msg = (payload && (payload.msg || payload.error)) || 'Error servidor';
       return { ok:false, msg, data: payload || null };
     }
-
-    // OK
     return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendRegister error', e);
@@ -589,14 +584,12 @@ async function backendRegister(userObj){
 
 async function backendLogin(creds){
   try{
-    // CALL the correct backend route: /api/auth/login
     const res = await fetch(`${window.API}/auth/login`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify(creds)
     });
 
-    // parse body
     const payload = await res.json().catch(()=>null);
 
     if(!res.ok){
@@ -633,15 +626,12 @@ function openRegisterModal(){
 
     if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
 
-    // Try backend register first
     const userObj = { name, email, phone, address, password: pass };
     console.log('Register payload:', userObj);
     const backend = await backendRegister(userObj);
     if(backend.ok){
-      // if server returned token or user
       const serverData = backend.data;
 
-      // HANDLE: backend created user but email failed to send
       if(serverData && serverData.verificationSent === false){
         msgEl.innerHTML = 'Cuenta creada pero el correo de verificación no pudo enviarse.<br/><br/>';
         const btn = document.createElement('button');
@@ -676,10 +666,9 @@ function openRegisterModal(){
           }
         });
 
-        return; // don't close modal nor log in user yet
+        return;
       }
 
-      // try store session according server response
       if(serverData && serverData.token){
         localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name }));
         localStorage.setItem('token', serverData.token);
@@ -723,7 +712,6 @@ function openLoginModal(){
 
     if(!email || !pass){ msg.textContent='Completa los campos'; return; }
 
-    // Try backend login first
     const backend = await backendLogin({ email, password: pass });
     if(backend.ok){
       const d = backend.data;
@@ -769,60 +757,59 @@ function restorePublicHeader(){
 }
 
 /* -------------------------
-   PARTE PRIVADA (igual que antes)
+   PARTE PRIVADA (defensiva)
    ------------------------- */
 
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
 
-/* showPrivateFull & performLogoutFull kept as you had them (no changes) */
-function showPrivateFull(user, token){
-  try{
-    document.getElementById('publicMain').style.display='none';
-    document.getElementById('publicFooter').style.display='none';
-    const headerActions = document.getElementById('headerActions');
-    if(headerActions){
-      headerActions.innerHTML = '';
-      const profileBtn = document.createElement('div');
-      profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
-      const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
-      const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
-      logoutBtn.addEventListener('click', performLogoutFull);
-      profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
-      headerActions.appendChild(profileBtn);
-    }
-
-    const privateWrapper = document.getElementById('privateArea_full');
-    if(privateWrapper) {
-      privateWrapper.style.display = 'flex';
-      const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
-      const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
-      // use actual balance if available, otherwise fallback to random for demo content
-      const bal = document.getElementById('priv_balance_full');
-      if(bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO'));
-    }
-
-    // persist token too if provided
+/* define showPrivateFull & performLogoutFull only if not provided (avoid overwriting advanced versions) */
+if(typeof window.showPrivateFull !== 'function'){
+  window.showPrivateFull = function(user, token){
     try{
-      if(token) localStorage.setItem('token', token);
-    }catch(e){}
+      document.getElementById('publicMain') && (document.getElementById('publicMain').style.display='none');
+      document.getElementById('publicFooter') && (document.getElementById('publicFooter').style.display='none');
+      const headerActions = document.getElementById('headerActions');
+      if(headerActions){
+        headerActions.innerHTML = '';
+        const profileBtn = document.createElement('div');
+        profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+        const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
+        const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+        logoutBtn.addEventListener('click', performLogoutFull);
+        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+        headerActions.appendChild(profileBtn);
+      }
 
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    window.scrollTo({top:0,behavior:'smooth'});
-  }catch(e){ console.error('showPrivateFull error', e); }
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) {
+        privateWrapper.style.display = 'flex';
+        const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
+        const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
+        const bal = document.getElementById('priv_balance_full');
+        if(bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO'));
+      }
+
+      try{ if(token) localStorage.setItem('token', token); }catch(e){}
+      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      window.scrollTo({top:0,behavior:'smooth'});
+    }catch(e){ console.error('showPrivateFull error', e); }
+  };
 }
 
-function performLogoutFull(){
-  try{
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('token');
-    const privateWrapper = document.getElementById('privateArea_full');
-    if(privateWrapper) privateWrapper.style.display = 'none';
-    const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
-    const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
-    restorePublicHeader();
-    const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> { const b=document.getElementById('openAccountBtn'); if(b) b.click(); });
-    const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> { const b=document.getElementById('loginBtn'); if(b) b.click(); });
-  }catch(e){ console.error('logout error', e); }
+if(typeof window.performLogoutFull !== 'function'){
+  window.performLogoutFull = function(){
+    try{
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('token');
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'none';
+      const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
+      const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
+      restorePublicHeader();
+      const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> { const b=document.getElementById('openAccountBtn'); if(b) b.click(); });
+      const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> { const b=document.getElementById('loginBtn'); if(b) b.click(); });
+    }catch(e){ console.error('logout error', e); }
+  };
 }
 
 /* On load: init and restore session */
@@ -845,6 +832,7 @@ window.addEventListener('load', function(){
   :root{
     --bg:#070707; --surface:#0f0f0f; --muted:#9aa0a6; --text:#e9e6e0;
     --gold:#d4af37; --danger:#cf304a; --line:rgba(255,255,255,0.06);
+    --focus-glow: rgba(212,175,55,0.14);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -857,6 +845,7 @@ window.addEventListener('load', function(){
   /* Header */
   .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
   .header-left{display:flex;align-items:center;gap:12px}
+  /* menu-toggle moved into sidebar; keep style for potential reuse */
   .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
   .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
   .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
@@ -865,8 +854,10 @@ window.addEventListener('load', function(){
   /* Layout */
   .main-wrap{padding-top:80px;max-width:none; width: auto; margin:0 2%;}
   .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
-  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px)}
+  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px); position:relative;}
   .sidebar.hidden{transform:translateX(-110%)}
+  .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .sidebar .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
   .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
   .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
 
@@ -895,7 +886,8 @@ window.addEventListener('load', function(){
   .symbol-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.5);border-color:rgba(212,175,55,0.08)}
 
   /* Trading specifics */
-  #tv_chart_container {width:100%;height:420px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.03)}
+  .chart-area{display:flex;flex-direction:column;min-height:420px}
+  #tv_chart_container {width:100%;flex:1;min-height:420px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.03)}
   .order-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
   .ob-col{background:transparent;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
   .ob-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:var(--muted)}
@@ -912,6 +904,22 @@ window.addEventListener('load', function(){
   .pos-card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);padding:10px;border-radius:8px;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
   .pos-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.4)}
 
+  /* Focus / glow for all fields where user types */
+  .panel input[type="text"], .panel input[type="number"], .panel input[type="email"], .panel input[type="file"], .panel textarea, .panel select,
+  .form-input, .form-select, .search-input {
+    transition: box-shadow .18s ease, border-color .18s ease, transform .08s ease;
+    outline: none;
+  }
+  .panel input:focus, .panel textarea:focus, .panel select:focus, .form-input:focus, .form-select:focus, .search-input:focus {
+    box-shadow: 0 0 0 6px var(--focus-glow), 0 8px 30px rgba(0,0,0,0.6);
+    border-color: rgba(212,175,55,0.45);
+    transform: translateY(-1px);
+  }
+  /* Visible focus for keyboard only */
+  .panel input:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible {
+    outline: 3px solid rgba(212,175,55,0.12);
+  }
+
   /* Footer nav */
   .footer-nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:60}
   .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer}
@@ -920,9 +928,10 @@ window.addEventListener('load', function(){
 
   @media(max-width:1000px){
     .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
-    #tv_chart_container{height:300px}
+    #tv_chart_container{min-height:300px}
     .trade-panel{grid-template-columns:1fr}
     .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
+    .sidebar.hidden{transform:translateX(-120%)}
   }
 
   .muted-small{color:var(--muted);font-size:12px}
@@ -934,7 +943,6 @@ window.addEventListener('load', function(){
   <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
   <header class="header">
     <div class="header-left">
-       <button class="menu-toggle" id="menuToggle" title="Abrir/Cerrar menú">☰</button>
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
@@ -952,12 +960,15 @@ window.addEventListener('load', function(){
 <!-- TradingView official script (needed for real charts) -->
 <script src="https://s3.tradingview.com/tv.js"></script>
 
- 
-
   <div class="main-wrap">
     <div class="layout">
       <!-- Sidebar -->
       <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div style="font-weight:800;color:var(--gold)">Menú</div>
+          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+        </div>
+
         <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
         <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
         <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
@@ -1013,7 +1024,7 @@ window.addEventListener('load', function(){
 
         <div style="display:flex;gap:12px;flex-direction:column">
           <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
-            <div style="flex:1; min-width:320px; position:relative">
+            <div class="chart-area" style="flex:1; min-width:320px; position:relative">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <div>
                   <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
@@ -1198,21 +1209,95 @@ window.addEventListener('load', function(){
   </div>
 </div>
 
+<!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
+<script>
+  (function(){
+    // Sidebar toggle (no destruye si ya existe algo similar)
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+
+    if(sidebarToggle && sidebar){
+      sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('hidden');
+      });
+    }
+
+    // Mostrar el área privada (si usas control por auth en tu JS, ignora esto)
+    try {
+      // si ya controlas visibilidad por token, no correrá esto
+      if(document.getElementById('privateArea_full')){
+        document.getElementById('privateArea_full').style.display = 'block';
+      }
+    } catch(e){/* safe */}
+
+    // Helpers no destructivos: definir navSidebar / footerNavClick si no existen (evitan errores)
+    if(typeof navSidebar !== 'function'){
+      window.navSidebar = function(e){
+        try{
+          const target = e.currentTarget?.getAttribute('data-target');
+          if(!target) return;
+          // hide panels
+          document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+          // activate menu items
+          document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+          e.currentTarget.classList.add('active');
+          // show target
+          const panel = document.getElementById(target + 'Panel') || document.getElementById(target);
+          if(panel) panel.style.display = 'block';
+          // update footer active if applicable
+          document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        }catch(err){console.warn(err)}
+      };
+    }
+
+    if(typeof footerNavClick !== 'function'){
+      window.footerNavClick = function(e){
+        const target = e.currentTarget?.getAttribute('data-target');
+        if(!target) return;
+        document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+        document.getElementById(target).style.display='block';
+        document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        // also update sidebar active
+        document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+        const sidebarItem = Array.from(document.querySelectorAll('.menu-item')).find(mi => mi.getAttribute('data-target') === target.replace('Panel',''));
+        if(sidebarItem) sidebarItem.classList.add('active');
+      };
+    }
+
+    // Modales simples
+    window.showModalInfo = function(){ document.getElementById('infoModal').style.display = 'flex'; };
+    window.hideModalInfo = function(){ document.getElementById('infoModal').style.display = 'none'; };
+
+    // Logout placeholder (tu backend debe sobreescribir esto)
+    if(typeof logout !== 'function'){
+      window.logout = function(){
+        try{ localStorage.removeItem('token'); location.reload(); }catch(e){ location.reload(); }
+      };
+    }
+
+    // Evitar submit por defecto si las funciones específicas no existen
+    window.submitTransaction = window.submitTransaction || function(e){ e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
+    window.submitDoc = window.submitDoc || function(e){ e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
+    window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+  })();
+</script>
 
 <script>
 /* -------------------------
    PARTE PRIVADA - JS COMPLETO Y CORREGIDO
    ------------------------- */
 
-
 /* API URL: usa la variable global window.API si existe, si no usa tu URL de render por defecto. */
 const API_BASE = window.API || window.API_URL || "https://leones-broker.onrender.com/api";
 
-/* safe escape helper */
-function escapeHtml(s){
-  return String(s||'').replace(/[&<>"']/g,function(m){
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
-  });
+/* safe escape helper: define only si no existe para evitar duplicados */
+if(typeof window.escapeHtml !== 'function'){
+  window.escapeHtml = function(s){
+    return String(s||'').replace(/[&<>"']/g,function(m){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+    });
+  };
 }
 
 /* =========================
@@ -1253,12 +1338,10 @@ async function apiFetch(path, opts = {}){
   const token = localStorage.getItem('token');
   const headers = opts.headers || {};
   headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-  if(token) headers['Authorization'] = `Bearer ${token}`; // <- CORRECCIÓN importante
+  if(token) headers['Authorization'] = `Bearer ${token}`;
 
-  // Use absolute path if provided, else join
   const url = path.startsWith('http') ? path : (API_BASE.replace(/\/+$/,'') + (path.startsWith('/') ? path : '/' + path));
 
-  // simple rate-limit/caching for wallet and positions endpoints to avoid spamming
   const shortPaths = ['/wallet/me','/positions','/api/wallet/me','/api/positions'];
   const isShort = shortPaths.some(p => url.includes(p));
   if(isShort){
@@ -1269,10 +1352,8 @@ async function apiFetch(path, opts = {}){
       return cached.data;
     }
     if(inFlight[key]) {
-      // if a request is already in flight, reuse promise
       return inFlight[key];
     }
-    // start request and store promise
     const p = fetch(url, {...opts, headers}).then(async (res)=>{
       const text = await res.text().catch(()=>null);
       let data = null;
@@ -1291,7 +1372,6 @@ async function apiFetch(path, opts = {}){
     return p;
   }
 
-  // non-rate-limited endpoint
   const res = await fetch(url, {...opts, headers});
   const text = await res.text().catch(()=>null);
   let data = null;
@@ -1313,15 +1393,13 @@ let marginWatcherId = null;
 let marginWatcherRunning = false;
 let lastKnownWalletSnapshot = null;
 
-async function showPrivateFull(user, token){
+window.showPrivateFull = async function(user, token){
   try{
     if(!user) return;
 
-    // ocultar la parte pública (con defensas por si no existen los elementos)
     try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = 'none'; }catch(e){}
     try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = 'none'; }catch(e){}
 
-    // headerActions: construimos UI privada aquí, sin tocar el menú público
     try{
       const headerActions = document.getElementById('headerActions');
       if(headerActions){
@@ -1367,7 +1445,6 @@ async function showPrivateFull(user, token){
       console.error('showPrivateFull header error', e);
     }
 
-    // mostrar el contenedor privado y rellenar campos internos
     try{
       const privateWrapper = document.getElementById('privateArea_full');
       if(privateWrapper) privateWrapper.style.display = 'flex';
@@ -1384,7 +1461,6 @@ async function showPrivateFull(user, token){
       console.error('showPrivateFull private area error', e);
     }
 
-    // persistir sesión mínimamente (guardamos user y token si se da)
     try{
       const safeUser = {
         id: user.id || user._id || null,
@@ -1400,23 +1476,19 @@ async function showPrivateFull(user, token){
       };
       saveSession(safeUser, token);
       lastKnownWalletSnapshot = safeUser;
-    }catch(e){ /* ignore storage errors */ }
+    }catch(e){}
 
-    // actualizar UI con datos reales del backend
     try{
       await refreshWalletAndPositionsUI();
     }catch(e){ console.warn('refresh initial wallet failed', e); }
 
-    // start margin watcher
-    try{
-      startMarginWatcher();
-    }catch(e){ console.warn('startMarginWatcher error', e); }
+    try{ startMarginWatcher(); }catch(e){ console.warn('startMarginWatcher error', e); }
 
     try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
   }catch(err){
     console.error('showPrivateFull error', err);
   }
-}
+};
 
 /* =========================
    performLogoutFull
@@ -1461,20 +1533,12 @@ function computePositionUnrealized(position){
   return (priceNow - entry) * qty * sign;
 }
 
-/*
-  computeWalletMetrics espera que backend devuelva:
-  - balanceOwn: saldo propio disponible (retirable)
-  - credit: apalancamiento otorgado por admin (no retirable)
-  - marginUsed: margen usado por posiciones abiertas
-  - pnl: pnl flotante
-*/
 function computeWalletMetrics(wallet, positionsList){
   const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own ?? wallet.balance) || 0;
   const credit = Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0;
   const marginUsed = Number(wallet.marginUsed ?? wallet.usedMargin ?? wallet.borrowed ?? 0) || 0;
   const pnlReported = Number(wallet.pnl ?? wallet.pnlReported ?? 0) || 0;
 
-  // unrealized based on positions if backend doesn't provide pnl
   let unreal = 0;
   (positionsList || []).forEach(p => { unreal += computePositionUnrealized(p); });
 
@@ -1554,7 +1618,6 @@ async function refreshWalletAndPositionsUI(){
 
     positions = Array.isArray(remotePositions) ? remotePositions : [];
 
-    // update UI elements (if exist)
     const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + walletNormalized.balanceOwn.toLocaleString('es-DO');
     const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (walletNormalized.equityReported || (walletNormalized.balanceOwn + walletNormalized.credit)).toLocaleString('es-DO');
     const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (walletNormalized.pnlReported || 0).toLocaleString('es-DO');
@@ -1583,7 +1646,6 @@ function startMarginWatcher(){
     try{
       if(window.symbolPrices) Object.assign(symbolPrices, window.symbolPrices);
 
-      // prevent overlapping ticks
       if(window.__marginTickRunning) return;
       window.__marginTickRunning = true;
       try{
@@ -1715,10 +1777,7 @@ async function closePositionServer(id){
   }
 }
 
-/* =========================
-   TRADINGVIEW & SYMBOLS
-   (helpers mínimos para que UI funcione without errors)
-   ========================= */
+/* TRADINGVIEW & SYMBOLS (helpers mínimos) */
 
 const ALL_SYMBOLS = window.ALL_SYMBOLS || [
   {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
@@ -1736,7 +1795,8 @@ let menuToggle;
 
 /* Wire DOM refs defensively */
 function wireDomRefs(){
-  menuToggle = document.getElementById('menuToggle');
+  // look for several possible IDs to avoid mismatch with HTML edits
+  menuToggle = document.getElementById('menuToggle') || document.getElementById('sidebarToggle') || document.getElementById('menuTogglePrivate');
   symbolSearch = document.getElementById('symbolSearch');
   symbolsGrid = document.getElementById('symbolsGrid');
   catTabs = document.getElementById('catTabs');
@@ -1761,12 +1821,10 @@ function wireDomRefs(){
     if(sb) sb.classList.toggle('hidden');
   });
 
-  // attach nav handlers if sidebar items have data-target
   document.querySelectorAll('.menu-item[data-target]').forEach(item=>{
     try{ item.addEventListener('click', navSidebar); }catch(e){}
   });
 
-  // footer nav
   document.querySelectorAll('.fnav-item[data-target]').forEach(f=>{
     try{ f.addEventListener('click', footerNavClick); }catch(e){}
   });
@@ -1849,9 +1907,9 @@ function selectSymbolAndOpenTrading(symbol, label){
   if(opExchange) opExchange.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
   currentSymbol = symbol;
   showPanel('tradingPanel');
-  initTradingWidget(symbol);
-  updateDisplayedPrice(symbolPrices[symbol] || 0);
-  updateOrderBook(symbolPrices[symbol] || 0);
+  initTradingWidget && initTradingWidget(symbol);
+  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[symbol] || 0);
+  updateOrderBook && updateOrderBook(symbolPrices[symbol] || 0);
 }
 
 /* --- Demo price engine (keeps chart & symbols updated) --- */
@@ -1866,8 +1924,8 @@ function selectSymbolAndOpenTrading(symbol, label){
         symbolPrices[s.symbol] = Number(Math.max(0.00001, old + change).toFixed(6));
       }
     });
-    try{ updateDisplayedPrice(symbolPrices[currentSymbol] || 0); }catch(e){}
-    try{ updateOrderBook(symbolPrices[currentSymbol] || 0); }catch(e){}
+    try{ updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol] || 0); }catch(e){}
+    try{ updateOrderBook && updateOrderBook(symbolPrices[currentSymbol] || 0); }catch(e){}
     try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
     try{ renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory); }catch(e){}
     try{ updateWalletTotal(); }catch(e){}
@@ -1880,7 +1938,6 @@ let demo_usdt = 10000.00;
 let demo_balances = {'BTC':0.054231, 'ETH':0.0, 'SOL':0.0, 'EUR':0.0, 'GBP':0.0};
 
 function updateWalletTotal(){
-  // try to use server-side wallet if present otherwise show demo values
   const bal = Number(getSavedSession()?.balance || demo_usdt);
   balUsdtEl && (balUsdtEl.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
   balUsdtTop && (balUsdtTop.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -1906,9 +1963,9 @@ function findSymbolForBase(base){
 
 /* INIT TRADING */
 function initTradingIfNeeded(){
-  initTradingWidget(currentSymbol);
-  updateDisplayedPrice(symbolPrices[currentSymbol]||0);
-  updateOrderBook(symbolPrices[currentSymbol]||0);
+  initTradingWidget && initTradingWidget(currentSymbol);
+  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol]||0);
+  updateOrderBook && updateOrderBook(symbolPrices[currentSymbol]||0);
   renderPositionsUI();
 }
 
@@ -1917,7 +1974,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   try{ wireDomRefs(); }catch(e){ console.warn('wireDomRefs error', e); }
   try{ initSymbolsUI(); }catch(e){}
   try{ showPanel('dashboardPanel'); }catch(e){}
-  // render demo positions if none
   try{
     if(positions.length === 0){
       positions.push({id:'POS-1',symbol:'BINANCE:BTCUSDT',side:'LONG',qty:0.02,entryPrice:86000,createdAt:new Date().toISOString()});
@@ -1927,9 +1983,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }catch(e){}
 });
 
-/* =========================
-   NAV helpers (exposed globally so HTML onclick works)
-   ========================= */
+/* NAV helpers */
 function hideAllPanels(){
   document.querySelectorAll('#privateArea_full .panel').forEach(p => p.style.display = 'none');
   document.querySelectorAll('#privateArea_full .fnav-item').forEach(f => f.classList.remove('active'));
@@ -1944,7 +1998,6 @@ function showPanel(id){
 }
 
 function footerNavClick(evt){
-  // evt may be Event or string
   try{
     let target;
     if(typeof evt === 'string') target = evt;
@@ -1956,7 +2009,6 @@ function footerNavClick(evt){
   }catch(e){ console.warn('footerNavClick error', e); }
 }
 
-// navSidebar can be called from HTML 'onclick="navSidebar(this)"' or as event
 function navSidebar(evt){
   try{
     const el = (evt && evt.currentTarget) ? evt.currentTarget : evt;
@@ -1974,10 +2026,8 @@ function navSidebar(evt){
   }catch(e){ console.warn('navSidebar error', e); }
 }
 
-// expose to global so inline HTML onclick works
 window.navSidebar = navSidebar;
 window.footerNavClick = footerNavClick;
-
 </script>
 
   <!-- END: contenido importado -->
