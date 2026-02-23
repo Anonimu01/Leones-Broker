@@ -474,67 +474,6 @@ window.API =
 
 
 
-// public/js/polygon-client.js
-(function(){
-  const socket = io();
-
-  // DOM helpers
-  function $(sel){ return document.querySelector(sel); }
-
-  // keep last prices
-  window.symbolPrices = window.symbolPrices || {};
-
-  // init lightweight chart
-  const chartContainer = document.getElementById('tv_chart_container');
-  let chart, series;
-  if(chartContainer){
-    chart = LightweightCharts.createChart(chartContainer, {
-      width: chartContainer.clientWidth,
-      height: chartContainer.clientHeight || 420,
-      layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
-      grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
-    });
-    series = chart.addLineSeries({ priceLineVisible: true });
-    // resize
-    window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
-  }
-
-  socket.on('connect', ()=> console.log('socket connected', socket.id));
-  socket.on('prices_snapshot', (snapshot)=>{
-    window.symbolPrices = snapshot || {};
-    // set initial series from current symbol if available
-    const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
-    if(curSym && snapshot[curSym] && series){
-      series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
-    }
-  });
-
-  socket.on('price', (p)=>{
-    if(!p || !p.symbol) return;
-    window.symbolPrices[p.symbol] = p.price;
-    // update small DOM price if present
-    const priceEls = document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`);
-    priceEls.forEach(el=> {
-      if(el.id === 'op-price') el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
-      else el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
-    });
-    // if chart present and current symbol matches
-    const currentLabel = document.getElementById('tradingSymbol')?.innerText?.replace('/','');
-    if(series && currentLabel && (p.symbol.endsWith(currentLabel) || p.symbol === currentLabel)){
-      const t = Math.floor((p.ts || Date.now()) / 1000);
-      try{ series.update({ time: t, value: Number(p.price) }); }catch(e){}
-    }
-  });
-
-  // optional: UI to ask server to subscribe
-  window.subscribeSymbol = function(symbol, kind='trades'){
-    socket.emit('subscribe', { symbol, kind });
-  };
-  window.unsubscribeSymbol = function(symbol, kind='trades'){
-    socket.emit('unsubscribe', { symbol, kind });
-  };
-
-})();
 
 
 
@@ -2195,6 +2134,78 @@ window.hideModalInfo = function(){ const m = document.getElementById('infoModal'
 window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
 window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
 window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+
+
+
+
+
+
+// public/js/polygon-client.js
+(function(){
+  const socket = io();
+
+  // DOM helpers
+  function $(sel){ return document.querySelector(sel); }
+
+  // keep last prices
+  window.symbolPrices = window.symbolPrices || {};
+
+  // init lightweight chart
+  const chartContainer = document.getElementById('tv_chart_container');
+  let chart, series;
+  if(chartContainer){
+    chart = LightweightCharts.createChart(chartContainer, {
+      width: chartContainer.clientWidth,
+      height: chartContainer.clientHeight || 420,
+      layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+    });
+    series = chart.addLineSeries({ priceLineVisible: true });
+    // resize
+    window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+  }
+
+  socket.on('connect', ()=> console.log('socket connected', socket.id));
+  socket.on('prices_snapshot', (snapshot)=>{
+    window.symbolPrices = snapshot || {};
+    // set initial series from current symbol if available
+    const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
+    if(curSym && snapshot[curSym] && series){
+      series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
+    }
+  });
+
+  socket.on('price', (p)=>{
+    if(!p || !p.symbol) return;
+    window.symbolPrices[p.symbol] = p.price;
+    // update small DOM price if present
+    const priceEls = document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`);
+    priceEls.forEach(el=> {
+      if(el.id === 'op-price') el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+      else el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+    });
+    // if chart present and current symbol matches
+    const currentLabel = document.getElementById('tradingSymbol')?.innerText?.replace('/','');
+    if(series && currentLabel && (p.symbol.endsWith(currentLabel) || p.symbol === currentLabel)){
+      const t = Math.floor((p.ts || Date.now()) / 1000);
+      try{ series.update({ time: t, value: Number(p.price) }); }catch(e){}
+    }
+  });
+
+  // optional: UI to ask server to subscribe
+  window.subscribeSymbol = function(symbol, kind='trades'){
+    socket.emit('subscribe', { symbol, kind });
+  };
+  window.unsubscribeSymbol = function(symbol, kind='trades'){
+    socket.emit('unsubscribe', { symbol, kind });
+  };
+
+})();
+
+
+
+
+
 </script>
   <!-- END: contenido importado -->
 </div>
