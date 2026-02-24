@@ -1,0 +1,2250 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Leones Broker — Tu Puerta al Mercado Global</title>
+<meta name="description" content="Leones Broker - Plataforma de trading. Público y área privada." />
+
+<!-- FONT AWESOME (necesario para los íconos del bloque de depósito) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+    background:#0b0b0b;color:#e9e6e1;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+    line-height:1.45;overflow-x:hidden;
+  }
+  :root{ --gold:#cfa240; --muted:#bfc6c9; --card:#141414; }
+
+  img{display:block;max-width:100%;height:auto;object-fit:cover}
+  a{color:var(--gold);text-decoration:none}
+
+  header{
+    position:fixed;top:0;left:0;right:0;height:72px;z-index:1400;
+    display:flex;align-items:center;justify-content:space-between;padding:12px 22px;
+    background:linear-gradient(180deg, rgba(11,11,11,0.75), rgba(11,11,11,0.22));
+    backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,0.03)
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand img{height:44px;width:auto;object-fit:contain}
+  .brand h1{margin:0;font-size:18px;color:var(--gold);font-weight:800}
+  .nav-actions{display:flex;gap:10px;align-items:center}
+  .btn{background:var(--gold);color:#111;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--gold);border:2px solid rgba(207,162,67,0.12)}
+  /* Glow animation for prominent CTA */
+  .glow {
+    box-shadow: 0 0 8px rgba(207,162,67,0.9), 0 0 20px rgba(207,162,67,0.18) inset;
+    animation: pulseGlow 2.6s infinite ease-in-out;
+  }
+  @keyframes pulseGlow {
+    0% { box-shadow: 0 0 6px rgba(207,162,67,0.7), 0 0 12px rgba(207,162,67,0.12) inset; transform: translateY(0); }
+    50% { box-shadow: 0 0 12px rgba(207,162,67,0.95), 0 0 26px rgba(207,162,67,0.18) inset; transform: translateY(-1px); }
+    100% { box-shadow: 0 0 6px rgba(207,162,67,0.7), 0 0 12px rgba(207,162,67,0.12) inset; transform: translateY(0); }
+  }
+
+  main{width:100%;margin:0;padding-top:88px}
+  /* CONTENIDO AOCUPAR TODA LA PÁGINA */
+  .container{width:100%;max-width:none;margin:0;padding:24px} /* cambiado para ocupar página completa */
+
+  /* Hero */
+  .hero-strip{position:relative;height:56vh;min-height:420px;display:flex;align-items:center;overflow:hidden}
+  .hero-strip .bg{position:absolute;inset:0;z-index:1;overflow:hidden}
+  .hero-strip .bg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:contrast(1.02) saturate(.9)}
+  .hero-content{position:relative;z-index:3;width:100%;display:flex;align-items:center}
+  .hero-inner{display:grid;grid-template-columns:1fr 480px;gap:28px;align-items:center;width:100%;padding:24px}
+  .hero-text{color:#f6efe6;text-align:left;padding:20px;background:linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.06));border-radius:12px}
+  .hero-text h2{margin:0;color:var(--gold);font-size:clamp(28px,5vw,56px);line-height:1.03;font-weight:800}
+  .hero-text p.lead{margin:12px 0 0;color:var(--muted);font-size:clamp(14px,1.6vw,20px)}
+  .cta-group{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}
+  .hero-visual{border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,0.6)}
+  .hero-visual img{width:100%;height:56vh;min-height:320px;object-fit:cover}
+
+  /* Sections */
+  h3{color:var(--gold);font-size:28px;margin:0 0 12px}
+  h4{color:var(--gold);margin:0 0 8px}
+  p{margin:0;color:var(--muted);line-height:1.6}
+
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.04));padding:18px;border-radius:12px;border:1px solid rgba(255,255,255,0.03)}
+  .card .thumb{width:100%;height:140px;border-radius:8px;overflow:hidden}
+
+  /* Accent cards (mobile look) */
+  .card-list{display:flex;flex-direction:column;gap:16px}
+  .accent-card{background:var(--card);border-radius:12px;padding:20px;position:relative;overflow:hidden;border:1px solid rgba(255,255,255,0.02)}
+  .accent-card::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:12px;border-radius:8px;background:linear-gradient(180deg,#D9B34A,#C79E40)}
+
+  /* Private area */
+  .private-wrapper{display:flex;min-height:calc(100vh - 72px);background:linear-gradient(180deg,#0f0f0f,#0d0d0d)}
+  .private-aside{width:260px;background:#0c0c0c;border-right:1px solid rgba(255,255,255,0.02);padding:18px;position:fixed;top:72px;bottom:0;left:0}
+  .private-main{margin-left:280px;flex:1;padding:28px;max-width:1200px}
+  .menu-item{display:block;padding:10px 12px;border-radius:8px;color:var(--muted);margin-bottom:6px;cursor:pointer}
+  .menu-item.active{background:rgba(207,162,67,0.08);color:var(--gold);font-weight:700}
+
+  footer{padding:28px 24px;text-align:center;color:var(--muted)}
+
+  /* modal */
+  #modal{display:none;position:fixed;inset:0;align-items:center;justify-content:center;background:rgba(0,0,0,0.65);z-index:3000}
+  #modal .box{width:100%;max-width:780px;padding:18px;border-radius:12px;background:linear-gradient(180deg,#0b0b0b,#121212);border:1px solid rgba(255,255,255,0.03)}
+
+  /* fallback */
+  .img-fallback{display:flex;align-items:center;justify-content:center;background:#121212;color:var(--muted);height:140px;border-radius:8px;padding:10px;text-align:center}
+
+  @media (max-width:900px){
+    .hero-inner{grid-template-columns:1fr}
+    .hero-visual img{height:40vh;min-height:200px}
+    .grid-3{grid-template-columns:1fr}
+    .private-aside{position:static;width:100%;margin-bottom:12px}
+    .private-main{margin-left:0}
+    .container{padding:18px}
+    .hero-inner{padding:16px}
+  }
+
+  /* =========================
+     BLOQUE: Deposita y Retira (estilos añadidos del bloque)
+     ========================= */
+  .deposit-section {
+      padding: 40px 0 60px 0;
+      background-color: var(--background, #0b0b0b);
+      color: #e9e6e1;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+  }
+  .deposit-title {
+      text-align: left;
+      font-size: 2rem;
+      font-weight: 400;
+      color: var(--gold);
+      margin-bottom: 18px;
+  }
+  .deposit-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 30px;
+      flex-wrap: wrap;
+  }
+  .info-column { flex:1; max-width:380px; padding:0 12px; }
+  .info-item { margin: 18px 0; line-height:1.5; }
+  .item-title { font-size:1.2rem; font-weight:600; margin-bottom:6px; color:#fff }
+  .item-description { font-size:1rem; color:var(--muted) }
+  .deposit-footer { text-align:left;color:var(--muted);margin-top:20px;font-size:0.9rem }
+
+  .circle-chart {
+      position: relative;
+      width: 380px;
+      height: 380px;
+      border-radius: 50%;
+      background-color: transparent;
+      flex-shrink: 0;
+      margin: 0 20px;
+      overflow: hidden;
+      box-shadow: 0 0 15px rgba(0,0,0,0.4);
+  }
+  @media (max-width: 500px) {
+      .circle-chart { width: 300px; height: 300px; margin: 0 auto; }
+      .info-column { max-width:100%; text-align:center; }
+  }
+  .center-circle {
+      position:absolute; top:50%; left:50%; width:160px; height:160px; border-radius:50%;
+      transform:translate(-50%,-50%); background-color:var(--center-color, #0b0b0b); z-index:2;
+  }
+  .segment {
+      --segment-size:50%;
+      position:absolute; width:var(--segment-size); height:var(--segment-size);
+      background-color:var(--segment-color, #333333); display:flex; justify-content:center; align-items:center;
+      color:#fff; font-size:2em; z-index:1; box-sizing:border-box; border:1px solid rgba(0,0,0,0.2);
+  }
+  .segment-1 { top:0; left:0; }
+  .segment-2 { top:0; right:0; }
+  .segment-3 { bottom:0; right:0; }
+  .segment-4 { bottom:0; left:0; }
+  .segment-5 { bottom:0; left:0; }
+  .segment i { color:#e9e6e1; position:absolute; font-size:1.6em; }
+  /* End deposit block styles */
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <img id="logoImg" src="/imge.img/logo leones.avif" alt="Leones Broker logo" onerror="this.style.display='none'"/>
+    <h1>Leones Broker</h1>
+  </div>
+  <div class="nav-actions" id="headerActions">
+    <!-- Added glow class to highlight these buttons -->
+    <button class="btn glow" id="openAccountBtn">Abrir Cuenta</button>
+    <button class="btn ghost glow" id="loginBtn">Iniciar Sesión</button>
+  </div>
+</header>
+
+<main id="publicMain">
+
+  <!-- HERO -->
+  <section class="hero-strip" aria-label="Hero">
+    <div class="bg"><img src="" alt="Hero banner" onerror="this.style.display='none'"></div>
+
+    <div class="hero-content container">
+      <div class="hero-inner">
+        <div class="hero-text">
+          <!-- EXACT TEXT (intro) -->
+          <h2>Bienvenido a Leones Broker:<br>Tu Puerta al Mercado Global</h2>
+          <p class="lead">Descubre un mundo de oportunidades con nuestra plataforma de trading avanzada. ¡Regístrate hoy y comienza tu viaje financiero!</p>
+
+          <div class="cta-group">
+            <!-- also glowing CTAs -->
+            <button class="btn glow" id="ctaAbrir">Abrir Cuenta</button>
+            <button class="btn ghost glow" id="ctaLogin">Iniciar Sesión</button>
+          </div>
+        </div>
+
+        <div class="hero-visual" aria-hidden="true">
+          <img src="/imge.img/cc80JmF0w-yls-Phj6T3e.jpg" alt="Visual" onerror="this.style.display='none'">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXPLORA LOS MERCADOS -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Explora los Mercados que Te Mueven</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:14px">
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/tgZ6DN5F0VWApXkvuUqkv.jpg" alt="Forex" onerror="this.style.display='none'">
+          </div>
+          <h4>Forex</h4>
+          <p>Opera con las principales divisas globales.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/2IBw_mVFi2j9_lZ0B5drJ.jpg" alt="Criptomonedas" onerror="this.style.display='none'">
+          </div>
+          <h4>Criptomonedas</h4>
+          <p>Invierte en el futuro del dinero digital.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/wDJ7kLiUHiwmQUy0WTa3y.jpg" alt="Índices" onerror="this.style.display='none'">
+          </div>
+          <h4>Índices</h4>
+          <p>Accede a los principales mercados bursátiles del mundo.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/M6y8BjWWbmAp6xTqxhV6m.jpg" alt="Materias Primas" onerror="this.style.display='none'">
+          </div>
+          <h4>Materias Primas</h4>
+          <p>Desde el oro y la plata hasta el petróleo y el gas.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/SblHxbuPnj0bDONBbTJKq.jpg" alt="Acciones y ETFs" onerror="this.style.display='none'">
+          </div>
+          <h4>Acciones y ETFs</h4>
+          <p>Participa en el crecimiento de las empresas líderes.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="CFDs y Futuros" onerror="this.style.display='none'">
+          </div>
+          <h4>CFDs y Futuros</h4>
+          <p>Maximiza tus oportunidades con instrumentos derivados.</p>
+        </div>
+      </div>
+
+      <p style="margin-top:18px;color:var(--muted)">Ofrecemos una amplia gama de instrumentos para diversificar tu cartera.</p>
+
+      <!-- ====== BLOQUE DEPOSIT MOVIDO AQUÍ (debajo de la frase solicitada) ====== -->
+      <section class="deposit-section" aria-label="Depositos y Retiros">
+        <div class="container">
+            <h2 class="deposit-title">Deposita y Retira con Facilidad y Seguridad</h2>
+
+            <div class="deposit-content">
+                <div class="info-column left" style="padding-left: 0;">
+                    <div class="info-item">
+                        <h3 class="item-title">Tarjetas de Crédito/Débito</h3>
+                        <p class="item-description">Rápido y seguro, las opciones más populares.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">Pagos Locales</h3>
+                        <p class="item-description">Opciones específicas para cada región.</p>
+                    </div>
+                </div>
+
+                <div class="circle-chart" id="circleChart">
+                    <div class="center-circle"></div>
+                    <div class="segment segment-1" data-index="0" data-origin="100% 100%"><i class="fa-solid fa-credit-card"></i></div>
+                    <div class="segment segment-2" data-index="1" data-origin="0% 100%"><i class="fa-solid fa-money-bill-transfer"></i></div>
+                    <div class="segment segment-3" data-index="2" data-origin="0% 0%"><i class="fa-brands fa-bitcoin"></i></div>
+                    <div class="segment segment-4" data-index="3" data-origin="100% 0%"><i class="fa-solid fa-wallet"></i></div>
+                    <div class="segment segment-5" data-index="4" data-origin="100% 0%"><i class="fa-solid fa-users"></i></div>
+                </div>
+
+                <div class="info-column right" style="padding-right: 0;">
+                    <div class="info-item">
+                        <h3 class="item-title">Transferencias Bancarias</h3>
+                        <p class="item-description">Directo desde tu banco, ideal para montos mayores.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">Criptomonedas</h3>
+                        <p class="item-description">Financia tu cuenta con activos digitales.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">e-Wallets</h3>
+                        <p class="item-description">PayPal, Skrill, Neteller y otros monederos electrónicos.</p>
+                    </div>
+                </div>
+            </div>
+
+            <p class="deposit-footer">Todos los métodos cuentan con tiempos de aprobación transparentes para tu comodidad</p>
+        </div>
+      </section>
+      <!-- ====== FIN BLOQUE DEPOSIT ====== -->
+
+    </div>
+  </section>
+
+  <!-- INSTRUMENTOS DETALLE (mantenidos, ahora más ancho) -->
+  <section style="padding:36px 0">
+    <div class="container">
+      <h3>Instrumentos de Trading: Conoce Cada Detalle</h3>
+
+      <div class="card-list" style="margin-top:14px">
+        <div class="accent-card">
+          <h4>Spreads y Comisiones</h4>
+          <p>Transparencia total en nuestros costos para que operes con confianza.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Apalancamiento</h4>
+          <p>Amplifica tus operaciones con opciones de apalancamiento flexibles.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Swaps y Márgenes</h4>
+          <p>Información clara sobre swaps y requisitos de margen para una gestión eficaz.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Horarios de Mercado</h4>
+          <p>Consulta los horarios de trading para cada instrumento y planifica tus estrategias.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:18px" class="img-slot">
+        <img src="/imge.img/3O9hTbpVd0U6NXnh1joLF (1).jpg" alt="Instruments detail" onerror="this.style.display='none'">
+      </div>
+    </div>
+  </section>
+
+  <!-- PLATAFORMAS -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Plataformas de Trading Intuitivas y Potentes</h3>
+      <p style="color:var(--muted);margin-top:8px">Opera desde cualquier lugar con nuestras plataformas diseñadas para tu éxito.</p>
+
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:16px">
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/Yy7o1e5hqgD_UtiDhBAU0.jpg" alt="WebTrader" onerror="this.style.display='none'">
+          </div>
+          <h4>WebTrader</h4>
+          <p>Acceso instantáneo desde tu navegador sin descargas.</p>
+        </div>
+
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/wDJ7kLiUHiwmQUy0WTa3y.jpg" alt="App Móvil" onerror="this.style.display='none'">
+          </div>
+          <h4>App Móvil</h4>
+          <p>Gestiona tus operaciones en movimiento con nuestra app intuitiva.</p>
+        </div>
+
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="MT4/MT5/cTrader" onerror="this.style.display='none'">
+          </div>
+          <h4>MT4/MT5/cTrader</h4>
+          <p>Plataformas líderes para traders avanzados.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:18px" class="img-slot">
+        <img src="/imge.img/suBwzhDGDXvJSbuANOGH_ (1).jpg" alt="Manuales y Tutoriales" onerror="this.style.display='none'">
+      </div>
+      <p style="margin-top:12px;color:var(--muted)">Manuales y Tutoriales — Guías completas para dominar cada función de la plataforma.</p>
+    </div>
+  </section>
+
+  <!-- CUENTAS Y PAGOS (mantengo) -->
+  <section style="padding:36px 0">
+    <div class="container">
+      <h3>Elige la Cuenta Perfecta para Ti</h3>
+      <p style="color:var(--muted);margin-top:8px">Ofrecemos diferentes tipos de cuentas para adaptarse a tus necesidades y estilo de trading.</p>
+
+      <div class="grid-3" style="margin-top:14px">
+        <div class="card"><h4>Cuenta Estándar</h4><p class="muted">Ideal para principiantes y traders con experiencia moderada.</p></div>
+        <div class="card"><h4>Cuenta ECN</h4><p class="muted">Para operaciones directas al mercado con spreads muy bajos.</p></div>
+        <div class="card"><h4>Cuenta VIP</h4><p class="muted">Beneficios exclusivos y condiciones premium para grandes volúmenes.</p></div>
+      </div>
+
+      <h3 style="margin-top:22px">Deposita y Retira con Facilidad y Seguridad</h3>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px">
+        <div style="flex:1;min-width:300px" class="card">
+          <div class="thumb"><img src="/imge.img/LA1QmiMDzMWegyH1Lxc1J.jpg" alt="Tarjetas" onerror="this.style.display='none'"></div>
+          <h4>Tarjetas de Crédito/Débito</h4><p class="muted">Rápido y seguro, las opciones más populares.</p>
+        </div>
+
+        <div style="flex:1;min-width:300px" class="card">
+          <div class="thumb"><img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="Transferencias" onerror="this.style.display='none'"></div>
+          <h4>Transferencias Bancarias / Criptomonedas / e-Wallets</h4>
+          <p class="muted">Directo desde tu banco, criptomonedas, y monederos electrónicos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REGULACIÓN, EDUCACIÓN, SOPORTE -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Regulación y Seguridad: Nuestra Prioridad</h3>
+      <p class="muted">Operamos bajo estrictas regulaciones para garantizar un entorno de trading seguro y transparente.</p>
+
+      <ul style="color:var(--muted);margin-top:12px">
+        <li>Número de licencia claramente visible.</li>
+        <li>País de regulación y autoridad supervisora.</li>
+        <li>Términos y Condiciones, Política de Privacidad, Política de Riesgos y Política de Cookies.</li>
+      </ul>
+
+      <h3 style="margin-top:18px">Centro Educativo: Desarrolla Tus Habilidades</h3>
+      <p class="muted">Cursos interactivos, webinars en vivo, noticias de mercado y calendario económico.</p>
+
+      <h3 style="margin-top:18px">Soporte Dedicado: Siempre a Tu Lado</h3>
+      <p class="muted">Chat en Vivo · WhatsApp <strong>786-872-0660</strong> · Email <strong>contactoleonesbroker@gmail.com</strong></p>
+
+      <div style="margin-top:18px">
+        <img src="/imge.img/Yy7o1e5hqgD_UtiDhBAU0.jpg" alt="licence" style="width:100%;max-width:480px;border-radius:12px" onerror="this.style.display='none'">
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer id="publicFooter">© Leones Broker — Público
+  <!-- incluir en tu HTML (por ejemplo en footer) -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/js/polygon-client.js"></script>
+</footer>
+
+<!-- Modal -->
+<div id="modal" aria-hidden="true">
+  <div class="box">
+    <h3 id="modalTitle" style="color:var(--gold);margin:0 0 12px">Modal</h3>
+    <div id="modalBody"></div>
+    <div style="text-align:right;margin-top:12px">
+      <button class="btn ghost" id="modalCancel">Cancelar</button>
+      <button class="btn" id="modalOk">Aceptar</button>
+    </div>
+  </div>
+</div>
+<script>
+/* ----------------------------
+   JS Nº1 - FRONTEND: modal + register/login (COMPLETO - ACTUALIZADO)
+   ---------------------------- */
+
+/* GLOBAL KEYS / HELPERS */
+const USERS_KEY = 'leones_images_users';
+const SESSION_KEY = 'BROKERPRO_SESSION_USER';
+
+/* --- API URL dinámica --- */
+window.API =
+  location.hostname === "localhost"
+    ? "http://localhost:3000/api"
+    : (window.API || "https://leones-broker.onrender.com/api");
+
+
+
+// public/js/polygon-client.js
+(function(){
+  // Sólo inicializa socket si la librería está cargada
+  if (typeof io === 'function') {
+    const socket = io();
+
+    // DOM helpers
+    function $(sel){ return document.querySelector(sel); }
+
+    // keep last prices
+    window.symbolPrices = window.symbolPrices || {};
+
+    // init lightweight chart
+    const chartContainer = document.getElementById('tv_chart_container');
+    let chart, series;
+    if(chartContainer && typeof LightweightCharts !== 'undefined'){
+      chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.clientWidth,
+        height: chartContainer.clientHeight || 420,
+        layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+      });
+      series = chart.addLineSeries({ priceLineVisible: true });
+      // resize
+      window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+    }
+
+    socket.on('connect', ()=> console.log('socket connected', socket.id));
+    socket.on('prices_snapshot', (snapshot)=>{
+      window.symbolPrices = snapshot || {};
+      // set initial series from current symbol if available
+      const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
+      if(curSym && snapshot[curSym] && series){
+        series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
+      }
+    });
+
+    socket.on('price', (p)=>{
+      if(!p || !p.symbol) return;
+      window.symbolPrices[p.symbol] = p.price;
+      // update small DOM price if present
+      const priceEls = document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`);
+      priceEls.forEach(el=> {
+        if(el.id === 'op-price') el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+        else el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+      });
+      // if chart present and current symbol matches
+      const currentLabel = document.getElementById('tradingSymbol')?.innerText?.replace('/','');
+      if(series && currentLabel && (p.symbol.endsWith(currentLabel) || p.symbol === currentLabel)){
+        const t = Math.floor((p.ts || Date.now()) / 1000);
+        try{ series.update({ time: t, value: Number(p.price) }); }catch(e){}
+      }
+    });
+
+    // optional: UI to ask server to subscribe
+    window.subscribeSymbol = function(symbol, kind='trades'){
+      socket.emit('subscribe', { symbol, kind });
+    };
+    window.unsubscribeSymbol = function(symbol, kind='trades'){
+      socket.emit('unsubscribe', { symbol, kind });
+    };
+  } else {
+    // stubs para evitar errores si socket.io no está cargado
+    console.warn('socket.io no está disponible — funciones de precios en tiempo real inactivas.');
+    window.subscribeSymbol = function(){ console.warn('subscribeSymbol: socket.io no cargado'); };
+    window.unsubscribeSymbol = function(){ console.warn('unsubscribeSymbol: socket.io no cargado'); };
+    window.symbolPrices = window.symbolPrices || {};
+  }
+})();
+
+
+
+
+
+/* helpers localStorage */
+function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch (e) { return []; } }
+function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+/* Apply permanent glow to all interactive fields (inputs/selects/textareas/file) */
+function applyInputGlow(root = document){
+  try{
+    const selector = 'input, textarea, select';
+    Array.from(root.querySelectorAll(selector)).forEach(el=>{
+      // skip buttons
+      if(el.type && ['button','submit','reset'].includes(el.type)) return;
+      // base styles - keep them minimal to avoid overriding your CSS too much
+      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+      // focus handler to intensify
+      if(!el._glowHandlersAttached){
+        el.addEventListener('focus', ()=> {
+          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
+          el.style.borderColor = 'rgba(212,175,55,0.45)';
+          el.style.transform = 'translateY(-1px)';
+        });
+        el.addEventListener('blur', ()=> {
+          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
+          el.style.borderColor = 'rgba(212,175,55,0.14)';
+          el.style.transform = '';
+        });
+        el._glowHandlersAttached = true;
+      }
+    });
+  }catch(e){ console.warn('applyInputGlow error', e); }
+}
+
+/* UI modal helpers (mejorado con Enter y toggle password) */
+function ensureModalHooks(){
+  var modal = document.getElementById('modal');
+  if(!modal) return;
+
+  var cancel = document.getElementById('modalCancel');
+  if(cancel && !cancel.dataset.hooked){
+    cancel.addEventListener('click', closeModal);
+    cancel.dataset.hooked='1';
+  }
+
+  var ok = document.getElementById('modalOk');
+  if(ok && !ok.dataset.hooked){
+    ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); });
+    ok.dataset.hooked='1';
+  }
+}
+
+function openModal(html, onConfirm){
+  ensureModalHooks();
+  var modal = document.getElementById('modal');
+  if(!modal){
+    console.warn('Modal element not found: #modal');
+    return;
+  }
+  var body = document.getElementById('modalBody');
+  if(!body) {
+    console.warn('Modal body element not found: #modalBody');
+    return;
+  }
+  body.innerHTML = html;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  modal._onConfirm = onConfirm;
+
+  // Add enter key submit and password toggle inside modal
+  setTimeout(()=>{ // next tick to ensure elements are in DOM
+    // apply glow inside modal inputs
+    applyInputGlow(body);
+
+    const firstInput = modal.querySelector('input, textarea, select');
+    if(firstInput) firstInput.focus();
+
+    // Enter key handler
+    const enterHandler = (e)=>{
+      if(e.key === 'Enter'){
+        try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){}
+        closeModal();
+      }
+    };
+    modal._enterHandler = enterHandler;
+    modal.addEventListener('keydown', enterHandler);
+
+    // add toggle eye buttons for password inputs
+    modal.querySelectorAll('input[type="password"]').forEach(pw=>{
+      // avoid duplicating button
+      if(pw.nextSibling && pw.nextSibling.classList && pw.nextSibling.classList.contains('pw-toggle')) return;
+      const btn = document.createElement('button');
+      btn.type='button';
+      btn.className='pw-toggle';
+      btn.style.marginLeft='8px';
+      btn.style.padding='6px';
+      btn.style.background='transparent';
+      btn.style.color='#ddd';
+      btn.style.border='1px solid rgba(255,255,255,0.03)';
+      btn.style.borderRadius='6px';
+      btn.textContent='👁️';
+      btn.addEventListener('click', ()=> {
+        pw.type = pw.type === 'password' ? 'text' : 'password';
+        pw.focus();
+      });
+      // place after input (safe)
+      try{
+        pw.parentNode.style.position = pw.parentNode.style.position || 'relative';
+        pw.parentNode.appendChild(btn);
+      }catch(e){}
+    });
+  },50);
+}
+
+function closeModal(){
+  var modal = document.getElementById('modal');
+  if(!modal) return;
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+  modal._onConfirm = null;
+  if(modal._enterHandler){ modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
+}
+
+/* Safe element attach (no crash if element missing) */
+function attachIfExists(id, event, fn){
+  const el = document.getElementById(id);
+  if(el && !el._hooked){
+    el.addEventListener(event, fn);
+    el._hooked = true;
+  }
+}
+
+/* Attach buttons if exist */
+attachIfExists('openAccountBtn','click', openRegisterModal);
+attachIfExists('loginBtn','click', openLoginModal);
+attachIfExists('ctaAbrir','click', ()=> { const b = document.getElementById('openAccountBtn'); if(b) b.click(); });
+attachIfExists('ctaLogin','click', ()=> { const b = document.getElementById('loginBtn'); if(b) b.click(); });
+
+/* ---------- REGISTER / LOGIN (tries backend, fallback to localStorage) ---------- */
+
+async function backendRegister(userObj){
+  try{
+    const res = await fetch(`${window.API}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(userObj)
+    });
+    const payload = await res.json().catch(()=>null);
+    if(!res.ok){
+      const msg = (payload && (payload.msg || payload.error)) || 'Error servidor';
+      return { ok:false, msg, data: payload || null };
+    }
+    return { ok:true, data: payload || {} };
+  }catch(e){
+    console.error('backendRegister error', e);
+    return { ok:false, msg: e.message || 'Network' };
+  }
+}
+
+async function backendLogin(creds){
+  try{
+    const res = await fetch(`${window.API}/auth/login`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(creds)
+    });
+    const payload = await res.json().catch(()=>null);
+    if(!res.ok){
+      const msg = (payload && (payload.msg || payload.error)) || 'Credenciales inválidas';
+      return { ok:false, msg };
+    }
+    return { ok:true, data: payload || {} };
+  }catch(e){
+    console.error('backendLogin error', e);
+    return { ok:false, msg: e.message || 'Network' };
+  }
+}
+
+/* Register modal (tries backend then fallback) */
+function openRegisterModal(){
+  openModal(`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+    </div>
+    <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
+  `, async function(){
+    const name = (document.getElementById('r_name')||{}).value || '';
+    const email = ((document.getElementById('r_email')||{}).value || '').trim().toLowerCase();
+    const phone = (document.getElementById('r_phone')||{}).value || '';
+    const address = (document.getElementById('r_address')||{}).value || '';
+    const pass = (document.getElementById('r_pass')||{}).value || '';
+    const msgEl = document.getElementById('r_msg');
+    msgEl.textContent='';
+
+    if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
+
+    const userObj = { name, email, phone, address, password: pass };
+    console.log('Register payload:', userObj);
+    const backend = await backendRegister(userObj);
+    if(backend.ok){
+      const serverData = backend.data;
+
+      if(serverData && serverData.verificationSent === false){
+        msgEl.innerHTML = 'Cuenta creada pero el correo de verificación no pudo enviarse.<br/><br/>';
+        const btn = document.createElement('button');
+        btn.textContent = 'Reenviar verificación';
+        btn.className = 'btn glow';
+        btn.style.padding = '8px 12px';
+        btn.style.marginTop = '6px';
+        msgEl.appendChild(btn);
+
+        btn.addEventListener('click', async ()=>{
+          btn.disabled = true;
+          btn.textContent = 'Enviando...';
+          try{
+            const res = await fetch(`${window.API}/auth/resend-verification`, {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json' },
+              body: JSON.stringify({ email })
+            });
+            const p = await res.json().catch(()=>null);
+            if(res.ok){
+              msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
+            }else{
+              msgEl.textContent = (p && (p.msg || p.error)) || 'Error reenviando verificación';
+              btn.disabled = false;
+              btn.textContent = 'Reenviar verificación';
+            }
+          }catch(e){
+            console.error('resend verification error', e);
+            msgEl.textContent = 'Error de red al reenviar. Intenta de nuevo.';
+            btn.disabled = false;
+            btn.textContent = 'Reenviar verificación';
+          }
+        });
+
+        return;
+      }
+
+      if(serverData && serverData.token){
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name }));
+        localStorage.setItem('token', serverData.token);
+      }
+      else if(serverData && serverData.user){
+        localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
+        if(serverData.user.token) localStorage.setItem('token', serverData.user.token);
+      }
+      else { localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name })); }
+
+      closeModal();
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      return;
+    }
+
+    // fallback: localStorage (offline/dev)
+    const users = loadUsers();
+    if(users.find(u=>u.email===email)){ msgEl.textContent='Correo ya registrado'; return; }
+    const newUser = { name, email, phone, pass, created: Date.now() };
+    users.push(newUser); saveUsers(users);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(newUser));
+    closeModal();
+    if(typeof showPrivateFull === 'function'){ showPrivateFull(newUser); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(newUser); }
+  });
+}
+
+/* Login modal (tries backend then fallback) */
+function openLoginModal(){
+  openModal(`
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+    </div>
+    <div id="l_msg" style="color:#ff8a8a;margin-top:8px"></div>
+  `, async function(){
+    const email = ((document.getElementById('l_email')||{}).value || '').trim().toLowerCase();
+    const pass = (document.getElementById('l_pass')||{}).value || '';
+    const msg = document.getElementById('l_msg');
+    msg.textContent='';
+
+    if(!email || !pass){ msg.textContent='Completa los campos'; return; }
+
+    const backend = await backendLogin({ email, password: pass });
+    if(backend.ok){
+      const d = backend.data;
+      if(d && d.token){
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' }));
+        localStorage.setItem('token', d.token);
+      }
+      else if(d && d.user){
+        localStorage.setItem(SESSION_KEY, JSON.stringify(d.user));
+        if(d.user.token) localStorage.setItem('token', d.user.token);
+      }
+      closeModal();
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      return;
+    }
+
+    // fallback: localStorage auth
+    const users = loadUsers();
+    const user = users.find(u => u.email === email && (u.pass === pass || u.password === pass));
+    if(!user){ msg.textContent = 'Credenciales inválidas'; return; }
+
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    closeModal();
+    if(typeof showPrivateFull === 'function'){ showPrivateFull(user); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(user); }
+  });
+}
+
+/* PUBLIC helper to restore header actions after logout */
+function restorePublicHeader(){
+  const headerActions = document.getElementById('headerActions');
+  if(!headerActions) return;
+  headerActions.innerHTML = '';
+  const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
+  const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
+  headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
+  // reattach
+  openBtn.addEventListener('click', openRegisterModal);
+  loginBtn.addEventListener('click', openLoginModal);
+  // CTAs
+  const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
+  const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
+}
+
+/* -------------------------
+   PARTE PRIVADA (defensiva)
+   ------------------------- */
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+
+/* define showPrivateFull & performLogoutFull only if not provided (avoid overwriting advanced versions) */
+if(typeof window.showPrivateFull !== 'function'){
+  window.showPrivateFull = function(user, token){
+    try{
+      document.getElementById('publicMain') && (document.getElementById('publicMain').style.display='none');
+      document.getElementById('publicFooter') && (document.getElementById('publicFooter').style.display='none');
+      const headerActions = document.getElementById('headerActions');
+      if(headerActions){
+        headerActions.innerHTML = '';
+        const profileBtn = document.createElement('div');
+        profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+        const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
+        const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+        logoutBtn.addEventListener('click', performLogoutFull);
+        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
+        headerActions.appendChild(profileBtn);
+      }
+
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) {
+        privateWrapper.style.display = 'flex';
+        const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = user.name || 'Usuario';
+        const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = user.email || '';
+        const bal = document.getElementById('priv_balance_full');
+        if(bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO'));
+      }
+
+      try{ if(token) localStorage.setItem('token', token); }catch(e){}
+      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      window.scrollTo({top:0,behavior:'smooth'});
+    }catch(e){ console.error('showPrivateFull error', e); }
+  };
+}
+
+if(typeof window.performLogoutFull !== 'function'){
+  window.performLogoutFull = function(){
+    try{
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('token');
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'none';
+      const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
+      const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
+      restorePublicHeader();
+      const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> { const b=document.getElementById('openAccountBtn'); if(b) b.click(); });
+      const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> { const b=document.getElementById('loginBtn'); if(b) b.click(); });
+    }catch(e){ console.error('logout error', e); }
+  };
+}
+
+/* On load: init and restore session; apply input glow globally */
+window.addEventListener('load', function(){
+  ensureModalHooks();
+
+  // fix image paths
+  Array.from(document.images).forEach(img=>{ try{ let s = img.getAttribute('src')||''; if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){ let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29'); img.setAttribute('src', fixed); } }catch(e){} });
+
+  // apply permanent glow to inputs across the page
+  applyInputGlow(document);
+
+  // restore session: SOLO restaurar vista privada si HAY token válido (evita llamadas API sin token)
+  try {
+    var s = localStorage.getItem(SESSION_KEY);
+    var token = localStorage.getItem('token');
+    if (s) {
+      try {
+        var u = JSON.parse(s);
+        // si hay token en localStorage o el objeto de sesión contiene token, restaurar privada
+        const sessionHasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
+        if (sessionHasToken) {
+          if(typeof showPrivateFull === 'function'){
+            showPrivateFull(u, token || u.token);
+          }
+        } else {
+          // no hay token: asegurarse de que quede en modo público
+          try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
+        }
+      } catch(e){
+        console.warn('Error parseando SESSION_KEY al restaurar sesión', e);
+      }
+    }
+  } catch(e){ console.warn('restore session error', e); }
+});
+</script>
+<!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
+<!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
+
+<!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
+<style>
+  :root{
+    --bg:#070707; --surface:#0f0f0f; --muted:#9aa0a6; --text:#e9e6e0;
+    --gold:#d4af37; --danger:#cf304a; --line:rgba(255,255,255,0.06);
+    --focus-glow: rgba(212,175,55,0.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,Arial;
+    background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+    line-height:1.35; font-size:14px; overflow:auto;
+  }
+
+  /* Header */
+  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
+  .header-left{display:flex;align-items:center;gap:12px}
+  /* menu-toggle moved into sidebar; keep style for potential reuse */
+  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
+  .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
+  .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
+
+  /* Layout */
+  .main-wrap{padding-top:80px;max-width:none; width: auto; margin:0 2%;}
+  .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
+  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px); position:relative;}
+  .sidebar.hidden{transform:translateX(-110%)}
+  .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .sidebar .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
+  .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
+
+  .panel{background:linear-gradient(180deg,#0b0b0b,#0c0c0c);border-radius:12px;padding:18px;border:1px solid var(--line);height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6)}
+  .title{font-size:20px;color:var(--text);margin-bottom:12px;font-weight:800}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:14px;border:1px solid rgba(212,175,55,0.06)}
+  .card .value{font-weight:800;color:var(--gold);font-size:18px}
+  .muted{color:var(--muted);font-size:13px}
+
+  .table-box{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:12px;border:1px solid var(--line);overflow:auto}
+  table{width:100%;border-collapse:collapse;color:var(--text);font-size:13px}
+  th{text-align:left;padding:10px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line)}
+  td{padding:10px;border-bottom:1px dashed rgba(255,255,255,0.02)}
+  tr.clickable{cursor:pointer}
+  tr.clickable:hover{background:rgba(212,175,55,0.02)}
+
+  /* Symbols list */
+  .symbols-top{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .cat-tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .cat-tab{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
+  .cat-tab.active{background:rgba(212,175,55,0.06);color:var(--gold)}
+  .search-input{flex:1;min-width:200px;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0b0b0b;color:var(--text)}
+  .symbols-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px; margin-top:10px}
+  .symbol-card{padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg,#0f0f0f,#0d0d0d);cursor:pointer}
+  .symbol-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.5);border-color:rgba(212,175,55,0.08)}
+
+  /* Trading specifics */
+  .chart-area{display:flex;flex-direction:column;min-height:420px}
+  #tv_chart_container {width:100%;flex:1;min-height:420px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.03)}
+  .order-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .ob-col{background:transparent;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
+  .ob-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:var(--muted)}
+
+  .trade-panel{display:grid;grid-template-columns:1fr 320px;gap:12px;margin-top:12px}
+  .trade-box{background:#0b0b0b;border-radius:8px;border:1px solid var(--line);padding:12px}
+  .form-row{display:flex;gap:8px;margin-bottom:8px}
+  .form-input,.form-select{background:#0b0b0b;border:1px solid var(--line);color:var(--text);padding:8px;border-radius:6px;width:100%}
+
+  .btn-primary{background:var(--gold);color:#07100a;border:none;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer;box-shadow:0 6px 20px rgba(201,161,46,0.12)}
+  .btn-secondary{background:transparent;color:var(--gold);border:1px solid rgba(212,175,55,0.18);padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:700}
+
+  .positions-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .pos-card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);padding:10px;border-radius:8px;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+  .pos-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.4)}
+
+  /* Focus / glow for all fields where user types */
+  .panel input[type="text"], .panel input[type="number"], .panel input[type="email"], .panel input[type="file"], .panel textarea, .panel select,
+  .form-input, .form-select, .search-input {
+    transition: box-shadow .18s ease, border-color .18s ease, transform .08s ease;
+    outline: none;
+  }
+  .panel input:focus, .panel textarea:focus, .panel select:focus, .form-input:focus, .form-select:focus, .search-input:focus {
+    box-shadow: 0 0 0 6px var(--focus-glow), 0 8px 30px rgba(0,0,0,0.6);
+    border-color: rgba(212,175,55,0.45);
+    transform: translateY(-1px);
+  }
+  /* Visible focus for keyboard only */
+  .panel input:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible {
+    outline: 3px solid rgba(212,175,55,0.12);
+  }
+
+  /* Footer nav */
+  .footer-nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:60}
+  .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer}
+  .fnav-item.active{color:var(--gold);font-weight:800}
+  .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
+
+  @media(max-width:1000px){
+    .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
+    #tv_chart_container{min-height:300px}
+    .trade-panel{grid-template-columns:1fr}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
+    .sidebar.hidden{transform:translateX(-120%)}
+  }
+
+  .muted-small{color:var(--muted);font-size:12px}
+  .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
+</style>
+
+<!-- MARCA: PARTE PRIVADA (HTML) -->
+<div id="privateArea_full" style="display:none;">
+  <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
+    </div>
+
+    <div class="user">
+      <div style="text-align:right">
+        <div style="font-weight:800;color:var(--gold)" id="privateHeaderName">Usuario</div>
+        <div style="font-size:12px;color:var(--muted)">Bienvenido</div>
+      </div>
+      <div class="avatar" id="privateAvatar">P</div>
+      <button class="btn-primary" onclick="logout()" style="padding:8px 10px;margin-left:8px">Salir</button>
+    </div>
+  </header>
+
+<!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
+<!-- TradingView official script (needed for real charts) -->
+<script src="https://s3.tradingview.com/tv.js"></script>
+
+  <div class="main-wrap">
+    <div class="layout">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div style="font-weight:800;color:var(--gold)">Menú</div>
+          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+        </div>
+
+        <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
+        <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
+        <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+        <div class="menu-item" data-target="verification" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+        <div class="menu-item" data-target="deposit" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        <div class="menu-item" data-target="withdraw" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+
+        <div style="height:8px"></div>
+        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
+        <div class="menu-item" onclick="showModalInfo()"><i class="fa-solid fa-circle-info"></i> Info</div>
+      </aside>
+
+      <!-- Panels -->
+      <section class="panel" id="dashboardPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Bienvenido, <span style="color:var(--gold)" id="privateWelcomeName">Pedro</span></div>
+            <div class="muted">Resumen rápido de tu cuenta — abajo verás el listado completo de símbolos</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted">Saldo disponible</div>
+            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">10000.00</span></div>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">$125,430.50</div><div class="muted" style="margin-top:6px">Estado en tiempo real</div></div>
+          <div class="card"><div class="muted">Inversiones Activas</div><div class="value">$98,250.00</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
+          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">$10,000.00</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
+          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">+$8,430.50</div><div class="muted" style="margin-top:6px">Este mes</div></div>
+        </div>
+
+        <!-- SYMBOL SEARCH + CATEGORIES (sin gráfico) -->
+        <div>
+          <div class="symbols-top">
+            <div class="cat-tabs" id="catTabs"></div>
+            <input id="symbolSearch" class="search-input" placeholder="Buscar símbolo, ej: BTC, ETH, EURUSD, AAPL..." />
+          </div>
+          <div id="symbolsGrid" class="symbols-grid"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="tradingPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">BTC/USDT</span></div>
+            <div class="muted" id="trading-sub">Market: BINANCE</div>
+          </div>
+          <div class="muted">Estado: <span id="ws-status">demo</span></div>
+        </div>
+
+        <div class="market-list" id="market-list"></div>
+
+        <div style="display:flex;gap:12px;flex-direction:column">
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div class="chart-area" style="flex:1; min-width:320px; position:relative">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
+                  <div class="muted" id="op-exchange">Market: BINANCE</div>
+                </div>
+                <div style="text-align:right">
+                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">87,243.3</div>
+                  <div class="muted-small">Último</div>
+                </div>
+              </div>
+
+              <!-- chart: se carga solo aquí -->
+              <div id="tv_chart_container" style="margin-top:12px"></div>
+
+              <div class="order-book-grid">
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">BIDS</div>
+                  <div id="ob-bids" class="muted"></div>
+                </div>
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">ASKS</div>
+                  <div id="ob-asks" class="muted"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TRADE BOX -->
+            <aside style="width:320px">
+              <div class="trade-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-weight:800;color:var(--gold)">Crear Orden</div>
+                  <div class="muted-small">Saldo USDT: $<span id="bal-usdt">10000.00</span></div>
+                </div>
+
+                <div style="margin-bottom:8px">
+                  <label class="muted-small">Tipo</label>
+                  <select id="order-type" class="form-select">
+                    <option>Market</option>
+                    <option>Limit</option>
+                    <option>Stop Loss</option>
+                    <option>Take Profit</option>
+                    <option>Stop Limit</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Precio (si aplica)</label>
+                    <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn-primary" onclick="createOrder('BUY')">Buy</button>
+                  <button class="btn-secondary" onclick="createOrder('SELL')">Sell</button>
+                </div>
+
+                <div class="orders-box" id="orders-box" style="margin-top:12px">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
+                  <div id="orders-list" class="muted-small">— no hay órdenes —</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="positionsPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Posiciones Abiertas</div>
+            <div class="muted">Clic en una posición para abrirla en Trading con su gráfico</div>
+          </div>
+          <div class="muted">Total: <span id="pos-count-top">0</span></div>
+        </div>
+
+        <div id="positionsList" class="positions-list"></div>
+      </section>
+
+      <section class="panel" id="marketsPanel" style="display:none">
+        <div class="title">Mercados</div>
+        <div class="muted" style="margin-bottom:8px">Selecciona un mercado desde la lista — todo el mercado disponible</div>
+
+        <div class="symbols-top" style="margin-top:8px">
+          <div id="catTabsMarket" class="cat-tabs"></div>
+          <input id="marketSearch" class="search-input" placeholder="Buscar símbolo o mercado..." />
+        </div>
+
+        <div id="marketsSymbolsGrid" class="symbols-grid"></div>
+      </section>
+
+      <section class="panel" id="activosPanel" style="display:none">
+        <div class="title">Activos</div>
+        <div class="table-box">
+          <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Billetera</div>
+          <table>
+            <thead><tr><th>Activo</th><th>Cantidad</th><th>Valor Estimado</th></tr></thead>
+            <tbody id="walletRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="historyPanel" style="display:none">
+        <div class="title">Historial de Transacciones</div>
+        <div class="table-box">
+          <table><thead><tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Método</th><th>Monto</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>#TRX-8821</td><td>2025-12-10</td><td>Depósito</td><td>Transferencia</td><td class="muted-small">+$5,000.00</td><td><span class="kbd">Completado</span></td></tr>
+          </tbody></table>
+        </div>
+      </section>
+
+      <section class="panel" id="verificationPanel" style="display:none">
+        <div class="title">Verificación de Documentos</div>
+        <div class="muted">Sube tus documentos aquí</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitDoc(event)">
+            <label class="muted-small">Tipo</label>
+            <select class="form-select" style="margin-bottom:8px"><option>Identificación</option><option>Comprobante de domicilio</option></select>
+            <input type="file" required class="form-input" style="margin-bottom:8px">
+            <button class="btn-primary" type="submit">Subir</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="depositPanel" style="display:none">
+        <div class="title">Depósito</div>
+        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event)">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required>
+            <label class="muted-small">Método</label>
+            <select class="form-select" style="margin-bottom:8px"><option>Transferencia</option><option>Crypto</option></select>
+            <button class="btn-primary" type="submit">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="withdrawPanel" style="display:none">
+        <div class="title">Retiro</div>
+        <div class="muted">Solicita un retiro a tu cuenta registrada</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event)">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required>
+            <label class="muted-small">Cuenta destino</label>
+            <input class="form-input" type="text" required>
+            <button class="btn-primary" type="submit">Solicitar</button>
+          </form>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Footer nav -->
+  <nav class="footer-nav">
+    <div class="fnav-item active" data-target="dashboardPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-house"></i>Inicio</div>
+    <div class="fnav-item" data-target="tradingPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-line"></i>Trading</div>
+    <div class="fnav-item" data-target="positionsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-layer-group"></i>Posiciones</div>
+    <div class="fnav-item" data-target="marketsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-simple"></i>Mercados</div>
+    <div class="fnav-item" data-target="activosPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-wallet"></i>Activos</div>
+  </nav>
+
+  <!-- Info modal -->
+  <div id="infoModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:120">
+    <div style="background:#0b0b0b;padding:18px;border-radius:10px;border:1px solid var(--line);width:90%;max-width:520px;color:var(--text)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="color:var(--gold)">BrokerPro — Info</strong>
+        <button onclick="hideModalInfo()" style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+      </div>
+      <div style="color:var(--muted)">Demo. Para operar con capital real se requiere integración de APIs en back-end.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
+<script>
+  (function(){
+    // Sidebar toggle (no destruye si ya existe algo similar)
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+
+    if(sidebarToggle && sidebar){
+      sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('hidden');
+      });
+    }
+
+    // NO mostrar el área privada automáticamente.
+    // Antes se forzaba: document.getElementById('privateArea_full').style.display = 'block';
+    // Ahora solo mostramos la parte privada si existe una sesión válida en localStorage (SESSION_KEY + token).
+    try {
+      const sessKey = (typeof SESSION_KEY !== 'undefined') ? SESSION_KEY : 'BROKERPRO_SESSION_USER';
+      const sess = localStorage.getItem(sessKey);
+      const token = localStorage.getItem('token');
+      if (document.getElementById('privateArea_full') && sess && token) {
+        try {
+          const user = JSON.parse(sess);
+          if (typeof showPrivateFull === 'function') {
+            showPrivateFull(user, token);
+          } else {
+            // Si no hay showPrivateFull, mostrar de forma segura
+            document.getElementById('privateArea_full').style.display = 'flex';
+          }
+        } catch(e) {
+          // Sesión corrupta o inválida: no mostrar área privada
+          console.warn('Sesión inválida en localStorage, no se mostrará el área privada.', e);
+        }
+      }
+    } catch(e){/* safe */}
+
+    // Helpers no destructivos: definir navSidebar / footerNavClick si no existen (evitan errores)
+    if(typeof navSidebar !== 'function'){
+      window.navSidebar = function(e){
+        try{
+          const target = e.currentTarget?.getAttribute('data-target');
+          if(!target) return;
+          // hide panels
+          document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+          // activate menu items
+          document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+          e.currentTarget.classList.add('active');
+          // show target
+          const panel = document.getElementById(target + 'Panel') || document.getElementById(target);
+          if(panel) panel.style.display = 'block';
+          // update footer active if applicable
+          document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        }catch(err){console.warn(err)}
+      };
+    }
+
+    if(typeof footerNavClick !== 'function'){
+      window.footerNavClick = function(e){
+        const target = e.currentTarget?.getAttribute('data-target');
+        if(!target) return;
+        document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+        const targetEl = document.getElementById(target);
+        if(targetEl) targetEl.style.display='block';
+        document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        // also update sidebar active
+        document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+        const sidebarItem = Array.from(document.querySelectorAll('.menu-item')).find(mi => mi.getAttribute('data-target') === target.replace('Panel',''));
+        if(sidebarItem) sidebarItem.classList.add('active');
+      };
+    }
+
+    // Modales simples
+    window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
+    window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
+
+    // Logout placeholder (tu backend debe sobreescribir esto)
+    if(typeof logout !== 'function'){
+      window.logout = function(){
+        try{ localStorage.removeItem('token'); location.reload(); }catch(e){ location.reload(); }
+      };
+    }
+
+    // Evitar submit por defecto si las funciones específicas no existen
+    window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
+    window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
+    window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+  })();
+</script>
+<script>
+/* -------------------------
+   JS Nº2 - PARTE PRIVADA - JS COMPLETO Y CORREGIDO (COMPLETO - ACTUALIZADO)
+   ------------------------- */
+
+/* API URL: usa la variable global window.API si existe, si no usa tu URL de render por defecto. */
+const API_BASE = window.API || window.API_URL || "https://leones-broker.onrender.com/api";
+
+/* safe escape helper: define only si no existe para evitar duplicados */
+if(typeof window.escapeHtml !== 'function'){
+  window.escapeHtml = function(s){
+    return String(s||'').replace(/[&<>"']/g,function(m){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+    });
+  };
+}
+
+/* =========================
+   SESIÓN: guardar/recuperar
+   ========================= */
+function saveSession(userObj, token){
+  try{
+    if(userObj) localStorage.setItem(SESSION_KEY, JSON.stringify(userObj));
+    if(token) localStorage.setItem('token', token);
+  }catch(e){ console.warn('saveSession error', e); }
+}
+
+function clearSessionStorage(){
+  try{
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('token');
+    localStorage.removeItem('expires');
+    localStorage.removeItem('marginAlertDismissedAt');
+  }catch(e){}
+}
+
+function getSavedSession(){
+  try{
+    const s = localStorage.getItem(SESSION_KEY);
+    if(!s) return null;
+    return JSON.parse(s);
+  }catch(e){ return null; }
+}
+
+/* =========================
+   UTIL: fetch con token + rate-limit simple
+   ========================= */
+const rateLimitCache = {}; // { key: { ts, data } }
+const inFlight = {}; // promises in flight
+const RATE_LIMIT_MS = 2000; // 2s for wallet/positions
+
+async function apiFetch(path, opts = {}){
+  const token = localStorage.getItem('token');
+  const headers = opts.headers || {};
+  headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  if(token) headers['Authorization'] = `Bearer ${token}`;
+
+  const url = path.startsWith('http') ? path : (API_BASE.replace(/\/+$/,'') + (path.startsWith('/') ? path : '/' + path));
+
+  const shortPaths = ['/wallet/me','/positions','/api/wallet/me','/api/positions'];
+  const isShort = shortPaths.some(p => url.includes(p));
+  if(isShort){
+    const key = url + JSON.stringify(opts.body || opts.method || '');
+    const cached = rateLimitCache[key];
+    const now = Date.now();
+    if(cached && (now - cached.ts < RATE_LIMIT_MS)) {
+      return cached.data;
+    }
+    if(inFlight[key]) {
+      return inFlight[key];
+    }
+    const p = fetch(url, {...opts, headers}).then(async (res)=>{
+      const text = await res.text().catch(()=>null);
+      let data = null;
+      try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+      if(!res.ok){
+        const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'Error API');
+        const err = new Error(msg);
+        err.status = res.status;
+        err.body = data;
+        throw err;
+      }
+      rateLimitCache[key] = { ts: Date.now(), data };
+      return data;
+    }).finally(()=>{ delete inFlight[key]; });
+    inFlight[key] = p;
+    return p;
+  }
+
+  const res = await fetch(url, {...opts, headers});
+  const text = await res.text().catch(()=>null);
+  let data = null;
+  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+  if(!res.ok){
+    const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'Error API');
+    const err = new Error(msg);
+    err.status = res.status;
+    err.body = data;
+    throw err;
+  }
+  return data;
+}
+
+/* =========================
+   showPrivateFull: obtiene wallet y posiciones reales y arranca margin watcher
+   ========================= */
+let marginWatcherId = null;
+let marginWatcherRunning = false;
+let lastKnownWalletSnapshot = null;
+
+window.showPrivateFull = async function(user, token){
+  try{
+    if(!user) return;
+
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = 'none'; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = 'none'; }catch(e){}
+
+    try{
+      const headerActions = document.getElementById('headerActions');
+      if(headerActions){
+        headerActions.innerHTML = '';
+
+        // Reuse existing menuToggle if present (user requested to keep original)
+        const existingMenuToggle = document.getElementById('menuToggle');
+        if(existingMenuToggle){
+          try{ headerActions.appendChild(existingMenuToggle); }catch(e){}
+          existingMenuToggle.onclick = function(){ const sidebar = document.getElementById('sidebar'); if(sidebar) sidebar.classList.toggle('hidden'); };
+        } else {
+          // fallback create only if missing
+          const menuBtn = document.createElement('button');
+          menuBtn.id = 'menuTogglePrivate';
+          menuBtn.className = 'menu-toggle';
+          menuBtn.title = 'Abrir/Cerrar menú';
+          menuBtn.type = 'button';
+          menuBtn.textContent = '☰';
+          menuBtn.addEventListener('click', () => {
+            const sidebar = document.getElementById('sidebar');
+            if(sidebar) sidebar.classList.toggle('hidden');
+          });
+          headerActions.appendChild(menuBtn);
+        }
+
+        const profileBtn = document.createElement('div');
+        profileBtn.style.display = 'flex';
+        profileBtn.style.alignItems = 'center';
+        profileBtn.style.gap = '10px';
+
+        const nameEl = document.createElement('div');
+        nameEl.textContent = user.name || user.username || 'Usuario';
+        nameEl.style.color = 'var(--gold)';
+        nameEl.style.fontWeight = '700';
+
+        const logoutBtn = document.createElement('button');
+        logoutBtn.className = 'btn ghost';
+        logoutBtn.type = 'button';
+        logoutBtn.textContent = 'Cerrar sesión';
+        logoutBtn.addEventListener('click', performLogoutFull);
+
+        profileBtn.appendChild(nameEl);
+        profileBtn.appendChild(logoutBtn);
+
+        headerActions.appendChild(profileBtn);
+      }
+    }catch(e){
+      console.error('showPrivateFull header error', e);
+    }
+
+    try{
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'flex';
+
+      const nameVal = user.name || user.username || 'Usuario';
+      const emailVal = user.email || '';
+
+      const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = nameVal;
+      const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = emailVal;
+      const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = nameVal;
+      const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = nameVal;
+      const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (nameVal||'U').slice(0,1).toUpperCase();
+    }catch(e){
+      console.error('showPrivateFull private area error', e);
+    }
+
+    try{
+      const safeUser = {
+        id: user.id || user._id || null,
+        name: user.name || user.username || 'Usuario',
+        email: user.email || '',
+        phone: user.phone || user.telefono || '',
+        address: user.address || user.adress || '',
+        balance: (typeof user.balance === 'number') ? user.balance : (user.balance ? Number(user.balance) : 0),
+        equity: (typeof user.equity === 'number') ? user.equity : (user.equity ? Number(user.equity) : 0),
+        pnl: (typeof user.pnl === 'number') ? user.pnl : (user.pnl ? Number(user.pnl) : 0),
+        borrowed: (typeof user.borrowed === 'number') ? user.borrowed : (user.borrowed ? Number(user.borrowed) : 0),
+        leverageFactor: (typeof user.leverageFactor === 'number') ? user.leverageFactor : (user.leverageFactor ? Number(user.leverageFactor) : 0)
+      };
+      saveSession(safeUser, token);
+      lastKnownWalletSnapshot = safeUser;
+    }catch(e){}
+
+    try{
+      await refreshWalletAndPositionsUI();
+    }catch(e){ console.warn('refresh initial wallet failed', e); }
+
+    try{ startMarginWatcher(); }catch(e){ console.warn('startMarginWatcher error', e); }
+
+    try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
+  }catch(err){
+    console.error('showPrivateFull error', err);
+  }
+};
+
+/* =========================
+   performLogoutFull
+   ========================= */
+function performLogoutFull(){
+  try{
+    clearSessionStorage();
+    try{
+      const privateWrapper = document.getElementById('privateArea_full');
+      if(privateWrapper) privateWrapper.style.display = 'none';
+    }catch(e){}
+    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = ''; }catch(e){}
+    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = ''; }catch(e){}
+    try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
+    try{
+      const privateMenu = document.getElementById('menuTogglePrivate');
+      if(privateMenu) privateMenu.remove();
+    }catch(e){}
+    try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn')?.click()); }catch(e){}
+    try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn')?.click()); }catch(e){}
+    stopMarginWatcher();
+  }catch(e){
+    console.error('performLogoutFull error', e);
+  }
+}
+
+/* =========================
+   MARGIN / POSITIONS POLLING & LOGIC
+   ========================= */
+
+let positions = []; // will be populated from backend
+let symbolPrices = window.symbolPrices ? {...window.symbolPrices} : {};
+let marginPollingInterval = 5000; // 5s
+let marginAlertThreshold = 30; // percent
+let marginCloseThreshold = 15; // percent
+
+function computePositionUnrealized(position){
+  const priceNow = Number(symbolPrices[position.symbol]) || Number(position.currentPrice) || 0;
+  const entry = Number(position.entryPrice) || 0;
+  const qty = Number(position.qty) || 0;
+  const sign = (position.side === 'SHORT' || position.side === 'SELL') ? -1 : 1;
+  return (priceNow - entry) * qty * sign;
+}
+
+function computeWalletMetrics(wallet, positionsList){
+  const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own ?? wallet.balance) || 0;
+  const credit = Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0;
+  const marginUsed = Number(wallet.marginUsed ?? wallet.usedMargin ?? wallet.borrowed ?? 0) || 0;
+  const pnlReported = Number(wallet.pnl ?? wallet.pnlReported ?? 0) || 0;
+
+  let unreal = 0;
+  (positionsList || []).forEach(p => { unreal += computePositionUnrealized(p); });
+
+  const pnl = pnlReported || unreal;
+  const equity = balanceOwn + credit + pnl;
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : Infinity;
+  const freeMargin = equity - marginUsed;
+
+  return {
+    balanceOwn,
+    credit,
+    marginUsed,
+    pnl,
+    equity,
+    marginLevel,
+    freeMargin
+  };
+}
+
+function showMarginAlert(msg, allowDismiss = true){
+  try{
+    const area = document.getElementById('marginAlertArea');
+    if(!area){
+      const wrapper = document.getElementById('privateArea_full') || document.body;
+      const div = document.createElement('div');
+      div.id = 'marginAlertArea';
+      div.style.position = 'relative';
+      div.style.padding = '12px';
+      div.style.background = '#3b1f1f';
+      div.style.color = '#fff';
+      div.style.border = '1px solid rgba(255,255,255,0.04)';
+      div.style.margin = '8px';
+      div.style.borderRadius = '8px';
+      div.style.zIndex = 9999;
+      wrapper.prepend(div);
+      div.innerHTML = `<strong>Alerta de margen:</strong> <span id="marginAlertMsg">${escapeHtml(msg)}</span> <span id="marginAlertControls"></span>`;
+    }else{
+      document.getElementById('marginAlertMsg').innerText = msg;
+      area.style.display = '';
+    }
+    if(allowDismiss){
+      const controls = document.getElementById('marginAlertControls');
+      controls.innerHTML = '';
+      const btn = document.createElement('button');
+      btn.className = 'btn ghost';
+      btn.textContent = 'Omitir';
+      btn.addEventListener('click', ()=>{
+        localStorage.setItem('marginAlertDismissedAt', String(Date.now()));
+        localStorage.setItem('marginAlertWalletSnapshot', JSON.stringify(lastKnownWalletSnapshot || {}));
+        const a = document.getElementById('marginAlertArea'); if(a) a.style.display = 'none';
+      });
+      controls.appendChild(btn);
+    }
+  }catch(e){ console.warn('showMarginAlert error', e); }
+}
+
+function clearMarginAlert(){
+  try{
+    const area = document.getElementById('marginAlertArea');
+    if(area) area.remove();
+  }catch(e){}
+}
+
+async function refreshWalletAndPositionsUI(){
+  try{
+    const wallet = await apiFetch('/wallet/me');
+    const remotePositions = await apiFetch('/positions');
+
+    const walletNormalized = {
+      balanceOwn: Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own) || 0,
+      credit: Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0,
+      marginUsed: Number(wallet.marginUsed ?? wallet.usedMargin ?? 0) || 0,
+      equityReported: Number(wallet.equity ?? 0) || 0,
+      pnlReported: Number(wallet.pnl ?? 0) || 0,
+      leverageFactor: Number(wallet.leverageFactor ?? wallet.leverage ?? wallet.leverage_factor) || 0
+    };
+
+    positions = Array.isArray(remotePositions) ? remotePositions : [];
+
+    const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + walletNormalized.balanceOwn.toLocaleString('es-DO');
+    const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (walletNormalized.equityReported || (walletNormalized.balanceOwn + walletNormalized.credit)).toLocaleString('es-DO');
+    const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (walletNormalized.pnlReported || 0).toLocaleString('es-DO');
+    const borrowedEl = document.getElementById('priv_borrowed_full'); if(borrowedEl) borrowedEl.textContent = 'RD$' + (walletNormalized.credit).toLocaleString('es-DO');
+
+    const metrics = computeWalletMetrics(walletNormalized, positions);
+
+    const balUsdtTopLocal = document.getElementById('bal-usdt-top'); if(balUsdtTopLocal) balUsdtTopLocal.innerText = Number(metrics.balanceOwn).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number(metrics.equity).toLocaleString(undefined,{maximumFractionDigits:2});
+    const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(metrics.balanceOwn).toLocaleString(undefined,{maximumFractionDigits:2});
+
+    lastKnownWalletSnapshot = walletNormalized;
+    saveSession({...getSavedSession(), ...walletNormalized}, localStorage.getItem('token'));
+
+    return { wallet: walletNormalized, positions, metrics };
+  }catch(err){
+    console.error('refreshWalletAndPositionsUI error', err);
+    throw err;
+  }
+}
+
+function startMarginWatcher(){
+  if(marginWatcherId || marginWatcherRunning) return;
+  marginWatcherRunning = true;
+  marginWatcherId = setInterval(async ()=>{
+    try{
+      if(window.symbolPrices) Object.assign(symbolPrices, window.symbolPrices);
+
+      if(window.__marginTickRunning) return;
+      window.__marginTickRunning = true;
+      try{
+        const { metrics } = await refreshWalletAndPositionsUI();
+
+        const marginRatio = metrics.marginLevel;
+        if(!isFinite(marginRatio)){
+          clearMarginAlert();
+          return;
+        }
+
+        if(marginRatio <= marginCloseThreshold){
+          showMarginAlert(`¡Margen crítico (${marginRatio.toFixed(1)}%)! Cerrando posiciones ahora...`, false);
+          try{
+            const res = await apiFetch('/positions/close-all', { method: 'POST' });
+            await refreshWalletAndPositionsUI();
+            const txt = (res && res.result) ? `Resultados: PnL ${res.result.realizedPnl}. Nuevo saldo: ${res.result.newBalance}` : `Posiciones cerradas`;
+            alert(`Posiciones cerradas automáticamente. ${txt}`);
+            clearMarginAlert();
+          }catch(e){
+            console.error('Error cerrando posiciones automáticamente', e);
+            showMarginAlert(`Error al cerrar posiciones automáticamente: ${e.message || e}`, true);
+          }
+          return;
+        }
+
+        if(marginRatio < marginAlertThreshold && marginRatio > marginCloseThreshold){
+          const dismissedAt = Number(localStorage.getItem('marginAlertDismissedAt') || 0);
+          const walletSnapshotKey = JSON.stringify(lastKnownWalletSnapshot || {});
+          const dismissedForWallet = localStorage.getItem('marginAlertWalletSnapshot') || '';
+          if(dismissedAt && dismissedForWallet === walletSnapshotKey){
+            return;
+          }
+
+          showMarginAlert(`Margen bajo: ${marginRatio.toFixed(1)}%. Recomendado depositar fondos o reducir posiciones.`, true);
+
+          try{
+            const revokeRes = await apiFetch('/wallet/revoke-leverage', { method: 'POST' });
+            await refreshWalletAndPositionsUI();
+            showMarginAlert(`Apalancamiento revocado automáticamente por margen bajo (${marginRatio.toFixed(1)}%).`, true);
+            localStorage.setItem('marginAlertWalletSnapshot', walletSnapshotKey);
+          }catch(e){
+            console.error('Error revocando apalancamiento', e);
+            showMarginAlert(`No se pudo revocar apalancamiento automáticamente: ${e.message || e}`, true);
+          }
+        } else {
+          clearMarginAlert();
+        }
+      } finally {
+        window.__marginTickRunning = false;
+      }
+    }catch(e){
+      console.error('marginWatcher tick error', e);
+    }
+  }, marginPollingInterval);
+}
+
+function stopMarginWatcher(){
+  if(marginWatcherId){
+    clearInterval(marginWatcherId);
+    marginWatcherId = null;
+  }
+  marginWatcherRunning = false;
+}
+
+/* POSITIONS UI helpers */
+function renderPositionsUI(){
+  const container = document.getElementById('positionsList');
+  if(!container) return;
+  container.innerHTML = '';
+
+  if(positions.length === 0){
+    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:12px;text-align:center">No hay posiciones abiertas</div>`;
+  } else {
+    positions.forEach(p=>{
+      const price = symbolPrices[p.symbol] || p.entryPrice || 0;
+      const unreal = computePositionUnrealized(p);
+      const el = document.createElement('div');
+      el.className = 'pos-card';
+      el.onclick = ()=> openPosition && openPosition(p.id);
+      el.innerHTML = `
+        <div>
+          <div style="font-weight:700">${escapeHtml(p.symbol)}</div>
+          <div style="color:var(--muted);font-size:13px">
+            qty ${escapeHtml(String(p.qty))} • entrada ${escapeHtml(Number(p.entryPrice).toFixed(6))}
+          </div>
+        </div>
+
+        <div style="text-align:right">
+          <div style="font-weight:800;color:${unreal >= 0 ? 'var(--gold)' : 'var(--danger)'}">
+            ${unreal >= 0 ? '+' : ''}${escapeHtml(Number(unreal).toFixed(2))}
+          </div>
+          <div class="muted-small">PnL</div>
+        </div>
+      `;
+      container.appendChild(el);
+    });
+  }
+}
+
+/* TRADING: abrir orden real via backend */
+async function openTrade(symbol, qty, price, side='BUY', type='Market'){
+  try{
+    const token = localStorage.getItem('token');
+    if(!token){ alert('No autenticado'); return; }
+    const body = { symbol, qty, price, side, type };
+    const res = await apiFetch('/trade/open', { method: 'POST', body: JSON.stringify(body) });
+    if(res.positions) positions = res.positions;
+    await refreshWalletAndPositionsUI();
+    renderPositionsUI();
+    alert('Operación abierta correctamente.');
+    return res;
+  }catch(err){
+    console.error('openTrade error', err);
+    alert('Error al abrir trade: ' + (err.message || err));
+  }
+}
+
+/* close position server */
+async function closePositionServer(id){
+  try{
+    const res = await apiFetch('/positions/close', { method: 'POST', body: JSON.stringify({ id }) });
+    await refreshWalletAndPositionsUI();
+    renderPositionsUI();
+    alert('Posición cerrada.');
+  }catch(e){
+    console.error('closePositionServer error', e);
+    alert('Error cerrando posición: ' + (e.message || e));
+  }
+}
+
+/* TRADINGVIEW & SYMBOLS (helpers mínimos) */
+
+const ALL_SYMBOLS = window.ALL_SYMBOLS || [
+  {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+  {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+  {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
+  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
+  {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'}
+];
+
+let currentSymbol = ALL_SYMBOLS[0].symbol;
+
+let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
+let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
+let menuToggle;
+
+/* Apply permanent glow to fields (same function as in js1) */
+function applyInputGlow(root = document){
+  try{
+    const selector = 'input, textarea, select';
+    Array.from(root.querySelectorAll(selector)).forEach(el=>{
+      if(el.type && ['button','submit','reset'].includes(el.type)) return;
+      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+      if(!el._glowHandlersAttached){
+        el.addEventListener('focus', ()=> {
+          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
+          el.style.borderColor = 'rgba(212,175,55,0.45)';
+          el.style.transform = 'translateY(-1px)';
+        });
+        el.addEventListener('blur', ()=> {
+          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
+          el.style.borderColor = 'rgba(212,175,55,0.14)';
+          el.style.transform = '';
+        });
+        el._glowHandlersAttached = true;
+      }
+    });
+  }catch(e){ console.warn('applyInputGlow error', e); }
+}
+
+/* Wire DOM refs defensively */
+function wireDomRefs(){
+  // look for several possible IDs to avoid mismatch with HTML edits
+  menuToggle = document.getElementById('menuToggle') || document.getElementById('sidebarToggle') || document.getElementById('menuTogglePrivate');
+  symbolSearch = document.getElementById('symbolSearch');
+  symbolsGrid = document.getElementById('symbolsGrid');
+  catTabs = document.getElementById('catTabs');
+  marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
+  marketSearch = document.getElementById('marketSearch');
+  catTabsMarket = document.getElementById('catTabsMarket');
+
+  opSymbolEl = document.getElementById('op-symbol');
+  opExchangeEl = document.getElementById('op-exchange');
+  opPriceEl = document.getElementById('op-price');
+  obBidsEl = document.getElementById('ob-bids');
+  obAsksEl = document.getElementById('ob-asks');
+  ordersListEl = document.getElementById('orders-list');
+  balUsdtEl = document.getElementById('bal-usdt');
+  balUsdtTop = document.getElementById('bal-usdt-top');
+  balanceTotalEl = document.getElementById('balanceTotal');
+  posCountEl = document.getElementById('pos-count');
+  posCountTop = document.getElementById('pos-count-top');
+
+  if(menuToggle && !menuToggle._attached){
+    menuToggle.addEventListener('click', ()=> {
+      const sb = document.getElementById('sidebar');
+      if(sb) sb.classList.toggle('hidden');
+    });
+    menuToggle._attached = true;
+  }
+
+  document.querySelectorAll('.menu-item[data-target]').forEach(item=>{
+    try{ item.addEventListener('click', navSidebar); }catch(e){}
+  });
+
+  document.querySelectorAll('.fnav-item[data-target]').forEach(f=>{
+    try{ f.addEventListener('click', footerNavClick); }catch(e){}
+  });
+}
+
+/* basic category tabs + symbols render */
+const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
+let activeCategory = 'All';
+
+function buildCategoryTabs(container, onClick){
+  if(!container) return;
+  container.innerHTML = '';
+  CATEGORIES.forEach(cat=>{
+    const b = document.createElement('button');
+    b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
+    b.innerText = cat;
+    b.onclick = ()=> { activeCategory = cat; document.querySelectorAll('.cat-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); onClick(); };
+    container.appendChild(b);
+  });
+}
+
+function filterSymbols(q, category){
+  q = (q||'').trim().toLowerCase();
+  return ALL_SYMBOLS.filter(s=>{
+    if(category && category !== 'All' && s.market !== category) return false;
+    if(!q) return true;
+    return (s.label.toLowerCase().includes(q) || s.symbol.toLowerCase().includes(q));
+  });
+}
+
+function renderSymbolsGrid(container, query, category){
+  if(!container) return;
+  container.innerHTML = '';
+  const list = filterSymbols(query, category);
+  if(list.length === 0){
+    container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
+    return;
+  }
+  list.forEach(s=>{
+    const el = document.createElement('div');
+    el.className = 'symbol-card';
+    el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market)} · ${escapeHtml(s.symbol)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:800;color:var(--text);font-size:14px">${displayPriceFor(s.symbol)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+      </div>
+    </div>`;
+    container.appendChild(el);
+  });
+}
+
+function displayPriceFor(sym){
+  const p = symbolPrices[sym];
+  const pn = Number(p);
+  if(!isFinite(pn)) return '--';
+  return (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6);
+}
+
+function initSymbolsUI(){
+  buildCategoryTabs(catTabs, ()=> renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory));
+  buildCategoryTabs(catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory));
+  renderSymbolsGrid(symbolsGrid, '', 'All');
+  renderSymbolsGrid(marketsSymbolsGrid, '', 'All');
+
+  if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
+  if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
+}
+
+function selectSymbolAndOpenTrading(symbol, label){
+  const ts = document.getElementById('tradingSymbol');
+  if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
+  const opSymbol = document.getElementById('op-symbol');
+  if(opSymbol) opSymbol.innerText = document.getElementById('tradingSymbol').innerText;
+  const opExchange = document.getElementById('op-exchange');
+  if(opExchange) opExchange.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
+  currentSymbol = symbol;
+  showPanel('tradingPanel');
+  initTradingWidget && initTradingWidget(symbol);
+  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[symbol] || 0);
+  updateOrderBook && updateOrderBook(symbolPrices[symbol] || 0);
+}
+
+/* --- Demo price engine (keeps chart & symbols updated) --- */
+(function priceEngine(){
+  setInterval(()=>{
+    ALL_SYMBOLS.forEach(s=>{
+      if(!(s.symbol in symbolPrices)){
+        symbolPrices[s.symbol] = Number((Math.random()*100).toFixed(2));
+      } else {
+        const old = Number(symbolPrices[s.symbol]) || 0;
+        const change = (Math.random()-0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
+        symbolPrices[s.symbol] = Number(Math.max(0.00001, old + change).toFixed(6));
+      }
+    });
+    try{ updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol] || 0); }catch(e){}
+    try{ updateOrderBook && updateOrderBook(symbolPrices[currentSymbol] || 0); }catch(e){}
+    try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
+    try{ renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory); }catch(e){}
+    try{ updateWalletTotal(); }catch(e){}
+    try{ renderPositionsUI(); }catch(e){}
+  }, 1200);
+})();
+
+/* Wallet UI update used by demo price engine */
+let demo_usdt = 10000.00;
+let demo_balances = {'BTC':0.054231, 'ETH':0.0, 'SOL':0.0, 'EUR':0.0, 'GBP':0.0};
+
+function updateWalletTotal(){
+  const bal = Number(getSavedSession()?.balance || demo_usdt);
+  balUsdtEl && (balUsdtEl.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+  balUsdtTop && (balUsdtTop.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+  let total = bal;
+  Object.keys(demo_balances).forEach(k=>{
+    const sym = findSymbolForBase(k);
+    const qty = demo_balances[k] || 0;
+    total += (symbolPrices[sym] || 0) * qty;
+  });
+  balanceTotalEl && (balanceTotalEl.innerText = '$' + total.toLocaleString(undefined,{maximumFractionDigits:2}));
+  const cashAvailEl = document.getElementById('cashAvail');
+  if(cashAvailEl) cashAvailEl.innerText = '$' + bal.toLocaleString(undefined,{maximumFractionDigits:2});
+}
+
+function findSymbolForBase(base){
+  if(base === 'BTC') return 'BINANCE:BTCUSDT';
+  if(base === 'ETH') return 'BINANCE:ETHUSDT';
+  if(base === 'SOL') return 'BINANCE:SOLUSDT';
+  if(base === 'EUR') return 'OANDA:EUR_USD';
+  if(base === 'GBP') return 'OANDA:GBP_USD';
+  return 'BINANCE:BTCUSDT';
+}
+
+/* INIT TRADING */
+function initTradingIfNeeded(){
+  initTradingWidget && initTradingWidget(currentSymbol);
+  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol]||0);
+  updateOrderBook && updateOrderBook(symbolPrices[currentSymbol]||0);
+  renderPositionsUI();
+}
+
+/* DOMContentLoaded: inicialización segura y única */
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{ wireDomRefs(); }catch(e){ console.warn('wireDomRefs error', e); }
+  try{ initSymbolsUI(); }catch(e){}
+  try{ showPanel('dashboardPanel'); }catch(e){}
+  try{
+    if(positions.length === 0){
+      positions.push({id:'POS-1',symbol:'BINANCE:BTCUSDT',side:'LONG',qty:0.02,entryPrice:86000,createdAt:new Date().toISOString()});
+    }
+    renderPositionsUI();
+    updateWalletTotal();
+  }catch(e){}
+  // ensure inputs have glow
+  try{ applyInputGlow(document); }catch(e){}
+});
+
+/* NAV helpers */
+function hideAllPanels(){
+  document.querySelectorAll('#privateArea_full .panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f => f.classList.remove('active'));
+}
+function showPanel(id){
+  hideAllPanels();
+  const panel = document.getElementById(id);
+  if(panel) panel.style.display = 'block';
+  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f=>{
+    if(f.dataset.target === id) f.classList.add('active');
+  });
+}
+
+function footerNavClick(evt){
+  try{
+    let target;
+    if(typeof evt === 'string') target = evt;
+    else if(evt && evt.currentTarget && evt.currentTarget.dataset && evt.currentTarget.dataset.target) target = evt.currentTarget.dataset.target;
+    else if(evt && evt.target && evt.target.dataset && evt.target.dataset.target) target = evt.target.dataset.target;
+    if(!target) return;
+    showPanel(target);
+    if(target === 'tradingPanel') initTradingIfNeeded();
+  }catch(e){ console.warn('footerNavClick error', e); }
+}
+
+function navSidebar(evt){
+  try{
+    const el = (evt && evt.currentTarget) ? evt.currentTarget : evt;
+    const target = el && el.dataset ? el.dataset.target : (typeof el === 'string' ? el : null);
+    const mapping = {
+      'dashboard':'dashboardPanel','trading':'tradingPanel',
+      'history':'historyPanel','verification':'verificationPanel',
+      'deposit':'depositPanel','withdraw':'withdrawPanel'
+    };
+    const panelId = mapping[target] || 'dashboardPanel';
+    showPanel(panelId);
+    document.querySelectorAll('#privateArea_full .menu-item').forEach(item => item.classList.remove('active'));
+    if(el && el.classList) el.classList.add('active');
+    if(panelId === 'tradingPanel') initTradingIfNeeded();
+  }catch(e){ console.warn('navSidebar error', e); }
+}
+
+window.navSidebar = navSidebar;
+window.footerNavClick = footerNavClick;
+
+/* small helpers for modal/info */
+window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
+window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
+
+// Stub helpers to avoid errors if not provided elsewhere
+window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
+window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
+window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+
+
+
+
+
+
+
+
+
+</script>
+  <!-- END: contenido importado -->
+</div>
+
+<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
+
+</body>
+</html>
