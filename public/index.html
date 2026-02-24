@@ -476,41 +476,260 @@ window.API =
 
 // public/js/polygon-client.js
 (function(){
-  // Sólo inicializa socket si la librería está cargada
-  if (typeof io === 'function') {
-    const socket = io();
+  'use strict';
 
-    // DOM helpers
-    function $(sel){ return document.querySelector(sel); }
+  // Helper: safe logger (silence in prod if needed)
+  const log = (...args) => { try { console.log(...args); } catch(e){} };
+  const warn = (...args) => { try { console.warn(...args); } catch(e){} };
+  const errlog = (...args) => { try { console.error(...args); } catch(e){} };
 
-    // keep last prices
-    window.symbolPrices = window.symbolPrices || {};
+  // If socket.io isn't loaded, create harmless stubs and exit gracefully.
+  if (typeof io !== 'function') {
+    warn('socket.io (io) not found — real-time features inactive.');
+    // Provide stubs so other code won't crash
+    window.subscribeSymbol = function(){ warn('subscribeSymbol: socket.io no cargado'); };
+    window.unsubscribeSymbol = function(){ warn('unsubscribeSymbol: socket.io no cargado'); };
+    window.fetchSymbolsFromServer = async function(){ return []; };
+    return;
+  }
 
-    // init lightweight chart
-    const chartContainer = document.getElementById('tv_chart_container');
-    let chart, series;
-    if(chartContainer && typeof LightweightCharts !== 'undefined'){
+  // init socket
+  const socket = io();
+
+  // DOM helper
+  function $ (sel) { try { return document.querySelector(sel); } catch(e){ return null; } }
+
+  // Keep last prices (map symbol -> { price, ts })
+  window.symbolPrices = window.symbolPrices || {};
+
+  // Chart init (LightweightCharts) - defensive
+  const chartContainer = document.getElementById('tv_chart_container');
+  let chart = null, series = null;
+  try {
+    if (chartContainer && typeof LightweightCharts !== 'undefined' && LightweightCharts.createChart) {
       chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.clientWidth,
+        width: chartContainer.clientWidth || 800,
         height: chartContainer.clientHeight || 420,
         layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
+        timeScale: { borderColor: 'rgba(255,255,255,0.06)' }
       });
       series = chart.addLineSeries({ priceLineVisible: true });
-      // resize
-      window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+      // responsive
+      window.addEventListener('resize', ()=> {
+        try { chart.applyOptions({ width: chartContainer.clientWidth }); } catch(e){}
+      });
+    } else {
+      warn('LightweightCharts no disponible — gráfico inactivo.');
     }
+  } catch(e){
+    errlog('Chart init error', e);
+    chart = null; series = null;
+  }
 
-    socket.on('connect', ()=> console.log('socket connected', socket.id));
-    socket.on('prices_snapshot', (snapshot)=>{
-      window.symbolPrices = snapshot || {};
-      // set initial series from current symbol if available
-      const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
-      if(curSym && snapshot[curSym] && series){
-        series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
+  // formatting
+  function formatPrice(n){
+    const num = Number(n);
+    if(!isFinite(num)) return '--';
+    // dynamic formatting: big numbers show 1 decimal, small numbers up to 6 decimals
+    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    if(Math.abs(num) >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    // small fractional values
+    return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  }
+
+  function updatePriceElementsForSymbol(symbol, price){
+    try{
+      // Update elements with data-symbol attribute
+      const nodes = Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`));
+      nodes.forEach(el => {
+        // choose formatting target
+        el.textContent = formatPrice(price);
+      });
+
+      // update #op-price if present (single main price)
+      const op = document.getElementById('op-price');
+      if(op) op.textContent = formatPrice(price);
+
+      // update any other price displays that rely on symbol (e.g. by symbol suffix)
+      const symbolShort = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','');
+      if(symbolShort && (symbol.endsWith(symbolShort) || symbol === symbolShort)){
+        // also update trading panel price if needed
+        const mainPrice = document.getElementById('op-price');
+        if(mainPrice) mainPrice.textContent = formatPrice(price);
       }
-    });
+    }catch(e){ errlog('updatePriceElementsForSymbol error', e); }
+  }
 
+  // Keep compatibility with different payload shapes
+  function normalizePricePayload(p){
+    if(!p) return null;
+    const symbol = p.symbol || p.s || p.sym || p.t; // try common keys
+    const price = (p.price ?? p.p ?? p.value ?? p.v) || 0;
+    const ts = p.ts || p.t || Date.now();
+    return { symbol, price: Number(price), ts: Number(ts) };
+  }
+
+  // Attempt to set series point (chart)
+  function pushToSeries(sym, priceObj){
+    try{
+      if(!series || !priceObj) return;
+      const t = Math.floor((priceObj.ts || Date.now()) / 1000);
+      // series.update expects { time: <unix-seconds>, value: <number> }
+      try{
+        series.update({ time: t, value: Number(priceObj.price) });
+      }catch(e){
+        // if update fails (empty series), setData
+        try{ series.setData([{ time: t, value: Number(priceObj.price) }]); } catch(e2){}
+      }
+    }catch(e){ errlog('pushToSeries error', e); }
+  }
+
+  // Socket events
+  socket.on('connect', ()=> log('socket connected', socket.id));
+  socket.on('disconnect', ()=> log('socket disconnected'));
+
+  socket.on('prices_snapshot', (snapshot) => {
+    try{
+      if(!snapshot || typeof snapshot !== 'object') return;
+      // snapshot might be { "BINANCE:BTCUSDT": { price: 123, ts: 123123 }, ... }
+      window.symbolPrices = window.symbolPrices || {};
+      Object.keys(snapshot).forEach(k => {
+        const item = snapshot[k];
+        const price = Number(item?.price ?? item?.p ?? item);
+        const ts = Number(item?.ts ?? Date.now());
+        if(!isFinite(price)) return;
+        window.symbolPrices[k] = { price, ts };
+        // update DOM for known symbols
+        updatePriceElementsForSymbol(k, price);
+      });
+
+      // if current symbol present and chart exists, seed series
+      const curSym = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+      if(curSym){
+        // find exact match or suffix match
+        const matchKey = Object.keys(window.symbolPrices).find(k => k === curSym || k.endsWith(curSym));
+        if(matchKey && window.symbolPrices[matchKey] && series){
+          const seed = window.symbolPrices[matchKey];
+          series.setData([{ time: Math.floor(seed.ts/1000), value: seed.price }]);
+        }
+      }
+    }catch(e){
+      errlog('prices_snapshot handler error', e);
+    }
+  });
+
+  socket.on('price', (payload) => {
+    try{
+      const p = normalizePricePayload(payload);
+      if(!p || !p.symbol) return;
+      // store price
+      window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
+      // update DOM
+      updatePriceElementsForSymbol(p.symbol, p.price);
+      // update chart if current symbol matches
+      const currentLabel = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+      if(series && (p.symbol === currentLabel || p.symbol.endsWith(currentLabel))){
+        pushToSeries(p.symbol, p);
+      }
+    }catch(e){ errlog('price handler error', e); }
+  });
+
+  socket.on('error', (e)=> { warn('socket error', e); });
+
+  // Provide subscribe/unsubscribe helpers
+  window.subscribeSymbol = function(symbol, kind='trades'){
+    try{
+      if(!symbol) return;
+      socket.emit && socket.emit('subscribe', { symbol, kind });
+      log('subscribe emitted', symbol, kind);
+    }catch(e){ errlog('subscribeSymbol error', e); }
+  };
+
+  window.unsubscribeSymbol = function(symbol, kind='trades'){
+    try{
+      if(!symbol) return;
+      socket.emit && socket.emit('unsubscribe', { symbol, kind });
+      log('unsubscribe emitted', symbol, kind);
+    }catch(e){ errlog('unsubscribeSymbol error', e); }
+  };
+
+  // Try to fetch symbols list from backend (try several possible endpoints)
+  window.fetchSymbolsFromServer = async function(){
+    const candidates = [
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/api/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/markets/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/market/symbols',
+      '/api/symbols',
+      '/api/markets/symbols',
+      '/api/market/symbols'
+    ].filter(Boolean);
+
+    for(const url of candidates){
+      try{
+        const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }});
+        if(!res.ok) { warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
+        const data = await res.json().catch(()=>null);
+        if(Array.isArray(data) && data.length>0){
+          window.ALL_SYMBOLS = data.map(item => {
+            if(typeof item === 'string') {
+              // format "EXCHANGE:PAIR"
+              const parts = item.split(':');
+              return { symbol: item, label: (parts[1]||parts[0]).replace('_','/'), market: parts[0] || 'Unknown' };
+            }
+            return {
+              symbol: item.symbol || item.sym || item.s || '',
+              label: item.label || item.name || (item.symbol ? item.symbol.split(':').pop() : ''),
+              market: item.market || item.exchange || item.type || 'Other'
+            };
+          });
+          log('Symbols loaded from', url, 'count=', window.ALL_SYMBOLS.length);
+          // If a render function exists, call it
+          try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){/* ignore */ }
+          return window.ALL_SYMBOLS;
+        } else {
+          warn('fetchSymbolsFromServer got empty/invalid data', url);
+        }
+      }catch(e){
+        warn('fetchSymbolsFromServer error', url, e);
+      }
+    }
+    warn('fetchSymbolsFromServer: no endpoints returned valid list');
+    return [];
+  };
+
+  // Auto-fetch symbols on load (non-blocking)
+  (async function tryLoadSymbols(){
+    try{
+      await window.fetchSymbolsFromServer();
+    }catch(e){
+      /* ignore */
+    }
+  })();
+
+  // Defensive UI init helpers that other scripts might call
+  window.updateDisplayedPrice = function(price){
+    try{
+      const op = document.getElementById('op-price');
+      if(op) op.textContent = formatPrice(price);
+    }catch(e){}
+  };
+
+  window.updateOrderBook = function(price){
+    try{
+      const bids = document.getElementById('ob-bids');
+      const asks = document.getElementById('ob-asks');
+      if(bids) bids.textContent = `—`; // placeholder (real orderbook via backend)
+      if(asks) asks.textContent = `—`;
+    }catch(e){}
+  };
+
+  // Final log
+  log('polygon-client.js initialized');
+
+})();
     socket.on('price', (p)=>{
       if(!p || !p.symbol) return;
       window.symbolPrices[p.symbol] = p.price;
@@ -535,14 +754,15 @@ window.API =
     window.unsubscribeSymbol = function(symbol, kind='trades'){
       socket.emit('unsubscribe', { symbol, kind });
     };
-  } else {
+
+  {
     // stubs para evitar errores si socket.io no está cargado
     console.warn('socket.io no está disponible — funciones de precios en tiempo real inactivas.');
     window.subscribeSymbol = function(){ console.warn('subscribeSymbol: socket.io no cargado'); };
     window.unsubscribeSymbol = function(){ console.warn('unsubscribeSymbol: socket.io no cargado'); };
     window.symbolPrices = window.symbolPrices || {};
   }
-})();
+;
 
 
 
