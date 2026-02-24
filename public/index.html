@@ -464,7 +464,7 @@
 
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
-const SESSION_KEY = 'BROKERPRO_SESSION_USER';
+
 
 /* --- API URL dinámica --- */
 window.API =
@@ -1355,7 +1355,7 @@ window.addEventListener('load', function(){
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 <script>
   (function(){
-    // Sidebar toggle (no destruye si ya existe algo similar)
+    // Sidebar toggle (no destruye si ya exista algo similar)
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebarToggle');
 
@@ -1441,6 +1441,7 @@ window.addEventListener('load', function(){
     window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
   })();
 </script>
+
 <script>
 /* -------------------------
    JS Nº2 - PARTE PRIVADA - JS COMPLETO Y CORREGIDO (COMPLETO - ACTUALIZADO)
@@ -1448,6 +1449,9 @@ window.addEventListener('load', function(){
 
 /* API URL: usa la variable global window.API si existe, si no usa tu URL de render por defecto. */
 const API_BASE = window.API || window.API_URL || "https://leones-broker.onrender.com/api";
+
+/* SESSION KEY seguro (fallback) */
+const SESSION_KEY = (typeof window.SESSION_KEY !== 'undefined') ? window.SESSION_KEY : 'BROKERPRO_SESSION_USER';
 
 /* safe escape helper: define only si no existe para evitar duplicados */
 if(typeof window.escapeHtml !== 'function'){
@@ -1487,6 +1491,7 @@ function getSavedSession(){
 
 /* =========================
    UTIL: fetch con token + rate-limit simple
+   - Manejo seguro de respuestas no-JSON (evita "Unexpected token <")
    ========================= */
 const rateLimitCache = {}; // { key: { ts, data } }
 const inFlight = {}; // promises in flight
@@ -1533,8 +1538,22 @@ async function apiFetch(path, opts = {}){
   const res = await fetch(url, {...opts, headers});
   const text = await res.text().catch(()=>null);
   let data = null;
-  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+  try{
+    data = text ? JSON.parse(text) : null;
+  }catch(e){
+    // respuesta no-JSON: dejar texto literal (evita Unexpected token '<')
+    data = text;
+  }
   if(!res.ok){
+    // Si 401: limpiar sesión para evitar llamadas repetidas sin token
+    if(res.status === 401){
+      try{ localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); }catch(e){}
+      const msg = (data && (data.msg || data.error || data.message)) || 'Token requerido';
+      const err = new Error(msg);
+      err.status = res.status;
+      err.body = data;
+      throw err;
+    }
     const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'Error API');
     const err = new Error(msg);
     err.status = res.status;
@@ -1543,6 +1562,63 @@ async function apiFetch(path, opts = {}){
   }
   return data;
 }
+
+/* =========================
+   resendVerification (frontend)
+   - Asegura que desde el cliente se pueda pedir reenvío de correo.
+   - Uso: await resendVerification(email, btnEl)  ó  createResendButton(email)
+   ========================= */
+window.resendVerification = async function(email, btnEl = null){
+  try{
+    if(!email) throw new Error('Falta el email');
+    if(btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando...'; }
+
+    const apiRoot = window.API || API_BASE;
+    const res = await fetch(`${apiRoot.replace(/\/+$/,'')}/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    // Intentar parsear JSON; si falla, tomar text
+    const payload = await res.json().catch(async ()=> {
+      const t = await res.text().catch(()=>null);
+      return t || null;
+    });
+
+    if(res.ok){
+      if(btnEl) { btnEl.textContent = 'Reenviado'; setTimeout(()=>{ try{ btnEl.textContent = 'Reenviar verificación'; btnEl.disabled=false;}catch(e){} }, 2500); }
+      return { ok:true, data: payload };
+    } else {
+      const msg = (payload && (payload.msg || payload.error)) || `Error ${res.status}`;
+      if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Reenviar verificación'; }
+      return { ok:false, msg, data: payload };
+    }
+  }catch(e){
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Reenviar verificación'; }
+    console.error('resendVerification error', e);
+    return { ok:false, msg: e.message || 'Error de red' };
+  }
+};
+
+/* Crea un botón listo para usar en modales */
+window.createResendButton = function(email){
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn glow resend-verification-btn';
+  btn.textContent = 'Reenviar verificación';
+  btn.addEventListener('click', async (ev)=> {
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+    const r = await window.resendVerification(email, btn);
+    if(!r.ok){
+      alert(r.msg || 'No se pudo reenviar. Intenta más tarde.');
+    } else {
+      alert('Email de verificación reenviado. Revisa bandeja y spam.');
+    }
+  });
+  return btn;
+};
 
 /* =========================
    showPrivateFull: obtiene wallet y posiciones reales y arranca margin watcher
@@ -1748,7 +1824,7 @@ function showMarginAlert(msg, allowDismiss = true){
       const btn = document.createElement('button');
       btn.className = 'btn ghost';
       btn.textContent = 'Omitir';
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', ()=>{ 
         localStorage.setItem('marginAlertDismissedAt', String(Date.now()));
         localStorage.setItem('marginAlertWalletSnapshot', JSON.stringify(lastKnownWalletSnapshot || {}));
         const a = document.getElementById('marginAlertArea'); if(a) a.style.display = 'none';
@@ -2232,16 +2308,8 @@ window.submitTransaction = window.submitTransaction || function(e){ if(e && e.pr
 window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
 window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
 
-
-
-
-
-
-
-
-
 </script>
-  <!-- END: contenido importado -->
+<!-- END: contenido importado -->
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
