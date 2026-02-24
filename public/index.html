@@ -474,76 +474,75 @@ window.API =
 
 
 
-
 // public/js/polygon-client.js
 (function(){
-  const socket = io();
+  // Sólo inicializa socket si la librería está cargada
+  if (typeof io === 'function') {
+    const socket = io();
 
-  // DOM helpers
-  function $(sel){ return document.querySelector(sel); }
+    // DOM helpers
+    function $(sel){ return document.querySelector(sel); }
 
-  // keep last prices
-  window.symbolPrices = window.symbolPrices || {};
+    // keep last prices
+    window.symbolPrices = window.symbolPrices || {};
 
-  // init lightweight chart
-  const chartContainer = document.getElementById('tv_chart_container');
-  let chart, series;
-  if(chartContainer){
-    chart = LightweightCharts.createChart(chartContainer, {
-      width: chartContainer.clientWidth,
-      height: chartContainer.clientHeight || 420,
-      layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
-      grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+    // init lightweight chart
+    const chartContainer = document.getElementById('tv_chart_container');
+    let chart, series;
+    if(chartContainer && typeof LightweightCharts !== 'undefined'){
+      chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.clientWidth,
+        height: chartContainer.clientHeight || 420,
+        layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+      });
+      series = chart.addLineSeries({ priceLineVisible: true });
+      // resize
+      window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+    }
+
+    socket.on('connect', ()=> console.log('socket connected', socket.id));
+    socket.on('prices_snapshot', (snapshot)=>{
+      window.symbolPrices = snapshot || {};
+      // set initial series from current symbol if available
+      const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
+      if(curSym && snapshot[curSym] && series){
+        series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
+      }
     });
-    series = chart.addLineSeries({ priceLineVisible: true });
-    // resize
-    window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+
+    socket.on('price', (p)=>{
+      if(!p || !p.symbol) return;
+      window.symbolPrices[p.symbol] = p.price;
+      // update small DOM price if present
+      const priceEls = document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`);
+      priceEls.forEach(el=> {
+        if(el.id === 'op-price') el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+        else el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
+      });
+      // if chart present and current symbol matches
+      const currentLabel = document.getElementById('tradingSymbol')?.innerText?.replace('/','');
+      if(series && currentLabel && (p.symbol.endsWith(currentLabel) || p.symbol === currentLabel)){
+        const t = Math.floor((p.ts || Date.now()) / 1000);
+        try{ series.update({ time: t, value: Number(p.price) }); }catch(e){}
+      }
+    });
+
+    // optional: UI to ask server to subscribe
+    window.subscribeSymbol = function(symbol, kind='trades'){
+      socket.emit('subscribe', { symbol, kind });
+    };
+    window.unsubscribeSymbol = function(symbol, kind='trades'){
+      socket.emit('unsubscribe', { symbol, kind });
+    };
+  } else {
+    // stubs para evitar errores si socket.io no está cargado
+    console.warn('socket.io no está disponible — funciones de precios en tiempo real inactivas.');
+    window.subscribeSymbol = function(){ console.warn('subscribeSymbol: socket.io no cargado'); };
+    window.unsubscribeSymbol = function(){ console.warn('unsubscribeSymbol: socket.io no cargado'); };
+    window.symbolPrices = window.symbolPrices || {};
   }
-
-  socket.on('connect', ()=> console.log('socket connected', socket.id));
-  socket.on('prices_snapshot', (snapshot)=>{
-    window.symbolPrices = snapshot || {};
-    // set initial series from current symbol if available
-    const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
-    if(curSym && snapshot[curSym] && series){
-      series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
-    }
-  });
-
-  socket.on('price', (p)=>{
-    if(!p || !p.symbol) return;
-    window.symbolPrices[p.symbol] = p.price;
-    // update small DOM price if present
-    const priceEls = document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`);
-    priceEls.forEach(el=> {
-      if(el.id === 'op-price') el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
-      else el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6});
-    });
-    // if chart present and current symbol matches
-    const currentLabel = document.getElementById('tradingSymbol')?.innerText?.replace('/','');
-    if(series && currentLabel && (p.symbol.endsWith(currentLabel) || p.symbol === currentLabel)){
-      const t = Math.floor((p.ts || Date.now()) / 1000);
-      try{ series.update({ time: t, value: Number(p.price) }); }catch(e){}
-    }
-  });
-
-  // optional: UI to ask server to subscribe
-  window.subscribeSymbol = function(symbol, kind='trades'){
-    socket.emit('subscribe', { symbol, kind });
-  };
-  window.unsubscribeSymbol = function(symbol, kind='trades'){
-    socket.emit('unsubscribe', { symbol, kind });
-  };
-
 })();
-
-
-
-
-
-
-
-
 
 
 
@@ -944,9 +943,28 @@ window.addEventListener('load', function(){
   // apply permanent glow to inputs across the page
   applyInputGlow(document);
 
-  // restore session
-  var s = localStorage.getItem(SESSION_KEY);
-  if(s){ try{ var u = JSON.parse(s); if(typeof showPrivateFull === 'function'){ showPrivateFull(u, localStorage.getItem('token')); } }catch(e){} }
+  // restore session: SOLO restaurar vista privada si HAY token válido (evita llamadas API sin token)
+  try {
+    var s = localStorage.getItem(SESSION_KEY);
+    var token = localStorage.getItem('token');
+    if (s) {
+      try {
+        var u = JSON.parse(s);
+        // si hay token en localStorage o el objeto de sesión contiene token, restaurar privada
+        const sessionHasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
+        if (sessionHasToken) {
+          if(typeof showPrivateFull === 'function'){
+            showPrivateFull(u, token || u.token);
+          }
+        } else {
+          // no hay token: asegurarse de que quede en modo público
+          try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
+        }
+      } catch(e){
+        console.warn('Error parseando SESSION_KEY al restaurar sesión', e);
+      }
+    }
+  } catch(e){ console.warn('restore session error', e); }
 });
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
