@@ -110,6 +110,45 @@ app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 
 /* ======================================================
+   SIMPLE SYMBOLS ENDPOINTS ADDED (aliases para evitar 404)
+   - Se colocaron aquí para que existan antes del 404 /api
+   - Devuelven un listado simple de símbolos que puedes ampliar
+====================================================== */
+
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
+];
+
+// endpoint principal solicitado
+app.get("/api/symbols", (req, res) => {
+  res.json(SAMPLE_SYMBOLS);
+});
+
+// aliases comunes que aparecieron en tus logs (evitan 404)
+app.get("/api/market/symbols", (req, res) => {
+  res.json(SAMPLE_SYMBOLS);
+});
+app.get("/api/markets/symbols", (req, res) => {
+  res.json(SAMPLE_SYMBOLS);
+});
+app.get("/api/markets", (req, res) => {
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] });
+});
+app.get("/api/market/list", (req, res) => {
+  res.json(SAMPLE_SYMBOLS);
+});
+// catch extra variant with duplicated /api prefix that apareced in logs
+app.get("/api/api/symbols", (req, res) => {
+  res.json(SAMPLE_SYMBOLS);
+});
+app.get("/api/api/markets", (req, res) => {
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] });
+});
+
+/* ======================================================
    🚀 SOCKET SERVER + POLYGON REALTIME
 ====================================================== */
 
