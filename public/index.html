@@ -439,6 +439,7 @@
 
 </main>
 
+
 <footer id="publicFooter">© Leones Broker — Público
   <!-- incluir en tu HTML (por ejemplo en footer) -->
 <script src="/socket.io/socket.io.js"></script>
@@ -457,6 +458,8 @@
     </div>
   </div>
 </div>
+
+
 <script>
 /* ----------------------------
    JS Nº1 - FRONTEND: modal + register/login (COMPLETO - ACTUALIZADO)
@@ -464,7 +467,7 @@
 
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
-const SESSION_KEY = 'BROKERPRO_SESSION_USER';
+
 
 /* --- API URL dinámica --- */
 window.API =
@@ -476,41 +479,260 @@ window.API =
 
 // public/js/polygon-client.js
 (function(){
-  // Sólo inicializa socket si la librería está cargada
-  if (typeof io === 'function') {
-    const socket = io();
+  'use strict';
 
-    // DOM helpers
-    function $(sel){ return document.querySelector(sel); }
+  // Helper: safe logger (silence in prod if needed)
+  const log = (...args) => { try { console.log(...args); } catch(e){} };
+  const warn = (...args) => { try { console.warn(...args); } catch(e){} };
+  const errlog = (...args) => { try { console.error(...args); } catch(e){} };
 
-    // keep last prices
-    window.symbolPrices = window.symbolPrices || {};
+  // If socket.io isn't loaded, create harmless stubs and exit gracefully.
+  if (typeof io !== 'function') {
+    warn('socket.io (io) not found — real-time features inactive.');
+    // Provide stubs so other code won't crash
+    window.subscribeSymbol = function(){ warn('subscribeSymbol: socket.io no cargado'); };
+    window.unsubscribeSymbol = function(){ warn('unsubscribeSymbol: socket.io no cargado'); };
+    window.fetchSymbolsFromServer = async function(){ return []; };
+    return;
+  }
 
-    // init lightweight chart
-    const chartContainer = document.getElementById('tv_chart_container');
-    let chart, series;
-    if(chartContainer && typeof LightweightCharts !== 'undefined'){
+  // init socket
+  const socket = io();
+
+  // DOM helper
+  function $ (sel) { try { return document.querySelector(sel); } catch(e){ return null; } }
+
+  // Keep last prices (map symbol -> { price, ts })
+  window.symbolPrices = window.symbolPrices || {};
+
+  // Chart init (LightweightCharts) - defensive
+  const chartContainer = document.getElementById('tv_chart_container');
+  let chart = null, series = null;
+  try {
+    if (chartContainer && typeof LightweightCharts !== 'undefined' && LightweightCharts.createChart) {
       chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.clientWidth,
+        width: chartContainer.clientWidth || 800,
         height: chartContainer.clientHeight || 420,
         layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } }
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
+        timeScale: { borderColor: 'rgba(255,255,255,0.06)' }
       });
       series = chart.addLineSeries({ priceLineVisible: true });
-      // resize
-      window.addEventListener('resize', ()=> chart.applyOptions({ width: chartContainer.clientWidth }));
+      // responsive
+      window.addEventListener('resize', ()=> {
+        try { chart.applyOptions({ width: chartContainer.clientWidth }); } catch(e){}
+      });
+    } else {
+      warn('LightweightCharts no disponible — gráfico inactivo.');
     }
+  } catch(e){
+    errlog('Chart init error', e);
+    chart = null; series = null;
+  }
 
-    socket.on('connect', ()=> console.log('socket connected', socket.id));
-    socket.on('prices_snapshot', (snapshot)=>{
-      window.symbolPrices = snapshot || {};
-      // set initial series from current symbol if available
-      const curSym = document.getElementById('tradingSymbol')?.innerText?.replace('/','') || null;
-      if(curSym && snapshot[curSym] && series){
-        series.setData([{ time: Math.floor((snapshot[curSym].ts||Date.now())/1000), value: snapshot[curSym].price }]);
+  // formatting
+  function formatPrice(n){
+    const num = Number(n);
+    if(!isFinite(num)) return '--';
+    // dynamic formatting: big numbers show 1 decimal, small numbers up to 6 decimals
+    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    if(Math.abs(num) >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    // small fractional values
+    return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  }
+
+  function updatePriceElementsForSymbol(symbol, price){
+    try{
+      // Update elements with data-symbol attribute
+      const nodes = Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`));
+      nodes.forEach(el => {
+        // choose formatting target
+        el.textContent = formatPrice(price);
+      });
+
+      // update #op-price if present (single main price)
+      const op = document.getElementById('op-price');
+      if(op) op.textContent = formatPrice(price);
+
+      // update any other price displays that rely on symbol (e.g. by symbol suffix)
+      const symbolShort = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','');
+      if(symbolShort && (symbol.endsWith(symbolShort) || symbol === symbolShort)){
+        // also update trading panel price if needed
+        const mainPrice = document.getElementById('op-price');
+        if(mainPrice) mainPrice.textContent = formatPrice(price);
       }
-    });
+    }catch(e){ errlog('updatePriceElementsForSymbol error', e); }
+  }
 
+  // Keep compatibility with different payload shapes
+  function normalizePricePayload(p){
+    if(!p) return null;
+    const symbol = p.symbol || p.s || p.sym || p.t; // try common keys
+    const price = (p.price ?? p.p ?? p.value ?? p.v) || 0;
+    const ts = p.ts || p.t || Date.now();
+    return { symbol, price: Number(price), ts: Number(ts) };
+  }
+
+  // Attempt to set series point (chart)
+  function pushToSeries(sym, priceObj){
+    try{
+      if(!series || !priceObj) return;
+      const t = Math.floor((priceObj.ts || Date.now()) / 1000);
+      // series.update expects { time: <unix-seconds>, value: <number> }
+      try{
+        series.update({ time: t, value: Number(priceObj.price) });
+      }catch(e){
+        // if update fails (empty series), setData
+        try{ series.setData([{ time: t, value: Number(priceObj.price) }]); } catch(e2){}
+      }
+    }catch(e){ errlog('pushToSeries error', e); }
+  }
+
+  // Socket events
+  socket.on('connect', ()=> log('socket connected', socket.id));
+  socket.on('disconnect', ()=> log('socket disconnected'));
+
+  socket.on('prices_snapshot', (snapshot) => {
+    try{
+      if(!snapshot || typeof snapshot !== 'object') return;
+      // snapshot might be { "BINANCE:BTCUSDT": { price: 123, ts: 123123 }, ... }
+      window.symbolPrices = window.symbolPrices || {};
+      Object.keys(snapshot).forEach(k => {
+        const item = snapshot[k];
+        const price = Number(item?.price ?? item?.p ?? item);
+        const ts = Number(item?.ts ?? Date.now());
+        if(!isFinite(price)) return;
+        window.symbolPrices[k] = { price, ts };
+        // update DOM for known symbols
+        updatePriceElementsForSymbol(k, price);
+      });
+
+      // if current symbol present and chart exists, seed series
+      const curSym = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+      if(curSym){
+        // find exact match or suffix match
+        const matchKey = Object.keys(window.symbolPrices).find(k => k === curSym || k.endsWith(curSym));
+        if(matchKey && window.symbolPrices[matchKey] && series){
+          const seed = window.symbolPrices[matchKey];
+          series.setData([{ time: Math.floor(seed.ts/1000), value: seed.price }]);
+        }
+      }
+    }catch(e){
+      errlog('prices_snapshot handler error', e);
+    }
+  });
+
+  socket.on('price', (payload) => {
+    try{
+      const p = normalizePricePayload(payload);
+      if(!p || !p.symbol) return;
+      // store price
+      window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
+      // update DOM
+      updatePriceElementsForSymbol(p.symbol, p.price);
+      // update chart if current symbol matches
+      const currentLabel = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+      if(series && (p.symbol === currentLabel || p.symbol.endsWith(currentLabel))){
+        pushToSeries(p.symbol, p);
+      }
+    }catch(e){ errlog('price handler error', e); }
+  });
+
+  socket.on('error', (e)=> { warn('socket error', e); });
+
+  // Provide subscribe/unsubscribe helpers
+  window.subscribeSymbol = function(symbol, kind='trades'){
+    try{
+      if(!symbol) return;
+      socket.emit && socket.emit('subscribe', { symbol, kind });
+      log('subscribe emitted', symbol, kind);
+    }catch(e){ errlog('subscribeSymbol error', e); }
+  };
+
+  window.unsubscribeSymbol = function(symbol, kind='trades'){
+    try{
+      if(!symbol) return;
+      socket.emit && socket.emit('unsubscribe', { symbol, kind });
+      log('unsubscribe emitted', symbol, kind);
+    }catch(e){ errlog('unsubscribeSymbol error', e); }
+  };
+
+  // Try to fetch symbols list from backend (try several possible endpoints)
+  window.fetchSymbolsFromServer = async function(){
+    const candidates = [
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/api/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/markets/symbols',
+      (window.API ? window.API.replace(/\/+$/,'') : '') + '/market/symbols',
+      '/api/symbols',
+      '/api/markets/symbols',
+      '/api/market/symbols'
+    ].filter(Boolean);
+
+    for(const url of candidates){
+      try{
+        const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }});
+        if(!res.ok) { warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
+        const data = await res.json().catch(()=>null);
+        if(Array.isArray(data) && data.length>0){
+          window.ALL_SYMBOLS = data.map(item => {
+            if(typeof item === 'string') {
+              // format "EXCHANGE:PAIR"
+              const parts = item.split(':');
+              return { symbol: item, label: (parts[1]||parts[0]).replace('_','/'), market: parts[0] || 'Unknown' };
+            }
+            return {
+              symbol: item.symbol || item.sym || item.s || '',
+              label: item.label || item.name || (item.symbol ? item.symbol.split(':').pop() : ''),
+              market: item.market || item.exchange || item.type || 'Other'
+            };
+          });
+          log('Symbols loaded from', url, 'count=', window.ALL_SYMBOLS.length);
+          // If a render function exists, call it
+          try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){/* ignore */ }
+          return window.ALL_SYMBOLS;
+        } else {
+          warn('fetchSymbolsFromServer got empty/invalid data', url);
+        }
+      }catch(e){
+        warn('fetchSymbolsFromServer error', url, e);
+      }
+    }
+    warn('fetchSymbolsFromServer: no endpoints returned valid list');
+    return [];
+  };
+
+  // Auto-fetch symbols on load (non-blocking)
+  (async function tryLoadSymbols(){
+    try{
+      await window.fetchSymbolsFromServer();
+    }catch(e){
+      /* ignore */
+    }
+  })();
+
+  // Defensive UI init helpers that other scripts might call
+  window.updateDisplayedPrice = function(price){
+    try{
+      const op = document.getElementById('op-price');
+      if(op) op.textContent = formatPrice(price);
+    }catch(e){}
+  };
+
+  window.updateOrderBook = function(price){
+    try{
+      const bids = document.getElementById('ob-bids');
+      const asks = document.getElementById('ob-asks');
+      if(bids) bids.textContent = `—`; // placeholder (real orderbook via backend)
+      if(asks) asks.textContent = `—`;
+    }catch(e){}
+  };
+
+  // Final log
+  log('polygon-client.js initialized');
+
+})();
     socket.on('price', (p)=>{
       if(!p || !p.symbol) return;
       window.symbolPrices[p.symbol] = p.price;
@@ -535,14 +757,15 @@ window.API =
     window.unsubscribeSymbol = function(symbol, kind='trades'){
       socket.emit('unsubscribe', { symbol, kind });
     };
-  } else {
+
+  {
     // stubs para evitar errores si socket.io no está cargado
     console.warn('socket.io no está disponible — funciones de precios en tiempo real inactivas.');
     window.subscribeSymbol = function(){ console.warn('subscribeSymbol: socket.io no cargado'); };
     window.unsubscribeSymbol = function(){ console.warn('unsubscribeSymbol: socket.io no cargado'); };
     window.symbolPrices = window.symbolPrices || {};
   }
-})();
+;
 
 
 
@@ -685,19 +908,203 @@ attachIfExists('loginBtn','click', openLoginModal);
 attachIfExists('ctaAbrir','click', ()=> { const b = document.getElementById('openAccountBtn'); if(b) b.click(); });
 attachIfExists('ctaLogin','click', ()=> { const b = document.getElementById('loginBtn'); if(b) b.click(); });
 
-/* ---------- REGISTER / LOGIN (tries backend, fallback to localStorage) ---------- */
+/* =========================
+   Autocontenido - Registro / Login + Helpers (completo y corregido)
+   ========================= */
 
+/* GLOBAL KEYS */
+
+/* --- API URL dinámica (asegúrate que window.API exista en tu entorno) --- */
+window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "https://leones-broker.onrender.com/api");
+
+
+/* ---------- small helpers: localStorage users ---------- */
+function loadUsers(){ try{ return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); }catch(e){ return []; } }
+function saveUsers(u){ try{ localStorage.setItem(USERS_KEY, JSON.stringify(u||[])); }catch(e){} }
+
+/* ---------- resilient fetch helper (adds token + handles HTML responses) ---------- */
+async function apiFetch(path, opts = {}){
+  try{
+    const token = localStorage.getItem('token');
+    const headers = Object.assign({}, opts.headers || {});
+    if(!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    if(token && !headers['Authorization']) headers['Authorization'] = 'Bearer ' + token;
+
+    const url = path.startsWith('http') ? path : (API_BASE.replace(/\/+$/,'') + (path.startsWith('/') ? path : '/' + path));
+
+    const res = await fetch(url, {...opts, headers});
+    const ct = res.headers.get('content-type') || '';
+    let data;
+    if(ct.includes('application/json')){
+      data = await res.json().catch(()=>null);
+    } else {
+      // could be HTML (error page) or plain text
+      const txt = await res.text().catch(()=>null);
+      // try parse JSON anyway
+      try{ data = txt ? JSON.parse(txt) : null; }catch(e){ data = txt; }
+    }
+
+    if(!res.ok){
+      const message = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : `HTTP ${res.status}`);
+      const err = new Error(message);
+      err.status = res.status;
+      err.body = data;
+      throw err;
+    }
+    return data;
+  }catch(e){
+    throw e;
+  }
+}
+
+/* ---------- robust helpers para modales y UI ---------- */
+function applyInputGlow(root = document){
+  try{
+    const selector = 'input, textarea, select';
+    Array.from(root.querySelectorAll(selector)).forEach(el=>{
+      if(el.type && ['button','submit','reset'].includes(el.type)) return;
+      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+      if(!el._glowHandlersAttached){
+        el.addEventListener('focus', ()=> {
+          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
+          el.style.borderColor = 'rgba(212,175,55,0.45)';
+          el.style.transform = 'translateY(-1px)';
+        });
+        el.addEventListener('blur', ()=> {
+          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
+          el.style.borderColor = 'rgba(212,175,55,0.14)';
+          el.style.transform = '';
+        });
+        el._glowHandlersAttached = true;
+      }
+    });
+  }catch(e){ console.warn('applyInputGlow error', e); }
+}
+
+function ensureModalHooks(){
+  var modal = document.getElementById('modal');
+  if(!modal) return;
+
+  var cancel = document.getElementById('modalCancel');
+  if(cancel && !cancel.dataset.hooked){
+    cancel.addEventListener('click', closeModal);
+    cancel.dataset.hooked='1';
+  }
+
+  var ok = document.getElementById('modalOk');
+  if(ok && !ok.dataset.hooked){
+    ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); });
+    ok.dataset.hooked='1';
+  }
+}
+
+function openModal(html, onConfirm){
+  ensureModalHooks();
+  var modal = document.getElementById('modal');
+  if(!modal){
+    // crear modal mínimo si no existe (para compatibilidad)
+    modal = document.createElement('div'); modal.id='modal';
+    modal.style.position='fixed'; modal.style.inset='0'; modal.style.display='flex';
+    modal.style.alignItems='center'; modal.style.justifyContent='center'; modal.style.background='rgba(0,0,0,0.6)';
+    modal.innerHTML = `<div id="modalBox" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff">
+      <div id="modalBody"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="modalCancel" class="btn ghost">Cancelar</button>
+        <button id="modalOk" class="btn glow">Aceptar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    ensureModalHooks();
+  }
+  var body = document.getElementById('modalBody');
+  if(!body){
+    console.warn('Modal body element not found: #modalBody');
+    return;
+  }
+  body.innerHTML = html;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  modal._onConfirm = onConfirm;
+
+  // Add enter key submit and password toggle inside modal
+  setTimeout(()=>{ // next tick to ensure elements are in DOM
+    applyInputGlow(body);
+
+    const firstInput = modal.querySelector('input, textarea, select');
+    if(firstInput) firstInput.focus();
+
+    const enterHandler = (e)=>{
+      if(e.key === 'Enter'){
+        try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){}
+        closeModal();
+      }
+    };
+    modal._enterHandler = enterHandler;
+    modal.addEventListener('keydown', enterHandler);
+
+    modal.querySelectorAll('input[type="password"]').forEach(pw=>{
+      if(pw.nextSibling && pw.nextSibling.classList && pw.nextSibling.classList.contains('pw-toggle')) return;
+      const btn = document.createElement('button');
+      btn.type='button'; btn.className='pw-toggle'; btn.style.marginLeft='8px'; btn.style.padding='6px';
+      btn.style.background='transparent'; btn.style.color='#ddd'; btn.style.border='1px solid rgba(255,255,255,0.03)';
+      btn.style.borderRadius='6px'; btn.textContent='👁️';
+      btn.addEventListener('click', ()=> { pw.type = pw.type === 'password' ? 'text' : 'password'; pw.focus(); });
+      try{ pw.parentNode.style.position = pw.parentNode.style.position || 'relative'; pw.parentNode.appendChild(btn); }catch(e){}
+    });
+  },50);
+}
+
+function closeModal(){
+  var modal = document.getElementById('modal');
+  if(!modal) return;
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+  modal._onConfirm = null;
+  if(modal._enterHandler){ modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
+}
+
+/* ---------- safe escape ---------- */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+
+/* ---------- restorePublicHeader (cuando se hace logout) ---------- */
+function restorePublicHeader(){
+  const headerActions = document.getElementById('headerActions');
+  if(!headerActions) return;
+  headerActions.innerHTML = '';
+  const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
+  const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
+  headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
+  openBtn.addEventListener('click', openRegisterModal);
+  loginBtn.addEventListener('click', openLoginModal);
+  const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
+  const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
+}
+
+/* =========================
+   ---------- REGISTER / LOGIN (robustos)
+   ========================= */
+
+/* backendRegister: usa apiFetch si quieres (pero aquí uso fetch directo robusto) */
 async function backendRegister(userObj){
   try{
-    const res = await fetch(`${window.API}/auth/register`, {
+    const url = (API_BASE.replace(/\/+$/,'') + '/auth/register');
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(userObj)
     });
-    const payload = await res.json().catch(()=>null);
+    const ct = res.headers.get('content-type') || '';
+    let payload;
+    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
+    else {
+      const txt = await res.text().catch(()=>null);
+      try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; }
+    }
     if(!res.ok){
-      const msg = (payload && (payload.msg || payload.error)) || 'Error servidor';
-      return { ok:false, msg, data: payload || null };
+      const msg = (payload && (payload.msg || payload.error || payload.message)) || (typeof payload === 'string' ? payload : 'Error servidor');
+      return { ok:false, msg, data: payload || null, status: res.status };
     }
     return { ok:true, data: payload || {} };
   }catch(e){
@@ -706,17 +1113,22 @@ async function backendRegister(userObj){
   }
 }
 
+/* backendLogin similar robust parsing */
 async function backendLogin(creds){
   try{
-    const res = await fetch(`${window.API}/auth/login`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
+    const url = (API_BASE.replace(/\/+$/,'') + '/auth/login');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(creds)
     });
-    const payload = await res.json().catch(()=>null);
+    const ct = res.headers.get('content-type') || '';
+    let payload;
+    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
+    else { const txt = await res.text().catch(()=>null); try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; } }
     if(!res.ok){
-      const msg = (payload && (payload.msg || payload.error)) || 'Credenciales inválidas';
-      return { ok:false, msg };
+      const msg = (payload && (payload.msg || payload.error || payload.message)) || (typeof payload === 'string' ? payload : 'Credenciales inválidas');
+      return { ok:false, msg, status: res.status };
     }
     return { ok:true, data: payload || {} };
   }catch(e){
@@ -725,15 +1137,36 @@ async function backendLogin(creds){
   }
 }
 
+/* funciones para reenviar verificación */
+async function backendResend(email){
+  try{
+    const url = (API_BASE.replace(/\/+$/,'') + '/auth/resend-verification');
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const ct = res.headers.get('content-type') || '';
+    let p;
+    if(ct.includes('application/json')) p = await res.json().catch(()=>null);
+    else { const t = await res.text().catch(()=>null); try{ p = t ? JSON.parse(t) : null; }catch(e){ p = t; } }
+    if(!res.ok) return { ok:false, msg: (p && (p.msg||p.error)) || (typeof p==='string'?p:'Error reenviando'), status: res.status };
+    return { ok:true, data: p || {} };
+  }catch(e){
+    console.error('backendResend error', e);
+    return { ok:false, msg: e.message || 'Network' };
+  }
+}
+
 /* Register modal (tries backend then fallback) */
 function openRegisterModal(){
   openModal(`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" /></div>
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" /></div>
+      <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" /></div>
+      <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" /></div>
     </div>
     <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
   `, async function(){
@@ -743,16 +1176,18 @@ function openRegisterModal(){
     const address = (document.getElementById('r_address')||{}).value || '';
     const pass = (document.getElementById('r_pass')||{}).value || '';
     const msgEl = document.getElementById('r_msg');
+    if(!msgEl) return;
     msgEl.textContent='';
 
     if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
 
     const userObj = { name, email, phone, address, password: pass };
-    console.log('Register payload:', userObj);
+    msgEl.textContent = 'Registrando...';
     const backend = await backendRegister(userObj);
-    if(backend.ok){
-      const serverData = backend.data;
 
+    if(backend.ok){
+      const serverData = backend.data || {};
+      // si el backend responde que no pudo enviar email
       if(serverData && serverData.verificationSent === false){
         msgEl.innerHTML = 'Cuenta creada pero el correo de verificación no pudo enviarse.<br/><br/>';
         const btn = document.createElement('button');
@@ -763,33 +1198,20 @@ function openRegisterModal(){
         msgEl.appendChild(btn);
 
         btn.addEventListener('click', async ()=>{
-          btn.disabled = true;
-          btn.textContent = 'Enviando...';
-          try{
-            const res = await fetch(`${window.API}/auth/resend-verification`, {
-              method: 'POST',
-              headers: { 'Content-Type':'application/json' },
-              body: JSON.stringify({ email })
-            });
-            const p = await res.json().catch(()=>null);
-            if(res.ok){
-              msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
-            }else{
-              msgEl.textContent = (p && (p.msg || p.error)) || 'Error reenviando verificación';
-              btn.disabled = false;
-              btn.textContent = 'Reenviar verificación';
-            }
-          }catch(e){
-            console.error('resend verification error', e);
-            msgEl.textContent = 'Error de red al reenviar. Intenta de nuevo.';
+          btn.disabled = true; btn.textContent = 'Enviando...';
+          const r = await backendResend(email);
+          if(r.ok){
+            msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
+          } else {
+            msgEl.textContent = r.msg || 'Error reenviando verificación';
             btn.disabled = false;
             btn.textContent = 'Reenviar verificación';
           }
         });
-
         return;
       }
 
+      // guardar token o user según lo devuelto
       if(serverData && serverData.token){
         localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name }));
         localStorage.setItem('token', serverData.token);
@@ -797,23 +1219,19 @@ function openRegisterModal(){
       else if(serverData && serverData.user){
         localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
         if(serverData.user.token) localStorage.setItem('token', serverData.user.token);
+      } else {
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name }));
       }
-      else { localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name })); }
 
       closeModal();
       const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
+      return;
+    } else {
+      // backend returned error - show message
+      msgEl.textContent = backend.msg || 'Error al registrar';
       return;
     }
-
-    // fallback: localStorage (offline/dev)
-    const users = loadUsers();
-    if(users.find(u=>u.email===email)){ msgEl.textContent='Correo ya registrado'; return; }
-    const newUser = { name, email, phone, pass, created: Date.now() };
-    users.push(newUser); saveUsers(users);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(newUser));
-    closeModal();
-    if(typeof showPrivateFull === 'function'){ showPrivateFull(newUser); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(newUser); }
   });
 }
 
@@ -821,21 +1239,23 @@ function openRegisterModal(){
 function openLoginModal(){
   openModal(`
     <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
-      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" style="width:100%;padding:8px;border-radius:8px;background:#0b0b0b;border:1px solid rgba(255,255,255,0.03);color:#fff" /></div>
+      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" /></div>
+      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" /></div>
     </div>
     <div id="l_msg" style="color:#ff8a8a;margin-top:8px"></div>
   `, async function(){
     const email = ((document.getElementById('l_email')||{}).value || '').trim().toLowerCase();
     const pass = (document.getElementById('l_pass')||{}).value || '';
     const msg = document.getElementById('l_msg');
+    if(!msg) return;
     msg.textContent='';
 
     if(!email || !pass){ msg.textContent='Completa los campos'; return; }
 
+    msg.textContent = 'Iniciando sesión...';
     const backend = await backendLogin({ email, password: pass });
     if(backend.ok){
-      const d = backend.data;
+      const d = backend.data || {};
       if(d && d.token){
         localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' }));
         localStorage.setItem('token', d.token);
@@ -843,47 +1263,28 @@ function openLoginModal(){
       else if(d && d.user){
         localStorage.setItem(SESSION_KEY, JSON.stringify(d.user));
         if(d.user.token) localStorage.setItem('token', d.user.token);
+      } else {
+        // fallback guarda sesión mínima
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
       }
       closeModal();
       const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(session); }
+      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
+      return;
+    } else {
+      // si backend devolvió status 409/401/etc, mostrar
+      msg.textContent = backend.msg || 'Credenciales inválidas';
       return;
     }
-
-    // fallback: localStorage auth
-    const users = loadUsers();
-    const user = users.find(u => u.email === email && (u.pass === pass || u.password === pass));
-    if(!user){ msg.textContent = 'Credenciales inválidas'; return; }
-
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    closeModal();
-    if(typeof showPrivateFull === 'function'){ showPrivateFull(user); } else { if(typeof enterPrivateMode === 'function') enterPrivateMode(user); }
   });
 }
 
-/* PUBLIC helper to restore header actions after logout */
-function restorePublicHeader(){
-  const headerActions = document.getElementById('headerActions');
-  if(!headerActions) return;
-  headerActions.innerHTML = '';
-  const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
-  const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
-  headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
-  // reattach
-  openBtn.addEventListener('click', openRegisterModal);
-  loginBtn.addEventListener('click', openLoginModal);
-  // CTAs
-  const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
-  const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
-}
+/* PUBLIC helper to restore header actions after logout (ya definido arriba también) - mantener compatibilidad */
+window.restorePublicHeader = restorePublicHeader;
 
-/* -------------------------
-   PARTE PRIVADA (defensiva)
-   ------------------------- */
+/* ---------- showPrivateFull y performLogoutFull defensivos (si no existen) ---------- */
+/* (si ya tienes versiones avanzadas, estas no sobrescribirán porque revisan typeof) */
 
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
-
-/* define showPrivateFull & performLogoutFull only if not provided (avoid overwriting advanced versions) */
 if(typeof window.showPrivateFull !== 'function'){
   window.showPrivateFull = function(user, token){
     try{
@@ -896,7 +1297,14 @@ if(typeof window.showPrivateFull !== 'function'){
         profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
         const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
         const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
-        logoutBtn.addEventListener('click', performLogoutFull);
+        logoutBtn.addEventListener('click', function(){ 
+          if(typeof window.performLogoutFull === 'function') window.performLogoutFull(); 
+          else {
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem('token');
+            restorePublicHeader();
+          }
+        });
         profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
         headerActions.appendChild(profileBtn);
       }
@@ -927,8 +1335,6 @@ if(typeof window.performLogoutFull !== 'function'){
       const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
       const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
       restorePublicHeader();
-      const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> { const b=document.getElementById('openAccountBtn'); if(b) b.click(); });
-      const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> { const b=document.getElementById('loginBtn'); if(b) b.click(); });
     }catch(e){ console.error('logout error', e); }
   };
 }
@@ -936,33 +1342,27 @@ if(typeof window.performLogoutFull !== 'function'){
 /* On load: init and restore session; apply input glow globally */
 window.addEventListener('load', function(){
   ensureModalHooks();
-
-  // fix image paths
-  Array.from(document.images).forEach(img=>{ try{ let s = img.getAttribute('src')||''; if(s && !s.match(/^https?:\/\//i) && /[ \(\)]/.test(s)){ let fixed = s.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29'); img.setAttribute('src', fixed); } }catch(e){} });
-
-  // apply permanent glow to inputs across the page
   applyInputGlow(document);
 
-  // restore session: SOLO restaurar vista privada si HAY token válido (evita llamadas API sin token)
   try {
     var s = localStorage.getItem(SESSION_KEY);
     var token = localStorage.getItem('token');
     if (s) {
       try {
         var u = JSON.parse(s);
-        // si hay token en localStorage o el objeto de sesión contiene token, restaurar privada
         const sessionHasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
         if (sessionHasToken) {
           if(typeof showPrivateFull === 'function'){
             showPrivateFull(u, token || u.token);
           }
         } else {
-          // no hay token: asegurarse de que quede en modo público
-          try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
+          try{ restorePublicHeader(); }catch(e){}
         }
       } catch(e){
         console.warn('Error parseando SESSION_KEY al restaurar sesión', e);
       }
+    } else {
+      try{ restorePublicHeader(); }catch(e){}
     }
   } catch(e){ console.warn('restore session error', e); }
 });
@@ -1089,6 +1489,9 @@ window.addEventListener('load', function(){
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
+    <!-- ADDED: headerActions (usado por los scripts) -->
+    <div id="headerActions" style="display:flex;align-items:center;gap:10px;margin-right:12px;"></div>
+
     <div class="user">
       <div style="text-align:right">
         <div style="font-weight:800;color:var(--gold)" id="privateHeaderName">Usuario</div>
@@ -1099,9 +1502,9 @@ window.addEventListener('load', function(){
     </div>
   </header>
 
-<!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
-<!-- TradingView official script (needed for real charts) -->
-<script src="https://s3.tradingview.com/tv.js"></script>
+  <!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
+  <!-- TradingView official script (needed for real charts) -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
 
   <div class="main-wrap">
     <div class="layout">
@@ -1180,7 +1583,7 @@ window.addEventListener('load', function(){
               </div>
 
               <!-- chart: se carga solo aquí -->
-              <div id="tv_chart_container" style="margin-top:12px"></div>
+              <div id="tv_chart_container" style="margin-top:12px; height:420px;"></div>
 
               <div class="order-book-grid">
                 <div class="ob-col">
@@ -1352,677 +1755,307 @@ window.addEventListener('load', function(){
   </div>
 </div>
 
-<!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
-<script>
-  (function(){
-    // Sidebar toggle (no destruye si ya existe algo similar)
-    const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebarToggle');
 
-    if(sidebarToggle && sidebar){
-      sidebarToggle.addEventListener('click', () => {
-        sidebar.classList.toggle('hidden');
-      });
-    }
 
-    // NO mostrar el área privada automáticamente.
-    // Antes se forzaba: document.getElementById('privateArea_full').style.display = 'block';
-    // Ahora solo mostramos la parte privada si existe una sesión válida en localStorage (SESSION_KEY + token).
-    try {
-      const sessKey = (typeof SESSION_KEY !== 'undefined') ? SESSION_KEY : 'BROKERPRO_SESSION_USER';
-      const sess = localStorage.getItem(sessKey);
-      const token = localStorage.getItem('token');
-      if (document.getElementById('privateArea_full') && sess && token) {
-        try {
-          const user = JSON.parse(sess);
-          if (typeof showPrivateFull === 'function') {
-            showPrivateFull(user, token);
-          } else {
-            // Si no hay showPrivateFull, mostrar de forma segura
-            document.getElementById('privateArea_full').style.display = 'flex';
-          }
-        } catch(e) {
-          // Sesión corrupta o inválida: no mostrar área privada
-          console.warn('Sesión inválida en localStorage, no se mostrará el área privada.', e);
-        }
-      }
-    } catch(e){/* safe */}
-
-    // Helpers no destructivos: definir navSidebar / footerNavClick si no existen (evitan errores)
-    if(typeof navSidebar !== 'function'){
-      window.navSidebar = function(e){
-        try{
-          const target = e.currentTarget?.getAttribute('data-target');
-          if(!target) return;
-          // hide panels
-          document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
-          // activate menu items
-          document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
-          e.currentTarget.classList.add('active');
-          // show target
-          const panel = document.getElementById(target + 'Panel') || document.getElementById(target);
-          if(panel) panel.style.display = 'block';
-          // update footer active if applicable
-          document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
-        }catch(err){console.warn(err)}
-      };
-    }
-
-    if(typeof footerNavClick !== 'function'){
-      window.footerNavClick = function(e){
-        const target = e.currentTarget?.getAttribute('data-target');
-        if(!target) return;
-        document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
-        const targetEl = document.getElementById(target);
-        if(targetEl) targetEl.style.display='block';
-        document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        // also update sidebar active
-        document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
-        const sidebarItem = Array.from(document.querySelectorAll('.menu-item')).find(mi => mi.getAttribute('data-target') === target.replace('Panel',''));
-        if(sidebarItem) sidebarItem.classList.add('active');
-      };
-    }
-
-    // Modales simples
-    window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
-    window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
-
-    // Logout placeholder (tu backend debe sobreescribir esto)
-    if(typeof logout !== 'function'){
-      window.logout = function(){
-        try{ localStorage.removeItem('token'); location.reload(); }catch(e){ location.reload(); }
-      };
-    }
-
-    // Evitar submit por defecto si las funciones específicas no existen
-    window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
-    window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
-    window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
-  })();
-</script>
 <script>
 /* -------------------------
-   JS Nº2 - PARTE PRIVADA - JS COMPLETO Y CORREGIDO (COMPLETO - ACTUALIZADO)
+   JS PRIVADO: REAL-TIME + SYMBOLS FROM BACKEND
+   Reemplaza completamente tu JS Nº2 por este bloque
    ------------------------- */
 
-/* API URL: usa la variable global window.API si existe, si no usa tu URL de render por defecto. */
-const API_BASE = window.API || window.API_URL || "https://leones-broker.onrender.com/api";
+/* API base (usa window.API si está definida por tu HTML) */
+const API_BASE = (window.API && window.API.replace(/\/+$/,'')) || (window.API_URL && window.API_URL.replace(/\/+$/,'')) || "https://leones-broker.onrender.com/api";
+const WS_BASE = (window.API && window.API.replace(/\/api\/?$/,'')) || (location.origin);
+const SESSION_KEY = (typeof window.SESSION_KEY !== 'undefined') ? window.SESSION_KEY : 'BROKERPRO_SESSION_USER';
 
-/* safe escape helper: define only si no existe para evitar duplicados */
+/* -----------------------
+   UTIL: escape + localStorage helpers
+   ----------------------- */
 if(typeof window.escapeHtml !== 'function'){
-  window.escapeHtml = function(s){
-    return String(s||'').replace(/[&<>"']/g,function(m){
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
-    });
-  };
+  window.escapeHtml = function(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); };
 }
+function loadUsers(){ try{ return JSON.parse(localStorage.getItem('leones_images_users')||'[]'); }catch(e){return[]} }
+function saveUsers(u){ try{ localStorage.setItem('leones_images_users', JSON.stringify(u)); }catch(e){} }
 
 /* =========================
-   SESIÓN: guardar/recuperar
+   API fetch robusto (evita Unexpected token '<')
    ========================= */
-function saveSession(userObj, token){
-  try{
-    if(userObj) localStorage.setItem(SESSION_KEY, JSON.stringify(userObj));
-    if(token) localStorage.setItem('token', token);
-  }catch(e){ console.warn('saveSession error', e); }
-}
-
-function clearSessionStorage(){
-  try{
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('token');
-    localStorage.removeItem('expires');
-    localStorage.removeItem('marginAlertDismissedAt');
-  }catch(e){}
-}
-
-function getSavedSession(){
-  try{
-    const s = localStorage.getItem(SESSION_KEY);
-    if(!s) return null;
-    return JSON.parse(s);
-  }catch(e){ return null; }
-}
-
-/* =========================
-   UTIL: fetch con token + rate-limit simple
-   ========================= */
-const rateLimitCache = {}; // { key: { ts, data } }
-const inFlight = {}; // promises in flight
-const RATE_LIMIT_MS = 2000; // 2s for wallet/positions
-
 async function apiFetch(path, opts = {}){
   const token = localStorage.getItem('token');
-  const headers = opts.headers || {};
+  const headers = opts.headers ? {...opts.headers} : {};
   headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   if(token) headers['Authorization'] = `Bearer ${token}`;
 
-  const url = path.startsWith('http') ? path : (API_BASE.replace(/\/+$/,'') + (path.startsWith('/') ? path : '/' + path));
-
-  const shortPaths = ['/wallet/me','/positions','/api/wallet/me','/api/positions'];
-  const isShort = shortPaths.some(p => url.includes(p));
-  if(isShort){
-    const key = url + JSON.stringify(opts.body || opts.method || '');
-    const cached = rateLimitCache[key];
-    const now = Date.now();
-    if(cached && (now - cached.ts < RATE_LIMIT_MS)) {
-      return cached.data;
-    }
-    if(inFlight[key]) {
-      return inFlight[key];
-    }
-    const p = fetch(url, {...opts, headers}).then(async (res)=>{
-      const text = await res.text().catch(()=>null);
-      let data = null;
-      try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
-      if(!res.ok){
-        const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'Error API');
-        const err = new Error(msg);
-        err.status = res.status;
-        err.body = data;
-        throw err;
-      }
-      rateLimitCache[key] = { ts: Date.now(), data };
-      return data;
-    }).finally(()=>{ delete inFlight[key]; });
-    inFlight[key] = p;
-    return p;
+  const url = path.startsWith('http') ? path : (API_BASE + (path.startsWith('/') ? path : '/' + path));
+  let res;
+  try{
+    res = await fetch(url, {...opts, headers});
+  }catch(e){
+    const err = new Error('Network error');
+    err.body = e;
+    throw err;
   }
 
-  const res = await fetch(url, {...opts, headers});
   const text = await res.text().catch(()=>null);
   let data = null;
-  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; } // si no es JSON, guardamos texto
+
   if(!res.ok){
-    const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'Error API');
+    // manejar 401 -> limpiar sesión para evitar polling eterno con token inválido
+    if(res.status === 401){
+      try{ localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); }catch(e){}
+      const msg = (data && (data.msg||data.error||data.message)) || 'Token requerido';
+      const err = new Error(msg);
+      err.status = res.status; err.body = data;
+      throw err;
+    }
+    const msg = (data && (data.msg||data.error||data.message)) || (typeof data === 'string' ? data : 'Error API');
     const err = new Error(msg);
-    err.status = res.status;
-    err.body = data;
+    err.status = res.status; err.body = data;
     throw err;
   }
   return data;
 }
 
 /* =========================
-   showPrivateFull: obtiene wallet y posiciones reales y arranca margin watcher
+   Resend verification (frontend)
    ========================= */
-let marginWatcherId = null;
-let marginWatcherRunning = false;
-let lastKnownWalletSnapshot = null;
-
-window.showPrivateFull = async function(user, token){
+window.resendVerification = async function(email, btnEl = null){
   try{
-    if(!user) return;
+    if(!email) throw new Error('Falta el email');
+    if(btnEl){ btnEl.disabled = true; btnEl.textContent = 'Enviando...'; }
 
-    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = 'none'; }catch(e){}
-    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = 'none'; }catch(e){}
+    const res = await fetch(`${API_BASE}/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const payload = await res.json().catch(async ()=> { return (await res.text().catch(()=>null)) || null; });
 
-    try{
-      const headerActions = document.getElementById('headerActions');
-      if(headerActions){
-        headerActions.innerHTML = '';
-
-        // Reuse existing menuToggle if present (user requested to keep original)
-        const existingMenuToggle = document.getElementById('menuToggle');
-        if(existingMenuToggle){
-          try{ headerActions.appendChild(existingMenuToggle); }catch(e){}
-          existingMenuToggle.onclick = function(){ const sidebar = document.getElementById('sidebar'); if(sidebar) sidebar.classList.toggle('hidden'); };
-        } else {
-          // fallback create only if missing
-          const menuBtn = document.createElement('button');
-          menuBtn.id = 'menuTogglePrivate';
-          menuBtn.className = 'menu-toggle';
-          menuBtn.title = 'Abrir/Cerrar menú';
-          menuBtn.type = 'button';
-          menuBtn.textContent = '☰';
-          menuBtn.addEventListener('click', () => {
-            const sidebar = document.getElementById('sidebar');
-            if(sidebar) sidebar.classList.toggle('hidden');
-          });
-          headerActions.appendChild(menuBtn);
-        }
-
-        const profileBtn = document.createElement('div');
-        profileBtn.style.display = 'flex';
-        profileBtn.style.alignItems = 'center';
-        profileBtn.style.gap = '10px';
-
-        const nameEl = document.createElement('div');
-        nameEl.textContent = user.name || user.username || 'Usuario';
-        nameEl.style.color = 'var(--gold)';
-        nameEl.style.fontWeight = '700';
-
-        const logoutBtn = document.createElement('button');
-        logoutBtn.className = 'btn ghost';
-        logoutBtn.type = 'button';
-        logoutBtn.textContent = 'Cerrar sesión';
-        logoutBtn.addEventListener('click', performLogoutFull);
-
-        profileBtn.appendChild(nameEl);
-        profileBtn.appendChild(logoutBtn);
-
-        headerActions.appendChild(profileBtn);
-      }
-    }catch(e){
-      console.error('showPrivateFull header error', e);
+    if(res.ok){
+      if(btnEl){ btnEl.textContent = 'Reenviado'; setTimeout(()=>{ try{ btnEl.textContent='Reenviar verificación'; btnEl.disabled=false; }catch(e){} },2000); }
+      return { ok:true, data: payload };
+    } else {
+      if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; }
+      return { ok:false, msg: (payload && (payload.msg||payload.error)) || `Error ${res.status}`, data: payload };
     }
-
-    try{
-      const privateWrapper = document.getElementById('privateArea_full');
-      if(privateWrapper) privateWrapper.style.display = 'flex';
-
-      const nameVal = user.name || user.username || 'Usuario';
-      const emailVal = user.email || '';
-
-      const nameSpan = document.getElementById('private-name-full'); if(nameSpan) nameSpan.textContent = nameVal;
-      const emailSpan = document.getElementById('private-email-full'); if(emailSpan) emailSpan.textContent = emailVal;
-      const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = nameVal;
-      const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = nameVal;
-      const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (nameVal||'U').slice(0,1).toUpperCase();
-    }catch(e){
-      console.error('showPrivateFull private area error', e);
-    }
-
-    try{
-      const safeUser = {
-        id: user.id || user._id || null,
-        name: user.name || user.username || 'Usuario',
-        email: user.email || '',
-        phone: user.phone || user.telefono || '',
-        address: user.address || user.adress || '',
-        balance: (typeof user.balance === 'number') ? user.balance : (user.balance ? Number(user.balance) : 0),
-        equity: (typeof user.equity === 'number') ? user.equity : (user.equity ? Number(user.equity) : 0),
-        pnl: (typeof user.pnl === 'number') ? user.pnl : (user.pnl ? Number(user.pnl) : 0),
-        borrowed: (typeof user.borrowed === 'number') ? user.borrowed : (user.borrowed ? Number(user.borrowed) : 0),
-        leverageFactor: (typeof user.leverageFactor === 'number') ? user.leverageFactor : (user.leverageFactor ? Number(user.leverageFactor) : 0)
-      };
-      saveSession(safeUser, token);
-      lastKnownWalletSnapshot = safeUser;
-    }catch(e){}
-
-    try{
-      await refreshWalletAndPositionsUI();
-    }catch(e){ console.warn('refresh initial wallet failed', e); }
-
-    try{ startMarginWatcher(); }catch(e){ console.warn('startMarginWatcher error', e); }
-
-    try{ window.scrollTo({top:0,behavior:'smooth'}); }catch(e){}
-  }catch(err){
-    console.error('showPrivateFull error', err);
+  }catch(e){
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; }
+    console.error('resendVerification error', e);
+    return { ok:false, msg: e.message || 'Error de red' };
   }
+};
+window.createResendButton = function(email){
+  const btn = document.createElement('button');
+  btn.type='button'; btn.className='btn glow resend-verification-btn'; btn.textContent='Reenviar verificación';
+  btn.addEventListener('click', async ()=> {
+    btn.disabled = true; btn.textContent = 'Enviando...';
+    const r = await window.resendVerification(email, btn);
+    if(!r.ok) alert(r.msg || 'No se pudo reenviar'); else alert('Email reenviado. Revisa inbox/spam.');
+  });
+  return btn;
 };
 
 /* =========================
-   performLogoutFull
+   REAL-TIME SOCKET.IO SETUP
+   - conectamos al WS_BASE (servidor donde corre tu backend)
+   - escuchamos events: prices_snapshot, price, symbols_update, orderbook
    ========================= */
-function performLogoutFull(){
+window.symbolPrices = window.symbolPrices || {};
+window.orderBooks = window.orderBooks || {};
+window.ALL_SYMBOLS = window.ALL_SYMBOLS || []; // se sobrescribe con backend si existe
+
+let socket = null;
+function startSocket(){
   try{
-    clearSessionStorage();
+    if(typeof io !== 'function'){ console.warn('socket.io cliente no cargado (io no definido)'); return; }
+    if(socket && socket.connected) return;
+
+    // conectar al host principal (quitar /api si existe)
+    const wsUrl = WS_BASE;
+    socket = io(wsUrl, { transports: ['websocket','polling'] });
+
+    socket.on('connect', ()=> {
+      console.log('Socket conectado', socket.id);
+      document.getElementById('ws-status') && (document.getElementById('ws-status').innerText = 'conectado');
+      // pedir snapshot de precios y símbolos (si backend soporta)
+      socket.emit('request_prices_snapshot');
+      socket.emit('request_symbols');
+    });
+
+    socket.on('disconnect', (reason)=> {
+      console.warn('Cliente desconectado:', reason);
+      document.getElementById('ws-status') && (document.getElementById('ws-status').innerText = 'desconectado');
+    });
+
+    socket.on('prices_snapshot', (snap)=> {
+      if(!snap) return;
+      // snap expected: { SYMBOL: { price, ts }, ... }  OR array [{symbol, price, ts}, ...]
+      if(Array.isArray(snap)){
+        snap.forEach(item=> { if(item && item.symbol) window.symbolPrices[item.symbol] = item.price; });
+      } else {
+        Object.keys(snap).forEach(k=> { window.symbolPrices[k] = snap[k].price ?? snap[k]; });
+      }
+      // refresh UI
+      try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
+      try{ updateDisplayedPrice && updateDisplayedPrice(window.symbolPrices[currentSymbol]||0); }catch(e){}
+    });
+
+    socket.on('price', (p)=> {
+      // p expected: { symbol, price, ts }
+      if(!p || !p.symbol) return;
+      window.symbolPrices[p.symbol] = p.price;
+      // update small DOM price elements
+      document.querySelectorAll(`[data-symbol="${p.symbol}"], #op-price`).forEach(el=>{
+        try{ el.textContent = Number(p.price).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){}
+      });
+      // update chart/ob
+      try{ updateDisplayedPrice && updateDisplayedPrice(p.price); }catch(e){}
+      try{ updateOrderBook && updateOrderBook(window.orderBooks[p.symbol] || {}); }catch(e){}
+      try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
+    });
+
+    socket.on('symbols_update', (symbols)=> {
+      // symbols expected: [{symbol,label,market}, ...] or { SYMBOL:meta }
+      try{
+        if(Array.isArray(symbols)){
+          window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
+        } else if(typeof symbols === 'object'){
+          const arr = [];
+          Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' }));
+          window.ALL_SYMBOLS = arr;
+        }
+        initSymbolsUI();
+      }catch(e){ console.warn('symbols_update handling error', e); }
+    });
+
+    socket.on('orderbook', (ob)=> {
+      // ob: { symbol, bids:[], asks:[] }
+      if(!ob || !ob.symbol) return;
+      window.orderBooks[ob.symbol] = ob;
+      try{ updateOrderBook && updateOrderBook(ob); }catch(e){}
+    });
+
+    socket.on('connect_error', (err)=> { console.error('socket connect_error', err); document.getElementById('ws-status') && (document.getElementById('ws-status').innerText='error'); });
+  }catch(e){ console.error('startSocket error', e); }
+}
+
+/* -------------------------
+   SYMBOLS: fetch from backend (varios endpoints de prueba)
+   ------------------------- */
+async function fetchSymbolsFromBackend(){
+  const endpoints = [
+    '/symbols',
+    '/api/symbols',
+    '/markets/symbols',
+    '/market/symbols',
+    '/market/list',
+    '/markets',
+    '/api/markets'
+  ];
+  for(const ep of endpoints){
     try{
-      const privateWrapper = document.getElementById('privateArea_full');
-      if(privateWrapper) privateWrapper.style.display = 'none';
-    }catch(e){}
-    try{ const pm = document.getElementById('publicMain'); if(pm) pm.style.display = ''; }catch(e){}
-    try{ const pf = document.getElementById('publicFooter'); if(pf) pf.style.display = ''; }catch(e){}
-    try{ if(typeof restorePublicHeader === 'function') restorePublicHeader(); }catch(e){}
-    try{
-      const privateMenu = document.getElementById('menuTogglePrivate');
-      if(privateMenu) privateMenu.remove();
-    }catch(e){}
-    try{ const c1 = document.getElementById('ctaAbrir'); if(c1) c1.addEventListener('click', ()=> document.getElementById('openAccountBtn')?.click()); }catch(e){}
-    try{ const c2 = document.getElementById('ctaLogin'); if(c2) c2.addEventListener('click', ()=> document.getElementById('loginBtn')?.click()); }catch(e){}
-    stopMarginWatcher();
-  }catch(e){
-    console.error('performLogoutFull error', e);
+      const data = await apiFetch(ep).catch(()=>null);
+      if(!data) continue;
+      // normalizar a array [{symbol,label,market}]
+      let arr = [];
+      if(Array.isArray(data)){
+        // detectar estructura
+        arr = data.map(it=>{
+          if(typeof it === 'string') return { symbol: it, label: it, market: 'Unknown' };
+          return { symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol||it.t, market: it.market||it.mkt||it.group||'Unknown' };
+        });
+      } else if(typeof data === 'object'){
+        // object map -> convert
+        Object.keys(data).forEach(k=> arr.push({ symbol:k, label: data[k].label||k, market: data[k].market||'Unknown' }));
+      }
+      if(arr.length) return arr;
+    }catch(e){
+      // continuar intentando otros endpoints
+    }
   }
+  // fallback: devuelve lo que ya tengas (o el demo)
+  return (window.ALL_SYMBOLS && window.ALL_SYMBOLS.length) ? window.ALL_SYMBOLS : [
+    {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+    {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+    {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
+    {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
+    {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'}
+  ];
 }
 
-/* =========================
-   MARGIN / POSITIONS POLLING & LOGIC
-   ========================= */
-
-let positions = []; // will be populated from backend
-let symbolPrices = window.symbolPrices ? {...window.symbolPrices} : {};
-let marginPollingInterval = 5000; // 5s
-let marginAlertThreshold = 30; // percent
-let marginCloseThreshold = 15; // percent
-
-function computePositionUnrealized(position){
-  const priceNow = Number(symbolPrices[position.symbol]) || Number(position.currentPrice) || 0;
-  const entry = Number(position.entryPrice) || 0;
-  const qty = Number(position.qty) || 0;
-  const sign = (position.side === 'SHORT' || position.side === 'SELL') ? -1 : 1;
-  return (priceNow - entry) * qty * sign;
-}
-
-function computeWalletMetrics(wallet, positionsList){
-  const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own ?? wallet.balance) || 0;
-  const credit = Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0;
-  const marginUsed = Number(wallet.marginUsed ?? wallet.usedMargin ?? wallet.borrowed ?? 0) || 0;
-  const pnlReported = Number(wallet.pnl ?? wallet.pnlReported ?? 0) || 0;
-
-  let unreal = 0;
-  (positionsList || []).forEach(p => { unreal += computePositionUnrealized(p); });
-
-  const pnl = pnlReported || unreal;
-  const equity = balanceOwn + credit + pnl;
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : Infinity;
-  const freeMargin = equity - marginUsed;
-
-  return {
-    balanceOwn,
-    credit,
-    marginUsed,
-    pnl,
-    equity,
-    marginLevel,
-    freeMargin
+/* -------------------------
+   TRADINGVIEW init (if available)
+   ------------------------- */
+if(typeof window.initTradingWidget !== 'function'){
+  window.initTradingWidget = function(symbol){
+    try{
+      const cont = document.getElementById('tv_chart_container');
+      if(!cont) return;
+      cont.innerHTML = '';
+      if(window.TradingView && typeof TradingView.widget === 'function'){
+        try{
+          new TradingView.widget({
+            container_id: 'tv_chart_container',
+            autosize: true,
+            symbol: symbol || 'BINANCE:BTCUSDT',
+            interval: '60',
+            timezone: 'Etc/UTC',
+            theme: 'dark',
+            style: '1',
+            locale: 'es',
+            toolbar_bg: '#0b0b0b',
+            enable_publishing: false,
+            allow_symbol_change: true
+          });
+        }catch(e){
+          cont.innerHTML = '<div style="padding:12px;color:var(--muted)">No fue posible inicializar TradingView.</div>';
+          console.warn('TradingView init error', e);
+        }
+        return;
+      }
+      // fallback: si no hay tv.js
+      cont.innerHTML = '<div style="padding:12px;color:var(--muted)">Widget de gráficos no disponible (tv.js no cargó).</div>';
+    }catch(e){ console.warn('initTradingWidget error', e); }
   };
 }
 
-function showMarginAlert(msg, allowDismiss = true){
+/* -------------------------
+   UI helpers: updateDisplayedPrice y updateOrderBook
+   ------------------------- */
+function updateDisplayedPrice(price){
   try{
-    const area = document.getElementById('marginAlertArea');
-    if(!area){
-      const wrapper = document.getElementById('privateArea_full') || document.body;
-      const div = document.createElement('div');
-      div.id = 'marginAlertArea';
-      div.style.position = 'relative';
-      div.style.padding = '12px';
-      div.style.background = '#3b1f1f';
-      div.style.color = '#fff';
-      div.style.border = '1px solid rgba(255,255,255,0.04)';
-      div.style.margin = '8px';
-      div.style.borderRadius = '8px';
-      div.style.zIndex = 9999;
-      wrapper.prepend(div);
-      div.innerHTML = `<strong>Alerta de margen:</strong> <span id="marginAlertMsg">${escapeHtml(msg)}</span> <span id="marginAlertControls"></span>`;
-    }else{
-      document.getElementById('marginAlertMsg').innerText = msg;
-      area.style.display = '';
-    }
-    if(allowDismiss){
-      const controls = document.getElementById('marginAlertControls');
-      controls.innerHTML = '';
-      const btn = document.createElement('button');
-      btn.className = 'btn ghost';
-      btn.textContent = 'Omitir';
-      btn.addEventListener('click', ()=>{
-        localStorage.setItem('marginAlertDismissedAt', String(Date.now()));
-        localStorage.setItem('marginAlertWalletSnapshot', JSON.stringify(lastKnownWalletSnapshot || {}));
-        const a = document.getElementById('marginAlertArea'); if(a) a.style.display = 'none';
-      });
-      controls.appendChild(btn);
-    }
-  }catch(e){ console.warn('showMarginAlert error', e); }
+    const el = document.getElementById('op-price');
+    if(el) el.textContent = Number(price || 0).toLocaleString(undefined,{maximumFractionDigits:6});
+  }catch(e){}
 }
-
-function clearMarginAlert(){
+function updateOrderBook(ob){
   try{
-    const area = document.getElementById('marginAlertArea');
-    if(area) area.remove();
+    if(!ob) return;
+    const bidsEl = document.getElementById('ob-bids');
+    const asksEl = document.getElementById('ob-asks');
+    if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+    if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
   }catch(e){}
 }
 
-async function refreshWalletAndPositionsUI(){
-  try{
-    const wallet = await apiFetch('/wallet/me');
-    const remotePositions = await apiFetch('/positions');
-
-    const walletNormalized = {
-      balanceOwn: Number(wallet.balanceOwn ?? wallet.balance ?? wallet.balance_own) || 0,
-      credit: Number(wallet.credit ?? wallet.apalancamiento ?? wallet.borrowed ?? 0) || 0,
-      marginUsed: Number(wallet.marginUsed ?? wallet.usedMargin ?? 0) || 0,
-      equityReported: Number(wallet.equity ?? 0) || 0,
-      pnlReported: Number(wallet.pnl ?? 0) || 0,
-      leverageFactor: Number(wallet.leverageFactor ?? wallet.leverage ?? wallet.leverage_factor) || 0
-    };
-
-    positions = Array.isArray(remotePositions) ? remotePositions : [];
-
-    const balEl = document.getElementById('priv_balance_full'); if(balEl) balEl.textContent = 'RD$' + walletNormalized.balanceOwn.toLocaleString('es-DO');
-    const eqEl = document.getElementById('priv_equity_full'); if(eqEl) eqEl.textContent = 'RD$' + (walletNormalized.equityReported || (walletNormalized.balanceOwn + walletNormalized.credit)).toLocaleString('es-DO');
-    const pnlEl = document.getElementById('priv_pnl_full'); if(pnlEl) pnlEl.textContent = 'RD$' + (walletNormalized.pnlReported || 0).toLocaleString('es-DO');
-    const borrowedEl = document.getElementById('priv_borrowed_full'); if(borrowedEl) borrowedEl.textContent = 'RD$' + (walletNormalized.credit).toLocaleString('es-DO');
-
-    const metrics = computeWalletMetrics(walletNormalized, positions);
-
-    const balUsdtTopLocal = document.getElementById('bal-usdt-top'); if(balUsdtTopLocal) balUsdtTopLocal.innerText = Number(metrics.balanceOwn).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-    const balanceTotalEl = document.getElementById('balanceTotal'); if(balanceTotalEl) balanceTotalEl.innerText = '$' + Number(metrics.equity).toLocaleString(undefined,{maximumFractionDigits:2});
-    const cashAvailEl = document.getElementById('cashAvail'); if(cashAvailEl) cashAvailEl.innerText = '$' + Number(metrics.balanceOwn).toLocaleString(undefined,{maximumFractionDigits:2});
-
-    lastKnownWalletSnapshot = walletNormalized;
-    saveSession({...getSavedSession(), ...walletNormalized}, localStorage.getItem('token'));
-
-    return { wallet: walletNormalized, positions, metrics };
-  }catch(err){
-    console.error('refreshWalletAndPositionsUI error', err);
-    throw err;
-  }
-}
-
-function startMarginWatcher(){
-  if(marginWatcherId || marginWatcherRunning) return;
-  marginWatcherRunning = true;
-  marginWatcherId = setInterval(async ()=>{
-    try{
-      if(window.symbolPrices) Object.assign(symbolPrices, window.symbolPrices);
-
-      if(window.__marginTickRunning) return;
-      window.__marginTickRunning = true;
-      try{
-        const { metrics } = await refreshWalletAndPositionsUI();
-
-        const marginRatio = metrics.marginLevel;
-        if(!isFinite(marginRatio)){
-          clearMarginAlert();
-          return;
-        }
-
-        if(marginRatio <= marginCloseThreshold){
-          showMarginAlert(`¡Margen crítico (${marginRatio.toFixed(1)}%)! Cerrando posiciones ahora...`, false);
-          try{
-            const res = await apiFetch('/positions/close-all', { method: 'POST' });
-            await refreshWalletAndPositionsUI();
-            const txt = (res && res.result) ? `Resultados: PnL ${res.result.realizedPnl}. Nuevo saldo: ${res.result.newBalance}` : `Posiciones cerradas`;
-            alert(`Posiciones cerradas automáticamente. ${txt}`);
-            clearMarginAlert();
-          }catch(e){
-            console.error('Error cerrando posiciones automáticamente', e);
-            showMarginAlert(`Error al cerrar posiciones automáticamente: ${e.message || e}`, true);
-          }
-          return;
-        }
-
-        if(marginRatio < marginAlertThreshold && marginRatio > marginCloseThreshold){
-          const dismissedAt = Number(localStorage.getItem('marginAlertDismissedAt') || 0);
-          const walletSnapshotKey = JSON.stringify(lastKnownWalletSnapshot || {});
-          const dismissedForWallet = localStorage.getItem('marginAlertWalletSnapshot') || '';
-          if(dismissedAt && dismissedForWallet === walletSnapshotKey){
-            return;
-          }
-
-          showMarginAlert(`Margen bajo: ${marginRatio.toFixed(1)}%. Recomendado depositar fondos o reducir posiciones.`, true);
-
-          try{
-            const revokeRes = await apiFetch('/wallet/revoke-leverage', { method: 'POST' });
-            await refreshWalletAndPositionsUI();
-            showMarginAlert(`Apalancamiento revocado automáticamente por margen bajo (${marginRatio.toFixed(1)}%).`, true);
-            localStorage.setItem('marginAlertWalletSnapshot', walletSnapshotKey);
-          }catch(e){
-            console.error('Error revocando apalancamiento', e);
-            showMarginAlert(`No se pudo revocar apalancamiento automáticamente: ${e.message || e}`, true);
-          }
-        } else {
-          clearMarginAlert();
-        }
-      } finally {
-        window.__marginTickRunning = false;
-      }
-    }catch(e){
-      console.error('marginWatcher tick error', e);
-    }
-  }, marginPollingInterval);
-}
-
-function stopMarginWatcher(){
-  if(marginWatcherId){
-    clearInterval(marginWatcherId);
-    marginWatcherId = null;
-  }
-  marginWatcherRunning = false;
-}
-
-/* POSITIONS UI helpers */
-function renderPositionsUI(){
-  const container = document.getElementById('positionsList');
-  if(!container) return;
-  container.innerHTML = '';
-
-  if(positions.length === 0){
-    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:12px;text-align:center">No hay posiciones abiertas</div>`;
-  } else {
-    positions.forEach(p=>{
-      const price = symbolPrices[p.symbol] || p.entryPrice || 0;
-      const unreal = computePositionUnrealized(p);
-      const el = document.createElement('div');
-      el.className = 'pos-card';
-      el.onclick = ()=> openPosition && openPosition(p.id);
-      el.innerHTML = `
-        <div>
-          <div style="font-weight:700">${escapeHtml(p.symbol)}</div>
-          <div style="color:var(--muted);font-size:13px">
-            qty ${escapeHtml(String(p.qty))} • entrada ${escapeHtml(Number(p.entryPrice).toFixed(6))}
-          </div>
-        </div>
-
-        <div style="text-align:right">
-          <div style="font-weight:800;color:${unreal >= 0 ? 'var(--gold)' : 'var(--danger)'}">
-            ${unreal >= 0 ? '+' : ''}${escapeHtml(Number(unreal).toFixed(2))}
-          </div>
-          <div class="muted-small">PnL</div>
-        </div>
-      `;
-      container.appendChild(el);
-    });
-  }
-}
-
-/* TRADING: abrir orden real via backend */
-async function openTrade(symbol, qty, price, side='BUY', type='Market'){
-  try{
-    const token = localStorage.getItem('token');
-    if(!token){ alert('No autenticado'); return; }
-    const body = { symbol, qty, price, side, type };
-    const res = await apiFetch('/trade/open', { method: 'POST', body: JSON.stringify(body) });
-    if(res.positions) positions = res.positions;
-    await refreshWalletAndPositionsUI();
-    renderPositionsUI();
-    alert('Operación abierta correctamente.');
-    return res;
-  }catch(err){
-    console.error('openTrade error', err);
-    alert('Error al abrir trade: ' + (err.message || err));
-  }
-}
-
-/* close position server */
-async function closePositionServer(id){
-  try{
-    const res = await apiFetch('/positions/close', { method: 'POST', body: JSON.stringify({ id }) });
-    await refreshWalletAndPositionsUI();
-    renderPositionsUI();
-    alert('Posición cerrada.');
-  }catch(e){
-    console.error('closePositionServer error', e);
-    alert('Error cerrando posición: ' + (e.message || e));
-  }
-}
-
-/* TRADINGVIEW & SYMBOLS (helpers mínimos) */
-
-const ALL_SYMBOLS = window.ALL_SYMBOLS || [
-  {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
-  {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
-  {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
-  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
-  {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'}
-];
-
-let currentSymbol = ALL_SYMBOLS[0].symbol;
-
+/* -------------------------
+   Render / UI: symbols (uses window.ALL_SYMBOLS and symbolPrices)
+   ------------------------- */
 let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
-let opSymbolEl, opExchangeEl, opPriceEl, obBidsEl, obAsksEl, ordersListEl, balUsdtEl, balUsdtTop, balanceTotalEl, posCountEl, posCountTop;
-let menuToggle;
+let currentSymbol = (window.ALL_SYMBOLS && window.ALL_SYMBOLS[0] && window.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
 
-/* Apply permanent glow to fields (same function as in js1) */
-function applyInputGlow(root = document){
-  try{
-    const selector = 'input, textarea, select';
-    Array.from(root.querySelectorAll(selector)).forEach(el=>{
-      if(el.type && ['button','submit','reset'].includes(el.type)) return;
-      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
-      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
-      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
-      if(!el._glowHandlersAttached){
-        el.addEventListener('focus', ()=> {
-          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
-          el.style.borderColor = 'rgba(212,175,55,0.45)';
-          el.style.transform = 'translateY(-1px)';
-        });
-        el.addEventListener('blur', ()=> {
-          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
-          el.style.borderColor = 'rgba(212,175,55,0.14)';
-          el.style.transform = '';
-        });
-        el._glowHandlersAttached = true;
-      }
-    });
-  }catch(e){ console.warn('applyInputGlow error', e); }
-}
-
-/* Wire DOM refs defensively */
 function wireDomRefs(){
-  // look for several possible IDs to avoid mismatch with HTML edits
-  menuToggle = document.getElementById('menuToggle') || document.getElementById('sidebarToggle') || document.getElementById('menuTogglePrivate');
   symbolSearch = document.getElementById('symbolSearch');
   symbolsGrid = document.getElementById('symbolsGrid');
   catTabs = document.getElementById('catTabs');
   marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
   marketSearch = document.getElementById('marketSearch');
   catTabsMarket = document.getElementById('catTabsMarket');
-
-  opSymbolEl = document.getElementById('op-symbol');
-  opExchangeEl = document.getElementById('op-exchange');
-  opPriceEl = document.getElementById('op-price');
-  obBidsEl = document.getElementById('ob-bids');
-  obAsksEl = document.getElementById('ob-asks');
-  ordersListEl = document.getElementById('orders-list');
-  balUsdtEl = document.getElementById('bal-usdt');
-  balUsdtTop = document.getElementById('bal-usdt-top');
-  balanceTotalEl = document.getElementById('balanceTotal');
-  posCountEl = document.getElementById('pos-count');
-  posCountTop = document.getElementById('pos-count-top');
-
-  if(menuToggle && !menuToggle._attached){
-    menuToggle.addEventListener('click', ()=> {
-      const sb = document.getElementById('sidebar');
-      if(sb) sb.classList.toggle('hidden');
-    });
-    menuToggle._attached = true;
-  }
-
-  document.querySelectorAll('.menu-item[data-target]').forEach(item=>{
-    try{ item.addEventListener('click', navSidebar); }catch(e){}
-  });
-
-  document.querySelectorAll('.fnav-item[data-target]').forEach(f=>{
-    try{ f.addEventListener('click', footerNavClick); }catch(e){}
-  });
+  // small price elements
+  try{ document.getElementById('op-price') && (document.getElementById('op-price').textContent = Number(window.symbolPrices[currentSymbol]||0).toLocaleString()); }catch(e){}
 }
 
-/* basic category tabs + symbols render */
 const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
 let activeCategory = 'All';
 
@@ -2040,10 +2073,10 @@ function buildCategoryTabs(container, onClick){
 
 function filterSymbols(q, category){
   q = (q||'').trim().toLowerCase();
-  return ALL_SYMBOLS.filter(s=>{
-    if(category && category !== 'All' && s.market !== category) return false;
+  return (window.ALL_SYMBOLS||[]).filter(s=>{
+    if(category && category !== 'All' && (s.market||'').toLowerCase() !== category.toLowerCase()) return false;
     if(!q) return true;
-    return (s.label.toLowerCase().includes(q) || s.symbol.toLowerCase().includes(q));
+    return ( (s.label||'').toLowerCase().includes(q) || (s.symbol||'').toLowerCase().includes(q) );
   });
 }
 
@@ -2058,14 +2091,17 @@ function renderSymbolsGrid(container, query, category){
   list.forEach(s=>{
     const el = document.createElement('div');
     el.className = 'symbol-card';
+    el.setAttribute('data-symbol', s.symbol);
     el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
+    const price = window.symbolPrices[s.symbol];
+    const ptext = (price === undefined || price === null) ? '--' : (Number(price).toFixed ? (Math.abs(Number(price))>1000 ? Number(price).toLocaleString(undefined,{maximumFractionDigits:1}) : Number(price).toFixed(6)) : String(price));
     el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
       <div>
-        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label)}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market)} · ${escapeHtml(s.symbol)}</div>
+        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:800;color:var(--text);font-size:14px">${displayPriceFor(s.symbol)}</div>
+        <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
         <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
       </div>
     </div>`;
@@ -2073,175 +2109,113 @@ function renderSymbolsGrid(container, query, category){
   });
 }
 
-function displayPriceFor(sym){
-  const p = symbolPrices[sym];
-  const pn = Number(p);
-  if(!isFinite(pn)) return '--';
-  return (Math.abs(pn) > 1000) ? pn.toLocaleString(undefined,{maximumFractionDigits:1}) : pn.toFixed(6);
-}
-
-function initSymbolsUI(){
-  buildCategoryTabs(catTabs, ()=> renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory));
-  buildCategoryTabs(catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory));
-  renderSymbolsGrid(symbolsGrid, '', 'All');
-  renderSymbolsGrid(marketsSymbolsGrid, '', 'All');
-
-  if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
-  if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
-}
-
+/* Seleccionar símbolo y abrir trading */
 function selectSymbolAndOpenTrading(symbol, label){
+  currentSymbol = symbol;
   const ts = document.getElementById('tradingSymbol');
   if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
-  const opSymbol = document.getElementById('op-symbol');
-  if(opSymbol) opSymbol.innerText = document.getElementById('tradingSymbol').innerText;
-  const opExchange = document.getElementById('op-exchange');
-  if(opExchange) opExchange.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
-  currentSymbol = symbol;
+  document.getElementById('op-symbol') && (document.getElementById('op-symbol').innerText = document.getElementById('tradingSymbol').innerText);
+  document.getElementById('op-exchange') && (document.getElementById('op-exchange').innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE'));
   showPanel('tradingPanel');
   initTradingWidget && initTradingWidget(symbol);
-  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[symbol] || 0);
-  updateOrderBook && updateOrderBook(symbolPrices[symbol] || 0);
+  updateDisplayedPrice && updateDisplayedPrice(window.symbolPrices[symbol] || 0);
+  updateOrderBook && updateOrderBook(window.orderBooks[symbol] || {});
 }
 
-/* --- Demo price engine (keeps chart & symbols updated) --- */
-(function priceEngine(){
-  setInterval(()=>{
-    ALL_SYMBOLS.forEach(s=>{
-      if(!(s.symbol in symbolPrices)){
-        symbolPrices[s.symbol] = Number((Math.random()*100).toFixed(2));
+/* -------------------------
+   FALLBACK: si servidor no manda precios, permitimos un pequeño demo solo local
+   (se apagará en cuanto lleguen eventos via socket)
+   ------------------------- */
+let demoEngineId = null;
+function startDemoFallback(){
+  if(demoEngineId) return;
+  demoEngineId = setInterval(()=> {
+    (window.ALL_SYMBOLS || []).forEach(s=>{
+      if(!(s.symbol in window.symbolPrices)){
+        window.symbolPrices[s.symbol] = Number((Math.random()*100).toFixed(2));
       } else {
-        const old = Number(symbolPrices[s.symbol]) || 0;
+        const old = Number(window.symbolPrices[s.symbol]) || 0;
         const change = (Math.random()-0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
-        symbolPrices[s.symbol] = Number(Math.max(0.00001, old + change).toFixed(6));
+        window.symbolPrices[s.symbol] = Number(Math.max(0.00001, old + change).toFixed(6));
       }
     });
-    try{ updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol] || 0); }catch(e){}
-    try{ updateOrderBook && updateOrderBook(symbolPrices[currentSymbol] || 0); }catch(e){}
     try{ renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory); }catch(e){}
-    try{ renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory); }catch(e){}
-    try{ updateWalletTotal(); }catch(e){}
-    try{ renderPositionsUI(); }catch(e){}
+    try{ updateDisplayedPrice && updateDisplayedPrice(window.symbolPrices[currentSymbol] || 0); }catch(e){}
   }, 1200);
-})();
-
-/* Wallet UI update used by demo price engine */
-let demo_usdt = 10000.00;
-let demo_balances = {'BTC':0.054231, 'ETH':0.0, 'SOL':0.0, 'EUR':0.0, 'GBP':0.0};
-
-function updateWalletTotal(){
-  const bal = Number(getSavedSession()?.balance || demo_usdt);
-  balUsdtEl && (balUsdtEl.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
-  balUsdtTop && (balUsdtTop.innerText = bal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
-  let total = bal;
-  Object.keys(demo_balances).forEach(k=>{
-    const sym = findSymbolForBase(k);
-    const qty = demo_balances[k] || 0;
-    total += (symbolPrices[sym] || 0) * qty;
-  });
-  balanceTotalEl && (balanceTotalEl.innerText = '$' + total.toLocaleString(undefined,{maximumFractionDigits:2}));
-  const cashAvailEl = document.getElementById('cashAvail');
-  if(cashAvailEl) cashAvailEl.innerText = '$' + bal.toLocaleString(undefined,{maximumFractionDigits:2});
 }
+function stopDemoFallback(){ if(demoEngineId){ clearInterval(demoEngineId); demoEngineId = null; } }
 
-function findSymbolForBase(base){
-  if(base === 'BTC') return 'BINANCE:BTCUSDT';
-  if(base === 'ETH') return 'BINANCE:ETHUSDT';
-  if(base === 'SOL') return 'BINANCE:SOLUSDT';
-  if(base === 'EUR') return 'OANDA:EUR_USD';
-  if(base === 'GBP') return 'OANDA:GBP_USD';
-  return 'BINANCE:BTCUSDT';
-}
-
-/* INIT TRADING */
-function initTradingIfNeeded(){
-  initTradingWidget && initTradingWidget(currentSymbol);
-  updateDisplayedPrice && updateDisplayedPrice(symbolPrices[currentSymbol]||0);
-  updateOrderBook && updateOrderBook(symbolPrices[currentSymbol]||0);
-  renderPositionsUI();
-}
-
-/* DOMContentLoaded: inicialización segura y única */
-document.addEventListener('DOMContentLoaded', ()=>{
+/* =========================
+   Inicialización principal
+   ========================= */
+async function initPrivateJS(){
   try{ wireDomRefs(); }catch(e){ console.warn('wireDomRefs error', e); }
-  try{ initSymbolsUI(); }catch(e){}
-  try{ showPanel('dashboardPanel'); }catch(e){}
+
+  // start socket, but only after setting ALL_SYMBOLS from backend (prefer)
   try{
-    if(positions.length === 0){
-      positions.push({id:'POS-1',symbol:'BINANCE:BTCUSDT',side:'LONG',qty:0.02,entryPrice:86000,createdAt:new Date().toISOString()});
+    const syms = await fetchSymbolsFromBackend().catch(()=>null);
+    if(Array.isArray(syms) && syms.length){
+      window.ALL_SYMBOLS = syms;
     }
-    renderPositionsUI();
-    updateWalletTotal();
+  }catch(e){
+    console.warn('fetchSymbolsFromBackend error', e);
+  }
+
+  // render UI
+  try{
+    buildCategoryTabs(document.getElementById('catTabs')||catTabs, ()=> renderSymbolsGrid(symbolsGrid, symbolSearch ? symbolSearch.value : '', activeCategory));
+    buildCategoryTabs(document.getElementById('catTabsMarket')||catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch ? marketSearch.value : '', activeCategory));
+    renderSymbolsGrid(symbolsGrid, '', 'All');
+    renderSymbolsGrid(marketsSymbolsGrid, '', 'All');
+
+    if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid, symbolSearch.value, activeCategory));
+    if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid, marketSearch.value, activeCategory));
   }catch(e){}
-  // ensure inputs have glow
-  try{ applyInputGlow(document); }catch(e){}
+
+  // start socket and attach update handlers
+  try{
+    startSocket();
+  }catch(e){
+    console.warn('startSocket failed', e);
+  }
+
+  // if socket never provides prices within X seconds, enable demo fallback
+  let snapshotArrived = false;
+  const onSnapshot = ()=> { snapshotArrived = true; stopDemoFallback(); };
+  // we attach a one-time listener if socket exists
+  if(typeof socket !== 'undefined' && socket){
+    socket.once('prices_snapshot', onSnapshot);
+  }
+  setTimeout(()=>{ if(!snapshotArrived) startDemoFallback(); }, 2500);
+
+  // Attempt to init trading widget for currentSymbol
+  try{ initTradingWidget && initTradingWidget(currentSymbol); }catch(e){}
+
+  // restore session UI if token exists
+  try{
+    const s = localStorage.getItem(SESSION_KEY);
+    const token = localStorage.getItem('token');
+    if(s && token){
+      const u = JSON.parse(s);
+      if(typeof showPrivateFull === 'function') showPrivateFull(u, token);
+    } else {
+      if(typeof restorePublicHeader === 'function') restorePublicHeader();
+    }
+  }catch(e){}
+}
+
+/* start when DOM ready */
+document.addEventListener('DOMContentLoaded', ()=> {
+  try{ initPrivateJS(); }catch(e){ console.error('initPrivateJS error', e); }
 });
 
-/* NAV helpers */
-function hideAllPanels(){
-  document.querySelectorAll('#privateArea_full .panel').forEach(p => p.style.display = 'none');
-  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f => f.classList.remove('active'));
-}
-function showPanel(id){
-  hideAllPanels();
-  const panel = document.getElementById(id);
-  if(panel) panel.style.display = 'block';
-  document.querySelectorAll('#privateArea_full .fnav-item').forEach(f=>{
-    if(f.dataset.target === id) f.classList.add('active');
-  });
-}
-
-function footerNavClick(evt){
-  try{
-    let target;
-    if(typeof evt === 'string') target = evt;
-    else if(evt && evt.currentTarget && evt.currentTarget.dataset && evt.currentTarget.dataset.target) target = evt.currentTarget.dataset.target;
-    else if(evt && evt.target && evt.target.dataset && evt.target.dataset.target) target = evt.target.dataset.target;
-    if(!target) return;
-    showPanel(target);
-    if(target === 'tradingPanel') initTradingIfNeeded();
-  }catch(e){ console.warn('footerNavClick error', e); }
-}
-
-function navSidebar(evt){
-  try{
-    const el = (evt && evt.currentTarget) ? evt.currentTarget : evt;
-    const target = el && el.dataset ? el.dataset.target : (typeof el === 'string' ? el : null);
-    const mapping = {
-      'dashboard':'dashboardPanel','trading':'tradingPanel',
-      'history':'historyPanel','verification':'verificationPanel',
-      'deposit':'depositPanel','withdraw':'withdrawPanel'
-    };
-    const panelId = mapping[target] || 'dashboardPanel';
-    showPanel(panelId);
-    document.querySelectorAll('#privateArea_full .menu-item').forEach(item => item.classList.remove('active'));
-    if(el && el.classList) el.classList.add('active');
-    if(panelId === 'tradingPanel') initTradingIfNeeded();
-  }catch(e){ console.warn('navSidebar error', e); }
-}
-
-window.navSidebar = navSidebar;
-window.footerNavClick = footerNavClick;
-
-/* small helpers for modal/info */
-window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
-window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
-
-// Stub helpers to avoid errors if not provided elsewhere
-window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
-window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
-window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
-
-
-
-
-
-
-
-
-
+/* -------------------------
+   Exports for debugging
+   ------------------------- */
+window._privateJS = {
+  apiFetch, fetchSymbolsFromBackend, startSocket, stopDemoFallback, startDemoFallback, updateDisplayedPrice, updateOrderBook
+};
 </script>
-  <!-- END: contenido importado -->
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
