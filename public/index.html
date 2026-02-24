@@ -1755,7 +1755,348 @@ window.addEventListener('load', function(){
   </div>
 </div>
 
+<!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
+<!-- TradingView official script (needed for real charts) -->
+<script src="https://s3.tradingview.com/tv.js"></script>
 
+  <div class="main-wrap">
+    <div class="layout">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div style="font-weight:800;color:var(--gold)">Menú</div>
+          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+        </div>
+
+        <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
+        <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
+        <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+        <div class="menu-item" data-target="verification" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+        <div class="menu-item" data-target="deposit" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        <div class="menu-item" data-target="withdraw" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+
+        <div style="height:8px"></div>
+        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
+        <div class="menu-item" onclick="showModalInfo()"><i class="fa-solid fa-circle-info"></i> Info</div>
+      </aside>
+
+      <!-- Panels -->
+      <section class="panel" id="dashboardPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Bienvenido, <span style="color:var(--gold)" id="privateWelcomeName">Pedro</span></div>
+            <div class="muted">Resumen rápido de tu cuenta — abajo verás el listado completo de símbolos</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted">Saldo disponible</div>
+            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">10000.00</span></div>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">$125,430.50</div><div class="muted" style="margin-top:6px">Estado en tiempo real</div></div>
+          <div class="card"><div class="muted">Inversiones Activas</div><div class="value">$98,250.00</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
+          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">$10,000.00</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
+          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">+$8,430.50</div><div class="muted" style="margin-top:6px">Este mes</div></div>
+        </div>
+
+        <!-- SYMBOL SEARCH + CATEGORIES (sin gráfico) -->
+        <div>
+          <div class="symbols-top">
+            <div class="cat-tabs" id="catTabs"></div>
+            <input id="symbolSearch" class="search-input" placeholder="Buscar símbolo, ej: BTC, ETH, EURUSD, AAPL..." />
+          </div>
+          <div id="symbolsGrid" class="symbols-grid"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="tradingPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">BTC/USDT</span></div>
+            <div class="muted" id="trading-sub">Market: BINANCE</div>
+          </div>
+          <div class="muted">Estado: <span id="ws-status">demo</span></div>
+        </div>
+
+        <div class="market-list" id="market-list"></div>
+
+        <div style="display:flex;gap:12px;flex-direction:column">
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div class="chart-area" style="flex:1; min-width:320px; position:relative">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
+                  <div class="muted" id="op-exchange">Market: BINANCE</div>
+                </div>
+                <div style="text-align:right">
+                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">87,243.3</div>
+                  <div class="muted-small">Último</div>
+                </div>
+              </div>
+
+              <!-- chart: se carga solo aquí -->
+              <div id="tv_chart_container" style="margin-top:12px"></div>
+
+              <div class="order-book-grid">
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">BIDS</div>
+                  <div id="ob-bids" class="muted"></div>
+                </div>
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">ASKS</div>
+                  <div id="ob-asks" class="muted"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TRADE BOX -->
+            <aside style="width:320px">
+              <div class="trade-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-weight:800;color:var(--gold)">Crear Orden</div>
+                  <div class="muted-small">Saldo USDT: $<span id="bal-usdt">10000.00</span></div>
+                </div>
+
+                <div style="margin-bottom:8px">
+                  <label class="muted-small">Tipo</label>
+                  <select id="order-type" class="form-select">
+                    <option>Market</option>
+                    <option>Limit</option>
+                    <option>Stop Loss</option>
+                    <option>Take Profit</option>
+                    <option>Stop Limit</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Precio (si aplica)</label>
+                    <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn-primary" onclick="createOrder('BUY')">Buy</button>
+                  <button class="btn-secondary" onclick="createOrder('SELL')">Sell</button>
+                </div>
+
+                <div class="orders-box" id="orders-box" style="margin-top:12px">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
+                  <div id="orders-list" class="muted-small">— no hay órdenes —</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="positionsPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Posiciones Abiertas</div>
+            <div class="muted">Clic en una posición para abrirla en Trading con su gráfico</div>
+          </div>
+          <div class="muted">Total: <span id="pos-count-top">0</span></div>
+        </div>
+
+        <div id="positionsList" class="positions-list"></div>
+      </section>
+
+      <section class="panel" id="marketsPanel" style="display:none">
+        <div class="title">Mercados</div>
+        <div class="muted" style="margin-bottom:8px">Selecciona un mercado desde la lista — todo el mercado disponible</div>
+
+        <div class="symbols-top" style="margin-top:8px">
+          <div id="catTabsMarket" class="cat-tabs"></div>
+          <input id="marketSearch" class="search-input" placeholder="Buscar símbolo o mercado..." />
+        </div>
+
+        <div id="marketsSymbolsGrid" class="symbols-grid"></div>
+      </section>
+
+      <section class="panel" id="activosPanel" style="display:none">
+        <div class="title">Activos</div>
+        <div class="table-box">
+          <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Billetera</div>
+          <table>
+            <thead><tr><th>Activo</th><th>Cantidad</th><th>Valor Estimado</th></tr></thead>
+            <tbody id="walletRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="historyPanel" style="display:none">
+        <div class="title">Historial de Transacciones</div>
+        <div class="table-box">
+          <table><thead><tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Método</th><th>Monto</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>#TRX-8821</td><td>2025-12-10</td><td>Depósito</td><td>Transferencia</td><td class="muted-small">+$5,000.00</td><td><span class="kbd">Completado</span></td></tr>
+          </tbody></table>
+        </div>
+      </section>
+
+      <section class="panel" id="verificationPanel" style="display:none">
+        <div class="title">Verificación de Documentos</div>
+        <div class="muted">Sube tus documentos aquí</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitDoc(event)">
+            <label class="muted-small">Tipo</label>
+            <select class="form-select" style="margin-bottom:8px"><option>Identificación</option><option>Comprobante de domicilio</option></select>
+            <input type="file" required class="form-input" style="margin-bottom:8px">
+            <button class="btn-primary" type="submit">Subir</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="depositPanel" style="display:none">
+        <div class="title">Depósito</div>
+        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event)">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required>
+            <label class="muted-small">Método</label>
+            <select class="form-select" style="margin-bottom:8px"><option>Transferencia</option><option>Crypto</option></select>
+            <button class="btn-primary" type="submit">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="withdrawPanel" style="display:none">
+        <div class="title">Retiro</div>
+        <div class="muted">Solicita un retiro a tu cuenta registrada</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event)">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required>
+            <label class="muted-small">Cuenta destino</label>
+            <input class="form-input" type="text" required>
+            <button class="btn-primary" type="submit">Solicitar</button>
+          </form>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Footer nav -->
+  <nav class="footer-nav">
+    <div class="fnav-item active" data-target="dashboardPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-house"></i>Inicio</div>
+    <div class="fnav-item" data-target="tradingPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-line"></i>Trading</div>
+    <div class="fnav-item" data-target="positionsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-layer-group"></i>Posiciones</div>
+    <div class="fnav-item" data-target="marketsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-simple"></i>Mercados</div>
+    <div class="fnav-item" data-target="activosPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-wallet"></i>Activos</div>
+  </nav>
+
+  <!-- Info modal -->
+  <div id="infoModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:120">
+    <div style="background:#0b0b0b;padding:18px;border-radius:10px;border:1px solid var(--line);width:90%;max-width:520px;color:var(--text)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="color:var(--gold)">BrokerPro — Info</strong>
+        <button onclick="hideModalInfo()" style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+      </div>
+      <div style="color:var(--muted)">Demo. Para operar con capital real se requiere integración de APIs en back-end.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
+<script>
+  (function(){
+    // Sidebar toggle (no destruye si ya existe algo similar)
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+
+    if(sidebarToggle && sidebar){
+      sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('hidden');
+      });
+    }
+
+    // NO mostrar el área privada automáticamente.
+    // Antes se forzaba: document.getElementById('privateArea_full').style.display = 'block';
+    // Ahora solo mostramos la parte privada si existe una sesión válida en localStorage (SESSION_KEY + token).
+    try {
+      const sessKey = (typeof SESSION_KEY !== 'undefined') ? SESSION_KEY : 'BROKERPRO_SESSION_USER';
+      const sess = localStorage.getItem(sessKey);
+      const token = localStorage.getItem('token');
+      if (document.getElementById('privateArea_full') && sess && token) {
+        try {
+          const user = JSON.parse(sess);
+          if (typeof showPrivateFull === 'function') {
+            showPrivateFull(user, token);
+          } else {
+            // Si no hay showPrivateFull, mostrar de forma segura
+            document.getElementById('privateArea_full').style.display = 'flex';
+          }
+        } catch(e) {
+          // Sesión corrupta o inválida: no mostrar área privada
+          console.warn('Sesión inválida en localStorage, no se mostrará el área privada.', e);
+        }
+      }
+    } catch(e){/* safe */}
+
+    // Helpers no destructivos: definir navSidebar / footerNavClick si no existen (evitan errores)
+    if(typeof navSidebar !== 'function'){
+      window.navSidebar = function(e){
+        try{
+          const target = e.currentTarget?.getAttribute('data-target');
+          if(!target) return;
+          // hide panels
+          document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+          // activate menu items
+          document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+          e.currentTarget.classList.add('active');
+          // show target
+          const panel = document.getElementById(target + 'Panel') || document.getElementById(target);
+          if(panel) panel.style.display = 'block';
+          // update footer active if applicable
+          document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        }catch(err){console.warn(err)}
+      };
+    }
+
+    if(typeof footerNavClick !== 'function'){
+      window.footerNavClick = function(e){
+        const target = e.currentTarget?.getAttribute('data-target');
+        if(!target) return;
+        document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+        const targetEl = document.getElementById(target);
+        if(targetEl) targetEl.style.display='block';
+        document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        // also update sidebar active
+        document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
+        const sidebarItem = Array.from(document.querySelectorAll('.menu-item')).find(mi => mi.getAttribute('data-target') === target.replace('Panel',''));
+        if(sidebarItem) sidebarItem.classList.add('active');
+      };
+    }
+
+    // Modales simples
+    window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
+    window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
+
+    // Logout placeholder (tu backend debe sobreescribir esto)
+    if(typeof logout !== 'function'){
+      window.logout = function(){
+        try{ localStorage.removeItem('token'); location.reload(); }catch(e){ location.reload(); }
+      };
+    }
+
+    // Evitar submit por defecto si las funciones específicas no existen
+    window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
+    window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
+    window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
+  })();
+</script>
 
 <script>
 /* -------------------------
