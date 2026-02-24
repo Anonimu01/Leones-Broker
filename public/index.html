@@ -1758,6 +1758,7 @@ window.addEventListener('load', function(){
 
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
+
 <script>
   (function(){
     // Sidebar toggle (no destruye si ya existe algo similar)
@@ -1770,24 +1771,37 @@ window.addEventListener('load', function(){
       });
     }
 
-    // NO mostrar el área privada automáticamente.
-    // Antes se forzaba: document.getElementById('privateArea_full').style.display = 'block';
-    // Ahora solo mostramos la parte privada si existe una sesión válida en localStorage (SESSION_KEY + token).
+    // Mostrar área privada SÓLO si hay sesión válida (seguro)
     try {
       const sessKey = (typeof SESSION_KEY !== 'undefined') ? SESSION_KEY : 'BROKERPRO_SESSION_USER';
       const sess = localStorage.getItem(sessKey);
       const token = localStorage.getItem('token');
-      if (document.getElementById('privateArea_full') && sess && token) {
+      if (sess && token) {
         try {
           const user = JSON.parse(sess);
+          // Mostrar todos los elementos marcados como private-only
+          document.querySelectorAll('.private-only').forEach(el=>{
+            // Si el elemento tiene data-display, usarlo; si no, usar block/flex según su tag
+            const desired = el.dataset.display || '';
+            if(desired) {
+              el.style.display = desired;
+            } else {
+              // guess appropriate display
+              if(el.tagName.toLowerCase() === 'aside' || el.classList.contains('card') || el.classList.contains('trade-box')) {
+                el.style.display = 'block';
+              } else {
+                el.style.display = 'block';
+              }
+            }
+          });
+          // Rellenar nombre si existe
+          const nameEl = document.getElementById('privateWelcomeName');
+          if(nameEl && user.name) nameEl.textContent = user.name;
+          // Si tu código principal define showPrivateFull, lo llamamos (no destructivo)
           if (typeof showPrivateFull === 'function') {
             showPrivateFull(user, token);
-          } else {
-            // Si no hay showPrivateFull, mostrar de forma segura
-            document.getElementById('privateArea_full').style.display = 'flex';
           }
         } catch(e) {
-          // Sesión corrupta o inválida: no mostrar área privada
           console.warn('Sesión inválida en localStorage, no se mostrará el área privada.', e);
         }
       }
@@ -1846,8 +1860,6 @@ window.addEventListener('load', function(){
     window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
   })();
 </script>
-
-
 
 <script>
 /* -------------------------
