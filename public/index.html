@@ -460,56 +460,67 @@
 </div>
 
 <script>
-/* ----------------------------
-   JS Nº1 - FRONTEND: modal + register/login (COMPLETO - ACTUALIZADO)
-   ---------------------------- */
+/* JS Nº1 - modal + register/login + polygon-client (CORREGIDO) */
 
 /* GLOBAL KEYS / HELPERS */
 const USERS_KEY = 'leones_images_users';
 
+
 /* --- API URL dinámica --- */
-window.API =
-  location.hostname === "localhost"
-    ? "http://localhost:3000/api"
-    : (window.API || "https://leones-broker.onrender.com/api");
+ 
+   (window.API_URL && String(window.API_URL).replace(/\/+$/,'')) 
+  || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'https://leones-broker.onrender.com/api');
 
-/* Asegurar API_BASE y SESSION_KEY para este archivo */
+/* SOCKET URL (quita /api si existe) */
+const SOCKET_URL = (API_BASE.replace(/\/api\/?$/,'') || location.origin);
 
-/* ------------------------
-   POLYGON-CLIENT IIFE (socket + chart + symbols)
-   ------------------------ */
+/* safe console */
+const log = (...a)=>{ try{ console.log(...a); }catch(e){} };
+const warn = (...a)=>{ try{ console.warn(...a); }catch(e){} };
+const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
+
+/* ---------- polygon-client IIFE (socket + chart + symbols) ---------- */
 (function(){
   'use strict';
 
-  // Helper: safe logger (silence in prod if needed)
-  const log = (...args) => { try { console.log(...args); } catch(e){} };
-  const warn = (...args) => { try { console.warn(...args); } catch(e){} };
-  const errlog = (...args) => { try { console.error(...args); } catch(e){} };
-
-  // If socket.io isn't loaded, create harmless stubs and exit gracefully.
+  // If Chart/Socket libs missing, degrade gracefully
   if (typeof io !== 'function') {
     warn('socket.io (io) not found — real-time features inactive.');
-    // Provide stubs so other code won't crash
     window.subscribeSymbol = function(){ warn('subscribeSymbol: socket.io no cargado'); };
     window.unsubscribeSymbol = function(){ warn('unsubscribeSymbol: socket.io no cargado'); };
     window.fetchSymbolsFromServer = async function(){ return []; };
-    // Also provide updateDisplayedPrice/updateOrderBook stubs if missing
     window.updateDisplayedPrice = window.updateDisplayedPrice || function(){};
     window.updateOrderBook = window.updateOrderBook || function(){};
     log('polygon-client.js initialized (no socket.io)');
     return;
   }
 
-  // init socket (connect to same origin by default)
-  const socket = io();
+  // Reuse existing global socket if present to avoid double connections
+  let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
+  if(!socket){
+    try{
+      socket = io(SOCKET_URL, {
+        path: '/socket.io',
+        transports: ['websocket','polling'],
+        withCredentials: true,
+        auth: { token: localStorage.getItem('token') || null },
+        autoConnect: true
+      });
+      // store reference so other modules can reuse
+      window.__LEONES_SOCKET__ = { socket };
+    }catch(e){
+      warn('Error creando socket.io client', e);
+      socket = null;
+    }
+  }
 
   // DOM helper
-  function $ (sel) { try { return document.querySelector(sel); } catch(e){ return null; } }
+  function $(sel){ try{ return document.querySelector(sel);}catch(e){return null;}}
 
   // Keep last prices (map symbol -> { price, ts })
   window.symbolPrices = window.symbolPrices || {};
 
-  // Chart init (LightweightCharts) - defensive
+  /* Chart init (LightweightCharts) - defensive */
   const chartContainer = document.getElementById('tv_chart_container');
   let chart = null, series = null;
   try {
@@ -522,33 +533,21 @@ window.API =
         rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
         timeScale: { borderColor: 'rgba(255,255,255,0.06)' }
       });
-      // Compatibilidad con distintas APIs de LightweightCharts
       try {
-        if (typeof chart.addLineSeries === 'function') {
-          series = chart.addLineSeries({ priceLineVisible: true });
-        } else if (typeof chart.addSeries === 'function' && LightweightCharts.LineSeries) {
-          series = chart.addSeries(LightweightCharts.LineSeries, { priceLineVisible: true });
-        } else if (typeof chart.addAreaSeries === 'function') {
-          series = chart.addAreaSeries({});
-        }
+        if (typeof chart.addLineSeries === 'function') series = chart.addLineSeries({ priceLineVisible: true });
+        else if (typeof chart.addAreaSeries === 'function') series = chart.addAreaSeries({});
       } catch (e) {
-        warn('No se pudo añadir serie con la API detectada de LightweightCharts', e);
+        warn('No se pudo añadir serie al chart', e);
         series = null;
       }
-
-      // responsive
       window.addEventListener('resize', ()=> {
-        try { chart.applyOptions({ width: chartContainer.clientWidth }); } catch(e){}
+        try{ chart.applyOptions({ width: chartContainer.clientWidth }); }catch(e){}
       });
     } else {
-      warn('LightweightCharts no disponible — gráfico inactivo.');
+      // chart not available
     }
-  } catch(e){
-    errlog('Chart init error', e);
-    chart = null; series = null;
-  }
+  } catch(e){ errlog('Chart init error', e); chart = null; series = null; }
 
-  // formatting
   function formatPrice(n){
     const num = Number(n);
     if(!isFinite(num)) return '--';
@@ -559,21 +558,15 @@ window.API =
 
   function updatePriceElementsForSymbol(symbol, price){
     try{
-      const nodes = Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`));
-      nodes.forEach(el => { el.textContent = formatPrice(price); });
-
-      const op = document.getElementById('op-price');
-      if(op) op.textContent = formatPrice(price);
-
+      Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`)).forEach(el => { el.textContent = formatPrice(price); });
+      const op = document.getElementById('op-price'); if(op) op.textContent = formatPrice(price);
       const symbolShort = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','');
       if(symbolShort && (symbol.endsWith(symbolShort) || symbol === symbolShort)){
-        const mainPrice = document.getElementById('op-price');
-        if(mainPrice) mainPrice.textContent = formatPrice(price);
+        const mainPrice = document.getElementById('op-price'); if(mainPrice) mainPrice.textContent = formatPrice(price);
       }
     }catch(e){ errlog('updatePriceElementsForSymbol error', e); }
   }
 
-  // Keep compatibility with different payload shapes
   function normalizePricePayload(p){
     if(!p) return null;
     const symbol = p.symbol || p.s || p.sym || p.t;
@@ -583,146 +576,121 @@ window.API =
     return { symbol, price: Number(price), ts: Number(ts) };
   }
 
-  // Attempt to set series point (chart)
   function pushToSeries(sym, priceObj){
     try{
       if(!series || !priceObj) return;
       const t = Math.floor((priceObj.ts || Date.now()) / 1000);
-      try{
-        series.update({ time: t, value: Number(priceObj.price) });
-      }catch(e){
-        try{ series.setData([{ time: t, value: Number(priceObj.price) }]); } catch(e2){}
-      }
+      try{ series.update({ time: t, value: Number(priceObj.price) }); }catch(e){ try{ series.setData([{ time: t, value: Number(priceObj.price) }]); }catch(e){} }
     }catch(e){ errlog('pushToSeries error', e); }
   }
 
-  // Socket events
-  socket.on('connect', ()=> log('socket connected', socket.id));
-  socket.on('disconnect', ()=> log('socket disconnected'));
+  if(socket){
+    socket.on('connect', ()=> log('socket connected', socket.id));
+    socket.on('disconnect', ()=> log('socket disconnected'));
 
-  socket.on('prices_snapshot', (snapshot) => {
-    try{
-      if(!snapshot || typeof snapshot !== 'object') return;
-      window.symbolPrices = window.symbolPrices || {};
-      if(Array.isArray(snapshot)){
-        snapshot.forEach(item => {
-          const symbol = item.symbol || item.s || item.sym;
-          const price = Number(item?.price ?? item?.p ?? item);
-          const ts = Number(item?.ts ?? Date.now());
-          if(!symbol || !isFinite(price)) return;
-          window.symbolPrices[symbol] = { price, ts };
-          updatePriceElementsForSymbol(symbol, price);
-        });
-      } else {
-        Object.keys(snapshot).forEach(k => {
-          const item = snapshot[k];
-          const price = Number(item?.price ?? item?.p ?? item);
-          const ts = Number(item?.ts ?? Date.now());
-          if(!isFinite(price)) return;
-          window.symbolPrices[k] = { price, ts };
-          updatePriceElementsForSymbol(k, price);
-        });
-      }
-
-      const curSym = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
-      if(curSym){
-        const matchKey = Object.keys(window.symbolPrices).find(k => k === curSym || k.endsWith(curSym));
-        if(matchKey && window.symbolPrices[matchKey] && series){
-          const seed = window.symbolPrices[matchKey];
-          try{ series.setData([{ time: Math.floor(seed.ts/1000), value: seed.price }]); }catch(e){}
+    socket.on('prices_snapshot', (snapshot) => {
+      try{
+        if(!snapshot) return;
+        window.symbolPrices = window.symbolPrices || {};
+        if(Array.isArray(snapshot)){
+          snapshot.forEach(item=>{
+            const symbol = item.symbol || item.s || item.sym;
+            const price = Number(item?.price ?? item?.p ?? item);
+            const ts = Number(item?.ts ?? Date.now());
+            if(!symbol || !isFinite(price)) return;
+            window.symbolPrices[symbol] = { price, ts };
+            updatePriceElementsForSymbol(symbol, price);
+          });
+        } else {
+          Object.keys(snapshot).forEach(k=>{
+            const item = snapshot[k];
+            const price = Number(item?.price ?? item?.p ?? item);
+            const ts = Number(item?.ts ?? Date.now());
+            if(!isFinite(price)) return;
+            window.symbolPrices[k] = { price, ts };
+            updatePriceElementsForSymbol(k, price);
+          });
         }
-      }
-    }catch(e){
-      errlog('prices_snapshot handler error', e);
-    }
-  });
+        const curSym = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+        if(curSym){
+          const matchKey = Object.keys(window.symbolPrices).find(k => k === curSym || k.endsWith(curSym));
+          if(matchKey && window.symbolPrices[matchKey] && series){
+            const seed = window.symbolPrices[matchKey];
+            try{ series.setData([{ time: Math.floor(seed.ts/1000), value: seed.price }]); }catch(e){}
+          }
+        }
+      }catch(e){ errlog('prices_snapshot handler error', e); }
+    });
 
-  socket.on('price', (payload) => {
-    try{
-      const p = normalizePricePayload(payload);
-      if(!p || !p.symbol || (p.price === undefined || isNaN(p.price))) return;
-      window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
-      updatePriceElementsForSymbol(p.symbol, p.price);
+    socket.on('price', (payload) => {
+      try{
+        const p = normalizePricePayload(payload);
+        if(!p || !p.symbol || (p.price === undefined || isNaN(p.price))) return;
+        window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
+        updatePriceElementsForSymbol(p.symbol, p.price);
+        const currentLabel = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
+        if(series && (p.symbol === currentLabel || p.symbol.endsWith(currentLabel))) pushToSeries(p.symbol, p);
+      }catch(e){ errlog('price handler error', e); }
+    });
 
-      const currentLabel = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
-      if(series && (p.symbol === currentLabel || p.symbol.endsWith(currentLabel))){
-        pushToSeries(p.symbol, p);
-      }
-    }catch(e){ errlog('price handler error', e); }
-  });
+    socket.on('symbols_update', (symbols)=> {
+      try{
+        if(!symbols) return;
+        if(Array.isArray(symbols)){
+          window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
+        } else if(typeof symbols === 'object'){
+          const arr = []; Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' })); window.ALL_SYMBOLS = arr;
+        }
+        try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){}
+      }catch(e){ warn('symbols_update handling error', e); }
+    });
 
-  socket.on('error', (e)=> { warn('socket error', e); });
+    socket.on('orderbook', (ob)=> {
+      try{
+        if(!ob || !ob.symbol) return;
+        window.orderBooks = window.orderBooks || {};
+        window.orderBooks[ob.symbol] = ob;
+        try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){}
+      }catch(e){}
+    });
 
-  socket.on('symbols_update', (symbols)=> {
-    try{
-      if(!symbols) return;
-      if(Array.isArray(symbols)){
-        window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
-      } else if(typeof symbols === 'object'){
-        const arr = [];
-        Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' }));
-        window.ALL_SYMBOLS = arr;
-      }
-      try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){}
-    }catch(e){ warn('symbols_update handling error', e); }
-  });
+    socket.on('connect_error', (err)=> { console.error('socket connect_error', err); });
+    socket.on('error', (e)=> { warn('socket error', e); });
+  } else {
+    warn('socket variable no disponible — no se registrarán eventos en tiempo real.');
+  }
 
-  socket.on('orderbook', (ob)=> {
-    try{
-      if(!ob || !ob.symbol) return;
-      window.orderBooks = window.orderBooks || {};
-      window.orderBooks[ob.symbol] = ob;
-      try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){}
-    }catch(e){}
-  });
-
-  socket.on('connect_error', (err)=> { console.error('socket connect_error', err); });
-
-  // Provide subscribe/unsubscribe helpers
+  // provide helpers (idempotent)
   window.subscribeSymbol = function(symbol, kind='trades'){
-    try{
-      if(!symbol) return;
-      socket.emit && socket.emit('subscribe', { symbol, kind });
-      log('subscribe emitted', symbol, kind);
-    }catch(e){ errlog('subscribeSymbol error', e); }
+    try{ if(!symbol || !socket) return; socket.emit('subscribe', { symbol, kind }); log('subscribe emitted', symbol, kind); }catch(e){ errlog('subscribeSymbol error', e); }
   };
 
   window.unsubscribeSymbol = function(symbol, kind='trades'){
-    try{
-      if(!symbol) return;
-      socket.emit && socket.emit('unsubscribe', { symbol, kind });
-      log('unsubscribe emitted', symbol, kind);
-    }catch(e){ errlog('unsubscribeSymbol error', e); }
+    try{ if(!symbol || !socket) return; socket.emit('unsubscribe', { symbol, kind }); log('unsubscribe emitted', symbol, kind); }catch(e){ errlog('unsubscribeSymbol error', e); }
   };
 
   // Try to fetch symbols list from backend (try several possible endpoints)
   window.fetchSymbolsFromServer = async function(){
     const candidates = [
-      (window.API ? window.API.replace(/\/+$/,'') : '') + '/symbols',
-      (window.API ? window.API.replace(/\/+$/,'') : '') + '/api/symbols',
-      (window.API ? window.API.replace(/\/+$/,'') : '') + '/markets/symbols',
-      (window.API ? window.API.replace(/\/+$/,'') : '') + '/market/symbols',
+      API_BASE + '/symbols',
+      API_BASE + '/api/symbols',
+      API_BASE + '/markets/symbols',
+      API_BASE + '/market/symbols',
+      API_BASE + '/market/list',
+      API_BASE + '/markets',
       '/api/symbols',
-      '/api/markets/symbols',
-      '/api/market/symbols'
+      '/symbols'
     ].filter(Boolean);
 
     for(const url of candidates){
       try{
         const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }});
-        if(!res.ok) { warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
+        if(!res.ok){ warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
         const data = await res.json().catch(()=>null);
         if(Array.isArray(data) && data.length>0){
           window.ALL_SYMBOLS = data.map(item => {
-            if(typeof item === 'string') {
-              const parts = item.split(':');
-              return { symbol: item, label: (parts[1]||parts[0]).replace('_','/'), market: parts[0] || 'Unknown' };
-            }
-            return {
-              symbol: item.symbol || item.sym || item.s || '',
-              label: item.label || item.name || (item.symbol ? item.symbol.split(':').pop() : ''),
-              market: item.market || item.exchange || item.type || 'Other'
-            };
+            if(typeof item === 'string'){ const parts = item.split(':'); return { symbol: item, label: (parts[1]||parts[0]).replace('_','/'), market: parts[0] || 'Unknown' }; }
+            return { symbol: item.symbol || item.sym || item.s || '', label: item.label || item.name || (item.symbol ? item.symbol.split(':').pop() : ''), market: item.market || item.exchange || item.type || 'Other' };
           });
           log('Symbols loaded from', url, 'count=', window.ALL_SYMBOLS.length);
           try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){}
@@ -730,51 +698,24 @@ window.API =
         } else {
           warn('fetchSymbolsFromServer got empty/invalid data', url);
         }
-      }catch(e){
-        warn('fetchSymbolsFromServer error', url, e);
-      }
+      }catch(e){ warn('fetchSymbolsFromServer error', url, e); }
     }
     warn('fetchSymbolsFromServer: no endpoints returned valid list');
     return [];
   };
 
-  // Auto-fetch symbols on load (non-blocking)
-  (async function tryLoadSymbols(){
-    try{
-      await window.fetchSymbolsFromServer();
-    }catch(e){
-      /* ignore */
-    }
-  })();
+  // UI fallbacks
+  window.updateDisplayedPrice = window.updateDisplayedPrice || function(price){ try{ const op = document.getElementById('op-price'); if(op) op.textContent = formatPrice(price); }catch(e){} };
+  window.updateOrderBook = window.updateOrderBook || function(){ try{ const b = document.getElementById('ob-bids'); const a = document.getElementById('ob-asks'); if(b) b.textContent='—'; if(a) a.textContent='—'; }catch(e){} };
 
-  // Defensive UI init helpers that other scripts might call
-  window.updateDisplayedPrice = window.updateDisplayedPrice || function(price){
-    try{
-      const op = document.getElementById('op-price');
-      if(op) op.textContent = formatPrice(price);
-    }catch(e){}
-  };
-
-  window.updateOrderBook = window.updateOrderBook || function(price){
-    try{
-      const bids = document.getElementById('ob-bids');
-      const asks = document.getElementById('ob-asks');
-      if(bids) bids.textContent = `—`;
-      if(asks) asks.textContent = `—`;
-    }catch(e){}
-  };
-
-  // Final log
   log('polygon-client.js initialized');
-
 })(); // end polygon-client IIFE
-
 
 /* ---------- helpers localStorage ---------- */
 function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch (e) { return []; } }
 function saveUsers(u) { try { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }catch(e){} }
 
-/* Apply permanent glow to all interactive fields (inputs/selects/textareas/file) */
+/* Apply permanent glow to all interactive fields (inputs/selects/textareas) */
 function applyInputGlow(root = document){
   try{
     const selector = 'input, textarea, select';
@@ -800,29 +741,20 @@ function applyInputGlow(root = document){
   }catch(e){ console.warn('applyInputGlow error', e); }
 }
 
-/* UI modal helpers (mejorado con Enter y toggle password) */
+/* UI modal helpers */
 function ensureModalHooks(){
   var modal = document.getElementById('modal');
   if(!modal) return;
-
   var cancel = document.getElementById('modalCancel');
-  if(cancel && !cancel.dataset.hooked){
-    cancel.addEventListener('click', closeModal);
-    cancel.dataset.hooked='1';
-  }
-
+  if(cancel && !cancel.dataset.hooked){ cancel.addEventListener('click', closeModal); cancel.dataset.hooked='1'; }
   var ok = document.getElementById('modalOk');
-  if(ok && !ok.dataset.hooked){
-    ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); });
-    ok.dataset.hooked='1';
-  }
+  if(ok && !ok.dataset.hooked){ ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); }); ok.dataset.hooked='1'; }
 }
 
 function openModal(html, onConfirm){
   ensureModalHooks();
   var modal = document.getElementById('modal');
   if(!modal){
-    // crear modal mínimo si no existe (para compatibilidad)
     modal = document.createElement('div'); modal.id='modal';
     modal.style.position='fixed'; modal.style.inset='0'; modal.style.display='flex';
     modal.style.alignItems='center'; modal.style.justifyContent='center'; modal.style.background='rgba(0,0,0,0.6)';
@@ -837,30 +769,17 @@ function openModal(html, onConfirm){
     ensureModalHooks();
   }
   var body = document.getElementById('modalBody');
-  if(!body){
-    console.warn('Modal body element not found: #modalBody');
-    return;
-  }
+  if(!body){ console.warn('Modal body element not found: #modalBody'); return; }
   body.innerHTML = html;
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
   modal._onConfirm = onConfirm;
 
-  // Add enter key submit and password toggle inside modal
-  setTimeout(()=>{ // next tick to ensure elements are in DOM
+  setTimeout(()=>{
     applyInputGlow(body);
-
-    const firstInput = modal.querySelector('input, textarea, select');
-    if(firstInput) firstInput.focus();
-
-    const enterHandler = (e)=>{
-      if(e.key === 'Enter'){
-        try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){}
-        closeModal();
-      }
-    };
-    modal._enterHandler = enterHandler;
-    modal.addEventListener('keydown', enterHandler);
+    const firstInput = modal.querySelector('input, textarea, select'); if(firstInput) firstInput.focus();
+    const enterHandler = (e)=>{ if(e.key === 'Enter'){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){} closeModal(); } };
+    modal._enterHandler = enterHandler; modal.addEventListener('keydown', enterHandler);
 
     modal.querySelectorAll('input[type="password"]').forEach(pw=>{
       if(pw.nextSibling && pw.nextSibling.classList && pw.nextSibling.classList.contains('pw-toggle')) return;
@@ -875,55 +794,46 @@ function openModal(html, onConfirm){
 }
 
 function closeModal(){
-  var modal = document.getElementById('modal');
-  if(!modal) return;
-  modal.style.display = 'none';
-  document.body.style.overflow = '';
+  var modal = document.getElementById('modal'); if(!modal) return;
+  modal.style.display = 'none'; document.body.style.overflow = '';
   modal._onConfirm = null;
   if(modal._enterHandler){ modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
 }
 
-/* ---------- safe escape ---------- */
+/* safe escape */
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
 
-/* ---------- restorePublicHeader (cuando se hace logout) ---------- */
+/* restorePublicHeader */
 function restorePublicHeader(){
-  const headerActions = document.getElementById('headerActions');
-  if(!headerActions) return;
+  const headerActions = document.getElementById('headerActions'); if(!headerActions) return;
   headerActions.innerHTML = '';
   const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
   const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
   headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
-  openBtn.addEventListener('click', openRegisterModal);
-  loginBtn.addEventListener('click', openLoginModal);
+  openBtn.addEventListener('click', openRegisterModal); loginBtn.addEventListener('click', openLoginModal);
   const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
   const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
 }
 
 /* =========================
-   ---------- REGISTER / LOGIN (robustos)
+   REGISTER / LOGIN (robustos)
    ========================= */
 
-/* backendRegister: usa apiFetch si quieres (pero aquí uso fetch directo robusto) */
+/* Use global apiFetch if available for consistent behavior */
 async function backendRegister(userObj){
   try{
-    const url = (API_BASE.replace(/\/+$/,'') + '/auth/register');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(userObj)
-    });
+    if(typeof window.apiFetch === 'function'){
+      const res = await window.apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(userObj) });
+      return { ok: true, data: res };
+    }
+    // fallback to robust fetch
+    const url = API_BASE.replace(/\/+$/,'') + '/auth/register';
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(userObj) });
     const ct = res.headers.get('content-type') || '';
     let payload;
     if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
-    else {
-      const txt = await res.text().catch(()=>null);
-      try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; }
-    }
-    if(!res.ok){
-      const msg = (payload && (payload.msg || payload.error || payload.message)) || (typeof payload === 'string' ? payload : 'Error servidor');
-      return { ok:false, msg, data: payload || null, status: res.status };
-    }
+    else { const txt = await res.text().catch(()=>null); try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; } }
+    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error||payload.message)) || 'Error servidor', data: payload, status: res.status };
     return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendRegister error', e);
@@ -931,23 +841,19 @@ async function backendRegister(userObj){
   }
 }
 
-/* backendLogin similar robust parsing */
 async function backendLogin(creds){
   try{
-    const url = (API_BASE.replace(/\/+$/,'') + '/auth/login');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(creds)
-    });
+    if(typeof window.apiFetch === 'function'){
+      const res = await window.apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(creds) });
+      return { ok:true, data: res };
+    }
+    const url = API_BASE.replace(/\/+$/,'') + '/auth/login';
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(creds) });
     const ct = res.headers.get('content-type') || '';
     let payload;
     if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
     else { const txt = await res.text().catch(()=>null); try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; } }
-    if(!res.ok){
-      const msg = (payload && (payload.msg || payload.error || payload.message)) || (typeof payload === 'string' ? payload : 'Credenciales inválidas');
-      return { ok:false, msg, status: res.status };
-    }
+    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error||payload.message)) || 'Credenciales inválidas', status: res.status };
     return { ok:true, data: payload || {} };
   }catch(e){
     console.error('backendLogin error', e);
@@ -955,28 +861,22 @@ async function backendLogin(creds){
   }
 }
 
-/* funciones para reenviar verificación */
+/* resend verification helper (compatible con apiFetch) */
 async function backendResend(email){
   try{
-    const url = (API_BASE.replace(/\/+$/,'') + '/auth/resend-verification');
-    const res = await fetch(url, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ email })
-    });
+    if(typeof window.apiFetch === 'function') return await window.apiFetch('/auth/resend-verification', { method:'POST', body: JSON.stringify({ email }) });
+    const url = API_BASE.replace(/\/+$/,'') + '/auth/resend-verification';
+    const res = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) });
     const ct = res.headers.get('content-type') || '';
-    let p;
-    if(ct.includes('application/json')) p = await res.json().catch(()=>null);
-    else { const t = await res.text().catch(()=>null); try{ p = t ? JSON.parse(t) : null; }catch(e){ p = t; } }
-    if(!res.ok) return { ok:false, msg: (p && (p.msg||p.error)) || (typeof p==='string'?p:'Error reenviando'), status: res.status };
-    return { ok:true, data: p || {} };
-  }catch(e){
-    console.error('backendResend error', e);
-    return { ok:false, msg: e.message || 'Network' };
-  }
+    let payload;
+    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
+    else { const t = await res.text().catch(()=>null); try{ payload = t ? JSON.parse(t) : null; }catch(e){ payload = t; } }
+    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error)) || `Error ${res.status}`, data: payload };
+    return { ok:true, data: payload };
+  }catch(e){ console.error('backendResend error', e); return { ok:false, msg: e.message || 'Network' }; }
 }
 
-/* Register modal (tries backend then fallback) */
+/* Register modal */
 function openRegisterModal(){
   openModal(`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -993,48 +893,34 @@ function openRegisterModal(){
     const phone = (document.getElementById('r_phone')||{}).value || '';
     const address = (document.getElementById('r_address')||{}).value || '';
     const pass = (document.getElementById('r_pass')||{}).value || '';
-    const msgEl = document.getElementById('r_msg');
-    if(!msgEl) return;
+    const msgEl = document.getElementById('r_msg'); if(!msgEl) return;
     msgEl.textContent='';
 
     if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
-
     const userObj = { name, email, phone, address, password: pass };
     msgEl.textContent = 'Registrando...';
     const backend = await backendRegister(userObj);
 
     if(backend.ok){
       const serverData = backend.data || {};
-      // si el backend responde que no pudo enviar email
       if(serverData && serverData.verificationSent === false){
         msgEl.innerHTML = 'Cuenta creada pero el correo de verificación no pudo enviarse.<br/><br/>';
-        const btn = document.createElement('button');
-        btn.textContent = 'Reenviar verificación';
-        btn.className = 'btn glow';
-        btn.style.padding = '8px 12px';
-        btn.style.marginTop = '6px';
+        const btn = document.createElement('button'); btn.textContent = 'Reenviar verificación'; btn.className = 'btn glow'; btn.style.padding = '8px 12px'; btn.style.marginTop = '6px';
         msgEl.appendChild(btn);
-
         btn.addEventListener('click', async ()=>{
           btn.disabled = true; btn.textContent = 'Enviando...';
           const r = await backendResend(email);
-          if(r.ok){
-            msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
-          } else {
-            msgEl.textContent = r.msg || 'Error reenviando verificación';
-            btn.disabled = false;
-            btn.textContent = 'Reenviar verificación';
-          }
+          if(r.ok) msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
+          else { msgEl.textContent = r.msg || 'Error reenviando verificación'; btn.disabled = false; btn.textContent = 'Reenviar verificación'; }
         });
         return;
       }
 
-      // guardar token o user según lo devuelto
       if(serverData && serverData.token){
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: serverData.token, name }));
+        const sessionObj = { email, token: serverData.token, name: serverData.user?.name || name };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(sessionObj));
         localStorage.setItem('token', serverData.token);
-      }
-      else if(serverData && serverData.user){
+      } else if(serverData && serverData.user){
         localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
         if(serverData.user.token) localStorage.setItem('token', serverData.user.token);
       } else {
@@ -1042,7 +928,7 @@ function openRegisterModal(){
       }
 
       closeModal();
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
       if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
       return;
     } else {
@@ -1052,7 +938,7 @@ function openRegisterModal(){
   });
 }
 
-/* Login modal (tries backend then fallback) */
+/* Login modal */
 function openLoginModal(){
   openModal(`
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -1063,10 +949,7 @@ function openLoginModal(){
   `, async function(){
     const email = ((document.getElementById('l_email')||{}).value || '').trim().toLowerCase();
     const pass = (document.getElementById('l_pass')||{}).value || '';
-    const msg = document.getElementById('l_msg');
-    if(!msg) return;
-    msg.textContent='';
-
+    const msg = document.getElementById('l_msg'); if(!msg) return; msg.textContent='';
     if(!email || !pass){ msg.textContent='Completa los campos'; return; }
 
     msg.textContent = 'Iniciando sesión...';
@@ -1076,15 +959,14 @@ function openLoginModal(){
       if(d && d.token){
         localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' }));
         localStorage.setItem('token', d.token);
-      }
-      else if(d && d.user){
+      } else if(d && d.user){
         localStorage.setItem(SESSION_KEY, JSON.stringify(d.user));
         if(d.user.token) localStorage.setItem('token', d.user.token);
       } else {
         localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
       }
       closeModal();
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
       if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
       return;
     } else {
@@ -1094,10 +976,10 @@ function openLoginModal(){
   });
 }
 
-/* PUBLIC helper to restore header actions after logout (ya definido arriba también) - mantener compatibilidad */
+/* PUBLIC helper to restore header actions after logout */
 window.restorePublicHeader = restorePublicHeader;
 
-/* ---------- showPrivateFull y performLogoutFull defensivos (si no existen) ---------- */
+/* showPrivateFull & performLogoutFull defensivos */
 if(typeof window.showPrivateFull !== 'function'){
   window.showPrivateFull = function(user, token){
     try{
@@ -1106,22 +988,12 @@ if(typeof window.showPrivateFull !== 'function'){
       const headerActions = document.getElementById('headerActions');
       if(headerActions){
         headerActions.innerHTML = '';
-        const profileBtn = document.createElement('div');
-        profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+        const profileBtn = document.createElement('div'); profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
         const nameEl = document.createElement('div'); nameEl.textContent = user.name || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight='700';
         const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
-        logoutBtn.addEventListener('click', function(){ 
-          if(typeof window.performLogoutFull === 'function') window.performLogoutFull(); 
-          else {
-            localStorage.removeItem(SESSION_KEY);
-            localStorage.removeItem('token');
-            restorePublicHeader();
-          }
-        });
-        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn);
-        headerActions.appendChild(profileBtn);
+        logoutBtn.addEventListener('click', function(){ if(typeof window.performLogoutFull === 'function') window.performLogoutFull(); else { localStorage.removeItem(SESSION_KEY); localStorage.removeItem('token'); restorePublicHeader(); } });
+        profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn); headerActions.appendChild(profileBtn);
       }
-
       const privateWrapper = document.getElementById('privateArea_full');
       if(privateWrapper) {
         privateWrapper.style.display = 'flex';
@@ -1130,7 +1002,6 @@ if(typeof window.showPrivateFull !== 'function'){
         const bal = document.getElementById('priv_balance_full');
         if(bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random()*50000)+1000).toLocaleString('es-DO'));
       }
-
       try{ if(token) localStorage.setItem('token', token); }catch(e){}
       localStorage.setItem(SESSION_KEY, JSON.stringify(user));
       window.scrollTo({top:0,behavior:'smooth'});
@@ -1141,10 +1012,8 @@ if(typeof window.showPrivateFull !== 'function'){
 if(typeof window.performLogoutFull !== 'function'){
   window.performLogoutFull = function(){
     try{
-      localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem('token');
-      const privateWrapper = document.getElementById('privateArea_full');
-      if(privateWrapper) privateWrapper.style.display = 'none';
+      localStorage.removeItem(SESSION_KEY); localStorage.removeItem('token');
+      const privateWrapper = document.getElementById('privateArea_full'); if(privateWrapper) privateWrapper.style.display = 'none';
       const publicMain = document.getElementById('publicMain'); if(publicMain) publicMain.style.display = '';
       const publicFooter = document.getElementById('publicFooter'); if(publicFooter) publicFooter.style.display = '';
       restorePublicHeader();
@@ -1154,9 +1023,7 @@ if(typeof window.performLogoutFull !== 'function'){
 
 /* On load: init and restore session; apply input glow globally */
 window.addEventListener('load', function(){
-  ensureModalHooks();
-  applyInputGlow(document);
-
+  ensureModalHooks(); applyInputGlow(document);
   try {
     var s = localStorage.getItem(SESSION_KEY);
     var token = localStorage.getItem('token');
@@ -1165,18 +1032,10 @@ window.addEventListener('load', function(){
         var u = JSON.parse(s);
         const sessionHasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
         if (sessionHasToken) {
-          if(typeof showPrivateFull === 'function'){
-            showPrivateFull(u, token || u.token);
-          }
-        } else {
-          try{ restorePublicHeader(); }catch(e){}
-        }
-      } catch(e){
-        console.warn('Error parseando SESSION_KEY al restaurar sesión', e);
-      }
-    } else {
-      try{ restorePublicHeader(); }catch(e){}
-    }
+          if(typeof showPrivateFull === 'function'){ showPrivateFull(u, token || u.token); }
+        } else { restorePublicHeader(); }
+      } catch(e){ console.warn('Error parseando SESSION_KEY al restaurar sesión', e); }
+    } else { restorePublicHeader(); }
   } catch(e){ console.warn('restore session error', e); }
 });
 </script>
@@ -1328,12 +1187,12 @@ window.addEventListener('load', function(){
           <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
         </div>
 
-        <div class="menu-item active" data-target="dashboard" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
-        <div class="menu-item" data-target="trading" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
-        <div class="menu-item" data-target="history" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
-        <div class="menu-item" data-target="verification" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
-        <div class="menu-item" data-target="deposit" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
-        <div class="menu-item" data-target="withdraw" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+        <div class="menu-item active" data-target="dashboardPanel" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
+        <div class="menu-item" data-target="tradingPanel" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
+        <div class="menu-item" data-target="historyPanel" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+        <div class="menu-item" data-target="verificationPanel" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+        <div class="menu-item" data-target="depositPanel" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        <div class="menu-item" data-target="withdrawPanel" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
 
         <div style="height:8px"></div>
         <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
@@ -1510,7 +1369,7 @@ window.addEventListener('load', function(){
           <form onsubmit="submitDoc(event)">
             <label class="muted-small">Tipo</label>
             <select class="form-select" style="margin-bottom:8px"><option>Identificación</option><option>Comprobante de domicilio</option></select>
-            <input type="file" required class="form-input" style="margin-bottom:8px">
+            <input type="file" required class="form-input" style="margin-bottom:8px" id="doc-file">
             <button class="btn-primary" type="submit">Subir</button>
           </form>
         </div>
@@ -1520,11 +1379,11 @@ window.addEventListener('load', function(){
         <div class="title">Depósito</div>
         <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
         <div style="margin-top:12px" class="table-box">
-          <form onsubmit="submitTransaction(event)">
+          <form onsubmit="submitTransaction(event,'deposit')">
             <label class="muted-small">Monto</label>
-            <input class="form-input" type="number" step="0.01" required>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-deposit">
             <label class="muted-small">Método</label>
-            <select class="form-select" style="margin-bottom:8px"><option>Transferencia</option><option>Crypto</option></select>
+            <select class="form-select" style="margin-bottom:8px" id="tx-method-deposit"><option>Transferencia</option><option>Crypto</option></select>
             <button class="btn-primary" type="submit">Enviar</button>
           </form>
         </div>
@@ -1534,11 +1393,11 @@ window.addEventListener('load', function(){
         <div class="title">Retiro</div>
         <div class="muted">Solicita un retiro a tu cuenta registrada</div>
         <div style="margin-top:12px" class="table-box">
-          <form onsubmit="submitTransaction(event)">
+          <form onsubmit="submitTransaction(event,'withdraw')">
             <label class="muted-small">Monto</label>
-            <input class="form-input" type="number" step="0.01" required>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-withdraw">
             <label class="muted-small">Cuenta destino</label>
-            <input class="form-input" type="text" required>
+            <input class="form-input" type="text" required id="tx-account-withdraw">
             <button class="btn-primary" type="submit">Solicitar</button>
           </form>
         </div>
@@ -1568,6 +1427,333 @@ window.addEventListener('load', function(){
   </div>
 </div>
 
+<!-- ========================= INLINE JS NECESARIO (NO SE AÑADEN ARCHIVOS) ========================= -->
+<script>
+/*
+  Inline helper script para que esta sección privada funcione por sí misma.
+  - No añade archivos externos (usa socket si ya existe por tu backend).
+  - Si no hay socket, activa un demo fallback para mostrar precios.
+  - Implementa navegación del sidebar, footer, logout, envío de formularios y creación de órdenes.
+*/
+
+/* --- Config dinámico --- */
+
+/* --- Estado local simple --- */
+window.ALL_SYMBOLS = window.ALL_SYMBOLS || [
+  {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+  {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+  {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
+  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'}
+];
+window.symbolPrices = window.symbolPrices || {};
+window.orderStore = window.orderStore || []; // órdenes creadas en frontend (pendientes)
+
+/* --- Util --- */
+function $(sel){ return document.querySelector(sel); }
+function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
+function fmt(n){ try{ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){return '--'} }
+
+/* --- NAV / UI --- */
+function hideAllPanels(){ $all('.panel').forEach(p=> p.style.display='none'); $all('.menu-item').forEach(m=> m.classList.remove('active')); $all('.fnav-item').forEach(f=> f.classList.remove('active')); }
+function showPanelById(id){
+  hideAllPanels();
+  const el = document.getElementById(id);
+  if(el) el.style.display = 'block';
+  // set active in sidebar
+  const menu = $all('.menu-item[data-target="'+id+'"]');
+  if(menu && menu[0]) menu[0].classList.add('active');
+  // set footer active if matches
+  const foot = $all('.fnav-item[data-target="'+id+'"]');
+  if(foot && foot[0]) foot[0].classList.add('active');
+}
+function navSidebar(ev){
+  const target = (ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target) || ev.currentTarget.getAttribute('data-target');
+  if(!target) return;
+  showPanelById(target);
+  // collapse sidebar on mobile
+  const sb = document.getElementById('sidebar');
+  if(window.innerWidth < 1000 && sb) sb.classList.add('hidden');
+}
+function footerNavClick(ev){
+  const t = ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target;
+  if(!t) return;
+  showPanelById(t);
+  // set footer active handled by showPanelById
+}
+
+/* Sidebar toggle */
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('#sidebarToggle');
+  if(btn){
+    const sb = document.getElementById('sidebar');
+    if(sb) sb.classList.toggle('hidden');
+  }
+});
+
+/* Show/hide info modal */
+function showModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='flex'; }
+function hideModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='none'; }
+
+/* Logout */
+function logout(){
+  try{
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('token');
+    // hide private area
+    const pa = document.getElementById('privateArea_full');
+    if(pa) pa.style.display = 'none';
+    // reload page (optional) to restore public view
+    // location.reload();
+    alert('Sesión cerrada');
+  }catch(e){ console.warn('logout error', e); }
+}
+
+/* --- SYMBOLS UI (simple) --- */
+
+function buildCategoryTabs(){
+  catTabsEl = document.getElementById('catTabs');
+  if(!catTabsEl) return;
+  catTabsEl.innerHTML = '';
+  CATEGORIES.forEach(cat=>{
+    const b = document.createElement('button'); b.className = 'cat-tab' + (cat===activeCategory ? ' active':''); b.innerText = cat;
+    b.onclick = ()=> { activeCategory = cat; buildCategoryTabs(); renderSymbolsGrid(); };
+    catTabsEl.appendChild(b);
+  });
+}
+
+function filterSymbols(q, category){
+  q = (q||'').trim().toLowerCase();
+  return (window.ALL_SYMBOLS||[]).filter(s=>{
+    if(category && category !== 'All' && (s.market||'').toLowerCase() !== category.toLowerCase()) return false;
+    if(!q) return true;
+    return ((s.label||'').toLowerCase().includes(q) || (s.symbol||'').toLowerCase().includes(q));
+  });
+}
+
+function renderSymbolsGrid(){
+  symbolsGridEl = document.getElementById('symbolsGrid');
+  if(!symbolsGridEl) return;
+  symbolsGridEl.innerHTML = '';
+  const q = (symbolSearchInput && symbolSearchInput.value) ? symbolSearchInput.value : '';
+  const list = filterSymbols(q, activeCategory);
+  if(!list.length){ symbolsGridEl.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>'; return; }
+  list.forEach(s=>{
+    const el = document.createElement('div'); el.className = 'symbol-card'; el.setAttribute('data-symbol', s.symbol);
+    el.onclick = ()=> selectSymbolAndOpenTrading(s.symbol, s.label);
+    const rawPrice = window.symbolPrices[s.symbol];
+    const priceVal = (rawPrice && typeof rawPrice === 'object') ? (rawPrice.price ?? rawPrice) : rawPrice;
+    const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
+    let ptext = '--';
+    if(numeric !== null && !isNaN(numeric)) ptext = (Math.abs(numeric)>1000)? numeric.toLocaleString(undefined,{maximumFractionDigits:1}) : numeric.toFixed(6);
+    else if(priceVal !== null && priceVal !== undefined) ptext = String(priceVal);
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+      </div>
+    </div>`;
+    symbolsGridEl.appendChild(el);
+  });
+}
+
+/* select and open trading panel */
+function selectSymbolAndOpenTrading(symbol, label){
+  currentSymbol = symbol;
+  const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
+  const opSymbolEl = document.getElementById('op-symbol'); if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
+  const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
+  showPanelById('tradingPanel');
+  // show/update chart if TradingView available
+  try{ if(window.TradingView && typeof TradingView.widget === 'function'){ initTradingWidget(symbol); } }catch(e){}
+  // update displayed price if exists
+  const priceVal = (window.symbolPrices && window.symbolPrices[symbol] && window.symbolPrices[symbol].price) ? window.symbolPrices[symbol].price : null;
+  if(priceVal !== null) { const op = document.getElementById('op-price'); if(op) op.textContent = fmt(priceVal); }
+}
+
+/* --- SOCKET or DEMO fallback --- */
+let demoId = null;
+function startDemoEngine(){
+  if(demoId) return;
+  demoId = setInterval(()=>{
+    (window.ALL_SYMBOLS || []).forEach(s=>{
+      if(!(s.symbol in window.symbolPrices)) window.symbolPrices[s.symbol] = { price: (Math.random()*100).toFixed(2), ts: Date.now() };
+      else {
+        const old = Number((window.symbolPrices[s.symbol] && window.symbolPrices[s.symbol].price) || 0);
+        const change = (Math.random()-0.5) * Math.max(0.0001, Math.abs(old)*0.002);
+        const next = Math.max(0.00001, old + change);
+        window.symbolPrices[s.symbol] = { price: next, ts: Date.now() };
+      }
+    });
+    renderSymbolsGrid();
+    const cur = document.getElementById('op-price'); if(cur) cur.textContent = fmt(window.symbolPrices[currentSymbol]?.price || 0);
+  }, 1200);
+}
+function stopDemoEngine(){ if(demoId){ clearInterval(demoId); demoId = null; } }
+
+/* Try to use existing socket if available (from your backend scripts) */
+function attachSocketIfPresent(){
+  try{
+    const sock = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || (typeof io === 'function' ? io(SOCKET_BASE, { path:'/socket.io', transports:['websocket','polling'], withCredentials:true, auth:{ token: localStorage.getItem('token') } }) : null);
+    if(!sock) { startDemoEngine(); return; }
+    // if we created a socket here, store it to avoid duplicates
+    window.__LEONES_SOCKET__ = window.__LEONES_SOCKET__ || {}; window.__LEONES_SOCKET__.socket = sock;
+    if(typeof sock.on === 'function'){
+      sock.on('connect', ()=> { const el=document.getElementById('ws-status'); if(el) el.innerText='conectado'; stopDemoEngine(); });
+      sock.on('disconnect', ()=> { const el=document.getElementById('ws-status'); if(el) el.innerText='desconectado'; startDemoEngine(); });
+      sock.on('prices_snapshot', (snap)=>{
+        try{
+          if(Array.isArray(snap)){ snap.forEach(it=> { if(it && it.symbol) window.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; }); }
+          else if(typeof snap === 'object'){ Object.keys(snap).forEach(k=> { const it = snap[k]; window.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() }; }); }
+          renderSymbolsGrid();
+        }catch(e){ console.warn('prices_snapshot parse error', e); }
+      });
+      sock.on('price', (p)=> {
+        try{
+          const symbol = p.symbol || p.s || p.sym || p.t;
+          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
+          if(!symbol) return;
+          window.symbolPrices[symbol] = { price: price, ts: p.ts ?? Date.now() };
+          renderSymbolsGrid();
+          const op = document.getElementById('op-price'); if(op) op.textContent = fmt(price);
+        }catch(e){}
+      });
+    } else {
+      startDemoEngine();
+    }
+  }catch(e){
+    console.warn('attachSocketIfPresent error', e);
+    startDemoEngine();
+  }
+}
+
+/* --- ORDERS (frontend) --- */
+function refreshOrdersUI(){
+  const list = document.getElementById('orders-list');
+  if(!list) return;
+  if(!window.orderStore.length) { list.innerText = '— no hay órdenes —'; return; }
+  list.innerHTML = window.orderStore.map(o=>`<div style="padding:6px 0">${escapeHtml(o.side)} ${escapeHtml(o.symbol)} ${o.qty} @ ${o.price || 'mkt'} <small style="color:var(--muted)">(${o.type})</small></div>`).join('');
+}
+
+async function createOrder(side){
+  try{
+    const type = (document.getElementById('order-type')||{}).value || 'Market';
+    const qty = Number((document.getElementById('order-qty')||{}).value || 0);
+    const price = (document.getElementById('order-price')||{}).value || null;
+    if(!qty || qty <= 0){ alert('Cantidad inválida'); return; }
+    const token = localStorage.getItem('token');
+    const body = { symbol: currentSymbol, side, qty, price: price || null, type };
+    // optimista: guardar en UI
+    window.orderStore.push({ ...body, createdAt: Date.now() });
+    refreshOrdersUI();
+
+    // intentar enviar al backend si token y endpoint existen
+    if(token){
+      try{
+        const res = await fetch(API_BASE + '/orders', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(body) });
+        if(!res.ok){ const t = await res.text().catch(()=>null); console.warn('order backend error', res.status, t); }
+        else { const data = await res.json().catch(()=>null); console.log('order accepted', data); }
+      }catch(e){ console.warn('order send failed', e); }
+    } else {
+      console.warn('No token: orden creada solo localmente (demo).');
+    }
+  }catch(e){ console.error('createOrder error', e); alert('Error al crear orden'); }
+}
+
+/* --- Form handlers (doc upload & transactions) --- */
+async function submitDoc(ev){
+  ev.preventDefault();
+  try{
+    const fileEl = document.getElementById('doc-file');
+    if(!fileEl || !fileEl.files || !fileEl.files[0]){ alert('Seleccione un archivo'); return; }
+    const fd = new FormData(); fd.append('file', fileEl.files[0]); fd.append('type', ev.target.querySelector('select')?.value || 'document');
+    const token = localStorage.getItem('token');
+    const headers = token ? { 'Authorization': 'Bearer '+token } : {};
+    const res = await fetch(API_BASE + '/verification/upload', { method:'POST', body: fd, headers });
+    if(res.ok){ alert('Documento subido. Revisaremos tu verificación.'); } else { const t=await res.text().catch(()=>null); alert('Error al subir documento: '+ (t||res.status)); }
+  }catch(e){ console.error('submitDoc', e); alert('Error al subir documento'); }
+}
+
+async function submitTransaction(ev, kind){
+  ev.preventDefault();
+  try{
+    const token = localStorage.getItem('token');
+    const amount = Number((document.getElementById(kind==='deposit' ? 'tx-amount-deposit' : 'tx-amount-withdraw')||{}).value || 0);
+    if(!amount || amount <= 0){ alert('Monto inválido'); return; }
+    const method = (document.getElementById('tx-method-deposit')||{}).value || 'Transferencia';
+    const account = (document.getElementById('tx-account-withdraw')||{}).value || '';
+    const payload = { kind, amount, method, account };
+    if(token){
+      const res = await fetch(API_BASE + '/transactions', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(payload) });
+      if(res.ok){ alert('Transacción enviada. Verifique el estado en Historial.'); } else { const t = await res.text().catch(()=>null); alert('Error: '+(t||res.status)); }
+    } else {
+      alert('Debe iniciar sesión para operar (demo).');
+    }
+  }catch(e){ console.error('submitTransaction', e); alert('Error al enviar transacción'); }
+}
+
+/* --- Initialization --- */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
+
+async function fetchSymbolsBackendAndInit(){
+  try{
+    // try several endpoints quickly (use api base)
+    const endpoints = ['/symbols','/api/symbols','/markets/symbols','/market/symbols','/markets','/api/markets'];
+    for(const ep of endpoints){
+      try{
+        const res = await fetch(API_BASE.replace(/\/api\/?$/,'') + ep, { method:'GET' });
+        if(!res.ok) continue;
+        const data = await res.json().catch(()=>null);
+        if(Array.isArray(data) && data.length){ window.ALL_SYMBOLS = data.map(it=> typeof it === 'string' ? { symbol: it, label: it, market: 'Unknown' } : ({ symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol, market: it.market||it.mkt||'Unknown' })); break; }
+        if(data && typeof data === 'object' && Object.keys(data).length){ window.ALL_SYMBOLS = Object.keys(data).map(k=> ({ symbol: k, label: data[k].label || k, market: data[k].market || 'Unknown' })); break; }
+      }catch(e){}
+    }
+  }catch(e){ console.warn('fetchSymbolsBackendAndInit error', e); }
+  buildCategoryTabs();
+  symbolSearchInput = document.getElementById('symbolSearch');
+  if(symbolSearchInput) symbolSearchInput.addEventListener('input', ()=> renderSymbolsGrid());
+  renderSymbolsGrid();
+  attachSocketIfPresent();
+}
+
+/* initialize UI state and session */
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    // restore session UI if available
+    const s = localStorage.getItem(SESSION_KEY);
+    const token = localStorage.getItem('token');
+    if(s){
+      try{
+        const u = JSON.parse(s);
+        const name = u.name || u.email || u.username || 'Usuario';
+        const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = name;
+        const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = name;
+        const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (name[0]||'U').toUpperCase();
+        // show private area
+        const pa = document.getElementById('privateArea_full'); if(pa) pa.style.display = 'block';
+      }catch(e){}
+    } else {
+      // no session: show private area anyway in demo mode (your choice)
+      const pa = document.getElementById('privateArea_full'); if(pa) pa.style.display = 'block';
+    }
+
+    // wire categories and symbols
+    fetchSymbolsBackendAndInit();
+
+    // sidebar behavior on small screens: hide by default
+    if(window.innerWidth < 1000){ const sb=document.getElementById('sidebar'); if(sb) sb.classList.add('hidden'); }
+
+    // ensure initial panel
+    showPanelById('dashboardPanel');
+
+    // orders UI
+    refreshOrdersUI();
+  }catch(e){ console.error('init private area error', e); }
+});
+</script>
 
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
@@ -1675,14 +1861,14 @@ window.addEventListener('load', function(){
 </script>
 
 <script>
+/* JS Nº2 - API helpers, socket startup, symbols UI (CORREGIDO) */
+
 /* API base (usa window.API si está definida por tu HTML) */
-const API_BASE = (window.API && window.API.replace(/\/+$/,'')) || (window.API_URL && window.API_URL.replace(/\/+$/,'')) || "https://leones-broker.onrender.com/api";
-const WS_BASE = (window.API && window.API.replace(/\/api\/?$/,'')) || (location.origin);
+const API_BASE = (window.API && String(window.API).replace(/\/+$/,'')) || (window.API_URL && String(window.API_URL).replace(/\/+$/,'')) || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'https://leones-broker.onrender.com/api');
+const WS_BASE = (API_BASE.replace(/\/api\/?$/,'')) || location.origin;
 const SESSION_KEY = (typeof window.SESSION_KEY !== 'undefined') ? window.SESSION_KEY : 'BROKERPRO_SESSION_USER';
 
-/* -----------------------
-   UTIL: escape + localStorage helpers
-   ----------------------- */
+/* escape + localStorage helpers */
 if(typeof window.escapeHtml !== 'function'){
   window.escapeHtml = function(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); };
 }
@@ -1695,13 +1881,14 @@ function saveUsers(u){ try{ localStorage.setItem('leones_images_users', JSON.str
 async function apiFetch(path, opts = {}){
   const token = localStorage.getItem('token');
   const headers = opts.headers ? {...opts.headers} : {};
-  headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  // allow FormData when needed
+  if(!(opts.body instanceof FormData)) headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   if(token) headers['Authorization'] = `Bearer ${token}`;
 
   const url = path.startsWith('http') ? path : (API_BASE + (path.startsWith('/') ? path : '/' + path));
   let res;
   try{
-    res = await fetch(url, {...opts, headers});
+    res = await fetch(url, {...opts, headers, credentials: 'include'});
   }catch(e){
     const err = new Error('Network error');
     err.body = e;
@@ -1710,53 +1897,37 @@ async function apiFetch(path, opts = {}){
 
   const text = await res.text().catch(()=>null);
   let data = null;
-  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; } // si no es JSON, guardamos texto
+  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
 
   if(!res.ok){
-    // manejar 401 -> limpiar sesión para evitar polling eterno con token inválido
     if(res.status === 401){
       try{ localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); }catch(e){}
       const msg = (data && (data.msg||data.error||data.message)) || 'Token requerido';
-      const err = new Error(msg);
-      err.status = res.status; err.body = data;
+      const err = new Error(msg); err.status = res.status; err.body = data;
       throw err;
     }
     const msg = (data && (data.msg||data.error||data.message)) || (typeof data === 'string' ? data : 'Error API');
-    const err = new Error(msg);
-    err.status = res.status; err.body = data;
+    const err = new Error(msg); err.status = res.status; err.body = data;
     throw err;
   }
   return data;
 }
 
-/* =========================
-   Resend verification (frontend)
-   ========================= */
+/* Resend verification (frontend) */
 window.resendVerification = async function(email, btnEl = null){
   try{
     if(!email) throw new Error('Falta el email');
     if(btnEl){ btnEl.disabled = true; btnEl.textContent = 'Enviando...'; }
-
-    const res = await fetch(`${API_BASE}/auth/resend-verification`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ email })
-    });
-    const payload = await res.json().catch(async ()=> { return (await res.text().catch(()=>null)) || null; });
-
-    if(res.ok){
-      if(btnEl){ btnEl.textContent = 'Reenviado'; setTimeout(()=>{ try{ btnEl.textContent='Reenviar verificación'; btnEl.disabled=false; }catch(e){} },2000); }
-      return { ok:true, data: payload };
-    } else {
-      if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; }
-      return { ok:false, msg: (payload && (payload.msg||payload.error)) || `Error ${res.status}`, data: payload };
-    }
+    const payload = await apiFetch('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }).catch(e=>{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; } throw e; });
+    if(btnEl){ btnEl.textContent = 'Reenviado'; setTimeout(()=>{ try{ btnEl.textContent='Reenviar verificación'; btnEl.disabled=false; }catch(e){} },2000); }
+    return { ok:true, data: payload };
   }catch(e){
     if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; }
     console.error('resendVerification error', e);
     return { ok:false, msg: e.message || 'Error de red' };
   }
 };
+
 window.createResendButton = function(email){
   const btn = document.createElement('button');
   btn.type='button'; btn.className='btn glow resend-verification-btn'; btn.textContent='Reenviar verificación';
@@ -1769,46 +1940,45 @@ window.createResendButton = function(email){
 };
 
 /* =========================
-   REAL-TIME SOCKET.IO SETUP
-   - conectamos al WS_BASE (servidor donde corre tu backend)
-   - escuchamos events: prices_snapshot, price, symbols_update, orderbook
+   SOCKET.IO SETUP
    ========================= */
 window.symbolPrices = window.symbolPrices || {};
 window.orderBooks = window.orderBooks || {};
-window.ALL_SYMBOLS = window.ALL_SYMBOLS || []; // se sobrescribe con backend si existe
+window.ALL_SYMBOLS = window.ALL_SYMBOLS || [];
 
-let socket = null;
+let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
 function startSocket(){
   try{
     if(typeof io !== 'function'){ console.warn('socket.io cliente no cargado (io no definido)'); return; }
     if(socket && socket.connected) return;
 
-    // conectar al host principal (quitar /api si existe)
     const wsUrl = WS_BASE;
-    // Si wsUrl es falsy, io() funcionará contra el mismo host que sirvió la página.
-    socket = io(wsUrl, { transports: ['websocket','polling'] });
+    socket = io(wsUrl, {
+      path: '/socket.io',
+      transports: ['websocket','polling'],
+      withCredentials: true,
+      auth: { token: localStorage.getItem('token') || null },
+      autoConnect: true
+    });
+
+    // save global ref
+    window.__LEONES_SOCKET__ = window.__LEONES_SOCKET__ || {};
+    window.__LEONES_SOCKET__.socket = socket;
 
     socket.on('connect', ()=> {
       console.log('Socket conectado', socket.id);
-      const wsStatusEl = document.getElementById('ws-status');
-      if(wsStatusEl) wsStatusEl.innerText = 'conectado';
-      // pedir snapshot de precios y símbolos (si backend soporta)
-      if(socket && socket.emit){
-        socket.emit('request_prices_snapshot');
-        socket.emit('request_symbols');
-      }
+      const wsStatusEl = document.getElementById('ws-status'); if(wsStatusEl) wsStatusEl.innerText = 'conectado';
+      if(socket && socket.emit){ socket.emit('request_prices_snapshot'); socket.emit('request_symbols'); }
     });
 
     socket.on('disconnect', (reason)=> {
       console.warn('Cliente desconectado:', reason);
-      const wsStatusEl = document.getElementById('ws-status');
-      if(wsStatusEl) wsStatusEl.innerText = 'desconectado';
+      const wsStatusEl = document.getElementById('ws-status'); if(wsStatusEl) wsStatusEl.innerText = 'desconectado';
     });
 
     socket.on('prices_snapshot', (snap)=> {
       try{
         if(!snap) return;
-        // snap expected: { SYMBOL: { price, ts }, ... }  OR array [{symbol, price, ts}, ...]
         if(Array.isArray(snap)){
           snap.forEach(item=> { if(item && item.symbol) window.symbolPrices[item.symbol] = (item.price ?? item.p ?? item.v ?? item.value ?? item); });
         } else {
@@ -1823,62 +1993,41 @@ function startSocket(){
             }
           });
         }
-        // refresh UI (defensivo)
         try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory); }catch(e){}
         try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(window.symbolPrices[currentSymbol]?.price ?? window.symbolPrices[currentSymbol] ?? 0); }catch(e){}
-      }catch(e){
-        console.warn('prices_snapshot handler error', e);
-      }
+      }catch(e){ console.warn('prices_snapshot handler error', e); }
     });
 
     socket.on('price', (p)=> {
       try{
-        // p expected: { symbol, price, ts } or other shapes
         if(!p) return;
         const symbol = p.symbol || p.s || p.sym || p.t;
         const priceVal = p.price ?? p.p ?? p.v ?? p.value ?? p;
         const ts = p.ts ?? Date.now();
         if(!symbol || (priceVal === undefined || priceVal === null)) return;
-        // normalize storage as object with price+ts for consistency
         window.symbolPrices[symbol] = { price: priceVal, ts: ts };
-
-        // update small DOM price elements
-        document.querySelectorAll(`[data-symbol="${symbol}"], #op-price`).forEach(el=>{
-          try{ el.textContent = Number(priceVal).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){}
-        });
-
-        // update chart/ob and UI (defensivo)
+        document.querySelectorAll(`[data-symbol="${symbol}"], #op-price`).forEach(el=>{ try{ el.textContent = Number(priceVal).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){} });
         try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(priceVal); }catch(e){}
         try{ if(typeof updateOrderBook === 'function') updateOrderBook(window.orderBooks[symbol] || {}); }catch(e){}
         try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory); }catch(e){}
-        // notify JS1 chart helper if available
         try{ if(typeof window.onExternalPrice === 'function') window.onExternalPrice({ symbol, price: priceVal, ts }); }catch(e){}
       }catch(e){ console.warn('price handler error', e); }
     });
 
     socket.on('symbols_update', (symbols)=> {
-      // symbols expected: [{symbol,label,market}, ...] or { SYMBOL:meta }
       try{
         if(!symbols) return;
         if(Array.isArray(symbols)){
           window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
         } else if(typeof symbols === 'object'){
-          const arr = [];
-          Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' }));
-          window.ALL_SYMBOLS = arr;
+          const arr = []; Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' })); window.ALL_SYMBOLS = arr;
         }
-        // call initSymbolsUI only if exists
         try{ if(typeof initSymbolsUI === 'function') initSymbolsUI(); }catch(e){ console.warn('initSymbolsUI error', e); }
       }catch(e){ console.warn('symbols_update handling error', e); }
     });
 
     socket.on('orderbook', (ob)=> {
-      try{
-        // ob: { symbol, bids:[], asks:[] }
-        if(!ob || !ob.symbol) return;
-        window.orderBooks[ob.symbol] = ob;
-        try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){}
-      }catch(e){}
+      try{ if(!ob || !ob.symbol) return; window.orderBooks[ob.symbol] = ob; try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){} }catch(e){}
     });
 
     socket.on('connect_error', (err)=> { console.error('socket connect_error', err); const el = document.getElementById('ws-status'); if(el) el.innerText='error'; });
@@ -1902,24 +2051,18 @@ async function fetchSymbolsFromBackend(){
     try{
       const data = await apiFetch(ep).catch(()=>null);
       if(!data) continue;
-      // normalizar a array [{symbol,label,market}]
       let arr = [];
       if(Array.isArray(data)){
-        // detectar estructura
         arr = data.map(it=>{
           if(typeof it === 'string') return { symbol: it, label: it, market: 'Unknown' };
           return { symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol||it.t, market: it.market||it.mkt||it.group||'Unknown' };
         });
       } else if(typeof data === 'object'){
-        // object map -> convert
         Object.keys(data).forEach(k=> arr.push({ symbol:k, label: data[k].label||k, market: data[k].market||'Unknown' }));
       }
       if(arr.length) return arr;
-    }catch(e){
-      // continuar intentando otros endpoints
-    }
+    }catch(e){}
   }
-  // fallback: devuelve lo que ya tengas (o el demo)
   return (window.ALL_SYMBOLS && window.ALL_SYMBOLS.length) ? window.ALL_SYMBOLS : [
     {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
     {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
@@ -1929,14 +2072,11 @@ async function fetchSymbolsFromBackend(){
   ];
 }
 
-/* -------------------------
-   TRADINGVIEW init (if available)
-   ------------------------- */
+/* TRADINGVIEW init fallback */
 if(typeof window.initTradingWidget !== 'function'){
   window.initTradingWidget = function(symbol){
     try{
-      const cont = document.getElementById('tv_chart_container');
-      if(!cont) return;
+      const cont = document.getElementById('tv_chart_container'); if(!cont) return;
       cont.innerHTML = '';
       if(window.TradingView && typeof TradingView.widget === 'function'){
         try{
@@ -1953,26 +2093,17 @@ if(typeof window.initTradingWidget !== 'function'){
             enable_publishing: false,
             allow_symbol_change: true
           });
-        }catch(e){
-          cont.innerHTML = '<div style="padding:12px;color:var(--muted)">No fue posible inicializar TradingView.</div>';
-          console.warn('TradingView init error', e);
-        }
+        }catch(e){ cont.innerHTML = '<div style="padding:12px;color:var(--muted)">No fue posible inicializar TradingView.</div>'; console.warn('TradingView init error', e); }
         return;
       }
-      // fallback: si no hay tv.js
       cont.innerHTML = '<div style="padding:12px;color:var(--muted)">Widget de gráficos no disponible (tv.js no cargó).</div>';
     }catch(e){ console.warn('initTradingWidget error', e); }
   };
 }
 
-/* -------------------------
-   UI helpers: updateDisplayedPrice y updateOrderBook
-   ------------------------- */
+/* UI helpers */
 function updateDisplayedPrice(price){
-  try{
-    const el = document.getElementById('op-price');
-    if(el) el.textContent = Number(price || 0).toLocaleString(undefined,{maximumFractionDigits:6});
-  }catch(e){}
+  try{ const el = document.getElementById('op-price'); if(el) el.textContent = Number(price || 0).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){}
 }
 function updateOrderBook(ob){
   try{
@@ -1984,9 +2115,7 @@ function updateOrderBook(ob){
   }catch(e){}
 }
 
-/* -------------------------
-   Render / UI: symbols (uses window.ALL_SYMBOLS and symbolPrices)
-   ------------------------- */
+/* Render symbols grid (similar a tu implementación) */
 let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
 let currentSymbol = (window.ALL_SYMBOLS && window.ALL_SYMBOLS[0] && window.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
 
@@ -1997,7 +2126,6 @@ function wireDomRefs(){
   marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
   marketSearch = document.getElementById('marketSearch');
   catTabsMarket = document.getElementById('catTabsMarket');
-  // small price elements (defensivo: soporta objeto {price,ts} o número)
   try{
     const raw = window.symbolPrices[currentSymbol];
     const priceVal = (raw && typeof raw === 'object') ? (raw.price ?? raw) : raw;
@@ -2042,7 +2170,6 @@ function renderSymbolsGrid(container, query, category){
     el.className = 'symbol-card';
     el.setAttribute('data-symbol', s.symbol);
     el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
-    // price could be object {price,ts} or raw number/string
     const rawPrice = window.symbolPrices[s.symbol];
     const priceVal = (rawPrice && typeof rawPrice === 'object') ? (rawPrice.price ?? rawPrice) : rawPrice;
     const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
@@ -2069,23 +2196,16 @@ function renderSymbolsGrid(container, query, category){
 /* Seleccionar símbolo y abrir trading */
 function selectSymbolAndOpenTrading(symbol, label){
   currentSymbol = symbol;
-  const ts = document.getElementById('tradingSymbol');
-  if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
-  const opSymbolEl = document.getElementById('op-symbol');
-  if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
-  const opEx = document.getElementById('op-exchange');
-  if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
-  // show trading panel (defensivo: showPanel puede no existir)
+  const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
+  const opSymbolEl = document.getElementById('op-symbol'); if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
+  const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
   try{ if(typeof showPanel === 'function') showPanel('tradingPanel'); else { document.querySelectorAll('.panel').forEach(p=>p.style.display='none'); const el = document.getElementById('tradingPanel'); if(el) el.style.display = 'block'; } }catch(e){}
   if(typeof initTradingWidget === 'function') initTradingWidget(symbol);
   try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(window.symbolPrices[symbol]?.price ?? window.symbolPrices[symbol] ?? 0); }catch(e){}
   try{ if(typeof updateOrderBook === 'function') updateOrderBook(window.orderBooks[symbol] || {}); }catch(e){}
 }
 
-/* -------------------------
-   FALLBACK: si servidor no manda precios, permitimos un pequeño demo solo local
-   (se apagará en cuanto lleguen eventos via socket)
-   ------------------------- */
+/* Demo fallback engine (only if no snapshot arrives) */
 let demoEngineId = null;
 function startDemoFallback(){
   if(demoEngineId) return;
@@ -2107,75 +2227,51 @@ function startDemoFallback(){
 }
 function stopDemoFallback(){ if(demoEngineId){ clearInterval(demoEngineId); demoEngineId = null; } }
 
-/* =========================
-   Inicialización principal
-   ========================= */
+/* Inicialización principal */
 async function initPrivateJS(){
   try{ wireDomRefs(); }catch(e){ console.warn('wireDomRefs error', e); }
-
-  // start socket, but only after setting ALL_SYMBOLS from backend (prefer)
   try{
     const syms = await fetchSymbolsFromBackend().catch(()=>null);
-    if(Array.isArray(syms) && syms.length){
-      window.ALL_SYMBOLS = syms;
-    }
-  }catch(e){
-    console.warn('fetchSymbolsFromBackend error', e);
-  }
+    if(Array.isArray(syms) && syms.length) window.ALL_SYMBOLS = syms;
+  }catch(e){ console.warn('fetchSymbolsFromBackend error', e); }
 
-  // render UI
   try{
     buildCategoryTabs(document.getElementById('catTabs')||catTabs, ()=> renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory));
     buildCategoryTabs(document.getElementById('catTabsMarket')||catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), marketSearch ? (marketSearch.value||'') : '', activeCategory));
     renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), '', 'All');
     renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), '', 'All');
-
     if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch.value, activeCategory));
     if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), marketSearch.value, activeCategory));
   }catch(e){}
 
-  // start socket and attach update handlers
-  try{
-    startSocket();
-  }catch(e){
-    console.warn('startSocket failed', e);
-  }
+  try{ startSocket(); }catch(e){ console.warn('startSocket failed', e); }
 
-  // if socket never provides prices within X seconds, enable demo fallback
   let snapshotArrived = false;
   const onSnapshot = ()=> { snapshotArrived = true; stopDemoFallback(); };
-  // we attach a one-time listener if socket exists and supports once
   try{
-    if(socket && typeof socket.once === 'function'){
-      socket.once('prices_snapshot', onSnapshot);
+    if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === 'function'){
+      window.__LEONES_SOCKET__.socket.once('prices_snapshot', onSnapshot);
     } else {
-      // try to attach to io later if it connects
       const tryAttach = setInterval(()=> {
-        if(socket && typeof socket.once === 'function'){
-          socket.once('prices_snapshot', onSnapshot);
+        if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === 'function'){
+          window.__LEONES_SOCKET__.socket.once('prices_snapshot', onSnapshot);
           clearInterval(tryAttach);
         }
       }, 500);
-      // auto-clear after some time
       setTimeout(()=> clearInterval(tryAttach), 5000);
     }
   }catch(e){}
 
   setTimeout(()=>{ if(!snapshotArrived) startDemoFallback(); }, 2500);
 
-  // Attempt to init trading widget for currentSymbol
   try{ if(typeof initTradingWidget === 'function') initTradingWidget(currentSymbol); }catch(e){}
-
-  // restore session UI if token exists
   try{
     const s = localStorage.getItem(SESSION_KEY);
     const token = localStorage.getItem('token');
     if(s && token){
       const u = JSON.parse(s);
       if(typeof showPrivateFull === 'function') showPrivateFull(u, token);
-    } else {
-      if(typeof restorePublicHeader === 'function') restorePublicHeader();
-    }
+    } else { if(typeof restorePublicHeader === 'function') restorePublicHeader(); }
   }catch(e){}
 }
 
@@ -2184,9 +2280,7 @@ document.addEventListener('DOMContentLoaded', ()=> {
   try{ initPrivateJS(); }catch(e){ console.error('initPrivateJS error', e); }
 });
 
-/* -------------------------
-   Exports for debugging
-   ------------------------- */
+/* Exports for debugging */
 window._privateJS = {
   apiFetch, fetchSymbolsFromBackend, startSocket, stopDemoFallback, startDemoFallback, updateDisplayedPrice, updateOrderBook
 };
