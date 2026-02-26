@@ -7,7 +7,7 @@ import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
 /* =========================================================
-   HELPERS
+   HELPERS / CONFIG
 ========================================================= */
 
 const getBaseUrlFromReq = (req) => {
@@ -20,11 +20,10 @@ const getBaseUrlFromReq = (req) => {
   return `${protocol}://${host}`;
 };
 
-const AUTO_VERIFY =
-  String(process.env.AUTO_VERIFY).toLowerCase() === "true";
-
-const ENFORCE_EMAIL_VERIFICATION =
-  String(process.env.ENFORCE_EMAIL_VERIFICATION).toLowerCase() === "true";
+// robust parsing with defaults
+const AUTO_VERIFY = String(process.env.AUTO_VERIFY || "false").toLowerCase() === "true";
+const ENFORCE_EMAIL_VERIFICATION = String(process.env.ENFORCE_EMAIL_VERIFICATION || "false").toLowerCase() === "true";
+const DEFAULT_LEVERAGE = process.env.DEFAULT_LEVERAGE ? Number(process.env.DEFAULT_LEVERAGE) : null;
 
 const extractAddress = (body) =>
   (body.address || body.adress || body.dir || "").toString().trim();
@@ -32,6 +31,20 @@ const extractAddress = (body) =>
 const extractPhone = (body) =>
   (body.phone || body.tel || body.mobile || "").toString().trim();
 
+function publicUser(user){
+  // return a safe public view of user
+  if(!user) return null;
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    verified: !!user.verified,
+    phone: user.phone || '',
+    address: user.address || '',
+    balance: (typeof user.balance === 'number' ? user.balance : 0),
+    leverage: (typeof user.leverage !== 'undefined' ? user.leverage : DEFAULT_LEVERAGE)
+  };
+}
 
 /* =========================================================
    REGISTER
@@ -57,16 +70,19 @@ export const registerUser = async (req, res) => {
       return res.status(409).json({ msg: "Correo ya registrado" });
 
     const hash = await bcrypt.hash(password, 12);
-    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationToken = AUTO_VERIFY ? null : crypto.randomBytes(32).toString("hex");
 
+    // create user with sensible defaults (balance 0)
     const user = await User.create({
       name,
       email,
       password: hash,
       phone,
       address,
-      verified: AUTO_VERIFY,
-      verificationToken: AUTO_VERIFY ? null : verificationToken,
+      verified: !!AUTO_VERIFY,
+      verificationToken: verificationToken,
+      balance: 0,
+      leverage: DEFAULT_LEVERAGE
     });
 
     /* ---------- EMAIL ---------- */
@@ -74,7 +90,7 @@ export const registerUser = async (req, res) => {
     let mailSent = false;
     let mailError = null;
 
-    if (!AUTO_VERIFY) {
+    if (!AUTO_VERIFY && verificationToken) {
       try {
         const link = `${getBaseUrlFromReq(req)}/api/verify/email/${verificationToken}`;
 
@@ -82,16 +98,18 @@ export const registerUser = async (req, res) => {
           email,
           "Verifica tu cuenta",
           `
-          <h2>Bienvenido ${name}</h2>
-          <p>Haz clic para verificar:</p>
-          <a href="${link}">${link}</a>
+            <h2>Bienvenido ${name}</h2>
+            <p>Haz clic para verificar tu cuenta en Leones Broker:</p>
+            <p><a href="${link}">${link}</a></p>
+            <p>Si no solicitaste esto, ignora este correo.</p>
           `
         );
 
         mailSent = true;
       } catch (err) {
-        mailError = err.message;
+        mailError = (err && err.message) ? err.message : String(err);
         console.error("MAIL ERROR:", err);
+        // dejamos verificationToken en BD para que el usuario pueda reenviarlo luego
       }
     }
 
@@ -99,11 +117,7 @@ export const registerUser = async (req, res) => {
       msg: "Registro exitoso",
       verificationSent: mailSent,
       mailError,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
+      user: publicUser(user)
     });
 
   } catch (error) {
@@ -118,13 +132,47 @@ export const registerUser = async (req, res) => {
 
 
 /* =========================================================
+   VERIFY EMAIL (link clickeado por el usuario)
+   GET /api/verify/email/:token
+========================================================= */
+
+export const verifyEmail = async (req, res) => {
+  try {
+    const token = req.params.token;
+    if (!token) return res.status(400).json({ msg: "Token inválido" });
+
+    const user = await User.findOne({ verificationToken: token });
+    if (!user) return res.status(404).json({ msg: "Token no válido o usuario no encontrado" });
+
+    if (user.verified) {
+      // already verified
+      user.verificationToken = null;
+      await user.save().catch(()=>{});
+      return res.json({ msg: "Cuenta ya verificada" });
+    }
+
+    user.verified = true;
+    user.verificationToken = null;
+    await user.save();
+
+    return res.json({ msg: "Cuenta verificada correctamente" });
+  } catch (err) {
+    console.error("VERIFY EMAIL ERROR:", err);
+    return res.status(500).json({ msg: "Error del servidor" });
+  }
+};
+
+
+/* =========================================================
    RESEND VERIFICATION
+   POST /api/auth/resend-verification
 ========================================================= */
 
 export const resendVerification = async (req, res) => {
   try {
 
     const email = (req.body.email || "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ msg: "Email requerido" });
 
     const user = await User.findOne({ email });
     if (!user)
@@ -139,13 +187,21 @@ export const resendVerification = async (req, res) => {
 
     const link = `${getBaseUrlFromReq(req)}/api/verify/email/${token}`;
 
-    await sendEmail(
-      email,
-      "Reenvío verificación",
-      `<a href="${link}">Verificar cuenta</a>`
-    );
+    let mailError = null;
+    let mailSent = false;
+    try {
+      await sendEmail(
+        email,
+        "Reenvío verificación - Leones Broker",
+        `<p>Haz clic para verificar tu cuenta: <a href="${link}">${link}</a></p>`
+      );
+      mailSent = true;
+    } catch (err) {
+      mailError = (err && err.message) ? err.message : String(err);
+      console.error("RESEND MAIL ERROR:", err);
+    }
 
-    res.json({ msg: "Correo reenviado" });
+    return res.json({ msg: "Operación completada", verificationSent: mailSent, mailError });
 
   } catch (err) {
     console.error("RESEND ERROR:", err);
@@ -156,6 +212,7 @@ export const resendVerification = async (req, res) => {
 
 /* =========================================================
    LOGIN
+   POST /api/auth/login
 ========================================================= */
 
 export const loginUser = async (req, res) => {
@@ -192,21 +249,42 @@ export const loginUser = async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    res.json({
+    return res.json({
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        verified: user.verified,
-        phone: user.phone,
-        address: user.address,
-        balance: user.balance ?? 0
-      }
+      user: publicUser(user)
     });
 
   } catch (error) {
     console.error("LOGIN ERROR:", error);
+    res.status(500).json({ msg: "Error del servidor" });
+  }
+};
+
+
+/* =========================================================
+   GET PROFILE (verificar token desde frontend)
+   GET /api/auth/me  (o /api/users/me)
+========================================================= */
+
+export const getProfile = async (req, res) => {
+  try {
+    // soporte Authorization Bearer y cookie "token"
+    let token = null;
+    const auth = req.headers.authorization || req.get('authorization') || '';
+    if (auth && auth.toLowerCase().startsWith('bearer ')) token = auth.split(' ')[1];
+    if (!token && req.cookies && req.cookies.token) token = req.cookies.token;
+    if (!token) return res.status(401).json({ msg: "Token requerido" });
+
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(payload.id);
+      if (!user) return res.status(404).json({ msg: "Usuario no encontrado" });
+      return res.json({ user: publicUser(user) });
+    } catch (err) {
+      return res.status(401).json({ msg: "Token inválido" });
+    }
+  } catch (err) {
+    console.error("GET PROFILE ERROR:", err);
     res.status(500).json({ msg: "Error del servidor" });
   }
 };
