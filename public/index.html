@@ -467,6 +467,14 @@ const USERS_KEY = 'leones_images_users';
 
 
 /* --- API URL dinámica --- */
+
+
+/* SOCKET URL (quita /api si existe) */
+const API_BASE =
+  location.hostname === "localhost"
+    ? "http://localhost:3000/api"
+    : "https://TU-DOMINIO.onrender.com/api";
+
  
    (window.API_URL && String(window.API_URL).replace(/\/+$/,'')) 
   || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'https://leones-broker.onrender.com/api');
