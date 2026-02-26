@@ -17,7 +17,7 @@ const {
   2) SMTP (fallback dev/local)
   3) Log seguro (no rompe registro si no hay proveedor)
 
-  Nunca lanza error fatal.
+  Nunca lanza error fatal; siempre retorna un objeto con estado.
 */
 
 let resendClient = null;
@@ -29,7 +29,8 @@ if (RESEND_API_KEY) {
     resendClient = new Resend(RESEND_API_KEY);
     console.log("✅ Resend listo");
   } catch (err) {
-    console.error("❌ Error iniciando Resend:", err.message);
+    console.error("❌ Error iniciando Resend:", err && err.message ? err.message : err);
+    resendClient = null;
   }
 }
 
@@ -47,82 +48,107 @@ if (!resendClient && EMAIL_USER && EMAIL_PASS) {
     });
 
     transporter.verify((err) => {
-      if (err) console.error("❌ SMTP error:", err.message);
-      else console.log("✅ SMTP listo");
+      if (err) {
+        console.error("❌ SMTP error (verify):", err.message || err);
+        transporter = null;
+      } else {
+        console.log("✅ SMTP listo");
+      }
     });
 
   } catch (err) {
-    console.error("❌ Error creando transporter:", err.message);
+    console.error("❌ Error creando transporter:", err.message || err);
+    transporter = null;
+  }
+}
+
+/* small sleep util */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* timeout wrapper */
+async function withTimeout(promise, ms = 10000) {
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error("timeout")), ms);
+  });
+  try {
+    const res = await Promise.race([promise, timeout]);
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
   }
 }
 
 /* ====================================================== */
 
 export const sendEmail = async (to, subject, html) => {
-
   if (!to) {
     console.warn("[MAIL] destinatario vacío");
-    return { skipped: true };
+    return { ok: false, skipped: true, reason: "empty_recipient" };
   }
 
   if (!subject) subject = "Notificación";
 
-  /* ---------- RESEND ---------- */
+  // Normalize recipients
+  const tos = Array.isArray(to) ? to : [String(to)];
+
+  /* ---------- RESEND (preferido) ---------- */
   if (resendClient) {
     if (!SENDER_EMAIL) {
-      console.error("❌ Falta SENDER_EMAIL en variables entorno");
-      return { skipped: true };
+      console.error("❌ Falta SENDER_EMAIL en variables entorno (necesario para Resend)");
+      return { ok: false, provider: "resend", error: "missing_sender_email" };
     }
 
-    try {
-      console.log("[MAIL] usando Resend →", to);
-
-      const resp = await resendClient.emails.send({
-        from: SENDER_EMAIL,
-        to: Array.isArray(to) ? to : [to],
-        subject,
-        html
-      });
-
-      console.log("✅ Email enviado (Resend):", resp?.id);
-      return resp;
-
-    } catch (err) {
-      console.error("❌ Resend fallo:", err.message);
-      return { error: err.message };
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[MAIL] (resend) intento ${attempt} →`, tos);
+        const resp = await resendClient.emails.send({
+          from: SENDER_EMAIL,
+          to: tos,
+          subject,
+          html
+        });
+        console.log("✅ Email enviado (Resend):", resp?.id || resp);
+        return { ok: true, provider: "resend", id: resp?.id || null, resp };
+      } catch (err) {
+        lastErr = err;
+        console.error(`[MAIL] Resend fallo (intento ${attempt}):`, err && err.message ? err.message : err);
+        // small backoff
+        await sleep(400 * attempt);
+      }
     }
+    return { ok: false, provider: "resend", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
-  /* ---------- SMTP ---------- */
+  /* ---------- SMTP (fallback) ---------- */
   if (transporter) {
-    try {
-      console.log("[MAIL] usando SMTP →", to);
-
-      const info = await transporter.sendMail({
-        from: `"Leones Broker" <${EMAIL_USER}>`,
-        to,
-        subject,
-        html
-      });
-
-      console.log("✅ Email enviado SMTP:", info.messageId);
-      return info;
-
-    } catch (err) {
-      console.error("❌ SMTP fallo:", err.message);
-      return { error: err.message };
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[MAIL] (smtp) intento ${attempt} →`, tos);
+        const info = await withTimeout(transporter.sendMail({
+          from: `"Leones Broker" <${EMAIL_USER}>`,
+          to: tos.join(","),
+          subject,
+          html
+        }), 12000); // 12s timeout
+        console.log("✅ Email enviado SMTP:", info.messageId || info);
+        return { ok: true, provider: "smtp", messageId: info.messageId || null, info };
+      } catch (err) {
+        lastErr = err;
+        console.error(`[MAIL] SMTP fallo (intento ${attempt}):`, (err && err.message) ? err.message : err);
+        await sleep(400 * attempt);
+      }
     }
+    return { ok: false, provider: "smtp", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
-  /* ---------- SIN PROVEEDOR ---------- */
-  console.warn("⚠️ No hay proveedor de email configurado");
-  console.log("📧 Email simulado:");
-  console.log("Para:", to);
-  console.log("Asunto:", subject);
-
-  return {
-    simulated: true,
-    to,
-    subject
-  };
+  /* ---------- SIN PROVEEDOR (simulado/log) ---------- */
+  console.warn("⚠️ No hay proveedor de email configurado — simulando envío");
+  console.log("📧 Email simulado → Para:", tos, "Asunto:", subject);
+  // No lanzar: devolvemos ok=true pero marcado como simulado para que el flujo siga.
+  return { ok: true, provider: "simulated", simulated: true, to: tos, subject };
 };
