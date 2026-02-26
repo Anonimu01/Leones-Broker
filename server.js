@@ -19,7 +19,7 @@ import tradeRoutes from "./routes/trade.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
-// ✅ NUEVOS IMPORTS REALTIME
+// NUEVOS IMPORTS REALTIME
 import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
@@ -72,12 +72,41 @@ mongoose.connection.on("disconnected", () => {
   console.warn("⚠️ Mongo desconectado");
 });
 
-// CORS
+/* ======================================================
+   CORS - whitelist dinámico (más seguro que origin: true)
+   ====================================================== */
+
+const allowedOrigins = new Set([
+  process.env.CLIENT_URL,
+  process.env.BASE_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:4000",
+  "http://127.0.0.1:4000",
+].filter(Boolean));
+
 const corsOptions = {
-  origin: process.env.CLIENT_URL || true,
+  origin: (origin, callback) => {
+    // allow requests with no origin (like mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    // allow same origin requests
+    try {
+      const url = new URL(origin);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
+    } catch (e) {}
+    console.warn("CORS denied for origin:", origin);
+    callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 };
+
 app.use(cors(corsOptions));
+
+/* ======================================================
+   MIDDLEWARES
+   ====================================================== */
 
 // logger
 app.use((req, res, next) => {
@@ -86,21 +115,25 @@ app.use((req, res, next) => {
 });
 
 // body parser
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// HEALTH CHECK
+/* ======================================================
+   HEALTH CHECK
+   ====================================================== */
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : "smtp",
+    emailProvider: process.env.RESEND_API_KEY ? "resend" : (process.env.EMAIL_USER ? "smtp" : "none"),
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
 });
 
-// ROUTES
+/* ======================================================
+   ROUTES API (montadas temprano)
+   ====================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
@@ -110,106 +143,190 @@ app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 
 /* ======================================================
-   SIMPLE SYMBOLS ENDPOINTS ADDED (aliases para evitar 404)
-   - Se colocaron aquí para que existan antes del 404 /api
-   - Devuelven un listado simple de símbolos que puedes ampliar
-====================================================== */
+   FALLBACK / SAMPLE SYMBOLS (temporal)
+   - Esto se mantendrá como fallback si no hay PriceHandler
+   ====================================================== */
 
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
   { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
-  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" }
 ];
 
-// endpoint principal solicitado
-app.get("/api/symbols", (req, res) => {
-  res.json(SAMPLE_SYMBOLS);
-});
-
-// aliases comunes que aparecieron en tus logs (evitan 404)
-app.get("/api/market/symbols", (req, res) => {
-  res.json(SAMPLE_SYMBOLS);
-});
-app.get("/api/markets/symbols", (req, res) => {
-  res.json(SAMPLE_SYMBOLS);
-});
-app.get("/api/markets", (req, res) => {
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] });
-});
-app.get("/api/market/list", (req, res) => {
-  res.json(SAMPLE_SYMBOLS);
-});
-// catch extra variant with duplicated /api prefix that apareced in logs
-app.get("/api/api/symbols", (req, res) => {
-  res.json(SAMPLE_SYMBOLS);
-});
-app.get("/api/api/markets", (req, res) => {
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] });
-});
+// Rutas aliases iniciales (si tu frontend pide cualquiera de estas)
+app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
 
 /* ======================================================
-   🚀 SOCKET SERVER + POLYGON REALTIME
-====================================================== */
+   SOCKET SERVER + POLYGON REALTIME (HTTP server)
+   ====================================================== */
 
 const httpServer = createServer(app);
 
 const io = new IOServer(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || "*",
+    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : (process.env.CLIENT_URL || "*"),
     methods: ["GET", "POST"],
     credentials: true,
   },
+  // allowEIO3: true // habilita si clientes antiguos requieren Engine.IO v3
 });
 
-// iniciar manejador de precios
+// Price handler instanciado con IO para emitir cuando haya updates
 const priceHandler = new PriceHandler(io);
 
-// iniciar socket polygon
-const polygonSocket = new PolygonSocket({
-  apiKey: process.env.POLYGON_API_KEY,
-  onPrice: (data) => priceHandler.handle(data),
-});
+/* ======================================================
+   POLYGON SOCKET - inicializar con cuidado
+   ====================================================== */
 
-polygonSocket.connect();
+let polygonSocket = null;
+try {
+  if (!process.env.POLYGON_API_KEY) {
+    console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse");
+  } else {
+    polygonSocket = new PolygonSocket({
+      apiKey: process.env.POLYGON_API_KEY,
+      onPrice: (data) => priceHandler.handle(data),
+      onOpen: () => console.log("PolygonSocket abierto"),
+      onClose: () => console.log("PolygonSocket cerrado"),
+      onError: (err) => console.error("PolygonSocket error:", err),
+    });
 
-// market routes dinámico
+    // intentar conectar, pero captura errores internamente
+    try {
+      polygonSocket.connect();
+      console.log("🔌 Intentando conectar PolygonSocket...");
+    } catch (err) {
+      console.error("Error iniciando PolygonSocket.connect():", err);
+    }
+  }
+} catch (err) {
+  console.error("Error inicializando PolygonSocket:", err);
+}
+
+/* ======================================================
+   ROUTES dinámicas de mercado (factory)
+   ====================================================== */
+
 try {
   if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket }));
+    app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
   } else {
     app.use("/api/market", marketRoutesFactory);
   }
 } catch (e) {
-  console.warn("No se pudo montar /api/market:", e.message);
+  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
 }
 
-// sockets cliente
+/* ======================================================
+   RUTA DINÁMICA /api/symbols (usa priceHandler si existe)
+   ====================================================== */
+
+app.get("/api/symbols", (req, res) => {
+  try {
+    // prefer priceHandler.prices si existe
+    const prices = (priceHandler && priceHandler.prices) ? priceHandler.prices : null;
+    if (prices && Object.keys(prices).length) {
+      const arr = Object.keys(prices).map((k) => {
+        return {
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market: (prices[k] && prices[k].market) ? prices[k].market : "Unknown"
+        };
+      });
+      return res.json(arr);
+    }
+    // fallback
+    return res.json(SAMPLE_SYMBOLS);
+  } catch (err) {
+    console.error("api/symbols error:", err);
+    return res.json(SAMPLE_SYMBOLS);
+  }
+});
+
+/* ======================================================
+   SOCKET.IO CONNECTION HANDLERS
+   ====================================================== */
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
-  socket.emit("prices_snapshot", priceHandler.prices || {});
+  // Enviar snapshot inicial
+  try {
+    socket.emit("prices_snapshot", priceHandler.prices || {});
+  } catch (e) {
+    socket.emit("prices_snapshot", {});
+  }
 
-  socket.on("subscribe", ({ symbol }) => {
-    if (!symbol) return;
-    polygonSocket.subscribe(symbol);
-    socket.join(symbol);
+  // soporte para requests desde frontend
+  socket.on("request_prices_snapshot", () => {
+    try {
+      socket.emit("prices_snapshot", priceHandler.prices || {});
+    } catch (e) {
+      socket.emit("prices_snapshot", {});
+    }
   });
 
-  socket.on("unsubscribe", ({ symbol }) => {
-    if (!symbol) return;
-    polygonSocket.unsubscribe(symbol);
-    socket.leave(symbol);
+  socket.on("request_symbols", () => {
+    try {
+      // si PriceHandler provee método para listar símbolos, úsalo
+      if (priceHandler && typeof priceHandler.getSymbols === "function") {
+        const syms = priceHandler.getSymbols();
+        socket.emit("symbols_update", syms || []);
+      } else if (priceHandler && priceHandler.prices) {
+        const arr = Object.keys(priceHandler.prices).map((k) => ({
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market: (priceHandler.prices[k] && priceHandler.prices[k].market) ? priceHandler.prices[k].market : "Unknown"
+        }));
+        socket.emit("symbols_update", arr);
+      } else {
+        socket.emit("symbols_update", SAMPLE_SYMBOLS);
+      }
+    } catch (e) {
+      socket.emit("symbols_update", SAMPLE_SYMBOLS);
+    }
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ Cliente desconectado:", socket.id);
+  socket.on("subscribe", ({ symbol, kind } = {}) => {
+    if (!symbol) return;
+    try {
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      socket.join(symbol);
+      console.log("subscribe:", socket.id, symbol, kind || "trades");
+    } catch (e) {
+      console.warn("subscribe error:", e);
+    }
+  });
+
+  socket.on("unsubscribe", ({ symbol, kind } = {}) => {
+    if (!symbol) return;
+    try {
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      socket.leave(symbol);
+      console.log("unsubscribe:", socket.id, symbol, kind || "trades");
+    } catch (e) {
+      console.warn("unsubscribe error:", e);
+    }
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
   });
 });
 
 /* ======================================================
    404 API
-====================================================== */
+   ====================================================== */
 
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
@@ -217,7 +334,7 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
-====================================================== */
+   ====================================================== */
 
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
@@ -226,7 +343,7 @@ app.get("*", (req, res) => {
 
 /* ======================================================
    ERROR HANDLER
-====================================================== */
+   ====================================================== */
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
@@ -239,7 +356,7 @@ app.use((err, req, res, next) => {
 
 /* ======================================================
    START SERVER
-====================================================== */
+   ====================================================== */
 
 const PORT = process.env.PORT || 3000;
 
@@ -253,13 +370,13 @@ const server = httpServer.listen(PORT, () => {
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
 
-  if (!process.env.RESEND_API_KEY)
-    console.warn("⚠️ Resend no configurado — emails fallarán");
+  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
 
 /* ======================================================
    GRACEFUL SHUTDOWN
-====================================================== */
+   ====================================================== */
 
 let shuttingDown = false;
 
@@ -285,16 +402,20 @@ const gracefulShutdown = async (signal) => {
     });
 
     try {
-      if (typeof polygonSocket.close === "function") {
+      if (polygonSocket && typeof polygonSocket.close === "function") {
         polygonSocket.close();
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Error cerrando polygonSocket:", e);
+    }
 
     try {
       if (typeof global?.stopRiskWatcher === "function") {
         global.stopRiskWatcher();
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Error deteniendo risk watcher:", e);
+    }
 
     await mongoose.disconnect();
     console.log("Mongo cerrado");
