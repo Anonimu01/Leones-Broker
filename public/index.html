@@ -459,76 +459,35 @@
 
 
 <script>
+/* ===========================
+   MAIN FRONTEND SCRIPT (REPARADO)
+   =========================== */
+
+   /* CONFIG GLOBAL CORRECTA */
+
 window.API = location.hostname === "localhost"
- ? "http://localhost:3000/api"
- : "https://leones-broker.onrender.com/api";
+  ? "http://localhost:3000"
+  : "https://leones-broker.onrender.com";
 
-window.SOCKET_BASE = location.hostname === "localhost"
- ? "http://localhost:3000"
- : "https://leones-broker.onrender.com";
-
-window.WS_BASE = location.hostname === "localhost"
- ? "ws://localhost:3000"
- : "wss://leones-broker.onrender.com";
-</script>
-
-
-<script src="/js/polygon-client.js"> </script>
-<script src="/js/main.js"></script>
-<script src="/js/auth.js"></script>
-<!-- global singletons (ya los pusiste) -->
-<script>window.SESSION_KEY = "BROKERPRO_SESSION_USER";</script>
-<script>
-
-</script>
-<script src="https://s3.tradingview.com/tv.js"></script>
-<!-- libs -->
-<script src="/socket.io/socket.io.js"></script>
-<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-
-<!-- tus scripts (cada uno en su archivo) -->
-
-
-
-<script>
+window.SOCKET_BASE = window.API;
 window.SESSION_KEY = "BROKERPRO_SESSION_USER";
-</script>
+
+/* CONSTANTES LOCALES */
 
 
+/* Globals / config */
+window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "https://leones-broker.onrender.com/api");
+window.SOCKET_BASE = window.SOCKET_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : "https://leones-broker.onrender.com");
+window.WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "ws://localhost:3000" : "wss://leones-broker.onrender.com");
+window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 
-
-
-<script>
-/* JS Nº1 - modal + register/login + polygon-client (CORREGIDO) */
-window.API_BASE =
- location.hostname === "localhost"
-   ? "http://localhost:3000/api"
-   : "https://leones-broker.onrender.com/api";
-// después de backend responde con { token, user }
-localStorage.setItem('token', token);
-localStorage.setItem(window.SESSION_KEY, JSON.stringify(user));
-// Mostrar la parte privada (solo ahora)
-if(typeof showPrivateArea === 'function'){ showPrivateArea(user); }
-
-/* GLOBAL KEYS / HELPERS */
-const USERS_KEY = 'leones_images_users';
-
-const API_BASE = window.API_BASE; // NO redeclarar window.API_BASE
-const SOCKET_URL = API_BASE.replace(/\/api\/?$/,'') || location.origin;
-/* --- API URL dinámica --- */
-
-
-/* SOCKET URL (quita /api si existe) */
-
- 
-   (window.API_URL && String(window.API_URL).replace(/\/+$/,'')) 
-  || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : 'https://leones-broker.onrender.com/api');
-
-
-/* SOCKET URL (quita /api si existe) */
-
-
-/* safe console */
+/* Local constants */
+const API_BASE = "https://leones-broker.onrender.com/api";
+const SOCKET_URL = "https://leones-broker.onrender.com";
+const WS_BASE = "wss://leones-broker.onrender.com";
+const SESSION_KEY = "BROKERPRO_SESSION_USER";
+const USERS_KEY = "leones_images_users";
+/* Safe console helpers */
 const log = (...a)=>{ try{ console.log(...a); }catch(e){} };
 const warn = (...a)=>{ try{ console.warn(...a); }catch(e){} };
 const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
@@ -537,19 +496,19 @@ const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
 (function(){
   'use strict';
 
-  // If Chart/Socket libs missing, degrade gracefully
+  // defensive: if socket.io client missing, expose safe stubs and exit
   if (typeof io !== 'function') {
-    warn('socket.io (io) not found — real-time features inactive.');
+    warn('socket.io (io) not encontrado — funcionalidades en tiempo real inactivas.');
     window.subscribeSymbol = function(){ warn('subscribeSymbol: socket.io no cargado'); };
     window.unsubscribeSymbol = function(){ warn('unsubscribeSymbol: socket.io no cargado'); };
     window.fetchSymbolsFromServer = async function(){ return []; };
-    window.updateDisplayedPrice = window.updateDisplayedPrice || function(){};
+    window.updateDisplayedPrice = window.updateDisplayedPrice || function(){} ;
     window.updateOrderBook = window.updateOrderBook || function(){};
-    log('polygon-client.js initialized (no socket.io)');
+    log('polygon-client.js inicializado (sin socket.io).');
     return;
   }
 
-  // Reuse existing global socket if present to avoid double connections
+  // Reuse socket if created by other script to avoid duplicates
   let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
   if(!socket){
     try{
@@ -560,16 +519,15 @@ const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
         auth: { token: localStorage.getItem('token') || null },
         autoConnect: true
       });
-      // store reference so other modules can reuse
       window.__LEONES_SOCKET__ = { socket };
     }catch(e){
-      warn('Error creando socket.io client', e);
+      warn('Error creando cliente socket.io', e);
       socket = null;
     }
   }
 
   // DOM helper
-  function $(sel){ try{ return document.querySelector(sel);}catch(e){return null;}}
+  function $ (sel){ try{ return document.querySelector(sel); }catch(e){ return null; } }
 
   // Keep last prices (map symbol -> { price, ts })
   window.symbolPrices = window.symbolPrices || {};
@@ -597,8 +555,6 @@ const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
       window.addEventListener('resize', ()=> {
         try{ chart.applyOptions({ width: chartContainer.clientWidth }); }catch(e){}
       });
-    } else {
-      // chart not available
     }
   } catch(e){ errlog('Chart init error', e); chart = null; series = null; }
 
@@ -655,7 +611,7 @@ const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
             window.symbolPrices[symbol] = { price, ts };
             updatePriceElementsForSymbol(symbol, price);
           });
-        } else {
+        } else if (typeof snapshot === 'object') {
           Object.keys(snapshot).forEach(k=>{
             const item = snapshot[k];
             const price = Number(item?.price ?? item?.p ?? item);
@@ -767,7 +723,7 @@ const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
 
 /* ---------- helpers localStorage ---------- */
 function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch (e) { return []; } }
-function saveUsers(u) { try { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }catch(e){} }
+function saveUsers(u) { try { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }catch (e){} }
 
 /* Apply permanent glow to all interactive fields (inputs/selects/textareas) */
 function applyInputGlow(root = document){
@@ -873,14 +829,12 @@ function restorePublicHeader(){
    REGISTER / LOGIN (robustos)
    ========================= */
 
-/* Use global apiFetch if available for consistent behavior */
 async function backendRegister(userObj){
   try{
     if(typeof window.apiFetch === 'function'){
       const res = await window.apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(userObj) });
       return { ok: true, data: res };
     }
-    // fallback to robust fetch
     const url = API_BASE.replace(/\/+$/,'') + '/auth/register';
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(userObj) });
     const ct = res.headers.get('content-type') || '';
@@ -915,7 +869,6 @@ async function backendLogin(creds){
   }
 }
 
-/* resend verification helper (compatible con apiFetch) */
 async function backendResend(email){
   try{
     if(typeof window.apiFetch === 'function') return await window.apiFetch('/auth/resend-verification', { method:'POST', body: JSON.stringify({ email }) });
@@ -957,24 +910,10 @@ function openRegisterModal(){
 
     if(backend.ok){
       const serverData = backend.data || {};
-      if(serverData && serverData.verificationSent === false){
-        msgEl.innerHTML = 'Cuenta creada pero el correo de verificación no pudo enviarse.<br/><br/>';
-        const btn = document.createElement('button'); btn.textContent = 'Reenviar verificación'; btn.className = 'btn glow'; btn.style.padding = '8px 12px'; btn.style.marginTop = '6px';
-        msgEl.appendChild(btn);
-        btn.addEventListener('click', async ()=>{
-          btn.disabled = true; btn.textContent = 'Enviando...';
-          const r = await backendResend(email);
-          if(r.ok) msgEl.textContent = 'Email de verificación reenviado. Revisa tu bandeja (inbox/spam).';
-          else { msgEl.textContent = r.msg || 'Error reenviando verificación'; btn.disabled = false; btn.textContent = 'Reenviar verificación'; }
-        });
-        return;
-      }
-
-      const token = sessionStorage.getItem("TOKEN");
-
+      // store session safely
       if(serverData && serverData.token){
-        const sessionObj = { email, token: serverData.token, name: serverData.user?.name || name };
-        localStorage.setItem(SESSION_KEY, JSON.stringify(sessionObj));
+        const user = serverData.user || { name: name, email: email };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
         localStorage.setItem('token', serverData.token);
       } else if(serverData && serverData.user){
         localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
@@ -1035,9 +974,7 @@ function openLoginModal(){
 /* PUBLIC helper to restore header actions after logout */
 window.restorePublicHeader = restorePublicHeader;
 
-/* showPrivateFull & performLogoutFull defensivos */
-
-/* Aseguramos una referencia local segura a la clave de sesión */
+/* Defensive implementations for showPrivateFull & performLogoutFull */
 const SESSION_KEY_LOCAL = (typeof window.SESSION_KEY !== 'undefined') ? window.SESSION_KEY : 'BROKERPRO_SESSION_USER';
 
 if (typeof window.showPrivateFull !== 'function') {
@@ -1054,7 +991,7 @@ if (typeof window.showPrivateFull !== 'function') {
         profileBtn.style.gap = '10px';
 
         const nameEl = document.createElement('div');
-        nameEl.textContent = user.name || 'Usuario';
+        nameEl.textContent = user.name || user.email || 'Usuario';
         nameEl.style.color = 'var(--gold)';
         nameEl.style.fontWeight = '700';
 
@@ -1066,7 +1003,6 @@ if (typeof window.showPrivateFull !== 'function') {
           if (typeof window.performLogoutFull === 'function') {
             window.performLogoutFull();
           } else {
-            // usar la referencia segura
             localStorage.removeItem(SESSION_KEY_LOCAL);
             localStorage.removeItem('token');
             restorePublicHeader();
@@ -1088,7 +1024,6 @@ if (typeof window.showPrivateFull !== 'function') {
       }
 
       try { if (token) localStorage.setItem('token', token); } catch (e) { /* ignore */ }
-      // guardar usando la clave segura
       localStorage.setItem(SESSION_KEY_LOCAL, JSON.stringify(user));
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { console.error('showPrivateFull error', e); }
@@ -1121,9 +1056,9 @@ window.addEventListener('load', function(){
         if (sessionHasToken) {
           if(typeof showPrivateFull === 'function'){ showPrivateFull(u, token || u.token); }
         } else { restorePublicHeader(); }
-      } catch(e){ console.warn('Error parseando SESSION_KEY al restaurar sesión', e); }
+      } catch(e){ console.warn('Error parseando SESSION_KEY al restaurar sesión', e); restorePublicHeader(); }
     } else { restorePublicHeader(); }
-  } catch(e){ console.warn('restore session error', e); }
+  } catch(e){ console.warn('restore session error', e); restorePublicHeader(); }
 });
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
