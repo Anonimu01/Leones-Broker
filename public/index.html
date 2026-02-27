@@ -476,8 +476,31 @@ window.API_BASE =
 
 
 <script>
+window.API = location.hostname === "localhost"
+ ? "http://localhost:3000/api"
+ : "https://leones-broker.onrender.com/api";
+
+window.SOCKET_BASE = location.hostname === "localhost"
+ ? "http://localhost:3000"
+ : "https://leones-broker.onrender.com";
+
+window.WS_BASE = location.hostname === "localhost"
+ ? "ws://localhost:3000"
+ : "wss://leones-broker.onrender.com";
+</script>
+
+<script src="/js/polygon-client.js"></script>
+<script src="/js/main.js"></script>
+<script src="/js/auth.js"></script>
+
+
+
+
+<script>
 window.SESSION_KEY = "BROKERPRO_SESSION_USER";
 </script>
+
+
 
 
 
@@ -949,6 +972,8 @@ function openRegisterModal(){
         });
         return;
       }
+
+      const token = sessionStorage.getItem("TOKEN");
 
       if(serverData && serverData.token){
         const sessionObj = { email, token: serverData.token, name: serverData.user?.name || name };
