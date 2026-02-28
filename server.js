@@ -1,4 +1,4 @@
-// server.js
+// server.js (mejorado)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -7,6 +7,12 @@ import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { createServer } from "http";
 import { Server as IOServer } from "socket.io";
+
+import helmet from "helmet";
+import compression from "compression";
+import rateLimit from "express-rate-limit";
+import mongoSanitize from "express-mongo-sanitize";
+import xss from "xss-clean";
 
 import { connectDB } from "./config/db.js";
 
@@ -19,7 +25,7 @@ import tradeRoutes from "./routes/trade.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
-// NUEVOS IMPORTS REALTIME
+// Realtime
 import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
@@ -27,7 +33,7 @@ import marketRoutesFactory from "./routes/market.routes.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ENV CONFIG
+// ENV
 dotenv.config({
   path:
     process.env.NODE_ENV === "production"
@@ -41,7 +47,7 @@ app.set("trust proxy", 1);
 // DB CONNECT
 connectDB();
 
-// mongoose listeners
+// Mongoose listeners (logging + start jobs after DB ready)
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 
@@ -73,24 +79,42 @@ mongoose.connection.on("disconnected", () => {
 });
 
 /* ======================================================
-   CORS - whitelist dinámico (más seguro que origin: true)
+   SECURITY MIDDLEWARES (helmet, compression, sanitize, etc)
    ====================================================== */
+app.use(helmet());
+app.use(compression());
+app.use(mongoSanitize());
+app.use(xss());
 
-const allowedOrigins = new Set([
-  process.env.CLIENT_URL,
-  process.env.BASE_URL,
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:4000",
-  "http://127.0.0.1:4000",
-].filter(Boolean));
+/* ======================================================
+   RATE LIMIT (basic)
+   ====================================================== */
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 200, // requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api", limiter);
+
+/* ======================================================
+   CORS - whitelist dinámico
+   ====================================================== */
+const allowedOrigins = new Set(
+  [
+    process.env.CLIENT_URL,
+    process.env.BASE_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+  ].filter(Boolean)
+);
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // allow requests with no origin (like mobile apps, curl, server-to-server)
     if (!origin) return callback(null, true);
     if (allowedOrigins.has(origin)) return callback(null, true);
-    // allow same origin requests
     try {
       const url = new URL(origin);
       if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
@@ -105,7 +129,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 /* ======================================================
-   MIDDLEWARES
+   BASIC MIDDLEWARES
    ====================================================== */
 
 // logger
@@ -114,7 +138,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// body parser
+// body parsers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -132,21 +156,18 @@ app.get("/api/health", (req, res) => {
 });
 
 /* ======================================================
-   ROUTES API (montadas temprano)
+   API ROUTES
    ====================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
-
 app.use("/api/wallet", walletRoutes);
 app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 
 /* ======================================================
-   FALLBACK / SAMPLE SYMBOLS (temporal)
-   - Esto se mantendrá como fallback si no hay PriceHandler
+   SAMPLE SYMBOLS / FALLBACK
    ====================================================== */
-
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
@@ -158,7 +179,6 @@ const SAMPLE_SYMBOLS = [
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" }
 ];
 
-// Rutas aliases iniciales (si tu frontend pide cualquiera de estas)
 app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
@@ -167,9 +187,8 @@ app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
 
 /* ======================================================
-   SOCKET SERVER + POLYGON REALTIME (HTTP server)
+   SOCKET.IO + PRICE HANDLER
    ====================================================== */
-
 const httpServer = createServer(app);
 
 const io = new IOServer(httpServer, {
@@ -178,16 +197,13 @@ const io = new IOServer(httpServer, {
     methods: ["GET", "POST"],
     credentials: true,
   },
-  // allowEIO3: true // habilita si clientes antiguos requieren Engine.IO v3
 });
 
-// Price handler instanciado con IO para emitir cuando haya updates
 const priceHandler = new PriceHandler(io);
 
 /* ======================================================
-   POLYGON SOCKET - inicializar con cuidado
+   POLYGON SOCKET
    ====================================================== */
-
 let polygonSocket = null;
 try {
   if (!process.env.POLYGON_API_KEY) {
@@ -201,7 +217,6 @@ try {
       onError: (err) => console.error("PolygonSocket error:", err),
     });
 
-    // intentar conectar, pero captura errores internamente
     try {
       polygonSocket.connect();
       console.log("🔌 Intentando conectar PolygonSocket...");
@@ -214,9 +229,8 @@ try {
 }
 
 /* ======================================================
-   ROUTES dinámicas de mercado (factory)
+   MARKET ROUTES (factory)
    ====================================================== */
-
 try {
   if (typeof marketRoutesFactory === "function") {
     app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
@@ -228,12 +242,10 @@ try {
 }
 
 /* ======================================================
-   RUTA DINÁMICA /api/symbols (usa priceHandler si existe)
+   /api/symbols endpoint dinámico
    ====================================================== */
-
 app.get("/api/symbols", (req, res) => {
   try {
-    // prefer priceHandler.prices si existe
     const prices = (priceHandler && priceHandler.prices) ? priceHandler.prices : null;
     if (prices && Object.keys(prices).length) {
       const arr = Object.keys(prices).map((k) => {
@@ -245,7 +257,6 @@ app.get("/api/symbols", (req, res) => {
       });
       return res.json(arr);
     }
-    // fallback
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
     console.error("api/symbols error:", err);
@@ -254,20 +265,17 @@ app.get("/api/symbols", (req, res) => {
 });
 
 /* ======================================================
-   SOCKET.IO CONNECTION HANDLERS
+   SOCKET.IO EVENTS
    ====================================================== */
-
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
-  // Enviar snapshot inicial
   try {
     socket.emit("prices_snapshot", priceHandler.prices || {});
   } catch (e) {
     socket.emit("prices_snapshot", {});
   }
 
-  // soporte para requests desde frontend
   socket.on("request_prices_snapshot", () => {
     try {
       socket.emit("prices_snapshot", priceHandler.prices || {});
@@ -278,7 +286,6 @@ io.on("connection", (socket) => {
 
   socket.on("request_symbols", () => {
     try {
-      // si PriceHandler provee método para listar símbolos, úsalo
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         const syms = priceHandler.getSymbols();
         socket.emit("symbols_update", syms || []);
@@ -327,7 +334,6 @@ io.on("connection", (socket) => {
 /* ======================================================
    404 API
    ====================================================== */
-
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
 });
@@ -335,7 +341,6 @@ app.use("/api", (req, res) => {
 /* ======================================================
    STATIC FRONTEND
    ====================================================== */
-
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
@@ -344,7 +349,6 @@ app.get("*", (req, res) => {
 /* ======================================================
    ERROR HANDLER
    ====================================================== */
-
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({
@@ -357,7 +361,6 @@ app.use((err, req, res, next) => {
 /* ======================================================
    START SERVER
    ====================================================== */
-
 const PORT = process.env.PORT || 3000;
 
 const server = httpServer.listen(PORT, () => {
@@ -377,13 +380,11 @@ const server = httpServer.listen(PORT, () => {
 /* ======================================================
    GRACEFUL SHUTDOWN
    ====================================================== */
-
 let shuttingDown = false;
 
 const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
-
   console.log(`📴 ${signal} recibido. Cerrando...`);
 
   const timeout = setTimeout(() => {
