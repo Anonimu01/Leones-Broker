@@ -1,6 +1,6 @@
-// services/market.js
-// Usa fetch nativo (Node >= 18). Asegúrate que en Render estés usando Node >= 18.
-const POLYGON_KEY = process.env.POLYGON_API_KEY || process.env.POLYGON_KEY || "";
+import fetch from "node-fetch";
+
+const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const BASE_URL = "https://api.polygon.io";
 
 if (!POLYGON_KEY) {
@@ -9,7 +9,7 @@ if (!POLYGON_KEY) {
 
 /* =========================
    CACHE SIMPLE EN MEMORIA
-   ========================= */
+========================= */
 const priceCache = new Map();
 const CACHE_TIME = 5000; // 5 segundos
 
@@ -23,121 +23,74 @@ function setCache(symbol, data) {
 function getCache(symbol) {
   const entry = priceCache.get(symbol);
   if (!entry) return null;
+
   if (Date.now() - entry.time > CACHE_TIME) {
     priceCache.delete(symbol);
     return null;
   }
+
   return entry.data;
 }
 
 /* =========================
    NORMALIZAR SYMBOL
-   ========================= */
-/**
- * Normaliza símbolos recibidos en varias formas
- * - Quita prefix de exchange: "BINANCE:BTCUSDT" -> "BTCUSDT"
- * - Convierte "EUR/USD", "EUR_USD" -> "EURUSD"
- * - Elimina '-' y espacios
- * - Uppercase
- */
-export function normalizeSymbol(raw) {
-  if (!raw) return "";
-  let s = String(raw).trim();
-
-  // si viene con exchange "EXCHANGE:SYMBOL", quitar exchange (pero conservar I: / O: si needed)
-  if (s.includes(":") && !s.startsWith("I:") && !s.startsWith("O:")) {
-    s = s.split(":").pop();
-  }
-
-  // limpiar separadores y caracteres no alfanuméricos permitidos
-  s = s.replace(/[_\-\s\/]/g, "").toUpperCase();
-
-  return s;
+========================= */
+export function normalizeSymbol(symbol) {
+  return String(symbol || "")
+    .trim()
+    .toUpperCase()
+    .replace("/", "")
+    .replace("-", "")
+    .replace("_", "");
 }
 
 /* =========================
    OBTENER PRECIO ACTUAL
-   ========================= */
+========================= */
 export async function getPrice(symbol) {
-  // normalizar para cache/URL
-  const normalized = normalizeSymbol(symbol);
-  if (!normalized) {
-    return { symbol, price: null, source: "invalid", time: Date.now() };
-  }
+  symbol = normalizeSymbol(symbol);
 
-  const cached = getCache(normalized);
+  const cached = getCache(symbol);
   if (cached) return cached;
 
-  // asegúrate que fetch exista (Node >=18 lo tiene)
-  if (typeof fetch !== "function") {
-    const err = new Error("Global fetch no disponible en este runtime. Usa Node >= 18 o instala node-fetch");
-    console.error(err);
-    // fallback mock
-    const fallback = {
-      symbol: normalized,
-      price: Number((Math.random() * 100 + 10).toFixed(2)),
-      source: "fallback",
-      time: Date.now()
-    };
-    setCache(normalized, fallback);
-    return fallback;
-  }
-
   try {
-    // encodeURIComponent sólo sobre symbol normalizado por si acaso
-    const url = `${BASE_URL}/v2/last/trade/${encodeURIComponent(normalized)}?apiKey=${encodeURIComponent(POLYGON_KEY)}`;
-    const res = await fetch(url, { method: "GET" });
+    const url = `${BASE_URL}/v2/last/trade/${symbol}?apiKey=${POLYGON_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
 
-    // Si la respuesta no es JSON, lanzar y usar fallback
-    const ct = res.headers.get("content-type") || "";
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} - ${text || res.statusText}`);
+    if (!data?.results?.p) {
+      throw new Error("Precio no encontrado");
     }
 
-    let data;
-    if (ct.includes("application/json")) {
-      data = await res.json();
-    } else {
-      // respuesta no JSON (posible página de error) -> lanzar
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Non-JSON response: ${txt.slice(0, 200)}`);
-    }
-
-    // polygon v2 last trade shape: { results: { p: price, ... } }
-    const priceValue = Number(data?.results?.p ?? data?.results?.price ?? data?.price ?? NaN);
-    if (!isFinite(priceValue)) {
-      throw new Error("Precio no encontrado en respuesta de Polygon");
-    }
+    const price = Number(data.results.p);
 
     const result = {
-      symbol: normalized,
-      price: priceValue,
+      symbol,
+      price,
       source: "polygon",
       time: Date.now()
     };
 
-    setCache(normalized, result);
+    setCache(symbol, result);
     return result;
   } catch (err) {
-    console.error("Market price error:", err && err.message ? err.message : err);
+    console.error("Market price error:", err.message);
 
-    // fallback seguro (no rompe trading)
+    // fallback mock seguro (nunca rompe el broker)
     const fallback = {
-      symbol: normalized,
+      symbol,
       price: Number((Math.random() * 100 + 10).toFixed(2)),
       source: "fallback",
       time: Date.now()
     };
 
-    setCache(normalized, fallback);
     return fallback;
   }
 }
 
 /* =========================
    SNAPSHOT MULTIPLE
-   ========================= */
+========================= */
 export async function getPrices(symbols = []) {
   const results = [];
 
@@ -145,7 +98,7 @@ export async function getPrices(symbols = []) {
     try {
       const p = await getPrice(s);
       results.push(p);
-    } catch (e) {
+    } catch {
       results.push({
         symbol: s,
         price: null,
@@ -155,4 +108,46 @@ export async function getPrices(symbols = []) {
   }
 
   return results;
+}
+
+/* =========================
+   EJECUTAR ORDEN EN BROKER
+   (SIMULADOR REALISTA)
+========================= */
+export async function executeOrderOnBroker({
+  symbol,
+  side,
+  quantity,
+  type = "market",
+  price = null,
+  userId = null
+}) {
+  if (!symbol || !side || !quantity) {
+    throw new Error("Datos incompletos para ejecutar orden");
+  }
+
+  const market = await getPrice(symbol);
+
+  const executionPrice =
+    type === "market"
+      ? market.price
+      : Number(price || market.price);
+
+  const order = {
+    id: "ord_" + Math.random().toString(36).slice(2),
+    userId,
+    symbol: normalizeSymbol(symbol),
+    side: side.toLowerCase(),
+    type,
+    quantity: Number(quantity),
+    requestedPrice: price,
+    executedPrice: executionPrice,
+    status: "filled",
+    liquidity: "market",
+    slippage: Number((executionPrice - market.price).toFixed(5)),
+    source: market.source,
+    createdAt: new Date().toISOString()
+  };
+
+  return order;
 }
