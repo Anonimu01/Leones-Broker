@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const BASE_URL = "https://api.polygon.io";
 
@@ -11,7 +9,7 @@ if (!POLYGON_KEY) {
    CACHE SIMPLE EN MEMORIA
 ========================= */
 const priceCache = new Map();
-const CACHE_TIME = 5000; // 5 segundos
+const CACHE_TIME = 5000;
 
 function setCache(symbol, data) {
   priceCache.set(symbol, {
@@ -76,15 +74,12 @@ export async function getPrice(symbol) {
   } catch (err) {
     console.error("Market price error:", err.message);
 
-    // fallback mock seguro (nunca rompe el broker)
-    const fallback = {
+    return {
       symbol,
       price: Number((Math.random() * 100 + 10).toFixed(2)),
       source: "fallback",
       time: Date.now()
     };
-
-    return fallback;
   }
 }
 
@@ -96,8 +91,7 @@ export async function getPrices(symbols = []) {
 
   for (const s of symbols) {
     try {
-      const p = await getPrice(s);
-      results.push(p);
+      results.push(await getPrice(s));
     } catch {
       results.push({
         symbol: s,
@@ -111,8 +105,7 @@ export async function getPrices(symbols = []) {
 }
 
 /* =========================
-   EJECUTAR ORDEN EN BROKER
-   (SIMULADOR REALISTA)
+   EJECUTAR ORDEN (BROKER ENGINE)
 ========================= */
 export async function executeOrderOnBroker({
   symbol,
@@ -133,7 +126,7 @@ export async function executeOrderOnBroker({
       ? market.price
       : Number(price || market.price);
 
-  const order = {
+  return {
     id: "ord_" + Math.random().toString(36).slice(2),
     userId,
     symbol: normalizeSymbol(symbol),
@@ -148,6 +141,4 @@ export async function executeOrderOnBroker({
     source: market.source,
     createdAt: new Date().toISOString()
   };
-
-  return order;
 }
