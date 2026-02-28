@@ -1,6 +1,7 @@
+// sockets/polygonSocket.js
 import WebSocket from "ws";
 import EventEmitter from "events";
-import { endpoints, key: defaultKey, prefixes } from "../config/polygon.js";
+import { endpoints, key as defaultKey, prefixes as defaultPrefixes } from "../config/polygon.js";
 
 /**
  * PolygonSocket — multi-class socket manager
@@ -42,8 +43,8 @@ export default class PolygonSocket extends EventEmitter {
     this.heartbeatIntervalMs = Number(opts.heartbeatIntervalMs) || 30_000;
     this._heartbeatTimers = {}; // per class
 
-    // defend if prefixes missing
-    this.prefixes = prefixes || { trades: "T:", quotes: "Q:", aggs: "A:" };
+    // prefixes (from config or defaults). Polygon examples use "T." but config may vary.
+    this.prefixes = opts.prefixes || defaultPrefixes || { trades: "T.", quotes: "Q.", aggs: "A." };
 
     // ensure pendingSends map has keys
     Object.keys(this.subscriptions).forEach((k) => {
@@ -93,7 +94,6 @@ export default class PolygonSocket extends EventEmitter {
     }
 
     this._connecting[cls] = true;
-    // reset reconnect delay if first try
     if (!this.reconnectDelay[cls]) this.reconnectDelay[cls] = this.reconnectBase;
 
     let conn;
@@ -102,7 +102,6 @@ export default class PolygonSocket extends EventEmitter {
     } catch (err) {
       this._connecting[cls] = false;
       this.emit("status", { cls, status: "error", error: String(err) });
-      // schedule retry
       this._scheduleReconnect(cls);
       return;
     }
@@ -116,44 +115,35 @@ export default class PolygonSocket extends EventEmitter {
       this.emit("status", { cls, status: "connected" });
       this.emit("open", { cls });
 
-      // Auth: many polygon endpoints accept either a raw key or an auth action
+      // Auth
       try {
         if (this.apiKey) {
-          // Try safe auth object first; some endpoints expect plain key, some expect JSON action
-          const authPayload = JSON.stringify({ action: "auth", params: this.apiKey });
-          conn.send(authPayload);
+          // Polygon usually expects { action: "auth", params: "<API_KEY>" }
+          conn.send(JSON.stringify({ action: "auth", params: this.apiKey }));
         } else {
-          // warn if no key
           this.emit("status", { cls, status: "warning", message: "no apiKey provided" });
         }
       } catch (e) {
-        // ignore but log
         this.emit("error", e);
       }
 
-      // flush pending sends (subscribe/unsubscribe/messages)
+      // flush queue and re-subscribe
       this._flushPendingSends(cls);
-
-      // re-subscribe existing subscription set (in case connection lost and reconnected)
       const params = [...this.subscriptions[cls]];
       if (params && params.length) {
         try {
           conn.send(JSON.stringify({ action: "subscribe", params: params.join(",") }));
         } catch (e) {
-          // add to pending if cannot send now
           this.pendingSends[cls].push({ type: "subscribe", params });
         }
       }
 
-      // start heartbeat/ping if configured
       this._startHeartbeat(cls);
     });
 
     conn.on("message", (msg) => {
-      // always accept Buffer or string
       const s = typeof msg === "string" ? msg : msg.toString();
 
-      // defensive: if server returned HTML or other non-json (starts with '<'), emit raw and skip parse
       if (s.trim().startsWith("<")) {
         this.emit("raw", { cls, data: s });
         this.emit("error", new Error(`Non-JSON response for ${cls} (starts with <). Possibly an HTTP error page.`));
@@ -164,25 +154,17 @@ export default class PolygonSocket extends EventEmitter {
       try {
         parsed = JSON.parse(s);
       } catch (e) {
-        // Not JSON: emit raw so caller can inspect
         this.emit("raw", { cls, data: s });
         this.emit("error", new Error(`JSON parse error for ${cls}: ${e.message}`));
         return;
       }
 
-      // parsed can be an object or array
       this.emit("raw", { cls, data: parsed });
 
-      // If it's an array of events
       if (Array.isArray(parsed)) {
-        parsed.forEach((item) => {
-          this._handleIncomingItem(cls, item);
-        });
+        parsed.forEach((item) => this._handleIncomingItem(cls, item));
       } else if (typeof parsed === "object" && parsed !== null) {
-        // Some APIs wrap the payload in an object with 'ev' or 'type'
-        // polygon sometimes returns {ev:'status', status:'connected'} or trade objects
         if (parsed.ev || parsed.event || parsed.type) {
-          // if it's a status event
           if (parsed.ev === "status" || parsed.event === "status" || parsed.type === "status") {
             this.emit("status", { cls, status: parsed.status || parsed.message || parsed.event });
           } else {
@@ -200,7 +182,6 @@ export default class PolygonSocket extends EventEmitter {
       this._stopHeartbeat(cls);
       this.ws[cls] = null;
       this._connecting[cls] = false;
-      // schedule reconnect
       this._scheduleReconnect(cls);
     });
 
@@ -217,12 +198,10 @@ export default class PolygonSocket extends EventEmitter {
 
   _handleIncomingItem(cls, item) {
     try {
-      // polygon-like 'status' event
       if (item.ev === "status" || item.event === "status" || item.type === "status") {
         this.emit("status", { cls, status: item.status || item.message || item.event });
         return;
       }
-      // Normal trade/quote object
       this.emit("data", { cls, item });
     } catch (e) {
       this.emit("error", e);
@@ -233,21 +212,13 @@ export default class PolygonSocket extends EventEmitter {
     this._stopHeartbeat(cls);
     const conn = this.ws[cls];
     if (!conn || conn.readyState !== WebSocket.OPEN) return;
-    // ping every heartbeatIntervalMs if server supports it
     this._heartbeatTimers[cls] = setInterval(() => {
       try {
         if (conn && conn.readyState === WebSocket.OPEN) {
-          // some servers expect newline ping or 'ping' text; we call ws.ping if available
-          if (typeof conn.ping === "function") {
-            conn.ping();
-          } else {
-            // fallback: send minimal whitespace or ping string
-            conn.send(JSON.stringify({ action: "ping" }));
-          }
+          if (typeof conn.ping === "function") conn.ping();
+          else conn.send(JSON.stringify({ action: "ping" }));
         }
-      } catch (e) {
-        // ignore, will be handled by error/close events
-      }
+      } catch (e) {}
     }, this.heartbeatIntervalMs);
   }
 
@@ -261,17 +232,13 @@ export default class PolygonSocket extends EventEmitter {
   }
 
   _scheduleReconnect(cls) {
-    // exponential backoff capped
     this.reconnectAttempts[cls] = (this.reconnectAttempts[cls] || 0) + 1;
     const attempt = this.reconnectAttempts[cls];
     const delay = Math.min(this.reconnectBase * Math.pow(2, attempt - 1), this.reconnectMax);
     this.reconnectDelay[cls] = delay;
     this.emit("status", { cls, status: "reconnect_scheduled", delay });
     setTimeout(() => {
-      // only try if not already connecting and no live socket
-      if (!this.ws[cls] && !this._connecting[cls]) {
-        this._connectClass(cls);
-      }
+      if (!this.ws[cls] && !this._connecting[cls]) this._connectClass(cls);
     }, delay);
   }
 
@@ -294,19 +261,42 @@ export default class PolygonSocket extends EventEmitter {
           conn.send(JSON.stringify(item));
         }
       } catch (e) {
-        // on failure push back and break to avoid tight loops
         queue.unshift(item);
         break;
       }
     }
   }
 
+  // ---------------------------
+  // Normalización para Polygon
+  // ---------------------------
+  _formatForPolygon(symbol, cls) {
+    if (!symbol) return symbol;
+    let s = String(symbol).trim();
+
+    // Si viene con exchange prefix "EXCHANGE:SYMBOL" -> quitar la parte del exchange
+    if (s.includes(":") && !s.startsWith("I:") && !s.startsWith("O:")) {
+      s = s.split(":").pop();
+    }
+
+    // Forex: quitar separadores
+    if (cls === "forex") s = s.replace(/[\/_\-\s]/g, "");
+
+    // Crypto: quitar separadores
+    if (cls === "crypto") s = s.replace(/[\/_\-\s]/g, "");
+
+    // Stocks / others: limpiar espacios
+    s = s.replace(/\s+/g, "");
+
+    return s.toUpperCase();
+  }
+
   _normalizeSubscribeStr(symbol, kind = "trades") {
-    const pref = this.prefixes[
-      kind === "quotes" ? "quotes" : kind === "aggs" ? "aggs" : "trades"
-    ] || "";
-    // ensure no leading slashes, whitespace
-    return `${pref}${String(symbol).trim()}`;
+    const prefKey = kind === "quotes" ? "quotes" : kind === "aggs" ? "aggs" : "trades";
+    const pref = this.prefixes && this.prefixes[prefKey] ? this.prefixes[prefKey] : (prefKey === "trades" ? "T." : prefKey === "quotes" ? "Q." : "A.");
+    const cls = this._guessClass(symbol);
+    const formatted = this._formatForPolygon(symbol, cls);
+    return `${pref}${String(formatted).trim()}`;
   }
 
   subscribe(symbol, kind = "trades") {
@@ -400,7 +390,6 @@ export default class PolygonSocket extends EventEmitter {
   }
 
   async close() {
-    // Close all connections gracefully
     Object.keys(this.ws).forEach((cls) => {
       try {
         this._stopHeartbeat(cls);
