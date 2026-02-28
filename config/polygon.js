@@ -1,37 +1,42 @@
-// config/polygon.js
-// Lee la clave desde .env: POLYGON_API_KEY o POLYGON_KEY
+  // añade en la clase PolygonSocket
 
-export const key =
-  process.env.POLYGON_API_KEY ||
-  process.env.POLYGON_KEY ||
-  "";
+  _formatForPolygon(symbol, cls) {
+    // Recibe: "BINANCE:BTCUSDT", "EUR/USD", "I:SPX", "AAPL"
+    if (!symbol) return symbol;
+    let s = String(symbol).trim();
 
-/*
-Endpoints por clase de activo
-Ahora incluye TODOS los mercados soportados
-*/
-export const endpoints = {
-  stocks: "wss://socket.polygon.io/stocks",
-  crypto: "wss://socket.polygon.io/crypto",
-  forex: "wss://socket.polygon.io/forex",
+    // Si viene con exchange prefix "EXCHANGE:SYMBOL" -> quitar la parte del exchange
+    if (s.includes(":") && !s.startsWith("I:") && !s.startsWith("O:")) {
+      // mantiene símbolos tipo "I:SPX" (indices) y "O:..." (opciones)
+      s = s.split(":").pop();
+    }
 
-  // añadidos profesionales
-  indices: "wss://socket.polygon.io/indices",
-  options: "wss://socket.polygon.io/options"
-};
+    // Forex: Polygon suele usar sin slash
+    if (cls === "forex") {
+      s = s.replace("/", "").replace("_", "");
+    }
 
-/*
-Prefijos de suscripción
-Compatibles con todos los streams
-*/
-export const prefixes = {
-  trades: "T.",   // trades en vivo
-  quotes: "Q.",   // bid/ask
-  aggs: "A."      // velas / agregados
-};
+    // Crypto: unifica separadores, quita "-" o "/"
+    if (cls === "crypto") {
+      s = s.replace("/", "").replace("-", "");
+      // Opcional: transformar BINANCE pair BTCUSDT -> BTCUSD (algunos feeds usan USD no USDT)
+      // No lo forcemos por defecto — mejor dejar como venga.
+    }
 
-/*
-Helper opcional para listar mercados disponibles
-(esto te sirve si quieres mostrarlos en tu overview frontend)
-*/
-export const availableMarkets = Object.keys(endpoints);
+    // Stocks / others: limpiar espacios
+    s = s.replace(/\s+/g, "");
+
+    return s;
+  }
+
+  _normalizeSubscribeStr(symbol, kind = "trades") {
+    const pref = this.prefixes[
+      kind === "quotes" ? "quotes" : kind === "aggs" ? "aggs" : "trades"
+    ] || "";
+
+    // adivina clase para normalizar si es necesario
+    const cls = this._guessClass(symbol);
+    const formatted = this._formatForPolygon(symbol, cls);
+
+    return `${pref}${String(formatted).trim()}`;
+  }
