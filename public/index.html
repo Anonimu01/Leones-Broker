@@ -460,20 +460,317 @@
 
 <script>
 /* ===========================
-   MAIN FRONTEND SCRIPT (REPARADO)
+   MAIN FRONTEND SCRIPT (PRO)
    =========================== */
 
-   /* CONFIG GLOBAL CORRECTA */
+"use strict";
 
-window.API = location.hostname === "localhost"
-  ? "http://localhost:3000"
-  : "https://leones-broker.onrender.com";
+/* ---------- CONFIG GLOBAL ---------- */
 
-window.SOCKET_BASE = window.API;
-window.SESSION_KEY = "BROKERPRO_SESSION_USER";
+const API =
+  location.hostname === "localhost"
+    ? "http://localhost:3000/api"
+    : "https://leones-broker.onrender.com/api";
 
-/* CONSTANTES LOCALES */
+const SOCKET_BASE =
+  location.hostname === "localhost"
+    ? "http://localhost:3000"
+    : "https://leones-broker.onrender.com";
 
+const WS_BASE =
+  location.hostname === "localhost"
+    ? "ws://localhost:3000"
+    : "wss://leones-broker.onrender.com";
+
+const SESSION_KEY = "BROKERPRO_SESSION_USER";
+const USERS_KEY = "leones_images_users";
+
+/* ---------- LOG SAFE ---------- */
+
+const log = (...a)=>{ try{console.log(...a);}catch{} };
+const warn = (...a)=>{ try{console.warn(...a);}catch{} };
+const err = (...a)=>{ try{console.error(...a);}catch{} };
+
+/* =========================================================
+   SOCKET CLIENT
+========================================================= */
+
+let socket=null;
+
+if(typeof io==="function"){
+  try{
+    socket=io(SOCKET_BASE,{
+      transports:["websocket","polling"],
+      auth:{ token:localStorage.getItem("token")||null }
+    });
+  }catch(e){ warn("socket error",e); }
+}else{
+  warn("socket.io no cargado");
+}
+
+window.symbolPrices={};
+
+function formatPrice(n){
+  const num=Number(n);
+  if(!isFinite(num)) return "--";
+  if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1});
+  if(Math.abs(num)>=1) return num.toLocaleString(undefined,{maximumFractionDigits:4});
+  return num.toLocaleString(undefined,{maximumFractionDigits:6});
+}
+
+function updatePrice(symbol,price){
+  document.querySelectorAll(`[data-symbol="${symbol}"]`)
+    .forEach(el=>el.textContent=formatPrice(price));
+}
+
+function normalize(p){
+  if(!p) return null;
+  return {
+    symbol:p.symbol||p.s||p.t,
+    price:Number(p.price??p.p),
+    ts:Number(p.ts||Date.now())
+  };
+}
+
+if(socket){
+
+  socket.on("connect",()=>log("socket connected"));
+
+  socket.on("price",(payload)=>{
+    const p=normalize(payload);
+    if(!p||!p.symbol) return;
+    window.symbolPrices[p.symbol]=p;
+    updatePrice(p.symbol,p.price);
+  });
+
+  socket.on("prices_snapshot",(arr)=>{
+    if(!Array.isArray(arr)) return;
+    arr.forEach(i=>{
+      const p=normalize(i);
+      if(!p) return;
+      window.symbolPrices[p.symbol]=p;
+      updatePrice(p.symbol,p.price);
+    });
+  });
+
+  socket.on("disconnect",()=>log("socket disconnected"));
+}
+
+/* =========================================================
+   STORAGE USERS
+========================================================= */
+
+function loadUsers(){
+  try{return JSON.parse(localStorage.getItem(USERS_KEY)||"[]");}
+  catch{return[];}
+}
+
+function saveUsers(u){
+  try{localStorage.setItem(USERS_KEY,JSON.stringify(u));}
+  catch{}
+}
+
+/* =========================================================
+   MODAL SYSTEM
+========================================================= */
+
+function ensureModal(){
+
+  let modal=document.getElementById("modal");
+  if(modal) return modal;
+
+  modal=document.createElement("div");
+  modal.id="modal";
+  modal.style.cssText=`
+    position:fixed;inset:0;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,0,0,.65);
+    z-index:9999;
+  `;
+
+  modal.innerHTML=`
+    <div style="background:#0b0b0b;padding:20px;border-radius:12px;width:95%;max-width:650px">
+      <div id="modalBody"></div>
+      <div style="margin-top:15px;text-align:right">
+        <button id="modalCancel">Cancelar</button>
+        <button id="modalOk">Aceptar</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.querySelector("#modalCancel")
+    .addEventListener("click",closeModal);
+
+  modal.querySelector("#modalOk")
+    .addEventListener("click",()=>{
+      modal._confirm?.();
+      closeModal();
+    });
+
+  return modal;
+}
+
+function openModal(html,onConfirm){
+  const modal=ensureModal();
+  modal.style.display="flex";
+  document.body.style.overflow="hidden";
+  modal.querySelector("#modalBody").innerHTML=html;
+  modal._confirm=onConfirm||null;
+}
+
+function closeModal(){
+  const m=document.getElementById("modal");
+  if(!m) return;
+  m.style.display="none";
+  document.body.style.overflow="";
+}
+
+/* =========================================================
+   AUTH BACKEND
+========================================================= */
+
+async function api(path,body){
+  const res=await fetch(API+path,{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify(body)
+  });
+
+  let data=null;
+  try{ data=await res.json(); }catch{}
+
+  if(!res.ok)
+    return {ok:false,msg:data?.msg||"Error servidor"};
+
+  return {ok:true,data};
+}
+
+/* REGISTER */
+
+function openRegister(){
+
+openModal(`
+<input id="r_name" placeholder="Nombre">
+<input id="r_email" placeholder="Email">
+<input id="r_pass" type="password" placeholder="Password">
+<div id="r_msg"></div>
+`,async()=>{
+
+const name=r_name.value.trim();
+const email=r_email.value.trim();
+const password=r_pass.value;
+
+if(!name||!email||!password){
+r_msg.textContent="Completa campos";
+return;
+}
+
+const r=await api("/auth/register",{name,email,password});
+
+if(!r.ok){
+r_msg.textContent=r.msg;
+return;
+}
+
+localStorage.setItem(SESSION_KEY,JSON.stringify(r.data.user));
+localStorage.setItem("token",r.data.token);
+
+location.reload();
+});
+}
+
+/* LOGIN */
+
+function openLogin(){
+
+openModal(`
+<input id="l_email" placeholder="Email">
+<input id="l_pass" type="password" placeholder="Password">
+<div id="l_msg"></div>
+`,async()=>{
+
+const email=l_email.value.trim();
+const password=l_pass.value;
+
+if(!email||!password){
+l_msg.textContent="Completa campos";
+return;
+}
+
+const r=await api("/auth/login",{email,password});
+
+if(!r.ok){
+l_msg.textContent=r.msg;
+return;
+}
+
+localStorage.setItem(SESSION_KEY,JSON.stringify(r.data.user));
+localStorage.setItem("token",r.data.token);
+
+location.reload();
+});
+}
+
+/* =========================================================
+   HEADER SESSION UI
+========================================================= */
+
+function showUser(user){
+
+const header=document.getElementById("headerActions");
+if(!header) return;
+
+header.innerHTML=`
+<span style="color:gold">${user.name||user.email}</span>
+<button id="logoutBtn">Salir</button>
+`;
+
+document.getElementById("logoutBtn")
+.addEventListener("click",()=>{
+localStorage.removeItem(SESSION_KEY);
+localStorage.removeItem("token");
+location.reload();
+});
+}
+
+function showGuest(){
+
+const header=document.getElementById("headerActions");
+if(!header) return;
+
+header.innerHTML=`
+<button id="btnLogin">Login</button>
+<button id="btnReg">Abrir Cuenta</button>
+`;
+
+document.getElementById("btnLogin")
+.addEventListener("click",openLogin);
+
+document.getElementById("btnReg")
+.addEventListener("click",openRegister);
+}
+
+/* =========================================================
+   INIT
+========================================================= */
+
+window.addEventListener("DOMContentLoaded",()=>{
+
+const s=localStorage.getItem(SESSION_KEY);
+
+if(s){
+try{ showUser(JSON.parse(s)); }
+catch{ showGuest(); }
+}else{
+showGuest();
+}
+
+log("Frontend listo");
+});
 
 /* Globals / config */
 window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "https://leones-broker.onrender.com/api");
@@ -482,15 +779,6 @@ window.WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "ws://lo
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 
 /* Local constants */
-const API_BASE = "https://leones-broker.onrender.com/api";
-const SOCKET_URL = "https://leones-broker.onrender.com";
-const WS_BASE = "wss://leones-broker.onrender.com";
-const SESSION_KEY = "BROKERPRO_SESSION_USER";
-const USERS_KEY = "leones_images_users";
-/* Safe console helpers */
-const log = (...a)=>{ try{ console.log(...a); }catch(e){} };
-const warn = (...a)=>{ try{ console.warn(...a); }catch(e){} };
-const errlog = (...a)=>{ try{ console.error(...a); }catch(e){} };
 
 /* ---------- polygon-client IIFE (socket + chart + symbols) ---------- */
 (function(){
@@ -1962,8 +2250,7 @@ window.symbolPrices = window.symbolPrices || {};
 window.orderBooks = window.orderBooks || {};
 window.ALL_SYMBOLS = window.ALL_SYMBOLS || [];
 
-let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
-function startSocket(){
+
   try{
     if(typeof io !== 'function'){ console.warn('socket.io cliente no cargado (io no definido)'); return; }
     if(socket && socket.connected) return;
@@ -2048,7 +2335,7 @@ function startSocket(){
 
     socket.on('connect_error', (err)=> { console.error('socket connect_error', err); const el = document.getElementById('ws-status'); if(el) el.innerText='error'; });
   }catch(e){ console.error('startSocket error', e); }
-}
+
 
 /* -------------------------
    SYMBOLS: fetch from backend (varios endpoints de prueba)
