@@ -1,290 +1,224 @@
 // controllers/auth.controller.js
-
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
-/* =========================================================
-   HELPERS / CONFIG
-========================================================= */
+const JWT_SECRET = process.env.JWT_SECRET || "changeme";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const BASE_URL = (process.env.BASE_URL || "").replace(/\/+$/, "");
 
-const getBaseUrlFromReq = (req) => {
-  if (process.env.BASE_URL)
-    return process.env.BASE_URL.replace(/\/+$/, "");
-
-  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-  const host = req.headers["x-forwarded-host"] || req.get("host");
-
-  return `${protocol}://${host}`;
-};
-
-// robust parsing with defaults
-const AUTO_VERIFY = String(process.env.AUTO_VERIFY || "false").toLowerCase() === "true";
-const ENFORCE_EMAIL_VERIFICATION = String(process.env.ENFORCE_EMAIL_VERIFICATION || "false").toLowerCase() === "true";
-const DEFAULT_LEVERAGE = process.env.DEFAULT_LEVERAGE ? Number(process.env.DEFAULT_LEVERAGE) : null;
-
-const extractAddress = (body) =>
-  (body.address || body.adress || body.dir || "").toString().trim();
-
-const extractPhone = (body) =>
-  (body.phone || body.tel || body.mobile || "").toString().trim();
-
-function publicUser(user){
-  // return a safe public view of user
-  if(!user) return null;
-  return {
-    id: user._id,
-    name: user.name,
-    email: user.email,
-    verified: !!user.verified,
-    phone: user.phone || '',
-    address: user.address || '',
-    balance: (typeof user.balance === 'number' ? user.balance : 0),
-    leverage: (typeof user.leverage !== 'undefined' ? user.leverage : DEFAULT_LEVERAGE)
-  };
+function sanitizeUser(userDoc) {
+  if (!userDoc) return null;
+  const u = userDoc.toObject ? userDoc.toObject() : { ...userDoc };
+  delete u.password;
+  delete u.passwordHash;
+  delete u.verifyToken;
+  delete u.verifyExpires;
+  return u;
 }
 
-/* =========================================================
-   REGISTER
-========================================================= */
+function signToken(userId) {
+  return jwt.sign({ id: String(userId) }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
 
-export const registerUser = async (req, res) => {
+/**
+ * POST /api/auth/register
+ * Body: { name, email, password, phone?, address? }
+ */
+export async function register(req, res) {
   try {
-
-    let name = (req.body.name || "").toString().trim();
-    let email = (req.body.email || "").toLowerCase().trim();
-    let password = (req.body.password || "").toString();
-    let phone = extractPhone(req.body);
-    let address = extractAddress(req.body);
-
-    if (!name || !email || !password || !phone || !address)
-      return res.status(400).json({ msg: "Faltan campos obligatorios" });
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res.status(400).json({ msg: "Email inválido" });
-
-    const exists = await User.findOne({ email });
-    if (exists)
-      return res.status(409).json({ msg: "Correo ya registrado" });
-
-    const hash = await bcrypt.hash(password, 12);
-    const verificationToken = AUTO_VERIFY ? null : crypto.randomBytes(32).toString("hex");
-
-    // create user with sensible defaults (balance 0)
-    const user = await User.create({
-      name,
-      email,
-      password: hash,
-      phone,
-      address,
-      verified: !!AUTO_VERIFY,
-      verificationToken: verificationToken,
-      balance: 0,
-      leverage: DEFAULT_LEVERAGE
-    });
-
-    /* ---------- EMAIL ---------- */
-
-    let mailSent = false;
-    let mailError = null;
-
-    if (!AUTO_VERIFY && verificationToken) {
-      try {
-        const link = `${getBaseUrlFromReq(req)}/api/verify/email/${verificationToken}`;
-
-        await sendEmail(
-          email,
-          "Verifica tu cuenta",
-          `
-            <h2>Bienvenido ${name}</h2>
-            <p>Haz clic para verificar tu cuenta en Leones Broker:</p>
-            <p><a href="${link}">${link}</a></p>
-            <p>Si no solicitaste esto, ignora este correo.</p>
-          `
-        );
-
-        mailSent = true;
-      } catch (err) {
-        mailError = (err && err.message) ? err.message : String(err);
-        console.error("MAIL ERROR:", err);
-        // dejamos verificationToken en BD para que el usuario pueda reenviarlo luego
-      }
+    const { name, email, password, phone, address } = req.body || {};
+    if (!name || !email || !password) {
+      return res.status(400).json({ ok: false, message: "name, email y password son requeridos" });
     }
 
-    return res.status(201).json({
-      msg: "Registro exitoso",
-      verificationSent: mailSent,
-      mailError,
-      user: publicUser(user)
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Check existing user
+    const existing = await User.findOne({ email: normalizedEmail }).exec();
+    if (existing) {
+      return res.status(409).json({ ok: false, message: "El correo ya está registrado" });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Create verification token
+    const verifyToken = crypto.randomBytes(24).toString("hex");
+    const verifyExpires = new Date(Date.now() + (Number(process.env.VERIFY_TOKEN_TTL_MS) || 1000 * 60 * 60 * 24)); // 24h default
+
+    const newUser = new User({
+      name,
+      email: normalizedEmail,
+      password: passwordHash,
+      phone: phone || "",
+      address: address || "",
+      verified: false,
+      verifyToken,
+      verifyExpires,
+      createdAt: new Date(),
     });
 
-  } catch (error) {
-    console.error("REGISTER ERROR:", error);
+    await newUser.save();
 
-    if (error.code === 11000)
-      return res.status(409).json({ msg: "Correo ya registrado" });
+    // create jwt token for immediate session if you want
+    const token = signToken(newUser._id);
 
-    res.status(500).json({ msg: "Error del servidor" });
+    // Build verification link
+    const verifyUrl = BASE_URL
+      ? `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(normalizedEmail)}`
+      : `/verify?token=${verifyToken}&email=${encodeURIComponent(normalizedEmail)}`;
+
+    const html = `
+      <p>Hola ${sanitizeUser(newUser).name || ""},</p>
+      <p>Gracias por registrarte en Leones Broker. Por favor verifica tu correo usando el enlace a continuación:</p>
+      <p><a href="${verifyUrl}">Verificar mi cuenta</a></p>
+      <p>Si no solicitaste esto, ignora este correo.</p>
+    `;
+
+    // Try to send verification email (do not make registration fail if email provider misconfigured)
+    let emailResult = null;
+    try {
+      emailResult = await sendEmail({ to: normalizedEmail, subject: "Verifica tu cuenta - Leones Broker", html });
+      console.log("[AUTH] sendEmail result:", emailResult);
+    } catch (e) {
+      console.error("[AUTH] Error enviando email de verificación:", e && e.message ? e.message : e);
+      emailResult = { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+
+    const userSafe = sanitizeUser(newUser);
+
+    return res.status(201).json({
+      ok: true,
+      message: "Usuario creado",
+      data: { token, user: userSafe },
+      email_sent: !!(emailResult && emailResult.ok),
+      email_result: emailResult,
+    });
+  } catch (err) {
+    console.error("[AUTH] register error:", err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, message: "Error creando usuario", error: err && err.message ? err.message : String(err) });
   }
-};
+}
 
-
-/* =========================================================
-   VERIFY EMAIL (link clickeado por el usuario)
-   GET /api/verify/email/:token
-========================================================= */
-
-export const verifyEmail = async (req, res) => {
+/**
+ * POST /api/auth/login
+ * Body: { email, password }
+ */
+export async function login(req, res) {
   try {
-    const token = req.params.token;
-    if (!token) return res.status(400).json({ msg: "Token inválido" });
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ ok: false, message: "email y password requeridos" });
 
-    const user = await User.findOne({ verificationToken: token });
-    if (!user) return res.status(404).json({ msg: "Token no válido o usuario no encontrado" });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail }).exec();
+    if (!user) return res.status(401).json({ ok: false, message: "Credenciales inválidas" });
 
-    if (user.verified) {
-      // already verified
-      user.verificationToken = null;
-      await user.save().catch(()=>{});
-      return res.json({ msg: "Cuenta ya verificada" });
+    // Compare password
+    const match = await bcrypt.compare(password, user.password || user.passwordHash || "");
+    if (!match) return res.status(401).json({ ok: false, message: "Credenciales inválidas" });
+
+    // Optional: block login if not verified (you can change behavior)
+    if (user.verified === false) {
+      // still return token if you prefer, but frontend currently blocks if token missing.
+      // We will return a 403 with info so frontend can show "revisa tu correo".
+      return res.status(403).json({ ok: false, message: "Cuenta no verificada. Revisa tu correo." });
+    }
+
+    const token = signToken(user._id);
+    const userSafe = sanitizeUser(user);
+
+    return res.json({ ok: true, message: "Login correcto", data: { token, user: userSafe } });
+  } catch (err) {
+    console.error("[AUTH] login error:", err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, message: "Error en login", error: err && err.message ? err.message : String(err) });
+  }
+}
+
+/**
+ * POST /api/auth/resend-verification
+ * Body: { email }
+ */
+export async function resendVerification(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ ok: false, message: "email requerido" });
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail }).exec();
+    if (!user) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    if (user.verified) return res.status(400).json({ ok: false, message: "Cuenta ya verificada" });
+
+    // create a new token if expired or absent
+    const now = new Date();
+    let verifyToken = user.verifyToken;
+    if (!verifyToken || (user.verifyExpires && user.verifyExpires < now)) {
+      verifyToken = crypto.randomBytes(24).toString("hex");
+      user.verifyToken = verifyToken;
+      user.verifyExpires = new Date(Date.now() + (Number(process.env.VERIFY_TOKEN_TTL_MS) || 1000 * 60 * 60 * 24));
+      await user.save();
+    }
+
+    const verifyUrl = BASE_URL
+      ? `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(normalizedEmail)}`
+      : `/verify?token=${verifyToken}&email=${encodeURIComponent(normalizedEmail)}`;
+
+    const html = `
+      <p>Hola ${user.name || ""},</p>
+      <p>Haz solicitado re-enviar el correo de verificación. Haz clic abajo:</p>
+      <p><a href="${verifyUrl}">Verificar mi cuenta</a></p>
+    `;
+
+    let emailResult = null;
+    try {
+      emailResult = await sendEmail({ to: normalizedEmail, subject: "Reenviar verificación - Leones Broker", html });
+      console.log("[AUTH] resendVerification sendEmail:", emailResult);
+      return res.json({ ok: true, message: "Correo de verificación enviado", email_result: emailResult });
+    } catch (e) {
+      console.error("[AUTH] resendVerification email error:", e && e.message ? e.message : e);
+      return res.status(500).json({ ok: false, message: "Error enviando email", error: e && e.message ? e.message : String(e) });
+    }
+  } catch (err) {
+    console.error("[AUTH] resendVerification error:", err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, message: "Error interno", error: err && err.message ? err.message : String(err) });
+  }
+}
+
+/**
+ * GET /api/auth/verify?token=...&email=...
+ */
+export async function verify(req, res) {
+  try {
+    const { token, email } = req.query || {};
+    if (!token || !email) return res.status(400).json({ ok: false, message: "token y email requeridos" });
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail }).exec();
+    if (!user) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+
+    if (user.verified) return res.json({ ok: true, message: "Cuenta ya verificada" });
+
+    if (!user.verifyToken || user.verifyToken !== token) {
+      return res.status(400).json({ ok: false, message: "Token inválido" });
+    }
+
+    if (user.verifyExpires && user.verifyExpires < new Date()) {
+      return res.status(400).json({ ok: false, message: "Token expirado" });
     }
 
     user.verified = true;
-    user.verificationToken = null;
+    user.verifyToken = undefined;
+    user.verifyExpires = undefined;
     await user.save();
 
-    return res.json({ msg: "Cuenta verificada correctamente" });
+    return res.json({ ok: true, message: "Cuenta verificada" });
   } catch (err) {
-    console.error("VERIFY EMAIL ERROR:", err);
-    return res.status(500).json({ msg: "Error del servidor" });
+    console.error("[AUTH] verify error:", err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, message: "Error interno", error: err && err.message ? err.message : String(err) });
   }
-};
+}
 
-
-/* =========================================================
-   RESEND VERIFICATION
-   POST /api/auth/resend-verification
-========================================================= */
-
-export const resendVerification = async (req, res) => {
-  try {
-
-    const email = (req.body.email || "").toLowerCase().trim();
-    if (!email) return res.status(400).json({ msg: "Email requerido" });
-
-    const user = await User.findOne({ email });
-    if (!user)
-      return res.status(404).json({ msg: "Usuario no encontrado" });
-
-    if (user.verified)
-      return res.status(400).json({ msg: "Cuenta ya verificada" });
-
-    const token = crypto.randomBytes(32).toString("hex");
-    user.verificationToken = token;
-    await user.save();
-
-    const link = `${getBaseUrlFromReq(req)}/api/verify/email/${token}`;
-
-    let mailError = null;
-    let mailSent = false;
-    try {
-      await sendEmail(
-        email,
-        "Reenvío verificación - Leones Broker",
-        `<p>Haz clic para verificar tu cuenta: <a href="${link}">${link}</a></p>`
-      );
-      mailSent = true;
-    } catch (err) {
-      mailError = (err && err.message) ? err.message : String(err);
-      console.error("RESEND MAIL ERROR:", err);
-    }
-
-    return res.json({ msg: "Operación completada", verificationSent: mailSent, mailError });
-
-  } catch (err) {
-    console.error("RESEND ERROR:", err);
-    res.status(500).json({ msg: "Error del servidor" });
-  }
-};
-
-
-/* =========================================================
-   LOGIN
-   POST /api/auth/login
-========================================================= */
-
-export const loginUser = async (req, res) => {
-  try {
-
-    let { email, password } = req.body;
-
-    if (!email || !password)
-      return res.status(400).json({ msg: "Datos incompletos" });
-
-    email = email.toLowerCase().trim();
-    password = password.toString();
-
-    const user = await User.findOne({ email });
-    if (!user)
-      return res.status(401).json({ msg: "Credenciales inválidas" });
-
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid)
-      return res.status(401).json({ msg: "Credenciales inválidas" });
-
-    if (ENFORCE_EMAIL_VERIFICATION && !user.verified)
-      return res.status(403).json({
-        msg: "Debes verificar tu correo",
-        verificationRequired: true
-      });
-
-    if (!process.env.JWT_SECRET)
-      throw new Error("JWT_SECRET no definido en entorno");
-
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    return res.json({
-      token,
-      user: publicUser(user)
-    });
-
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
-    res.status(500).json({ msg: "Error del servidor" });
-  }
-};
-
-
-/* =========================================================
-   GET PROFILE (verificar token desde frontend)
-   GET /api/auth/me  (o /api/users/me)
-========================================================= */
-
-export const getProfile = async (req, res) => {
-  try {
-    // soporte Authorization Bearer y cookie "token"
-    let token = null;
-    const auth = req.headers.authorization || req.get('authorization') || '';
-    if (auth && auth.toLowerCase().startsWith('bearer ')) token = auth.split(' ')[1];
-    if (!token && req.cookies && req.cookies.token) token = req.cookies.token;
-    if (!token) return res.status(401).json({ msg: "Token requerido" });
-
-    try {
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(payload.id);
-      if (!user) return res.status(404).json({ msg: "Usuario no encontrado" });
-      return res.json({ user: publicUser(user) });
-    } catch (err) {
-      return res.status(401).json({ msg: "Token inválido" });
-    }
-  } catch (err) {
-    console.error("GET PROFILE ERROR:", err);
-    res.status(500).json({ msg: "Error del servidor" });
-  }
-};
+export default { register, login, resendVerification, verify };
