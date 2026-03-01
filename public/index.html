@@ -457,605 +457,200 @@
   </div>
 </div>
 
-
 <script>
-/* ===========================
-   MAIN FRONTEND SCRIPT (PRO)
-   =========================== */
-
-"use strict";
-
-/* ---------- CONFIG GLOBAL ---------- */
-
-const API =
-  location.hostname === "localhost"
-    ? "http://localhost:3000/api"
-    : "https://leones-broker.onrender.com/api";
-
-const SOCKET_BASE =
-  location.hostname === "localhost"
-    ? "http://localhost:3000"
-    : "https://leones-broker.onrender.com";
-
-const WS_BASE =
-  location.hostname === "localhost"
-    ? "ws://localhost:3000"
-    : "wss://leones-broker.onrender.com";
-
-const SESSION_KEY = "BROKERPRO_SESSION_USER";
-const USERS_KEY = "leones_images_users";
-
-/* ---------- LOG SAFE ---------- */
-
-const log = (...a)=>{ try{console.log(...a);}catch{} };
-const warn = (...a)=>{ try{console.warn(...a);}catch{} };
-const err = (...a)=>{ try{console.error(...a);}catch{} };
-
-/* =========================================================
-   SOCKET CLIENT
-========================================================= */
-
-let socket=null;
-
-if(typeof io==="function"){
-  try{
-    socket=io(SOCKET_BASE,{
-      transports:["websocket","polling"],
-      auth:{ token:localStorage.getItem("token")||null }
-    });
-  }catch(e){ warn("socket error",e); }
-}else{
-  warn("socket.io no cargado");
-}
-
-window.symbolPrices={};
-
-function formatPrice(n){
-  const num=Number(n);
-  if(!isFinite(num)) return "--";
-  if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1});
-  if(Math.abs(num)>=1) return num.toLocaleString(undefined,{maximumFractionDigits:4});
-  return num.toLocaleString(undefined,{maximumFractionDigits:6});
-}
-
-function updatePrice(symbol,price){
-  document.querySelectorAll(`[data-symbol="${symbol}"]`)
-    .forEach(el=>el.textContent=formatPrice(price));
-}
-
-function normalize(p){
-  if(!p) return null;
-  return {
-    symbol:p.symbol||p.s||p.t,
-    price:Number(p.price??p.p),
-    ts:Number(p.ts||Date.now())
-  };
-}
-
-if(socket){
-
-  socket.on("connect",()=>log("socket connected"));
-
-  socket.on("price",(payload)=>{
-    const p=normalize(payload);
-    if(!p||!p.symbol) return;
-    window.symbolPrices[p.symbol]=p;
-    updatePrice(p.symbol,p.price);
-  });
-
-  socket.on("prices_snapshot",(arr)=>{
-    if(!Array.isArray(arr)) return;
-    arr.forEach(i=>{
-      const p=normalize(i);
-      if(!p) return;
-      window.symbolPrices[p.symbol]=p;
-      updatePrice(p.symbol,p.price);
-    });
-  });
-
-  socket.on("disconnect",()=>log("socket disconnected"));
-}
-
-/* =========================================================
-   STORAGE USERS
-========================================================= */
-
-function loadUsers(){
-  try{return JSON.parse(localStorage.getItem(USERS_KEY)||"[]");}
-  catch{return[];}
-}
-
-function saveUsers(u){
-  try{localStorage.setItem(USERS_KEY,JSON.stringify(u));}
-  catch{}
-}
-
-/* =========================================================
-   MODAL SYSTEM
-========================================================= */
-
-function ensureModal(){
-
-  let modal=document.getElementById("modal");
-  if(modal) return modal;
-
-  modal=document.createElement("div");
-  modal.id="modal";
-  modal.style.cssText=`
-    position:fixed;inset:0;
-    display:none;
-    align-items:center;
-    justify-content:center;
-    background:rgba(0,0,0,.65);
-    z-index:9999;
-  `;
-
-  modal.innerHTML=`
-    <div style="background:#0b0b0b;padding:20px;border-radius:12px;width:95%;max-width:650px">
-      <div id="modalBody"></div>
-      <div style="margin-top:15px;text-align:right">
-        <button id="modalCancel">Cancelar</button>
-        <button id="modalOk">Aceptar</button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(modal);
-
-  modal.querySelector("#modalCancel")
-    .addEventListener("click",closeModal);
-
-  modal.querySelector("#modalOk")
-    .addEventListener("click",()=>{
-      modal._confirm?.();
-      closeModal();
-    });
-
-  return modal;
-}
-
-function openModal(html,onConfirm){
-  const modal=ensureModal();
-  modal.style.display="flex";
-  document.body.style.overflow="hidden";
-  modal.querySelector("#modalBody").innerHTML=html;
-  modal._confirm=onConfirm||null;
-}
-
-function closeModal(){
-  const m=document.getElementById("modal");
-  if(!m) return;
-  m.style.display="none";
-  document.body.style.overflow="";
-}
-
-/* =========================================================
-   AUTH BACKEND
-========================================================= */
-
-async function api(path,body){
-  const res=await fetch(API+path,{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify(body)
-  });
-
-  let data=null;
-  try{ data=await res.json(); }catch{}
-
-  if(!res.ok)
-    return {ok:false,msg:data?.msg||"Error servidor"};
-
-  return {ok:true,data};
-}
-
-/* REGISTER */
-
-function openRegister(){
-
-openModal(`
-<input id="r_name" placeholder="Nombre">
-<input id="r_email" placeholder="Email">
-<input id="r_pass" type="password" placeholder="Password">
-<div id="r_msg"></div>
-`,async()=>{
-
-const name=r_name.value.trim();
-const email=r_email.value.trim();
-const password=r_pass.value;
-
-if(!name||!email||!password){
-r_msg.textContent="Completa campos";
-return;
-}
-
-const r=await api("/auth/register",{name,email,password});
-
-if(!r.ok){
-r_msg.textContent=r.msg;
-return;
-}
-
-localStorage.setItem(SESSION_KEY,JSON.stringify(r.data.user));
-localStorage.setItem("token",r.data.token);
-
-location.reload();
-});
-}
-
-/* LOGIN */
-
-function openLogin(){
-
-openModal(`
-<input id="l_email" placeholder="Email">
-<input id="l_pass" type="password" placeholder="Password">
-<div id="l_msg"></div>
-`,async()=>{
-
-const email=l_email.value.trim();
-const password=l_pass.value;
-
-if(!email||!password){
-l_msg.textContent="Completa campos";
-return;
-}
-
-const r=await api("/auth/login",{email,password});
-
-if(!r.ok){
-l_msg.textContent=r.msg;
-return;
-}
-
-localStorage.setItem(SESSION_KEY,JSON.stringify(r.data.user));
-localStorage.setItem("token",r.data.token);
-
-location.reload();
-});
-}
-
-/* =========================================================
-   HEADER SESSION UI
-========================================================= */
-
-function showUser(user){
-
-const header=document.getElementById("headerActions");
-if(!header) return;
-
-header.innerHTML=`
-<span style="color:gold">${user.name||user.email}</span>
-<button id="logoutBtn">Salir</button>
-`;
-
-document.getElementById("logoutBtn")
-.addEventListener("click",()=>{
-localStorage.removeItem(SESSION_KEY);
-localStorage.removeItem("token");
-location.reload();
-});
-}
-
-function showGuest(){
-
-const header=document.getElementById("headerActions");
-if(!header) return;
-
-header.innerHTML=`
-<button id="btnLogin">Login</button>
-<button id="btnReg">Abrir Cuenta</button>
-`;
-
-document.getElementById("btnLogin")
-.addEventListener("click",openLogin);
-
-document.getElementById("btnReg")
-.addEventListener("click",openRegister);
-}
-
-/* =========================================================
-   INIT
-========================================================= */
-
-window.addEventListener("DOMContentLoaded",()=>{
-
-const s=localStorage.getItem(SESSION_KEY);
-
-if(s){
-try{ showUser(JSON.parse(s)); }
-catch{ showGuest(); }
-}else{
-showGuest();
-}
-
-log("Frontend listo");
-});
-
-/* Globals / config */
-window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "https://leones-broker.onrender.com/api");
-window.SOCKET_BASE = window.SOCKET_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : "https://leones-broker.onrender.com");
-window.WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "ws://localhost:3000" : "wss://leones-broker.onrender.com");
-window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-
-/* Local constants */
-
-/* ---------- polygon-client IIFE (socket + chart + symbols) ---------- */
-(function(){
-  'use strict';
-
-  // defensive: if socket.io client missing, expose safe stubs and exit
-  if (typeof io !== 'function') {
-    warn('socket.io (io) not encontrado — funcionalidades en tiempo real inactivas.');
-    window.subscribeSymbol = function(){ warn('subscribeSymbol: socket.io no cargado'); };
-    window.unsubscribeSymbol = function(){ warn('unsubscribeSymbol: socket.io no cargado'); };
-    window.fetchSymbolsFromServer = async function(){ return []; };
-    window.updateDisplayedPrice = window.updateDisplayedPrice || function(){} ;
-    window.updateOrderBook = window.updateOrderBook || function(){};
-    log('polygon-client.js inicializado (sin socket.io).');
-    return;
-  }
-
-  // Reuse socket if created by other script to avoid duplicates
-  let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
-  if(!socket){
-    try{
-      socket = io(SOCKET_URL, {
-        path: '/socket.io',
-        transports: ['websocket','polling'],
-        withCredentials: true,
-        auth: { token: localStorage.getItem('token') || null },
-        autoConnect: true
-      });
-      window.__LEONES_SOCKET__ = { socket };
-    }catch(e){
-      warn('Error creando cliente socket.io', e);
-      socket = null;
-    }
-  }
-
-  // DOM helper
-  function $ (sel){ try{ return document.querySelector(sel); }catch(e){ return null; } }
-
-  // Keep last prices (map symbol -> { price, ts })
-  window.symbolPrices = window.symbolPrices || {};
-
-  /* Chart init (LightweightCharts) - defensive */
-  const chartContainer = document.getElementById('tv_chart_container');
-  let chart = null, series = null;
-  try {
-    if (chartContainer && typeof LightweightCharts !== 'undefined' && LightweightCharts.createChart) {
-      chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.clientWidth || 800,
-        height: chartContainer.clientHeight || 420,
-        layout: { backgroundColor: '#000', textColor: '#d1d1d1' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
-        rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
-        timeScale: { borderColor: 'rgba(255,255,255,0.06)' }
-      });
-      try {
-        if (typeof chart.addLineSeries === 'function') series = chart.addLineSeries({ priceLineVisible: true });
-        else if (typeof chart.addAreaSeries === 'function') series = chart.addAreaSeries({});
-      } catch (e) {
-        warn('No se pudo añadir serie al chart', e);
-        series = null;
-      }
-      window.addEventListener('resize', ()=> {
-        try{ chart.applyOptions({ width: chartContainer.clientWidth }); }catch(e){}
-      });
-    }
-  } catch(e){ errlog('Chart init error', e); chart = null; series = null; }
-
-  function formatPrice(n){
+// public/js/main.js
+// Consolidated, CSP-safe frontend script for Leones Broker
+// Place in public/js/main.js and include with <script src="/js/main.js">
+
+(function () {
+  "use strict";
+
+  /* ========== CONFIG ========== */
+  const API_BASE = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "https://leones-broker.onrender.com/api");
+  const SOCKET_BASE = window.SOCKET_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : "https://leones-broker.onrender.com");
+  const WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "ws://localhost:3000" : "wss://leones-broker.onrender.com");
+  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  const USERS_KEY = window.USERS_KEY || "leones_images_users";
+
+  /* ========== LOG HELPERS (safe) ========== */
+  const log = (...a) => { try { console.log(...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn(...a); } catch (e) {} };
+  const error = (...a) => { try { console.error(...a); } catch (e) {} };
+
+  /* ========== UTILITIES ========== */
+  function safeJsonParse(s, fallback = null) { try { return JSON.parse(s); } catch { return fallback; } }
+
+  function formatPrice(n) {
     const num = Number(n);
-    if(!isFinite(num)) return '--';
-    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
-    if(Math.abs(num) >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    if (!isFinite(num)) return "--";
+    if (Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    if (Math.abs(num) >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
     return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
   }
 
-  function updatePriceElementsForSymbol(symbol, price){
-    try{
-      Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`)).forEach(el => { el.textContent = formatPrice(price); });
-      const op = document.getElementById('op-price'); if(op) op.textContent = formatPrice(price);
-      const symbolShort = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','');
-      if(symbolShort && (symbol.endsWith(symbolShort) || symbol === symbolShort)){
-        const mainPrice = document.getElementById('op-price'); if(mainPrice) mainPrice.textContent = formatPrice(price);
-      }
-    }catch(e){ errlog('updatePriceElementsForSymbol error', e); }
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, function (m) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
+    });
   }
 
-  function normalizePricePayload(p){
-    if(!p) return null;
+  function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || "[]"); } catch { return []; } }
+  function saveUsers(u) { try { localStorage.setItem(USERS_KEY, JSON.stringify(u)); } catch (e) {} }
+
+  /* ========== SOCKET / REALTIME ========== */
+
+  // Reuse socket if another script created it (avoid duplicates)
+  let socket = (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) || null;
+
+  try {
+    if (!socket && typeof io === "function") {
+      socket = io(SOCKET_BASE, {
+        transports: ["websocket", "polling"],
+        auth: { token: localStorage.getItem("token") || null },
+        autoConnect: true,
+      });
+      window.__LEONES_SOCKET__ = { socket };
+      log("socket.io client initialized");
+    } else if (!socket) {
+      warn("socket.io client not present");
+    }
+  } catch (e) {
+    warn("socket init error", e);
+    socket = null;
+  }
+
+  window.symbolPrices = window.symbolPrices || {};
+
+  function normalizePricePayload(p) {
+    if (!p) return null;
     const symbol = p.symbol || p.s || p.sym || p.t;
     const price = (p.price ?? p.p ?? p.value ?? p.v);
     const ts = p.ts ?? Date.now();
-    if(symbol === undefined) return null;
+    if (symbol === undefined) return null;
     return { symbol, price: Number(price), ts: Number(ts) };
   }
 
-  function pushToSeries(sym, priceObj){
-    try{
-      if(!series || !priceObj) return;
-      const t = Math.floor((priceObj.ts || Date.now()) / 1000);
-      try{ series.update({ time: t, value: Number(priceObj.price) }); }catch(e){ try{ series.setData([{ time: t, value: Number(priceObj.price) }]); }catch(e){} }
-    }catch(e){ errlog('pushToSeries error', e); }
+  function updatePriceElementsForSymbol(symbol, price) {
+    try {
+      Array.from(document.querySelectorAll(`[data-symbol="${symbol}"]`)).forEach(el => { el.textContent = formatPrice(price); });
+      const op = document.getElementById('op-price'); if (op) op.textContent = formatPrice(price);
+    } catch (e) { warn("updatePriceElementsForSymbol error", e); }
   }
 
-  if(socket){
-    socket.on('connect', ()=> log('socket connected', socket.id));
-    socket.on('disconnect', ()=> log('socket disconnected'));
+  if (socket) {
+    socket.on('connect', () => log('socket connected', socket.id));
+    socket.on('disconnect', () => log('socket disconnected'));
 
     socket.on('prices_snapshot', (snapshot) => {
-      try{
-        if(!snapshot) return;
+      try {
+        if (!snapshot) return;
         window.symbolPrices = window.symbolPrices || {};
-        if(Array.isArray(snapshot)){
-          snapshot.forEach(item=>{
-            const symbol = item.symbol || item.s || item.sym;
-            const price = Number(item?.price ?? item?.p ?? item);
-            const ts = Number(item?.ts ?? Date.now());
-            if(!symbol || !isFinite(price)) return;
-            window.symbolPrices[symbol] = { price, ts };
-            updatePriceElementsForSymbol(symbol, price);
+        if (Array.isArray(snapshot)) {
+          snapshot.forEach(item => {
+            const p = normalizePricePayload(item);
+            if (!p) return;
+            window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
+            updatePriceElementsForSymbol(p.symbol, p.price);
           });
         } else if (typeof snapshot === 'object') {
-          Object.keys(snapshot).forEach(k=>{
+          Object.keys(snapshot).forEach(k => {
             const item = snapshot[k];
             const price = Number(item?.price ?? item?.p ?? item);
-            const ts = Number(item?.ts ?? Date.now());
-            if(!isFinite(price)) return;
-            window.symbolPrices[k] = { price, ts };
+            if (!isFinite(price)) return;
+            window.symbolPrices[k] = { price, ts: Number(item?.ts ?? Date.now()) };
             updatePriceElementsForSymbol(k, price);
           });
         }
-        const curSym = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
-        if(curSym){
-          const matchKey = Object.keys(window.symbolPrices).find(k => k === curSym || k.endsWith(curSym));
-          if(matchKey && window.symbolPrices[matchKey] && series){
-            const seed = window.symbolPrices[matchKey];
-            try{ series.setData([{ time: Math.floor(seed.ts/1000), value: seed.price }]); }catch(e){}
-          }
-        }
-      }catch(e){ errlog('prices_snapshot handler error', e); }
+      } catch (e) { warn('prices_snapshot handler error', e); }
     });
 
     socket.on('price', (payload) => {
-      try{
+      try {
         const p = normalizePricePayload(payload);
-        if(!p || !p.symbol || (p.price === undefined || isNaN(p.price))) return;
+        if (!p || !p.symbol || (p.price === undefined || isNaN(p.price))) return;
         window.symbolPrices[p.symbol] = { price: p.price, ts: p.ts };
         updatePriceElementsForSymbol(p.symbol, p.price);
-        const currentLabel = (document.getElementById('tradingSymbol')?.innerText || '').replace('/','').trim();
-        if(series && (p.symbol === currentLabel || p.symbol.endsWith(currentLabel))) pushToSeries(p.symbol, p);
-      }catch(e){ errlog('price handler error', e); }
+      } catch (e) { warn('price handler error', e); }
     });
 
-    socket.on('symbols_update', (symbols)=> {
-      try{
-        if(!symbols) return;
-        if(Array.isArray(symbols)){
-          window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
-        } else if(typeof symbols === 'object'){
-          const arr = []; Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' })); window.ALL_SYMBOLS = arr;
+    socket.on('symbols_update', (symbols) => {
+      try {
+        if (!symbols) return;
+        if (Array.isArray(symbols)) {
+          window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol || s.sym || s.t, label: s.label || s.name || s.symbol, market: s.market || s.mkt || 'Crypto' }));
+        } else if (typeof symbols === 'object') {
+          const arr = [];
+          Object.keys(symbols).forEach(k => arr.push({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
+          window.ALL_SYMBOLS = arr;
         }
-        try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){}
-      }catch(e){ warn('symbols_update handling error', e); }
+        try { if (typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); } catch (e) {}
+      } catch (e) { warn('symbols_update handling error', e); }
     });
 
-    socket.on('orderbook', (ob)=> {
-      try{
-        if(!ob || !ob.symbol) return;
+    socket.on('orderbook', (ob) => {
+      try {
+        if (!ob || !ob.symbol) return;
         window.orderBooks = window.orderBooks || {};
         window.orderBooks[ob.symbol] = ob;
-        try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){}
-      }catch(e){}
+        try { if (typeof updateOrderBook === 'function') updateOrderBook(ob); } catch (e) {}
+      } catch (e) {}
     });
 
-    socket.on('connect_error', (err)=> { console.error('socket connect_error', err); });
-    socket.on('error', (e)=> { warn('socket error', e); });
+    socket.on('connect_error', (err) => { error('socket connect_error', err); });
+    socket.on('error', (e) => { warn('socket error', e); });
   } else {
-    warn('socket variable no disponible — no se registrarán eventos en tiempo real.');
+    warn('socket variable not available — realtime disabled');
   }
 
-  // provide helpers (idempotent)
-  window.subscribeSymbol = function(symbol, kind='trades'){
-    try{ if(!symbol || !socket) return; socket.emit('subscribe', { symbol, kind }); log('subscribe emitted', symbol, kind); }catch(e){ errlog('subscribeSymbol error', e); }
+  // Expose helpers
+  window.subscribeSymbol = function (symbol, kind = 'trades') {
+    try { if (!symbol || !socket) return; socket.emit('subscribe', { symbol, kind }); log('subscribe emitted', symbol, kind); } catch (e) { warn('subscribeSymbol error', e); }
+  };
+  window.unsubscribeSymbol = function (symbol, kind = 'trades') {
+    try { if (!symbol || !socket) return; socket.emit('unsubscribe', { symbol, kind }); log('unsubscribe emitted', symbol, kind); } catch (e) { warn('unsubscribeSymbol error', e); }
   };
 
-  window.unsubscribeSymbol = function(symbol, kind='trades'){
-    try{ if(!symbol || !socket) return; socket.emit('unsubscribe', { symbol, kind }); log('unsubscribe emitted', symbol, kind); }catch(e){ errlog('unsubscribeSymbol error', e); }
-  };
-
-  // Try to fetch symbols list from backend (try several possible endpoints)
-  window.fetchSymbolsFromServer = async function(){
+  window.fetchSymbolsFromServer = async function () {
     const candidates = [
       API_BASE + '/symbols',
       API_BASE + '/api/symbols',
-      API_BASE + '/markets/symbols',
       API_BASE + '/market/symbols',
       API_BASE + '/market/list',
-      API_BASE + '/markets',
       '/api/symbols',
       '/symbols'
     ].filter(Boolean);
 
-    for(const url of candidates){
-      try{
-        const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }});
-        if(!res.ok){ warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
-        const data = await res.json().catch(()=>null);
-        if(Array.isArray(data) && data.length>0){
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (!res.ok) { warn('fetchSymbolsFromServer non-ok', url, res.status); continue; }
+        const data = await res.json().catch(() => null);
+        if (Array.isArray(data) && data.length > 0) {
           window.ALL_SYMBOLS = data.map(item => {
-            if(typeof item === 'string'){ const parts = item.split(':'); return { symbol: item, label: (parts[1]||parts[0]).replace('_','/'), market: parts[0] || 'Unknown' }; }
+            if (typeof item === 'string') { const parts = item.split(':'); return { symbol: item, label: (parts[1] || parts[0]).replace('_', '/'), market: parts[0] || 'Unknown' }; }
             return { symbol: item.symbol || item.sym || item.s || '', label: item.label || item.name || (item.symbol ? item.symbol.split(':').pop() : ''), market: item.market || item.exchange || item.type || 'Other' };
           });
           log('Symbols loaded from', url, 'count=', window.ALL_SYMBOLS.length);
-          try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); }catch(e){}
+          try { if (typeof renderSymbolsGrid === 'function') renderSymbolsGrid(document.getElementById('symbolsGrid'), '', 'All'); } catch (e) {}
           return window.ALL_SYMBOLS;
         } else {
           warn('fetchSymbolsFromServer got empty/invalid data', url);
         }
-      }catch(e){ warn('fetchSymbolsFromServer error', url, e); }
+      } catch (e) { warn('fetchSymbolsFromServer error', url, e); }
     }
     warn('fetchSymbolsFromServer: no endpoints returned valid list');
     return [];
   };
 
-  // UI fallbacks
-  window.updateDisplayedPrice = window.updateDisplayedPrice || function(price){ try{ const op = document.getElementById('op-price'); if(op) op.textContent = formatPrice(price); }catch(e){} };
-  window.updateOrderBook = window.updateOrderBook || function(){ try{ const b = document.getElementById('ob-bids'); const a = document.getElementById('ob-asks'); if(b) b.textContent='—'; if(a) a.textContent='—'; }catch(e){} };
+  /* ========== UI: modal system & inputs ========== */
 
-  log('polygon-client.js initialized');
-})(); // end polygon-client IIFE
+  function ensureModal() {
+    let modal = document.getElementById('modal');
+    if (modal) return modal;
 
-/* ---------- helpers localStorage ---------- */
-function loadUsers() { try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); } catch (e) { return []; } }
-function saveUsers(u) { try { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }catch (e){} }
-
-/* Apply permanent glow to all interactive fields (inputs/selects/textareas) */
-function applyInputGlow(root = document){
-  try{
-    const selector = 'input, textarea, select';
-    Array.from(root.querySelectorAll(selector)).forEach(el=>{
-      if(el.type && ['button','submit','reset'].includes(el.type)) return;
-      el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
-      el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
-      el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
-      if(!el._glowHandlersAttached){
-        el.addEventListener('focus', ()=> {
-          el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)';
-          el.style.borderColor = 'rgba(212,175,55,0.45)';
-          el.style.transform = 'translateY(-1px)';
-        });
-        el.addEventListener('blur', ()=> {
-          el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)';
-          el.style.borderColor = 'rgba(212,175,55,0.14)';
-          el.style.transform = '';
-        });
-        el._glowHandlersAttached = true;
-      }
-    });
-  }catch(e){ console.warn('applyInputGlow error', e); }
-}
-
-/* UI modal helpers */
-function ensureModalHooks(){
-  var modal = document.getElementById('modal');
-  if(!modal) return;
-  var cancel = document.getElementById('modalCancel');
-  if(cancel && !cancel.dataset.hooked){ cancel.addEventListener('click', closeModal); cancel.dataset.hooked='1'; }
-  var ok = document.getElementById('modalOk');
-  if(ok && !ok.dataset.hooked){ ok.addEventListener('click', function(){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(e){} closeModal(); }); ok.dataset.hooked='1'; }
-}
-
-function openModal(html, onConfirm){
-  ensureModalHooks();
-  var modal = document.getElementById('modal');
-  if(!modal){
-    modal = document.createElement('div'); modal.id='modal';
-    modal.style.position='fixed'; modal.style.inset='0'; modal.style.display='flex';
-    modal.style.alignItems='center'; modal.style.justifyContent='center'; modal.style.background='rgba(0,0,0,0.6)';
+    modal = document.createElement('div');
+    modal.id = 'modal';
+    modal.style.cssText = 'position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:9999;';
     modal.innerHTML = `<div id="modalBox" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff">
       <div id="modalBody"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
@@ -1064,290 +659,254 @@ function openModal(html, onConfirm){
       </div>
     </div>`;
     document.body.appendChild(modal);
-    ensureModalHooks();
+
+    modal.querySelector('#modalCancel').addEventListener('click', closeModal);
+    modal.querySelector('#modalOk').addEventListener('click', function () { try { if (modal._onConfirm) modal._onConfirm(); } catch (e) { warn(e); } closeModal(); });
+
+    return modal;
   }
-  var body = document.getElementById('modalBody');
-  if(!body){ console.warn('Modal body element not found: #modalBody'); return; }
-  body.innerHTML = html;
-  modal.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  modal._onConfirm = onConfirm;
 
-  setTimeout(()=>{
-    applyInputGlow(body);
-    const firstInput = modal.querySelector('input, textarea, select'); if(firstInput) firstInput.focus();
-    const enterHandler = (e)=>{ if(e.key === 'Enter'){ try{ if(modal._onConfirm) modal._onConfirm(); }catch(err){} closeModal(); } };
-    modal._enterHandler = enterHandler; modal.addEventListener('keydown', enterHandler);
+  function openModal(html, onConfirm) {
+    const modal = ensureModal();
+    const body = modal.querySelector('#modalBody');
+    body.innerHTML = html;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    modal._onConfirm = onConfirm || null;
 
-    modal.querySelectorAll('input[type="password"]').forEach(pw=>{
-      if(pw.nextSibling && pw.nextSibling.classList && pw.nextSibling.classList.contains('pw-toggle')) return;
-      const btn = document.createElement('button');
-      btn.type='button'; btn.className='pw-toggle'; btn.style.marginLeft='8px'; btn.style.padding='6px';
-      btn.style.background='transparent'; btn.style.color='#ddd'; btn.style.border='1px solid rgba(255,255,255,0.03)';
-      btn.style.borderRadius='6px'; btn.textContent='👁️';
-      btn.addEventListener('click', ()=> { pw.type = pw.type === 'password' ? 'text' : 'password'; pw.focus(); });
-      try{ pw.parentNode.style.position = pw.parentNode.style.position || 'relative'; pw.parentNode.appendChild(btn); }catch(e){}
+    setTimeout(() => {
+      applyInputGlow(body);
+      const first = body.querySelector('input,textarea,select');
+      if (first) first.focus();
+
+      modal._enterHandler = function (e) { if (e.key === 'Enter') { try { if (modal._onConfirm) modal._onConfirm(); } catch (e) {} closeModal(); } };
+      modal.addEventListener('keydown', modal._enterHandler);
+
+      // password toggle buttons
+      body.querySelectorAll('input[type="password"]').forEach(pw => {
+        if (pw._pwBtnAttached) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = '👁️';
+        btn.style.marginLeft = '8px';
+        btn.addEventListener('click', () => { pw.type = pw.type === 'password' ? 'text' : 'password'; pw.focus(); });
+        try { pw.parentNode.style.position = pw.parentNode.style.position || 'relative'; pw.parentNode.appendChild(btn); pw._pwBtnAttached = true; } catch (e) {}
+      });
+    }, 30);
+  }
+
+  function closeModal() {
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    modal._onConfirm = null;
+    if (modal._enterHandler) { modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
+  }
+
+  function applyInputGlow(root = document) {
+    try {
+      const selector = 'input, textarea, select';
+      Array.from(root.querySelectorAll(selector)).forEach(el => {
+        if (el.type && ['button', 'submit', 'reset'].includes(el.type)) return;
+        if (el._glowAttached) return;
+        el.style.boxShadow = el.style.boxShadow || '0 0 0 6px rgba(212,175,55,0.14)';
+        el.style.borderColor = el.style.borderColor || 'rgba(212,175,55,0.14)';
+        el.style.transition = el.style.transition || 'box-shadow .18s ease, border-color .18s ease, transform .08s ease';
+        el.addEventListener('focus', () => { el.style.boxShadow = '0 0 0 8px rgba(212,175,55,0.26), 0 10px 40px rgba(0,0,0,0.6)'; el.style.borderColor = 'rgba(212,175,55,0.45)'; el.style.transform = 'translateY(-1px)'; });
+        el.addEventListener('blur', () => { el.style.boxShadow = '0 0 0 6px rgba(212,175,55,0.14)'; el.style.borderColor = 'rgba(212,175,55,0.14)'; el.style.transform = ''; });
+        el._glowAttached = true;
+      });
+    } catch (e) { warn('applyInputGlow error', e); }
+  }
+
+  /* ========== AUTH API helpers ========== */
+
+  async function apiPost(path, body) {
+    try {
+      const res = await fetch(API_BASE.replace(/\/+$/, '') + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const ct = res.headers.get('content-type') || '';
+      let payload;
+      if (ct.includes('application/json')) payload = await res.json().catch(() => null);
+      else { const txt = await res.text().catch(() => null); try { payload = txt ? JSON.parse(txt) : null; } catch (e) { payload = txt; } }
+      if (!res.ok) return { ok: false, msg: (payload && (payload.msg || payload.error || payload.message)) || `Error ${res.status}`, data: payload, status: res.status };
+      return { ok: true, data: payload };
+    } catch (e) {
+      error('apiPost error', e);
+      return { ok: false, msg: e.message || 'Network' };
+    }
+  }
+
+  /* ========== REGISTER & LOGIN UI ========== */
+
+  function openRegisterModal() {
+    openModal(`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" /></div>
+        <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" /></div>
+        <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" /></div>
+        <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" /></div>
+        <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" /></div>
+      </div>
+      <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
+    `, async function () {
+      const name = (document.getElementById('r_name') || {}).value || '';
+      const email = ((document.getElementById('r_email') || {}).value || '').trim().toLowerCase();
+      const phone = (document.getElementById('r_phone') || {}).value || '';
+      const address = (document.getElementById('r_address') || {}).value || '';
+      const pass = (document.getElementById('r_pass') || {}).value || '';
+      const msgEl = document.getElementById('r_msg'); if (!msgEl) return;
+      msgEl.textContent = '';
+
+      if (!name || !email || !pass || !phone || !address) { msgEl.textContent = 'Completa todos los campos'; return; }
+      msgEl.textContent = 'Registrando...';
+      const backend = await apiPost('/auth/register', { name, email, phone, address, password: pass });
+
+      if (backend.ok) {
+        const serverData = backend.data || {};
+        const payload = serverData.data || serverData;
+        if (payload && payload.token) {
+          const usr = payload.user || { name, email };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(usr));
+          localStorage.setItem('token', payload.token);
+        } else if (payload && payload.user) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(payload.user));
+          if (payload.user.token) localStorage.setItem('token', payload.user.token);
+        } else {
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name }));
+        }
+        closeModal();
+        try { if (typeof window.showPrivateFull === 'function') window.showPrivateFull(JSON.parse(localStorage.getItem(SESSION_KEY)), localStorage.getItem('token')); } catch (e) {}
+      } else {
+        msgEl.textContent = backend.msg || 'Error al registrar';
+      }
     });
-  },50);
-}
-
-function closeModal(){
-  var modal = document.getElementById('modal'); if(!modal) return;
-  modal.style.display = 'none'; document.body.style.overflow = '';
-  modal._onConfirm = null;
-  if(modal._enterHandler){ modal.removeEventListener('keydown', modal._enterHandler); modal._enterHandler = null; }
-}
-
-/* safe escape */
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); }
-
-/* restorePublicHeader */
-function restorePublicHeader(){
-  const headerActions = document.getElementById('headerActions'); if(!headerActions) return;
-  headerActions.innerHTML = '';
-  const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'openAccountBtn'; openBtn.textContent = 'Abrir Cuenta';
-  const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'loginBtn'; loginBtn.textContent = 'Iniciar Sesión';
-  headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
-  openBtn.addEventListener('click', openRegisterModal); loginBtn.addEventListener('click', openLoginModal);
-  const ctaAbrir = document.getElementById('ctaAbrir'); if(ctaAbrir) ctaAbrir.addEventListener('click', ()=> openBtn.click());
-  const ctaLogin = document.getElementById('ctaLogin'); if(ctaLogin) ctaLogin.addEventListener('click', ()=> loginBtn.click());
-}
-
-/* =========================
-   REGISTER / LOGIN (robustos)
-   ========================= */
-
-async function backendRegister(userObj){
-  try{
-    if(typeof window.apiFetch === 'function'){
-      const res = await window.apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(userObj) });
-      return { ok: true, data: res };
-    }
-    const url = API_BASE.replace(/\/+$/,'') + '/auth/register';
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(userObj) });
-    const ct = res.headers.get('content-type') || '';
-    let payload;
-    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
-    else { const txt = await res.text().catch(()=>null); try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; } }
-    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error||payload.message)) || 'Error servidor', data: payload, status: res.status };
-    return { ok:true, data: payload || {} };
-  }catch(e){
-    console.error('backendRegister error', e);
-    return { ok:false, msg: e.message || 'Network' };
   }
-}
 
-async function backendLogin(creds){
-  try{
-    if(typeof window.apiFetch === 'function'){
-      const res = await window.apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(creds) });
-      return { ok:true, data: res };
-    }
-    const url = API_BASE.replace(/\/+$/,'') + '/auth/login';
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(creds) });
-    const ct = res.headers.get('content-type') || '';
-    let payload;
-    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
-    else { const txt = await res.text().catch(()=>null); try{ payload = txt ? JSON.parse(txt) : null; }catch(e){ payload = txt; } }
-    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error||payload.message)) || 'Credenciales inválidas', status: res.status };
-    return { ok:true, data: payload || {} };
-  }catch(e){
-    console.error('backendLogin error', e);
-    return { ok:false, msg: e.message || 'Network' };
+  function openLoginModal() {
+    openModal(`
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" /></div>
+        <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" /></div>
+      </div>
+      <div id="l_msg" style="color:#ff8a8a;margin-top:8px"></div>
+    `, async function () {
+      const email = ((document.getElementById('l_email') || {}).value || '').trim().toLowerCase();
+      const pass = (document.getElementById('l_pass') || {}).value || '';
+      const msg = document.getElementById('l_msg'); if (!msg) return; msg.textContent = '';
+      if (!email || !pass) { msg.textContent = 'Completa los campos'; return; }
+
+      msg.textContent = 'Iniciando sesión...';
+      const backend = await apiPost('/auth/login', { email, password: pass });
+      if (backend.ok) {
+        const d = backend.data || {};
+        const payload = d.data || d;
+        if (payload && payload.token) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(payload.user || { email }));
+          localStorage.setItem('token', payload.token);
+        } else if (payload && payload.user) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(payload.user));
+          if (payload.user.token) localStorage.setItem('token', payload.user.token);
+        } else {
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
+        }
+        closeModal();
+        try { if (typeof window.showPrivateFull === 'function') window.showPrivateFull(JSON.parse(localStorage.getItem(SESSION_KEY)), localStorage.getItem('token')); } catch (e) {}
+      } else {
+        msg.textContent = backend.msg || 'Credenciales inválidas';
+      }
+    });
   }
-}
 
-async function backendResend(email){
-  try{
-    if(typeof window.apiFetch === 'function') return await window.apiFetch('/auth/resend-verification', { method:'POST', body: JSON.stringify({ email }) });
-    const url = API_BASE.replace(/\/+$/,'') + '/auth/resend-verification';
-    const res = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) });
-    const ct = res.headers.get('content-type') || '';
-    let payload;
-    if(ct.includes('application/json')) payload = await res.json().catch(()=>null);
-    else { const t = await res.text().catch(()=>null); try{ payload = t ? JSON.parse(t) : null; }catch(e){ payload = t; } }
-    if(!res.ok) return { ok:false, msg: (payload && (payload.msg||payload.error)) || `Error ${res.status}`, data: payload };
-    return { ok:true, data: payload };
-  }catch(e){ console.error('backendResend error', e); return { ok:false, msg: e.message || 'Network' }; }
-}
+  /* ========== Header UI helpers ========== */
 
-/* Register modal */
-function openRegisterModal(){
-  openModal(`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div style="display:flex;flex-direction:column"><label>Nombre</label><input id="r_name" /></div>
-      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="r_email" type="email" /></div>
-      <div style="display:flex;flex-direction:column"><label>Teléfono</label><input id="r_phone" /></div>
-      <div style="display:flex;flex-direction:column"><label>Dirección</label><input id="r_address" /></div>
-      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="r_pass" type="password" /></div>
-    </div>
-    <div id="r_msg" style="color:#ff8a8a;margin-top:8px"></div>
-  `, async function(){
-    const name = (document.getElementById('r_name')||{}).value || '';
-    const email = ((document.getElementById('r_email')||{}).value || '').trim().toLowerCase();
-    const phone = (document.getElementById('r_phone')||{}).value || '';
-    const address = (document.getElementById('r_address')||{}).value || '';
-    const pass = (document.getElementById('r_pass')||{}).value || '';
-    const msgEl = document.getElementById('r_msg'); if(!msgEl) return;
-    msgEl.textContent='';
+  function restorePublicHeader() {
+    const headerActions = document.getElementById('headerActions'); if (!headerActions) return;
+    headerActions.innerHTML = '';
+    const openBtn = document.createElement('button'); openBtn.className = 'btn glow'; openBtn.id = 'btnReg'; openBtn.textContent = 'Abrir Cuenta';
+    const loginBtn = document.createElement('button'); loginBtn.className = 'btn ghost glow'; loginBtn.id = 'btnLogin'; loginBtn.textContent = 'Iniciar Sesión';
+    headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
 
-    if(!name || !email || !pass || !phone || !address){ msgEl.textContent='Completa todos los campos'; return; }
-    const userObj = { name, email, phone, address, password: pass };
-    msgEl.textContent = 'Registrando...';
-    const backend = await backendRegister(userObj);
+    openBtn.addEventListener('click', openRegisterModal);
+    loginBtn.addEventListener('click', openLoginModal);
 
-    if(backend.ok){
-      const serverData = backend.data || {};
-      // store session safely
-      if(serverData && serverData.token){
-        const user = serverData.user || { name: name, email: email };
-        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-        localStorage.setItem('token', serverData.token);
-      } else if(serverData && serverData.user){
-        localStorage.setItem(SESSION_KEY, JSON.stringify(serverData.user));
-        if(serverData.user.token) localStorage.setItem('token', serverData.user.token);
-      } else {
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, name }));
-      }
+    const ctaAbrir = document.getElementById('ctaAbrir'); if (ctaAbrir) { ctaAbrir.removeAttribute('onclick'); ctaAbrir.addEventListener('click', () => openBtn.click()); }
+    const ctaLogin = document.getElementById('ctaLogin'); if (ctaLogin) { ctaLogin.removeAttribute('onclick'); ctaLogin.addEventListener('click', () => loginBtn.click()); }
+  }
 
-      closeModal();
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
-      return;
-    } else {
-      msgEl.textContent = backend.msg || 'Error al registrar';
-      return;
-    }
-  });
-}
+  // expose some functions globally for compatibility with templates
+  window.openRegisterModal = openRegisterModal;
+  window.openLoginModal = openLoginModal;
+  window.restorePublicHeader = restorePublicHeader;
 
-/* Login modal */
-function openLoginModal(){
-  openModal(`
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;flex-direction:column"><label>Correo</label><input id="l_email" type="email" /></div>
-      <div style="display:flex;flex-direction:column"><label>Contraseña</label><input id="l_pass" type="password" /></div>
-    </div>
-    <div id="l_msg" style="color:#ff8a8a;margin-top:8px"></div>
-  `, async function(){
-    const email = ((document.getElementById('l_email')||{}).value || '').trim().toLowerCase();
-    const pass = (document.getElementById('l_pass')||{}).value || '';
-    const msg = document.getElementById('l_msg'); if(!msg) return; msg.textContent='';
-    if(!email || !pass){ msg.textContent='Completa los campos'; return; }
-
-    msg.textContent = 'Iniciando sesión...';
-    const backend = await backendLogin({ email, password: pass });
-    if(backend.ok){
-      const d = backend.data || {};
-      if(d && d.token){
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ email, token: d.token, name: d.user?.name || '' }));
-        localStorage.setItem('token', d.token);
-      } else if(d && d.user){
-        localStorage.setItem(SESSION_KEY, JSON.stringify(d.user));
-        if(d.user.token) localStorage.setItem('token', d.user.token);
-      } else {
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ email }));
-      }
-      closeModal();
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
-      if(typeof showPrivateFull === 'function'){ showPrivateFull(session, localStorage.getItem('token')); }
-      return;
-    } else {
-      msg.textContent = backend.msg || 'Credenciales inválidas';
-      return;
-    }
-  });
-}
-
-/* PUBLIC helper to restore header actions after logout */
-window.restorePublicHeader = restorePublicHeader;
-
-/* Defensive implementations for showPrivateFull & performLogoutFull */
-const SESSION_KEY_LOCAL = (typeof window.SESSION_KEY !== 'undefined') ? window.SESSION_KEY : 'BROKERPRO_SESSION_USER';
-
-if (typeof window.showPrivateFull !== 'function') {
-  window.showPrivateFull = function (user, token) {
-    try {
-      document.getElementById('publicMain') && (document.getElementById('publicMain').style.display = 'none');
-      document.getElementById('publicFooter') && (document.getElementById('publicFooter').style.display = 'none');
-      const headerActions = document.getElementById('headerActions');
-      if (headerActions) {
-        headerActions.innerHTML = '';
-        const profileBtn = document.createElement('div');
-        profileBtn.style.display = 'flex';
-        profileBtn.style.alignItems = 'center';
-        profileBtn.style.gap = '10px';
-
-        const nameEl = document.createElement('div');
-        nameEl.textContent = user.name || user.email || 'Usuario';
-        nameEl.style.color = 'var(--gold)';
-        nameEl.style.fontWeight = '700';
-
-        const logoutBtn = document.createElement('button');
-        logoutBtn.className = 'btn ghost';
-        logoutBtn.textContent = 'Cerrar sesión';
-
-        logoutBtn.addEventListener('click', function () {
-          if (typeof window.performLogoutFull === 'function') {
-            window.performLogoutFull();
-          } else {
-            localStorage.removeItem(SESSION_KEY_LOCAL);
-            localStorage.removeItem('token');
-            restorePublicHeader();
-          }
-        });
-
-        profileBtn.appendChild(nameEl);
-        profileBtn.appendChild(logoutBtn);
-        headerActions.appendChild(profileBtn);
-      }
-
-      const privateWrapper = document.getElementById('privateArea_full');
-      if (privateWrapper) {
-        privateWrapper.style.display = 'flex';
-        const nameSpan = document.getElementById('private-name-full'); if (nameSpan) nameSpan.textContent = user.name || 'Usuario';
-        const emailSpan = document.getElementById('private-email-full'); if (emailSpan) emailSpan.textContent = user.email || '';
-        const bal = document.getElementById('priv_balance_full');
-        if (bal) bal.textContent = 'RD$' + ((typeof user.balance === 'number') ? user.balance.toLocaleString('es-DO') : (Math.floor(Math.random() * 50000) + 1000).toLocaleString('es-DO'));
-      }
-
-      try { if (token) localStorage.setItem('token', token); } catch (e) { /* ignore */ }
-      localStorage.setItem(SESSION_KEY_LOCAL, JSON.stringify(user));
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (e) { console.error('showPrivateFull error', e); }
-  };
-}
-
-if (typeof window.performLogoutFull !== 'function') {
-  window.performLogoutFull = function () {
-    try {
-      localStorage.removeItem(SESSION_KEY_LOCAL);
-      localStorage.removeItem('token');
-      const privateWrapper = document.getElementById('privateArea_full'); if (privateWrapper) privateWrapper.style.display = 'none';
-      const publicMain = document.getElementById('publicMain'); if (publicMain) publicMain.style.display = '';
-      const publicFooter = document.getElementById('publicFooter'); if (publicFooter) publicFooter.style.display = '';
-      restorePublicHeader();
-    } catch (e) { console.error('logout error', e); }
-  };
-}
-
-/* On load: init and restore session; apply input glow globally */
-window.addEventListener('load', function(){
-  ensureModalHooks(); applyInputGlow(document);
-  try {
-    var s = localStorage.getItem(SESSION_KEY);
-    var token = localStorage.getItem('token');
-    if (s) {
+  // defensive implementations for private UI if not provided
+  if (typeof window.showPrivateFull !== 'function') {
+    window.showPrivateFull = function (user, token) {
       try {
-        var u = JSON.parse(s);
-        const sessionHasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
-        if (sessionHasToken) {
-          if(typeof showPrivateFull === 'function'){ showPrivateFull(u, token || u.token); }
-        } else { restorePublicHeader(); }
-      } catch(e){ console.warn('Error parseando SESSION_KEY al restaurar sesión', e); restorePublicHeader(); }
-    } else { restorePublicHeader(); }
-  } catch(e){ console.warn('restore session error', e); restorePublicHeader(); }
-});
+        document.getElementById('publicMain') && (document.getElementById('publicMain').style.display = 'none');
+        document.getElementById('publicFooter') && (document.getElementById('publicFooter').style.display = 'none');
+        const headerActions = document.getElementById('headerActions');
+        if (headerActions) {
+          headerActions.innerHTML = '';
+          const profileBtn = document.createElement('div');
+          profileBtn.style.display = 'flex'; profileBtn.style.alignItems = 'center'; profileBtn.style.gap = '10px';
+          const nameEl = document.createElement('div'); nameEl.textContent = user.name || user.email || 'Usuario'; nameEl.style.color = 'var(--gold)'; nameEl.style.fontWeight = '700';
+          const logoutBtn = document.createElement('button'); logoutBtn.className = 'btn ghost'; logoutBtn.textContent = 'Cerrar sesión';
+          logoutBtn.addEventListener('click', function () {
+            if (typeof window.performLogoutFull === 'function') window.performLogoutFull();
+            else { localStorage.removeItem(SESSION_KEY); localStorage.removeItem('token'); restorePublicHeader(); }
+          });
+          profileBtn.appendChild(nameEl); profileBtn.appendChild(logoutBtn); headerActions.appendChild(profileBtn);
+        }
+        const privateWrapper = document.getElementById('privateArea_full');
+        if (privateWrapper) { privateWrapper.style.display = 'flex'; const nameSpan = document.getElementById('private-name-full'); if (nameSpan) nameSpan.textContent = user.name || 'Usuario'; }
+        try { if (token) localStorage.setItem('token', token); } catch (e) {}
+        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (e) { error('showPrivateFull error', e); }
+    };
+  }
+
+  if (typeof window.performLogoutFull !== 'function') {
+    window.performLogoutFull = function () {
+      try {
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem('token');
+        const privateWrapper = document.getElementById('privateArea_full'); if (privateWrapper) privateWrapper.style.display = 'none';
+        const publicMain = document.getElementById('publicMain'); if (publicMain) publicMain.style.display = '';
+        const publicFooter = document.getElementById('publicFooter'); if (publicFooter) publicFooter.style.display = '';
+        restorePublicHeader();
+      } catch (e) { error('logout error', e); }
+    };
+  }
+
+  /* ========== Initialization ========== */
+  window.addEventListener('DOMContentLoaded', function () {
+    try { applyInputGlow(document); } catch (e) {}
+
+    try {
+      const s = localStorage.getItem(SESSION_KEY);
+      const token = localStorage.getItem('token');
+      if (s) {
+        try {
+          const u = safeJsonParse(s, {});
+          const hasToken = !!(token && token.length) || !!(u && (u.token && String(u.token).length));
+          if (hasToken) { if (typeof window.showPrivateFull === 'function') window.showPrivateFull(u, token || u.token); }
+          else restorePublicHeader();
+        } catch (e) { warn('Error parsing session', e); restorePublicHeader(); }
+      } else {
+        restorePublicHeader();
+      }
+    } catch (e) { warn('restore session error', e); restorePublicHeader(); }
+
+    log("Frontend (main.js) initialized");
+  });
+
+})(); // EOF 
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
@@ -2067,526 +1626,682 @@ document.addEventListener('DOMContentLoaded', function(){
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
 <script>
-  (function(){
-    // Sidebar toggle (no destruye si ya existe algo similar)
-    const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebarToggle');
+/* =========================================================
+   LEONES BROKER — JS UNIFICADO (completo, sin duplicados)
+   ========================================================= */
+(function () {
+  "use strict";
 
-    if(sidebarToggle && sidebar){
-      sidebarToggle.addEventListener('click', () => {
-        sidebar.classList.toggle('hidden');
+  /* ---------------------------
+     CONFIG & GLOBALS
+     --------------------------- */
+  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+
+  const API_BASE =
+    window.API_BASE ||
+    window.API ||
+    (location.hostname === "localhost" ? "http://localhost:3000/api" : (location.origin + "/api"));
+
+  const WS_BASE =
+    window.WS_BASE ||
+    (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+
+  // socket variable global (shared)
+  let socket = window.__LEONES_SOCKET__?.socket || null;
+
+  // shared state
+  window.symbolPrices = window.symbolPrices || {};
+  window.orderBooks = window.orderBooks || {};
+  window.ALL_SYMBOLS = window.ALL_SYMBOLS || [];
+
+  /* ---------------------------
+     LOG SAFE
+     --------------------------- */
+  const log = (...a) => { try { console.log(...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn(...a); } catch (e) {} };
+  const err = (...a) => { try { console.error(...a); } catch (e) {} };
+
+  /* ---------------------------
+     SMALL HELPERS
+     --------------------------- */
+  if (typeof window.escapeHtml !== "function") {
+    window.escapeHtml = function (s) {
+      return String(s || "").replace(/[&<>"']/g, function (m) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m];
       });
-    }
-
-    // Mostrar área privada SÓLO si hay sesión válida (seguro)
-    try {
-      const sessKey = (typeof SESSION_KEY !== 'undefined') ? SESSION_KEY : 'BROKERPRO_SESSION_USER';
-      const sess = localStorage.getItem(sessKey);
-      const token = localStorage.getItem('token');
-      if (sess && token) {
-        try {
-          const user = JSON.parse(sess);
-          // Mostrar todos los elementos marcados como private-only
-          document.querySelectorAll('.private-only').forEach(el=>{
-            // Si el elemento tiene data-display, usarlo; si no, usar block/flex según su tag
-            const desired = el.dataset.display || '';
-            if(desired) {
-              el.style.display = desired;
-            } else {
-              // guess appropriate display
-              if(el.tagName.toLowerCase() === 'aside' || el.classList.contains('card') || el.classList.contains('trade-box')) {
-                el.style.display = 'block';
-              } else {
-                el.style.display = 'block';
-              }
-            }
-          });
-          // Rellenar nombre si existe
-          const nameEl = document.getElementById('privateWelcomeName');
-          if(nameEl && user.name) nameEl.textContent = user.name;
-          // Si tu código principal define showPrivateFull, lo llamamos (no destructivo)
-          if (typeof showPrivateFull === 'function') {
-            showPrivateFull(user, token);
-          }
-        } catch(e) {
-          console.warn('Sesión inválida en localStorage, no se mostrará el área privada.', e);
-        }
-      }
-    } catch(e){/* safe */}
-
-    // Helpers no destructivos: definir navSidebar / footerNavClick si no existen (evitan errores)
-    if(typeof navSidebar !== 'function'){
-      window.navSidebar = function(e){
-        try{
-          const target = e.currentTarget?.getAttribute('data-target');
-          if(!target) return;
-          // hide panels
-          document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
-          // activate menu items
-          document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
-          e.currentTarget.classList.add('active');
-          // show target
-          const panel = document.getElementById(target + 'Panel') || document.getElementById(target);
-          if(panel) panel.style.display = 'block';
-          // update footer active if applicable
-          document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
-        }catch(err){console.warn(err)}
-      };
-    }
-
-    if(typeof footerNavClick !== 'function'){
-      window.footerNavClick = function(e){
-        const target = e.currentTarget?.getAttribute('data-target');
-        if(!target) return;
-        document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
-        const targetEl = document.getElementById(target);
-        if(targetEl) targetEl.style.display='block';
-        document.querySelectorAll('.fnav-item').forEach(f=>f.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        // also update sidebar active
-        document.querySelectorAll('.menu-item').forEach(mi=>mi.classList.remove('active'));
-        const sidebarItem = Array.from(document.querySelectorAll('.menu-item')).find(mi => mi.getAttribute('data-target') === target.replace('Panel',''));
-        if(sidebarItem) sidebarItem.classList.add('active');
-      };
-    }
-
-    // Modales simples
-    window.showModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'flex'; };
-    window.hideModalInfo = function(){ const m = document.getElementById('infoModal'); if(m) m.style.display = 'none'; };
-
-    // Logout placeholder (tu backend debe sobreescribir esto)
-    if(typeof logout !== 'function'){
-      window.logout = function(){
-        try{ localStorage.removeItem('token'); location.reload(); }catch(e){ location.reload(); }
-      };
-    }
-
-    // Evitar submit por defecto si las funciones específicas no existen
-    window.submitTransaction = window.submitTransaction || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitTransaction no implementada todavía.'); };
-    window.submitDoc = window.submitDoc || function(e){ if(e && e.preventDefault) e.preventDefault(); alert('Función submitDoc no implementada todavía.'); };
-    window.createOrder = window.createOrder || function(type){ alert('createOrder('+type+') - falta implementar en tu JS principal.'); };
-  })();
-</script>
-
-<script>
-/* JS Nº2 - API helpers, socket startup, symbols UI (CORREGIDO) */
-
-
-/* escape + localStorage helpers */
-if(typeof window.escapeHtml !== 'function'){
-  window.escapeHtml = function(s){ return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];}); };
-}
-function loadUsers(){ try{ return JSON.parse(localStorage.getItem('leones_images_users')||'[]'); }catch(e){return[]} }
-function saveUsers(u){ try{ localStorage.setItem('leones_images_users', JSON.stringify(u)); }catch(e){} }
-
-/* =========================
-   API fetch robusto (evita Unexpected token '<')
-   ========================= */
-async function apiFetch(path, opts = {}){
-  const token = localStorage.getItem('token');
-  const headers = opts.headers ? {...opts.headers} : {};
-  // allow FormData when needed
-  if(!(opts.body instanceof FormData)) headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-  if(token) headers['Authorization'] = `Bearer ${token}`;
-
-  const url = path.startsWith('http') ? path : (API_BASE + (path.startsWith('/') ? path : '/' + path));
-  let res;
-  try{
-    res = await fetch(url, {...opts, headers, credentials: 'include'});
-  }catch(e){
-    const err = new Error('Network error');
-    err.body = e;
-    throw err;
+    };
   }
 
-  const text = await res.text().catch(()=>null);
-  let data = null;
-  try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+  function safeParseJSON(s) {
+    try { return JSON.parse(s); } catch (e) { return null; }
+  }
 
-  if(!res.ok){
-    if(res.status === 401){
-      try{ localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); }catch(e){}
-      const msg = (data && (data.msg||data.error||data.message)) || 'Token requerido';
+  /* ---------------------------
+     MODAL (reutilizable)
+     --------------------------- */
+  function ensureModal() {
+    let modal = document.getElementById("modal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "modal";
+    modal.style.cssText = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:9999;";
+    modal.innerHTML = `
+      <div id="modalBox" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff">
+        <div id="modalBody"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+          <button id="modalCancel" class="btn ghost">Cancelar</button>
+          <button id="modalOk" class="btn glow">Aceptar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector("#modalCancel").addEventListener("click", closeModal);
+    modal.querySelector("#modalOk").addEventListener("click", function () {
+      try { if (modal._onConfirm) modal._onConfirm(); } catch (e) {}
+      closeModal();
+    });
+
+    return modal;
+  }
+
+  function openModal(html, onConfirm) {
+    const modal = ensureModal();
+    const body = modal.querySelector("#modalBody");
+    body.innerHTML = html;
+    modal.style.display = "flex";
+    document.body.style.overflow = "hidden";
+    modal._onConfirm = onConfirm || null;
+
+    // attach enter key and password toggles after showing
+    setTimeout(() => {
+      const enterHandler = (e) => { if (e.key === "Enter") { try { if (modal._onConfirm) modal._onConfirm(); } catch (err) {} closeModal(); } };
+      modal._enterHandler = enterHandler;
+      modal.addEventListener("keydown", enterHandler);
+
+      modal.querySelectorAll('input[type="password"]').forEach(pw => {
+        if (pw._pwBtn) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "👁️";
+        btn.style.marginLeft = "6px";
+        btn.addEventListener("click", () => { pw.type = pw.type === "password" ? "text" : "password"; pw.focus(); });
+        pw._pwBtn = btn;
+        try { pw.parentNode && pw.parentNode.appendChild(btn); } catch (e) {}
+      });
+    }, 40);
+  }
+
+  function closeModal() {
+    const modal = document.getElementById("modal");
+    if (!modal) return;
+    modal.style.display = "none";
+    document.body.style.overflow = "";
+    modal._onConfirm = null;
+    if (modal._enterHandler) { modal.removeEventListener("keydown", modal._enterHandler); modal._enterHandler = null; }
+  }
+
+  /* ---------------------------
+     SESSION / UI PUBLIC <-> PRIVATE
+     --------------------------- */
+
+  function restorePublicHeader() {
+    const headerActions = document.getElementById("headerActions");
+    if (!headerActions) return;
+    headerActions.innerHTML = "";
+    const openBtn = document.createElement("button"); openBtn.className = "btn glow"; openBtn.id = "openAccountBtn"; openBtn.textContent = "Abrir Cuenta";
+    const loginBtn = document.createElement("button"); loginBtn.className = "btn ghost glow"; loginBtn.id = "loginBtn"; loginBtn.textContent = "Iniciar Sesión";
+    headerActions.appendChild(openBtn); headerActions.appendChild(loginBtn);
+    openBtn.addEventListener("click", openRegisterModal);
+    loginBtn.addEventListener("click", openLoginModal);
+  }
+
+  // public helpers (non-destructive)
+  window.restorePublicHeader = window.restorePublicHeader || restorePublicHeader;
+
+  if (typeof window.showPrivateFull !== "function") {
+    window.showPrivateFull = function (user, token) {
+      try {
+        document.getElementById("publicMain") && (document.getElementById("publicMain").style.display = "none");
+        document.getElementById("publicFooter") && (document.getElementById("publicFooter").style.display = "none");
+        const headerActions = document.getElementById("headerActions");
+        if (headerActions) {
+          headerActions.innerHTML = "";
+          const profileBtn = document.createElement("div");
+          profileBtn.style.display = "flex";
+          profileBtn.style.alignItems = "center";
+          profileBtn.style.gap = "10px";
+
+          const nameEl = document.createElement("div");
+          nameEl.textContent = user.name || user.email || "Usuario";
+          nameEl.style.color = "var(--gold)";
+          nameEl.style.fontWeight = "700";
+
+          const logoutBtn = document.createElement("button");
+          logoutBtn.className = "btn ghost";
+          logoutBtn.textContent = "Cerrar sesión";
+
+          logoutBtn.addEventListener("click", function () {
+            if (typeof window.performLogoutFull === "function") {
+              window.performLogoutFull();
+            } else {
+              localStorage.removeItem(SESSION_KEY);
+              localStorage.removeItem("token");
+              restorePublicHeader();
+              location.reload();
+            }
+          });
+
+          profileBtn.appendChild(nameEl);
+          profileBtn.appendChild(logoutBtn);
+          headerActions.appendChild(profileBtn);
+        }
+
+        const privateWrapper = document.getElementById("privateArea_full");
+        if (privateWrapper) {
+          privateWrapper.style.display = "flex";
+          const nameSpan = document.getElementById("private-name-full"); if (nameSpan) nameSpan.textContent = user.name || "Usuario";
+          const emailSpan = document.getElementById("private-email-full"); if (emailSpan) emailSpan.textContent = user.email || "";
+        }
+
+        if (token) try { localStorage.setItem("token", token); } catch (e) {}
+        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch (e) { console.error("showPrivateFull error", e); }
+    };
+  }
+
+  if (typeof window.performLogoutFull !== "function") {
+    window.performLogoutFull = function () {
+      try {
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem("token");
+        const privateWrapper = document.getElementById("privateArea_full"); if (privateWrapper) privateWrapper.style.display = "none";
+        const publicMain = document.getElementById("publicMain"); if (publicMain) publicMain.style.display = "";
+        const publicFooter = document.getElementById("publicFooter"); if (publicFooter) publicFooter.style.display = "";
+        restorePublicHeader();
+        location.reload();
+      } catch (e) { console.error("logout error", e); }
+    };
+  }
+
+  /* ---------------------------
+     SIMPLE UI HELPERS (sidebar, footer nav)
+     --------------------------- */
+  (function wireBasicUI() {
+    const sidebar = document.getElementById("sidebar");
+    const sidebarToggle = document.getElementById("sidebarToggle");
+
+    if (sidebarToggle && sidebar) {
+      sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("hidden"));
+    }
+
+    if (typeof window.navSidebar !== "function") {
+      window.navSidebar = function (e) {
+        try {
+          const target = e.currentTarget?.getAttribute("data-target");
+          if (!target) return;
+          document.querySelectorAll(".panel").forEach(p => p.style.display = "none");
+          document.querySelectorAll(".menu-item").forEach(mi => mi.classList.remove("active"));
+          e.currentTarget.classList.add("active");
+          const panel = document.getElementById(target + "Panel") || document.getElementById(target);
+          if (panel) panel.style.display = "block";
+          document.querySelectorAll(".fnav-item").forEach(f => f.classList.remove("active"));
+        } catch (err) { console.warn(err); }
+      };
+    }
+
+    if (typeof window.footerNavClick !== "function") {
+      window.footerNavClick = function (e) {
+        const target = e.currentTarget?.getAttribute("data-target");
+        if (!target) return;
+        document.querySelectorAll(".panel").forEach(p => p.style.display = "none");
+        const targetEl = document.getElementById(target);
+        if (targetEl) targetEl.style.display = "block";
+        document.querySelectorAll(".fnav-item").forEach(f => f.classList.remove("active"));
+        e.currentTarget.classList.add("active");
+        document.querySelectorAll(".menu-item").forEach(mi => mi.classList.remove("active"));
+        const sidebarItem = Array.from(document.querySelectorAll(".menu-item")).find(mi => mi.getAttribute("data-target") === target.replace("Panel", ""));
+        if (sidebarItem) sidebarItem.classList.add("active");
+      };
+    }
+  })();
+
+  /* ---------------------------
+     API FETCH robusto (json/text handling)
+     --------------------------- */
+  async function apiFetch(path, opts = {}) {
+    const token = localStorage.getItem("token");
+    const headers = opts.headers ? { ...opts.headers } : {};
+    if (!(opts.body instanceof FormData)) headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const url = path.startsWith("http") ? path : API_BASE + (path.startsWith("/") ? path : "/" + path);
+    let res;
+    try {
+      res = await fetch(url, { ...opts, headers, credentials: "include" });
+    } catch (e) {
+      const err = new Error("Network error");
+      err.body = e;
+      throw err;
+    }
+
+    const text = await res.text().catch(() => null);
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = text; }
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        try { localStorage.removeItem("token"); localStorage.removeItem(SESSION_KEY); } catch (e) {}
+        const msg = (data && (data.msg || data.error || data.message)) || "Token requerido";
+        const err = new Error(msg); err.status = res.status; err.body = data;
+        throw err;
+      }
+      const msg = (data && (data.msg || data.error || data.message)) || (typeof data === "string" ? data : "Error API");
       const err = new Error(msg); err.status = res.status; err.body = data;
       throw err;
     }
-    const msg = (data && (data.msg||data.error||data.message)) || (typeof data === 'string' ? data : 'Error API');
-    const err = new Error(msg); err.status = res.status; err.body = data;
-    throw err;
+
+    return data;
   }
-  return data;
-}
 
-/* Resend verification (frontend) */
-window.resendVerification = async function(email, btnEl = null){
-  try{
-    if(!email) throw new Error('Falta el email');
-    if(btnEl){ btnEl.disabled = true; btnEl.textContent = 'Enviando...'; }
-    const payload = await apiFetch('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }).catch(e=>{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; } throw e; });
-    if(btnEl){ btnEl.textContent = 'Reenviado'; setTimeout(()=>{ try{ btnEl.textContent='Reenviar verificación'; btnEl.disabled=false; }catch(e){} },2000); }
-    return { ok:true, data: payload };
-  }catch(e){
-    if(btnEl){ btnEl.disabled=false; btnEl.textContent='Reenviar verificación'; }
-    console.error('resendVerification error', e);
-    return { ok:false, msg: e.message || 'Error de red' };
-  }
-};
+  // expose for other scripts
+  window.apiFetch = window.apiFetch || apiFetch;
 
-window.createResendButton = function(email){
-  const btn = document.createElement('button');
-  btn.type='button'; btn.className='btn glow resend-verification-btn'; btn.textContent='Reenviar verificación';
-  btn.addEventListener('click', async ()=> {
-    btn.disabled = true; btn.textContent = 'Enviando...';
-    const r = await window.resendVerification(email, btn);
-    if(!r.ok) alert(r.msg || 'No se pudo reenviar'); else alert('Email reenviado. Revisa inbox/spam.');
-  });
-  return btn;
-};
-
-/* =========================
-   SOCKET.IO SETUP
-   ========================= */
-window.symbolPrices = window.symbolPrices || {};
-window.orderBooks = window.orderBooks || {};
-window.ALL_SYMBOLS = window.ALL_SYMBOLS || [];
-
-
-  try{
-    if(typeof io !== 'function'){ console.warn('socket.io cliente no cargado (io no definido)'); return; }
-    if(socket && socket.connected) return;
-
-    const wsUrl = WS_BASE;
-    socket = io(wsUrl, {
-      path: '/socket.io',
-      transports: ['websocket','polling'],
-      withCredentials: true,
-      auth: { token: localStorage.getItem('token') || null },
-      autoConnect: true
-    });
-
-    // save global ref
-    window.__LEONES_SOCKET__ = window.__LEONES_SOCKET__ || {};
-    window.__LEONES_SOCKET__.socket = socket;
-
-    socket.on('connect', ()=> {
-      console.log('Socket conectado', socket.id);
-      const wsStatusEl = document.getElementById('ws-status'); if(wsStatusEl) wsStatusEl.innerText = 'conectado';
-      if(socket && socket.emit){ socket.emit('request_prices_snapshot'); socket.emit('request_symbols'); }
-    });
-
-    socket.on('disconnect', (reason)=> {
-      console.warn('Cliente desconectado:', reason);
-      const wsStatusEl = document.getElementById('ws-status'); if(wsStatusEl) wsStatusEl.innerText = 'desconectado';
-    });
-
-    socket.on('prices_snapshot', (snap)=> {
-      try{
-        if(!snap) return;
-        if(Array.isArray(snap)){
-          snap.forEach(item=> { if(item && item.symbol) window.symbolPrices[item.symbol] = (item.price ?? item.p ?? item.v ?? item.value ?? item); });
-        } else {
-          Object.keys(snap).forEach(k=> {
-            const item = snap[k];
-            if(typeof item === 'object'){
-              const price = item.price ?? item.p ?? item.v ?? item;
-              const ts = item.ts ?? Date.now();
-              window.symbolPrices[k] = (typeof price === 'object' ? price : { price: price, ts: ts });
-            } else {
-              window.symbolPrices[k] = snap[k];
-            }
-          });
-        }
-        try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory); }catch(e){}
-        try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(window.symbolPrices[currentSymbol]?.price ?? window.symbolPrices[currentSymbol] ?? 0); }catch(e){}
-      }catch(e){ console.warn('prices_snapshot handler error', e); }
-    });
-
-    socket.on('price', (p)=> {
-      try{
-        if(!p) return;
-        const symbol = p.symbol || p.s || p.sym || p.t;
-        const priceVal = p.price ?? p.p ?? p.v ?? p.value ?? p;
-        const ts = p.ts ?? Date.now();
-        if(!symbol || (priceVal === undefined || priceVal === null)) return;
-        window.symbolPrices[symbol] = { price: priceVal, ts: ts };
-        document.querySelectorAll(`[data-symbol="${symbol}"], #op-price`).forEach(el=>{ try{ el.textContent = Number(priceVal).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){} });
-        try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(priceVal); }catch(e){}
-        try{ if(typeof updateOrderBook === 'function') updateOrderBook(window.orderBooks[symbol] || {}); }catch(e){}
-        try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory); }catch(e){}
-        try{ if(typeof window.onExternalPrice === 'function') window.onExternalPrice({ symbol, price: priceVal, ts }); }catch(e){}
-      }catch(e){ console.warn('price handler error', e); }
-    });
-
-    socket.on('symbols_update', (symbols)=> {
-      try{
-        if(!symbols) return;
-        if(Array.isArray(symbols)){
-          window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol||s.sym||s.t, label: s.label||s.name||s.symbol, market: s.market||s.mkt||'Crypto' }));
-        } else if(typeof symbols === 'object'){
-          const arr = []; Object.keys(symbols).forEach(k=> arr.push({ symbol:k, label: symbols[k].label||k, market: symbols[k].market||'Crypto' })); window.ALL_SYMBOLS = arr;
-        }
-        try{ if(typeof initSymbolsUI === 'function') initSymbolsUI(); }catch(e){ console.warn('initSymbolsUI error', e); }
-      }catch(e){ console.warn('symbols_update handling error', e); }
-    });
-
-    socket.on('orderbook', (ob)=> {
-      try{ if(!ob || !ob.symbol) return; window.orderBooks[ob.symbol] = ob; try{ if(typeof updateOrderBook === 'function') updateOrderBook(ob); }catch(e){} }catch(e){}
-    });
-
-    socket.on('connect_error', (err)=> { console.error('socket connect_error', err); const el = document.getElementById('ws-status'); if(el) el.innerText='error'; });
-  }catch(e){ console.error('startSocket error', e); }
-
-
-/* -------------------------
-   SYMBOLS: fetch from backend (varios endpoints de prueba)
-   ------------------------- */
-async function fetchSymbolsFromBackend(){
-  const endpoints = [
-    '/symbols',
-    '/api/symbols',
-    '/markets/symbols',
-    '/market/symbols',
-    '/market/list',
-    '/markets',
-    '/api/markets'
-  ];
-  for(const ep of endpoints){
-    try{
-      const data = await apiFetch(ep).catch(()=>null);
-      if(!data) continue;
-      let arr = [];
-      if(Array.isArray(data)){
-        arr = data.map(it=>{
-          if(typeof it === 'string') return { symbol: it, label: it, market: 'Unknown' };
-          return { symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol||it.t, market: it.market||it.mkt||it.group||'Unknown' };
-        });
-      } else if(typeof data === 'object'){
-        Object.keys(data).forEach(k=> arr.push({ symbol:k, label: data[k].label||k, market: data[k].market||'Unknown' }));
-      }
-      if(arr.length) return arr;
-    }catch(e){}
-  }
-  return (window.ALL_SYMBOLS && window.ALL_SYMBOLS.length) ? window.ALL_SYMBOLS : [
-    {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
-    {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
-    {symbol:'OANDA:EUR_USD', label:'EUR/USD', market:'Forex'},
-    {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'},
-    {symbol:'INDEX:SPX', label:'S&P 500', market:'Indices'}
-  ];
-}
-
-/* TRADINGVIEW init fallback */
-if(typeof window.initTradingWidget !== 'function'){
-  window.initTradingWidget = function(symbol){
-    try{
-      const cont = document.getElementById('tv_chart_container'); if(!cont) return;
-      cont.innerHTML = '';
-      if(window.TradingView && typeof TradingView.widget === 'function'){
-        try{
-          new TradingView.widget({
-            container_id: 'tv_chart_container',
-            autosize: true,
-            symbol: symbol || 'BINANCE:BTCUSDT',
-            interval: '60',
-            timezone: 'Etc/UTC',
-            theme: 'dark',
-            style: '1',
-            locale: 'es',
-            toolbar_bg: '#0b0b0b',
-            enable_publishing: false,
-            allow_symbol_change: true
-          });
-        }catch(e){ cont.innerHTML = '<div style="padding:12px;color:var(--muted)">No fue posible inicializar TradingView.</div>'; console.warn('TradingView init error', e); }
-        return;
-      }
-      cont.innerHTML = '<div style="padding:12px;color:var(--muted)">Widget de gráficos no disponible (tv.js no cargó).</div>';
-    }catch(e){ console.warn('initTradingWidget error', e); }
+  /* ---------------------------
+     Resend verification (frontend UI helper)
+     --------------------------- */
+  window.resendVerification = window.resendVerification || async function (email, btnEl = null) {
+    try {
+      if (!email) throw new Error("Falta el email");
+      if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Enviando..."; }
+      const payload = await apiFetch("/auth/resend-verification", { method: "POST", body: JSON.stringify({ email }) }).catch(e => { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Reenviar verificación"; } throw e; });
+      if (btnEl) { btnEl.textContent = "Reenviado"; setTimeout(() => { try { btnEl.textContent = "Reenviar verificación"; btnEl.disabled = false; } catch (e) { } }, 2000); }
+      return { ok: true, data: payload };
+    } catch (e) {
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Reenviar verificación"; }
+      console.error("resendVerification error", e);
+      return { ok: false, msg: e.message || "Error de red" };
+    }
   };
-}
 
-/* UI helpers */
-function updateDisplayedPrice(price){
-  try{ const el = document.getElementById('op-price'); if(el) el.textContent = Number(price || 0).toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){}
-}
-function updateOrderBook(ob){
-  try{
-    if(!ob) return;
-    const bidsEl = document.getElementById('ob-bids');
-    const asksEl = document.getElementById('ob-asks');
-    if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-    if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-  }catch(e){}
-}
-
-/* Render symbols grid (similar a tu implementación) */
-let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
-let currentSymbol = (window.ALL_SYMBOLS && window.ALL_SYMBOLS[0] && window.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
-
-function wireDomRefs(){
-  symbolSearch = document.getElementById('symbolSearch');
-  symbolsGrid = document.getElementById('symbolsGrid');
-  catTabs = document.getElementById('catTabs');
-  marketsSymbolsGrid = document.getElementById('marketsSymbolsGrid');
-  marketSearch = document.getElementById('marketSearch');
-  catTabsMarket = document.getElementById('catTabsMarket');
-  try{
-    const raw = window.symbolPrices[currentSymbol];
-    const priceVal = (raw && typeof raw === 'object') ? (raw.price ?? raw) : raw;
-    if(document.getElementById('op-price')) document.getElementById('op-price').textContent = Number(priceVal || 0).toLocaleString();
-  }catch(e){}
-}
-
-const CATEGORIES = ['All','Stocks','Crypto','Forex','Indices','Futures','Bonds','Economy','Options'];
-let activeCategory = 'All';
-
-function buildCategoryTabs(container, onClick){
-  if(!container) return;
-  container.innerHTML = '';
-  CATEGORIES.forEach(cat=>{
-    const b = document.createElement('button');
-    b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
-    b.innerText = cat;
-    b.onclick = ()=> { activeCategory = cat; document.querySelectorAll('.cat-tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); onClick(); };
-    container.appendChild(b);
-  });
-}
-
-function filterSymbols(q, category){
-  q = (q||'').trim().toLowerCase();
-  return (window.ALL_SYMBOLS||[]).filter(s=>{
-    if(category && category !== 'All' && (s.market||'').toLowerCase() !== category.toLowerCase()) return false;
-    if(!q) return true;
-    return ( (s.label||'').toLowerCase().includes(q) || (s.symbol||'').toLowerCase().includes(q) );
-  });
-}
-
-function renderSymbolsGrid(container, query, category){
-  if(!container) return;
-  container.innerHTML = '';
-  const list = filterSymbols(query, category);
-  if(list.length === 0){
-    container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
-    return;
-  }
-  list.forEach(s=>{
-    const el = document.createElement('div');
-    el.className = 'symbol-card';
-    el.setAttribute('data-symbol', s.symbol);
-    el.onclick = ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); };
-    const rawPrice = window.symbolPrices[s.symbol];
-    const priceVal = (rawPrice && typeof rawPrice === 'object') ? (rawPrice.price ?? rawPrice) : rawPrice;
-    const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
-    let ptext = '--';
-    if(numeric !== null && !isNaN(numeric)){
-      ptext = (Math.abs(numeric) > 1000) ? numeric.toLocaleString(undefined,{maximumFractionDigits:1}) : numeric.toFixed(6);
-    } else if(priceVal !== null && priceVal !== undefined){
-      ptext = String(priceVal);
-    }
-    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-      </div>
-    </div>`;
-    container.appendChild(el);
-  });
-}
-
-/* Seleccionar símbolo y abrir trading */
-function selectSymbolAndOpenTrading(symbol, label){
-  currentSymbol = symbol;
-  const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
-  const opSymbolEl = document.getElementById('op-symbol'); if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
-  const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
-  try{ if(typeof showPanel === 'function') showPanel('tradingPanel'); else { document.querySelectorAll('.panel').forEach(p=>p.style.display='none'); const el = document.getElementById('tradingPanel'); if(el) el.style.display = 'block'; } }catch(e){}
-  if(typeof initTradingWidget === 'function') initTradingWidget(symbol);
-  try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(window.symbolPrices[symbol]?.price ?? window.symbolPrices[symbol] ?? 0); }catch(e){}
-  try{ if(typeof updateOrderBook === 'function') updateOrderBook(window.orderBooks[symbol] || {}); }catch(e){}
-}
-
-/* Demo fallback engine (only if no snapshot arrives) */
-let demoEngineId = null;
-function startDemoFallback(){
-  if(demoEngineId) return;
-  demoEngineId = setInterval(()=> {
-    (window.ALL_SYMBOLS || []).forEach(s=>{
-      if(!(s.symbol in window.symbolPrices)){
-        window.symbolPrices[s.symbol] = { price: Number((Math.random()*100).toFixed(2)), ts: Date.now() };
-      } else {
-        const oldRaw = window.symbolPrices[s.symbol];
-        const old = (oldRaw && typeof oldRaw === 'object') ? (Number(oldRaw.price) || 0) : (Number(oldRaw) || 0);
-        const change = (Math.random()-0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
-        const next = Number(Math.max(0.00001, old + change).toFixed(6));
-        window.symbolPrices[s.symbol] = { price: next, ts: Date.now() };
-      }
+  window.createResendButton = window.createResendButton || function (email) {
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn glow resend-verification-btn"; btn.textContent = "Reenviar verificación";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Enviando...";
+      const r = await window.resendVerification(email, btn);
+      if (!r.ok) alert(r.msg || "No se pudo reenviar"); else alert("Email reenviado. Revisa inbox/spam.");
     });
-    try{ if(typeof renderSymbolsGrid === 'function') renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory); }catch(e){}
-    try{ if(typeof updateDisplayedPrice === 'function') updateDisplayedPrice(window.symbolPrices[currentSymbol]?.price ?? window.symbolPrices[currentSymbol] ?? 0); }catch(e){}
-  }, 1200);
-}
-function stopDemoFallback(){ if(demoEngineId){ clearInterval(demoEngineId); demoEngineId = null; } }
+    return btn;
+  };
 
-/* Inicialización principal */
-async function initPrivateJS(){
-  try{ wireDomRefs(); }catch(e){ console.warn('wireDomRefs error', e); }
-  try{
-    const syms = await fetchSymbolsFromBackend().catch(()=>null);
-    if(Array.isArray(syms) && syms.length) window.ALL_SYMBOLS = syms;
-  }catch(e){ console.warn('fetchSymbolsFromBackend error', e); }
+  /* ---------------------------
+     SOCKET.IO STARTUP (idempotente)
+     --------------------------- */
+  function startSocket() {
+    try {
+      if (typeof io !== "function") { warn("socket.io client not loaded"); return; }
+      if (socket && socket.connected) return; // already running
 
-  try{
-    buildCategoryTabs(document.getElementById('catTabs')||catTabs, ()=> renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch ? (symbolSearch.value||'') : '', activeCategory));
-    buildCategoryTabs(document.getElementById('catTabsMarket')||catTabsMarket, ()=> renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), marketSearch ? (marketSearch.value||'') : '', activeCategory));
-    renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), '', 'All');
-    renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), '', 'All');
-    if(symbolSearch) symbolSearch.addEventListener('input', ()=> renderSymbolsGrid(symbolsGrid || document.getElementById('symbolsGrid'), symbolSearch.value, activeCategory));
-    if(marketSearch) marketSearch.addEventListener('input', ()=> renderSymbolsGrid(marketsSymbolsGrid || document.getElementById('marketsSymbolsGrid'), marketSearch.value, activeCategory));
-  }catch(e){}
+      socket = io(WS_BASE, {
+        path: "/socket.io",
+        transports: ["websocket", "polling"],
+        withCredentials: true,
+        auth: { token: localStorage.getItem("token") || null },
+        autoConnect: true
+      });
 
-  try{ startSocket(); }catch(e){ console.warn('startSocket failed', e); }
+      window.__LEONES_SOCKET__ = window.__LEONES_SOCKET__ || {};
+      window.__LEONES_SOCKET__.socket = socket;
 
-  let snapshotArrived = false;
-  const onSnapshot = ()=> { snapshotArrived = true; stopDemoFallback(); };
-  try{
-    if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === 'function'){
-      window.__LEONES_SOCKET__.socket.once('prices_snapshot', onSnapshot);
-    } else {
-      const tryAttach = setInterval(()=> {
-        if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === 'function'){
-          window.__LEONES_SOCKET__.socket.once('prices_snapshot', onSnapshot);
-          clearInterval(tryAttach);
+      socket.on("connect", () => {
+        log("Socket conectado", socket.id);
+        const wsStatusEl = document.getElementById("ws-status"); if (wsStatusEl) wsStatusEl.innerText = "conectado";
+        if (socket && socket.emit) { socket.emit("request_prices_snapshot"); socket.emit("request_symbols"); }
+      });
+
+      socket.on("disconnect", (reason) => {
+        warn("Cliente desconectado:", reason);
+        const wsStatusEl = document.getElementById("ws-status"); if (wsStatusEl) wsStatusEl.innerText = "desconectado";
+      });
+
+      socket.on("prices_snapshot", (snap) => {
+        try {
+          if (!snap) return;
+          if (Array.isArray(snap)) {
+            snap.forEach(item => { if (item && item.symbol) window.symbolPrices[item.symbol] = (item.price ?? item.p ?? item.v ?? item.value ?? item); });
+          } else {
+            Object.keys(snap).forEach(k => {
+              const item = snap[k];
+              if (typeof item === "object") {
+                const price = item.price ?? item.p ?? item.v ?? item;
+                const ts = item.ts ?? Date.now();
+                window.symbolPrices[k] = (typeof price === "object" ? price : { price: price, ts: ts });
+              } else {
+                window.symbolPrices[k] = snap[k];
+              }
+            });
+          }
+          try { if (typeof renderSymbolsGrid === "function") renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), symbolSearch ? (symbolSearch.value || "") : "", activeCategory); } catch (e) { }
+          try { if (typeof updateDisplayedPrice === "function") updateDisplayedPrice(window.symbolPrices[currentSymbol]?.price ?? window.symbolPrices[currentSymbol] ?? 0); } catch (e) { }
+        } catch (e) { warn("prices_snapshot handler error", e); }
+      });
+
+      socket.on("price", (p) => {
+        try {
+          if (!p) return;
+          const symbol = p.symbol || p.s || p.sym || p.t;
+          const priceVal = p.price ?? p.p ?? p.v ?? p.value ?? p;
+          const ts = p.ts ?? Date.now();
+          if (!symbol || (priceVal === undefined || priceVal === null)) return;
+          window.symbolPrices[symbol] = { price: priceVal, ts: ts };
+          document.querySelectorAll(`[data-symbol="${symbol}"], #op-price`).forEach(el => { try { el.textContent = Number(priceVal).toLocaleString(undefined, { maximumFractionDigits: 6 }); } catch (e) { } });
+          try { if (typeof updateDisplayedPrice === "function") updateDisplayedPrice(priceVal); } catch (e) { }
+          try { if (typeof updateOrderBook === "function") updateOrderBook(window.orderBooks[symbol] || {}); } catch (e) { }
+          try { if (typeof renderSymbolsGrid === "function") renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), symbolSearch ? (symbolSearch.value || "") : "", activeCategory); } catch (e) { }
+          try { if (typeof window.onExternalPrice === "function") window.onExternalPrice({ symbol, price: priceVal, ts }); } catch (e) { }
+        } catch (e) { warn("price handler error", e); }
+      });
+
+      socket.on("symbols_update", (symbols) => {
+        try {
+          if (!symbols) return;
+          if (Array.isArray(symbols)) {
+            window.ALL_SYMBOLS = symbols.map(s => ({ symbol: s.symbol || s.sym || s.t, label: s.label || s.name || s.symbol, market: s.market || s.mkt || "Crypto" }));
+          } else if (typeof symbols === "object") {
+            const arr = []; Object.keys(symbols).forEach(k => arr.push({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || "Crypto" })); window.ALL_SYMBOLS = arr;
+          }
+          try { if (typeof initSymbolsUI === "function") initSymbolsUI(); } catch (e) { }
+        } catch (e) { warn("symbols_update handling error", e); }
+      });
+
+      socket.on("orderbook", (ob) => {
+        try { if (!ob || !ob.symbol) return; window.orderBooks[ob.symbol] = ob; try { if (typeof updateOrderBook === "function") updateOrderBook(ob); } catch (e) { } } catch (e) { }
+      });
+
+      socket.on("connect_error", (err) => { console.error("socket connect_error", err); const el = document.getElementById("ws-status"); if (el) el.innerText = "error"; });
+
+    } catch (e) { console.error("startSocket error", e); }
+  }
+
+  window.startSocket = window.startSocket || startSocket;
+
+  /* ---------------------------
+     FETCH SYMBOLS (varios endpoints)
+     --------------------------- */
+  async function fetchSymbolsFromBackend() {
+    const endpoints = [
+      "/symbols",
+      "/api/symbols",
+      "/markets/symbols",
+      "/market/symbols",
+      "/market/list",
+      "/markets",
+      "/api/markets"
+    ];
+    for (const ep of endpoints) {
+      try {
+        const data = await apiFetch(ep).catch(() => null);
+        if (!data) continue;
+        let arr = [];
+        if (Array.isArray(data)) {
+          arr = data.map(it => {
+            if (typeof it === "string") return { symbol: it, label: it, market: "Unknown" };
+            return { symbol: it.symbol || it.sym || it.t, label: it.label || it.name || it.symbol || it.t, market: it.market || it.mkt || it.group || "Unknown" };
+          });
+        } else if (typeof data === "object") {
+          Object.keys(data).forEach(k => arr.push({ symbol: k, label: data[k].label || k, market: data[k].market || "Unknown" }));
         }
-      }, 500);
-      setTimeout(()=> clearInterval(tryAttach), 5000);
+        if (arr.length) return arr;
+      } catch (e) { }
     }
-  }catch(e){}
+    return (window.ALL_SYMBOLS && window.ALL_SYMBOLS.length) ? window.ALL_SYMBOLS : [
+      { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+      { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+      { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+      { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+      { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" }
+    ];
+  }
 
-  setTimeout(()=>{ if(!snapshotArrived) startDemoFallback(); }, 2500);
+  /* ---------------------------
+     TRADINGVIEW fallback
+     --------------------------- */
+  if (typeof window.initTradingWidget !== "function") {
+    window.initTradingWidget = function (symbol) {
+      try {
+        const cont = document.getElementById("tv_chart_container"); if (!cont) return;
+        cont.innerHTML = "";
+        if (window.TradingView && typeof TradingView.widget === "function") {
+          try {
+            new TradingView.widget({
+              container_id: "tv_chart_container",
+              autosize: true,
+              symbol: symbol || "BINANCE:BTCUSDT",
+              interval: "60",
+              timezone: "Etc/UTC",
+              theme: "dark",
+              style: "1",
+              locale: "es",
+              toolbar_bg: "#0b0b0b",
+              enable_publishing: false,
+              allow_symbol_change: true
+            });
+          } catch (e) { cont.innerHTML = '<div style="padding:12px;color:var(--muted)">No fue posible inicializar TradingView.</div>'; console.warn("TradingView init error", e); }
+          return;
+        }
+        cont.innerHTML = '<div style="padding:12px;color:var(--muted)">Widget de gráficos no disponible (tv.js no cargó).</div>';
+      } catch (e) { console.warn("initTradingWidget error", e); }
+    };
+  }
 
-  try{ if(typeof initTradingWidget === 'function') initTradingWidget(currentSymbol); }catch(e){}
-  try{
-    const s = localStorage.getItem(SESSION_KEY);
-    const token = localStorage.getItem('token');
-    if(s && token){
-      const u = JSON.parse(s);
-      if(typeof showPrivateFull === 'function') showPrivateFull(u, token);
-    } else { if(typeof restorePublicHeader === 'function') restorePublicHeader(); }
-  }catch(e){}
-}
+  /* ---------------------------
+     UI helpers (price & orderbook)
+     --------------------------- */
+  function updateDisplayedPrice(price) {
+    try { const el = document.getElementById("op-price"); if (el) el.textContent = Number(price || 0).toLocaleString(undefined, { maximumFractionDigits: 6 }); } catch (e) { }
+  }
 
-/* start when DOM ready */
-document.addEventListener('DOMContentLoaded', ()=> {
-  try{ initPrivateJS(); }catch(e){ console.error('initPrivateJS error', e); }
-});
+  function updateOrderBook(ob) {
+    try {
+      if (!ob) return;
+      const bidsEl = document.getElementById("ob-bids");
+      const asksEl = document.getElementById("ob-asks");
+      if (bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0, 8).map(b => `${Number(b[0]).toFixed(6)} • ${b[1]}`).join("<br/>") : '<div class="muted-small">—</div>';
+      if (asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0, 8).map(a => `${Number(a[0]).toFixed(6)} • ${a[1]}`).join("<br/>") : '<div class="muted-small">—</div>';
+    } catch (e) { }
+  }
 
-/* Exports for debugging */
-window._privateJS = {
-  apiFetch, fetchSymbolsFromBackend, startSocket, stopDemoFallback, startDemoFallback, updateDisplayedPrice, updateOrderBook
-};
+  /* ---------------------------
+     SYMBOLS GRID & SEARCH
+     --------------------------- */
+  let symbolSearch, symbolsGrid, catTabs, marketsSymbolsGrid, marketSearch, catTabsMarket;
+  let currentSymbol = (window.ALL_SYMBOLS && window.ALL_SYMBOLS[0] && window.ALL_SYMBOLS[0].symbol) || "BINANCE:BTCUSDT";
+
+  function wireDomRefs() {
+    symbolSearch = document.getElementById("symbolSearch");
+    symbolsGrid = document.getElementById("symbolsGrid");
+    catTabs = document.getElementById("catTabs");
+    marketsSymbolsGrid = document.getElementById("marketsSymbolsGrid");
+    marketSearch = document.getElementById("marketSearch");
+    catTabsMarket = document.getElementById("catTabsMarket");
+    try {
+      const raw = window.symbolPrices[currentSymbol];
+      const priceVal = (raw && typeof raw === "object") ? (raw.price ?? raw) : raw;
+      if (document.getElementById("op-price")) document.getElementById("op-price").textContent = Number(priceVal || 0).toLocaleString();
+    } catch (e) { }
+  }
+
+  const CATEGORIES = ["All", "Stocks", "Crypto", "Forex", "Indices", "Futures", "Bonds", "Economy", "Options"];
+  let activeCategory = "All";
+
+  function buildCategoryTabs(container, onClick) {
+    if (!container) return;
+    container.innerHTML = "";
+    CATEGORIES.forEach(cat => {
+      const b = document.createElement("button");
+      b.className = "cat-tab" + (cat === activeCategory ? " active" : "");
+      b.innerText = cat;
+      b.onclick = () => { activeCategory = cat; document.querySelectorAll(".cat-tab").forEach(x => x.classList.remove("active")); b.classList.add("active"); onClick(); };
+      container.appendChild(b);
+    });
+  }
+
+  function filterSymbols(q, category) {
+    q = (q || "").trim().toLowerCase();
+    return (window.ALL_SYMBOLS || []).filter(s => {
+      if (category && category !== "All" && (s.market || "").toLowerCase() !== category.toLowerCase()) return false;
+      if (!q) return true;
+      return ((s.label || "").toLowerCase().includes(q) || (s.symbol || "").toLowerCase().includes(q));
+    });
+  }
+
+  function renderSymbolsGrid(container, query, category) {
+    if (!container) return;
+    container.innerHTML = "";
+    const list = filterSymbols(query, category);
+    if (list.length === 0) {
+      container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>';
+      return;
+    }
+    list.forEach(s => {
+      const el = document.createElement("div");
+      el.className = "symbol-card";
+      el.setAttribute("data-symbol", s.symbol);
+      el.onclick = () => { selectSymbolAndOpenTrading(s.symbol, s.label); };
+      const rawPrice = window.symbolPrices[s.symbol];
+      const priceVal = (rawPrice && typeof rawPrice === "object") ? (rawPrice.price ?? rawPrice) : rawPrice;
+      const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
+      let ptext = "--";
+      if (numeric !== null && !isNaN(numeric)) {
+        ptext = (Math.abs(numeric) > 1000) ? numeric.toLocaleString(undefined, { maximumFractionDigits: 1 }) : numeric.toFixed(6);
+      } else if (priceVal !== null && priceVal !== undefined) {
+        ptext = String(priceVal);
+      }
+      el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || "Unknown")} · ${escapeHtml(s.symbol)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+        </div>
+      </div>`;
+      container.appendChild(el);
+    });
+  }
+
+  function selectSymbolAndOpenTrading(symbol, label) {
+    currentSymbol = symbol;
+    const ts = document.getElementById("tradingSymbol"); if (ts) ts.innerText = (label || symbol.split(":").pop()).replace("_", "/");
+    const opSymbolEl = document.getElementById("op-symbol"); if (opSymbolEl) opSymbolEl.innerText = (document.getElementById("tradingSymbol")?.innerText || "");
+    const opEx = document.getElementById("op-exchange"); if (opEx) opEx.innerText = symbol.includes("OANDA") ? "Market: FOREX" : (symbol.includes("INDEX") ? "Market: INDEX" : "Market: BINANCE");
+    try { if (typeof showPanel === "function") showPanel("tradingPanel"); else { document.querySelectorAll(".panel").forEach(p => p.style.display = "none"); const el = document.getElementById("tradingPanel"); if (el) el.style.display = "block"; } } catch (e) { }
+    if (typeof initTradingWidget === "function") initTradingWidget(symbol);
+    try { if (typeof updateDisplayedPrice === "function") updateDisplayedPrice(window.symbolPrices[symbol]?.price ?? window.symbolPrices[symbol] ?? 0); } catch (e) { }
+    try { if (typeof updateOrderBook === "function") updateOrderBook(window.orderBooks[symbol] || {}); } catch (e) { }
+  }
+
+  /* ---------------------------
+     DEMO FALLBACK (solo si no llega snapshot)
+     --------------------------- */
+  let demoEngineId = null;
+  function startDemoFallback() {
+    if (demoEngineId) return;
+    demoEngineId = setInterval(() => {
+      (window.ALL_SYMBOLS || []).forEach(s => {
+        if (!(s.symbol in window.symbolPrices)) {
+          window.symbolPrices[s.symbol] = { price: Number((Math.random() * 100).toFixed(2)), ts: Date.now() };
+        } else {
+          const oldRaw = window.symbolPrices[s.symbol];
+          const old = (oldRaw && typeof oldRaw === "object") ? (Number(oldRaw.price) || 0) : (Number(oldRaw) || 0);
+          const change = (Math.random() - 0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
+          const next = Number(Math.max(0.00001, old + change).toFixed(6));
+          window.symbolPrices[s.symbol] = { price: next, ts: Date.now() };
+        }
+      });
+      try { if (typeof renderSymbolsGrid === "function") renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), symbolSearch ? (symbolSearch.value || "") : "", activeCategory); } catch (e) { }
+      try { if (typeof updateDisplayedPrice === "function") updateDisplayedPrice(window.symbolPrices[currentSymbol]?.price ?? window.symbolPrices[currentSymbol] ?? 0); } catch (e) { }
+    }, 1200);
+  }
+  function stopDemoFallback() { if (demoEngineId) { clearInterval(demoEngineId); demoEngineId = null; } }
+
+  /* ---------------------------
+     INIT principal
+     --------------------------- */
+  async function initPrivateJS() {
+    try { wireDomRefs(); } catch (e) { warn("wireDomRefs error", e); }
+
+    try {
+      const syms = await fetchSymbolsFromBackend().catch(() => null);
+      if (Array.isArray(syms) && syms.length) window.ALL_SYMBOLS = syms;
+    } catch (e) { warn("fetchSymbolsFromBackend error", e); }
+
+    try {
+      buildCategoryTabs(document.getElementById("catTabs") || catTabs, () => renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), symbolSearch ? (symbolSearch.value || "") : "", activeCategory));
+      buildCategoryTabs(document.getElementById("catTabsMarket") || catTabsMarket, () => renderSymbolsGrid(marketsSymbolsGrid || document.getElementById("marketsSymbolsGrid"), marketSearch ? (marketSearch.value || "") : "", activeCategory));
+      renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), "", "All");
+      renderSymbolsGrid(marketsSymbolsGrid || document.getElementById("marketsSymbolsGrid"), "", "All");
+      if (symbolSearch) symbolSearch.addEventListener("input", () => renderSymbolsGrid(symbolsGrid || document.getElementById("symbolsGrid"), symbolSearch.value, activeCategory));
+      if (marketSearch) marketSearch.addEventListener("input", () => renderSymbolsGrid(marketsSymbolsGrid || document.getElementById("marketsSymbolsGrid"), marketSearch.value, activeCategory));
+    } catch (e) { }
+
+    try { startSocket(); } catch (e) { warn("startSocket failed", e); }
+
+    let snapshotArrived = false;
+    const onSnapshot = () => { snapshotArrived = true; stopDemoFallback(); };
+    try {
+      if (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === "function") {
+        window.__LEONES_SOCKET__.socket.once("prices_snapshot", onSnapshot);
+      } else {
+        const tryAttach = setInterval(() => {
+          if (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket && typeof window.__LEONES_SOCKET__.socket.once === "function") {
+            window.__LEONES_SOCKET__.socket.once("prices_snapshot", onSnapshot);
+            clearInterval(tryAttach);
+          }
+        }, 500);
+        setTimeout(() => clearInterval(tryAttach), 5000);
+      }
+    } catch (e) { }
+
+    setTimeout(() => { if (!snapshotArrived) startDemoFallback(); }, 2500);
+
+    try { if (typeof initTradingWidget === "function") initTradingWidget(currentSymbol); } catch (e) { }
+
+    try {
+      const s = localStorage.getItem(SESSION_KEY);
+      const token = localStorage.getItem("token");
+      if (s && token) {
+        const u = safeParseJSON(s) || {};
+        if (typeof showPrivateFull === "function") showPrivateFull(u, token);
+      } else { if (typeof restorePublicHeader === "function") restorePublicHeader(); }
+    } catch (e) { }
+  }
+
+  /* ---------------------------
+     BOOT on DOMContentLoaded
+     --------------------------- */
+  document.addEventListener("DOMContentLoaded", () => {
+    try { initPrivateJS(); } catch (e) { console.error("initPrivateJS error", e); }
+  });
+
+  /* ---------------------------
+     EXPORTS for debugging
+     --------------------------- */
+  window._privateJS = {
+    apiFetch: apiFetch,
+    fetchSymbolsFromBackend: fetchSymbolsFromBackend,
+    startSocket: startSocket,
+    stopDemoFallback: stopDemoFallback,
+    startDemoFallback: startDemoFallback,
+    updateDisplayedPrice: updateDisplayedPrice,
+    updateOrderBook: updateOrderBook
+  };
+
+})(); /* end wrapper */
 </script>
 </div>
 
