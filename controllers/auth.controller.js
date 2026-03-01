@@ -82,7 +82,8 @@ export async function register(req, res) {
     // Try to send verification email (do not make registration fail if email provider misconfigured)
     let emailResult = null;
     try {
-      emailResult = await sendEmail({ to: normalizedEmail, subject: "Verifica tu cuenta - Leones Broker", html });
+      // sendEmail expects (to, subject, html)
+      emailResult = await sendEmail(normalizedEmail, "Verifica tu cuenta - Leones Broker", html);
       console.log("[AUTH] sendEmail result:", emailResult);
     } catch (e) {
       console.error("[AUTH] Error enviando email de verificación:", e && e.message ? e.message : e);
@@ -128,7 +129,8 @@ export async function login(req, res) {
       return res.status(403).json({ ok: false, message: "Cuenta no verificada. Revisa tu correo." });
     }
 
-    const token = signToken(user._id);
+    const token = signToken(user._1?._id || user._id || user.id);
+    // Above line is defensive: prefers _id; fallback to id if present.
     const userSafe = sanitizeUser(user);
 
     return res.json({ ok: true, message: "Login correcto", data: { token, user: userSafe } });
@@ -174,7 +176,8 @@ export async function resendVerification(req, res) {
 
     let emailResult = null;
     try {
-      emailResult = await sendEmail({ to: normalizedEmail, subject: "Reenviar verificación - Leones Broker", html });
+      // sendEmail expects (to, subject, html)
+      emailResult = await sendEmail(normalizedEmail, "Reenviar verificación - Leones Broker", html);
       console.log("[AUTH] resendVerification sendEmail:", emailResult);
       return res.json({ ok: true, message: "Correo de verificación enviado", email_result: emailResult });
     } catch (e) {
@@ -221,4 +224,14 @@ export async function verify(req, res) {
   }
 }
 
+/* ---- Compatibility aliases ----
+   Some routes import different names (e.g. loginUser). Provide aliases so
+   both styles work and deployments don't fail due to export name mismatch.
+*/
+export const loginUser = login;
+export const registerUser = register;
+export const resendVerificationUser = resendVerification;
+export const verifyUser = verify;
+
+/* Default export kept for backwards compatibility */
 export default { register, login, resendVerification, verify };
