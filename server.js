@@ -1,8 +1,10 @@
-// server.js (CSP configurado + seguridad + comentarios)
+// server.js (CSP dinámico con nonce + seguridad + comentarios)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { createServer } from "http";
@@ -79,70 +81,82 @@ mongoose.connection.on("disconnected", () => {
 });
 
 /* ======================================================
-   SECURITY MIDDLEWARES (helmet, compression, sanitize, etc)
+   SECURITY MIDDLEWARES (helmet básico, compression, sanitize)
    ====================================================== */
 
 /*
-  Nota: Helmet por defecto aplica varias cabeceras.
-  A continuación desactivamos la CSP por defecto y aplicamos
-  una CSP personalizada que permite los CDNs que necesitas.
-
-  - Si quieres máxima seguridad: NO uses 'unsafe-inline' y mueve
-    los scripts inline a archivos externos (o implementa nonces).
-  - Si necesitas que todo funcione ahora (botones, scripts inline),
-    verás un bloque marcado // QUICK FIX que añade 'unsafe-inline'.
-    **Quita ese bloque tan pronto como migrés los handlers inline.**
+  Nota:
+  - Desactivamos la CSP default de Helmet para aplicar una CSP dinámica
+    basada en nonces por petición (más segura que 'unsafe-inline').
+  - Si temporalmente necesitas permitir inline por compatibilidad inmediata,
+    configura en tu .env: CSP_ALLOW_UNSAFE_INLINE=true
 */
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(
-  helmet.contentSecurityPolicy({
-    useDefaults: false, // usamos directivas completas
-    directives: {
-      defaultSrc: ["'self'"],
-      // Scripts permitidos: tu dominio + los CDNs que usas
-      // Si quieres activar la solución rápida, ver la nota más abajo.
-      scriptSrc: [
-        "'self'",
-        "https://unpkg.com",
-        "https://s3.tradingview.com",
-        "https://cdnjs.cloudflare.com",
-      ],
-      // Permite cargar scripts desde estos elementos también
-      scriptSrcElem: [
-        "'self'",
-        "https://unpkg.com",
-        "https://s3.tradingview.com",
-        "https://cdnjs.cloudflare.com",
-      ],
-      // QUICK FIX: si tus botones usan onclick="" o tienes scripts inline en HTML,
-      // descomenta la siguiente línea para permitirlos temporalmente.
-      // ADVERTENCIA: esto reduce la protección contra XSS. Quita cuando migres.
-      // scriptSrcAttr: ["'unsafe-inline'"],
-      //
-      // Styles: permitimos self + CDN y 'unsafe-inline' para estilos en línea (por now)
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      // Fonts & images
-      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
-      imgSrc: ["'self'", "data:", "blob:", "https://s3.tradingview.com"],
-      // Conexiones (fetch / websocket)
-      connectSrc: [
-        "'self'",
-        "wss:",
-        "https://api.polygon.io",
-        "https://leones-broker.onrender.com",
-        "https://*.polygon.io",
-      ],
-      // bloques
-      objectSrc: ["'none'"],
-      frameAncestors: ["'self'"],
-      upgradeInsecureRequests: [],
-    },
-  })
-);
-
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
+
+/* ======================================================
+   CSP dinámico con nonce por petición
+   - Genera res.locals.nonce (base64)
+   - Construye header Content-Security-Policy por petición
+   - Respeta env CSP_ALLOW_UNSAFE_INLINE para hotfix temporal
+   ====================================================== */
+app.use((req, res, next) => {
+  try {
+    const nonce = crypto.randomBytes(16).toString("base64");
+    res.locals.nonce = nonce;
+
+    const allowUnsafeInline = (process.env.CSP_ALLOW_UNSAFE_INLINE || "false").toLowerCase() === "true";
+
+    const scriptSrcArr = [
+      "'self'",
+      `'nonce-${nonce}'`,
+      "https://unpkg.com",
+      "https://s3.tradingview.com",
+      "https://cdnjs.cloudflare.com",
+    ];
+
+    // Hotfix temporal (NO recomendado en producción prolongada)
+    if (allowUnsafeInline) {
+      // esto permite handlers inline (onclick="...") y otros inline scripts
+      scriptSrcArr.push("'unsafe-inline'");
+      console.warn("⚠️ CSP_ALLOW_UNSAFE_INLINE=true -> 'unsafe-inline' habilitado (temporal)");
+    }
+
+    const scriptSrc = scriptSrcArr.join(" ");
+
+    const scriptSrcElemArr = [
+      "'self'",
+      `'nonce-${nonce}'`,
+      "https://unpkg.com",
+      "https://s3.tradingview.com",
+      "https://cdnjs.cloudflare.com",
+    ];
+    if (allowUnsafeInline) scriptSrcElemArr.push("'unsafe-inline'");
+
+    const directives = [
+      `default-src 'self'`,
+      `script-src ${scriptSrc}`,
+      `script-src-elem ${scriptSrcElemArr.join(" ")}`,
+      // NOTA: style-src incluye 'unsafe-inline' para permitir estilos inline
+      `style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com`,
+      `font-src 'self' https://cdnjs.cloudflare.com`,
+      `img-src 'self' data: blob: https://s3.tradingview.com`,
+      `connect-src 'self' wss: https://api.polygon.io https://leones-broker.onrender.com https://*.polygon.io`,
+      `object-src 'none'`,
+      `frame-ancestors 'self'`,
+    ];
+
+    // Construimos CSP final y lo seteamos
+    const cspHeader = directives.join("; ");
+    res.setHeader("Content-Security-Policy", cspHeader);
+  } catch (e) {
+    console.warn("No se pudo generar CSP nonce:", e);
+    // no rompemos la app, continuamos sin CSP dinámico (menos seguro)
+  }
+  next();
+});
 
 /* ======================================================
    RATE LIMIT (basic)
@@ -210,7 +224,7 @@ app.get("/api/health", (req, res) => {
     env: process.env.NODE_ENV || "dev",
     emailProvider: process.env.RESEND_API_KEY
       ? "resend"
-      : process.env.EMAIL_USER
+      : process.env.EMAIL_USER || process.env.SMTP_USER
       ? "smtp"
       : "none",
     db: mongoose.connection.name || null,
@@ -413,13 +427,28 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
-   NOTE: si prefieres inyectar nonces para scripts inline,
-   deberíamos servir index.html leyendo el archivo y reemplazando
-   los <script> que quieras con nonce="...". Te lo puedo armar.
+   - Express sirve assets estáticos normalmente
+   - Para index.html inyectamos nonce en los <script nonce="REPLACE_NONCE"> usando res.locals.nonce
    ====================================================== */
 app.use(express.static(path.join(__dirname, "public")));
+
+// Serve index.html replacing REPLACE_NONCE with the generated nonce.
+// Ensure your public/index.html uses: <script nonce="REPLACE_NONCE"> for inline scripts you want to allow.
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
+  const indexPath = path.join(__dirname, "public", "index.html");
+  // Si index.html existe, lo leemos y reemplazamos el placeholder REPLACE_NONCE
+  fs.readFile(indexPath, "utf8", (err, data) => {
+    if (err) {
+      // fallback: enviar archivo estático si lectura falla
+      console.error("Error leyendo index.html:", err);
+      return res.sendFile(indexPath);
+    }
+    const nonce = res.locals.nonce || "";
+    // Reemplazamos todas las ocurrencias de REPLACE_NONCE
+    const out = data.replace(/REPLACE_NONCE/g, nonce);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(out);
+  });
 });
 
 /* ======================================================
@@ -455,7 +484,7 @@ const server = httpServer.listen(PORT, () => {
 });
 
 /* ======================================================
-   GRACEFUL SHUTDOWN (igual que tenías)
+   GRACEFUL SHUTDOWN
    ====================================================== */
 let shuttingDown = false;
 
