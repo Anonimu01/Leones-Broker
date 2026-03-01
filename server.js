@@ -1,4 +1,4 @@
-// server.js (mejorado)
+// server.js (CSP configurado + seguridad + comentarios)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -81,7 +81,65 @@ mongoose.connection.on("disconnected", () => {
 /* ======================================================
    SECURITY MIDDLEWARES (helmet, compression, sanitize, etc)
    ====================================================== */
-app.use(helmet());
+
+/*
+  Nota: Helmet por defecto aplica varias cabeceras.
+  A continuación desactivamos la CSP por defecto y aplicamos
+  una CSP personalizada que permite los CDNs que necesitas.
+
+  - Si quieres máxima seguridad: NO uses 'unsafe-inline' y mueve
+    los scripts inline a archivos externos (o implementa nonces).
+  - Si necesitas que todo funcione ahora (botones, scripts inline),
+    verás un bloque marcado // QUICK FIX que añade 'unsafe-inline'.
+    **Quita ese bloque tan pronto como migrés los handlers inline.**
+*/
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(
+  helmet.contentSecurityPolicy({
+    useDefaults: false, // usamos directivas completas
+    directives: {
+      defaultSrc: ["'self'"],
+      // Scripts permitidos: tu dominio + los CDNs que usas
+      // Si quieres activar la solución rápida, ver la nota más abajo.
+      scriptSrc: [
+        "'self'",
+        "https://unpkg.com",
+        "https://s3.tradingview.com",
+        "https://cdnjs.cloudflare.com",
+      ],
+      // Permite cargar scripts desde estos elementos también
+      scriptSrcElem: [
+        "'self'",
+        "https://unpkg.com",
+        "https://s3.tradingview.com",
+        "https://cdnjs.cloudflare.com",
+      ],
+      // QUICK FIX: si tus botones usan onclick="" o tienes scripts inline en HTML,
+      // descomenta la siguiente línea para permitirlos temporalmente.
+      // ADVERTENCIA: esto reduce la protección contra XSS. Quita cuando migres.
+      // scriptSrcAttr: ["'unsafe-inline'"],
+      //
+      // Styles: permitimos self + CDN y 'unsafe-inline' para estilos en línea (por now)
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+      // Fonts & images
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https://s3.tradingview.com"],
+      // Conexiones (fetch / websocket)
+      connectSrc: [
+        "'self'",
+        "wss:",
+        "https://api.polygon.io",
+        "https://leones-broker.onrender.com",
+        "https://*.polygon.io",
+      ],
+      // bloques
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  })
+);
+
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
@@ -117,7 +175,8 @@ const corsOptions = {
     if (allowedOrigins.has(origin)) return callback(null, true);
     try {
       const url = new URL(origin);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+        return callback(null, true);
     } catch (e) {}
     console.warn("CORS denied for origin:", origin);
     callback(new Error("Not allowed by CORS"));
@@ -149,7 +208,11 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : (process.env.EMAIL_USER ? "smtp" : "none"),
+    emailProvider: process.env.RESEND_API_KEY
+      ? "resend"
+      : process.env.EMAIL_USER
+      ? "smtp"
+      : "none",
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
@@ -176,10 +239,12 @@ const SAMPLE_SYMBOLS = [
   { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
   { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
   { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" }
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
 
-app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
@@ -193,7 +258,10 @@ const httpServer = createServer(app);
 
 const io = new IOServer(httpServer, {
   cors: {
-    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : (process.env.CLIENT_URL || "*"),
+    origin:
+      Array.from(allowedOrigins).length
+        ? Array.from(allowedOrigins)
+        : process.env.CLIENT_URL || "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -246,13 +314,13 @@ try {
    ====================================================== */
 app.get("/api/symbols", (req, res) => {
   try {
-    const prices = (priceHandler && priceHandler.prices) ? priceHandler.prices : null;
+    const prices = priceHandler && priceHandler.prices ? priceHandler.prices : null;
     if (prices && Object.keys(prices).length) {
       const arr = Object.keys(prices).map((k) => {
         return {
           symbol: k,
           label: (k.split(":").pop() || k).replace("_", "/"),
-          market: (prices[k] && prices[k].market) ? prices[k].market : "Unknown"
+          market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
         };
       });
       return res.json(arr);
@@ -293,7 +361,10 @@ io.on("connection", (socket) => {
         const arr = Object.keys(priceHandler.prices).map((k) => ({
           symbol: k,
           label: (k.split(":").pop() || k).replace("_", "/"),
-          market: (priceHandler.prices[k] && priceHandler.prices[k].market) ? priceHandler.prices[k].market : "Unknown"
+          market:
+            priceHandler.prices[k] && priceHandler.prices[k].market
+              ? priceHandler.prices[k].market
+              : "Unknown",
         }));
         socket.emit("symbols_update", arr);
       } else {
@@ -307,7 +378,8 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function")
+        polygonSocket.subscribe(symbol, kind);
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -318,7 +390,8 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function")
+        polygonSocket.unsubscribe(symbol, kind);
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -340,6 +413,9 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
+   NOTE: si prefieres inyectar nonces para scripts inline,
+   deberíamos servir index.html leyendo el archivo y reemplazando
+   los <script> que quieras con nonce="...". Te lo puedo armar.
    ====================================================== */
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
@@ -353,8 +429,7 @@ app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({
     error: "Server error",
-    message:
-      process.env.NODE_ENV === "development" ? err.message : undefined,
+    message: process.env.NODE_ENV === "development" ? err.message : undefined,
   });
 });
 
@@ -373,12 +448,14 @@ const server = httpServer.listen(PORT, () => {
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
 
-  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  if (!process.env.POLYGON_API_KEY)
+    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  if (!process.env.RESEND_API_KEY)
+    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
 
 /* ======================================================
-   GRACEFUL SHUTDOWN
+   GRACEFUL SHUTDOWN (igual que tenías)
    ====================================================== */
 let shuttingDown = false;
 
