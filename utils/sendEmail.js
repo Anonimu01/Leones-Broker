@@ -5,67 +5,99 @@ import { Resend } from "resend";
 const {
   RESEND_API_KEY,
   SENDER_EMAIL,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_SECURE,
+  SMTP_USER,
+  SMTP_PASS,
   EMAIL_USER,
-  EMAIL_PASS
+  EMAIL_PASS,
+  NODE_ENV,
 } = process.env;
 
 /*
-  Sistema inteligente de envío:
+  Smart mailer:
+  Priority:
+   1) Resend (if RESEND_API_KEY)
+   2) SMTP (if SMTP_HOST/SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS)
+   3) Simulated (logs) - does not throw to avoid breaking flows
 
-  PRIORIDAD
-  1) Resend (producción recomendado)
-  2) SMTP (fallback dev/local)
-  3) Log seguro (no rompe registro si no hay proveedor)
-
-  Nunca lanza error fatal; siempre retorna un objeto con estado.
+  sendEmail supports two call styles:
+   - sendEmail(to, subject, htmlOrText)
+   - sendEmail({ to, subject, html, text, from })
 */
+
+const DEFAULT_SENDER = SENDER_EMAIL || SMTP_USER || EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/https?:\/\//, "") || "local"}`;
 
 let resendClient = null;
 let transporter = null;
+let transporterReady = false;
 
-/* ---------- INIT RESEND ---------- */
+/* ---------- Init Resend (if configured) ---------- */
 if (RESEND_API_KEY) {
   try {
     resendClient = new Resend(RESEND_API_KEY);
-    console.log("✅ Resend listo");
+    console.log("[MAIL] ✅ Resend client inicializado");
   } catch (err) {
-    console.error("❌ Error iniciando Resend:", err && err.message ? err.message : err);
+    console.error("[MAIL] ❌ Error inicializando Resend:", err && err.message ? err.message : err);
     resendClient = null;
   }
 }
 
-/* ---------- INIT SMTP ---------- */
-if (!resendClient && EMAIL_USER && EMAIL_PASS) {
+/* ---------- Init SMTP transporter (if Resend not present) ---------- */
+const initSmtp = () => {
+  if (transporter || (!SMTP_HOST && !SMTP_USER && !EMAIL_USER)) return;
+
+  const host = SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
+  const port = Number(SMTP_PORT || 465);
+  const secure = (SMTP_SECURE || "true").toLowerCase() === "true" || port === 465;
+  const user = SMTP_USER || EMAIL_USER;
+  const pass = SMTP_PASS || EMAIL_PASS;
+
+  if (!user || !pass) {
+    console.warn("[MAIL] ⚠️ SMTP credenciales no encontradas; SMTP no se inicializa");
+    return;
+  }
+
   try {
     transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
+      host,
+      port,
+      secure,
       auth: {
-        user: EMAIL_USER,
-        pass: EMAIL_PASS
-      }
+        user,
+        pass,
+      },
+      // aumenta timeouts razonables
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
     });
 
-    transporter.verify((err) => {
+    // verify async but non-blocking
+    transporter.verify((err, success) => {
       if (err) {
-        console.error("❌ SMTP error (verify):", err.message || err);
+        transporterReady = false;
+        console.error("[MAIL] ❌ SMTP verify failed:", err && err.message ? err.message : err);
+        // keep transporter null to avoid attempts later if verify fails badly
         transporter = null;
       } else {
-        console.log("✅ SMTP listo");
+        transporterReady = true;
+        console.log("[MAIL] ✅ SMTP transporter verificado y listo");
       }
     });
-
   } catch (err) {
-    console.error("❌ Error creando transporter:", err.message || err);
     transporter = null;
+    transporterReady = false;
+    console.error("[MAIL] ❌ Error creando transporter SMTP:", err && err.message ? err.message : err);
   }
-}
+};
 
-/* small sleep util */
+// initialize smtp if needed
+if (!resendClient) initSmtp();
+
+/* ---------- Helpers ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/* timeout wrapper */
 async function withTimeout(promise, ms = 10000) {
   let timer;
   const timeout = new Promise((_, rej) => {
@@ -81,74 +113,109 @@ async function withTimeout(promise, ms = 10000) {
   }
 }
 
-/* ====================================================== */
+function normalizeRecipients(to) {
+  if (!to) return [];
+  if (Array.isArray(to)) return to.map(String);
+  if (typeof to === "string") return [to];
+  if (typeof to === "object" && to.email) return [String(to.email)];
+  return [String(to)];
+}
 
-export const sendEmail = async (to, subject, html) => {
-  if (!to) {
-    console.warn("[MAIL] destinatario vacío");
+/* ====================================================== */
+/* Exported function - supports both signatures described  */
+/* ====================================================== */
+export const sendEmail = async (...args) => {
+  // support sendEmail({ to, subject, html, text, from }) and sendEmail(to, subject, html)
+  let payload = {};
+  if (args.length === 1 && typeof args[0] === "object") {
+    payload = { ...args[0] };
+  } else {
+    payload = {
+      to: args[0],
+      subject: args[1],
+      html: args[2],
+    };
+  }
+
+  const toArr = normalizeRecipients(payload.to);
+  if (!toArr.length) {
+    console.warn("[MAIL] destinatario vacío — skip");
     return { ok: false, skipped: true, reason: "empty_recipient" };
   }
 
-  if (!subject) subject = "Notificación";
+  const subject = payload.subject || "Notificación";
+  const html = payload.html || payload.body || "";
+  const text = payload.text || (html ? html.replace(/<[^>]+>/g, "") : "");
+  const from = payload.from || DEFAULT_SENDER;
 
-  // Normalize recipients
-  const tos = Array.isArray(to) ? to : [String(to)];
-
-  /* ---------- RESEND (preferido) ---------- */
+  // Prefer Resend
   if (resendClient) {
-    if (!SENDER_EMAIL) {
-      console.error("❌ Falta SENDER_EMAIL en variables entorno (necesario para Resend)");
+    if (!from) {
+      console.error("[MAIL] Resend configurado pero falta SENDER_EMAIL (from)");
       return { ok: false, provider: "resend", error: "missing_sender_email" };
     }
 
     let lastErr = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`[MAIL] (resend) intento ${attempt} →`, tos);
-        const resp = await resendClient.emails.send({
-          from: SENDER_EMAIL,
-          to: tos,
-          subject,
-          html
-        });
-        console.log("✅ Email enviado (Resend):", resp?.id || resp);
+        console.log(`[MAIL] (resend) intento ${attempt} →`, toArr);
+        const resp = await withTimeout(
+          resendClient.emails.send({
+            from,
+            to: toArr,
+            subject,
+            html,
+            text,
+          }),
+          12_000
+        );
+        console.log("[MAIL] ✅ Enviado via Resend:", resp?.id || resp);
         return { ok: true, provider: "resend", id: resp?.id || null, resp };
       } catch (err) {
         lastErr = err;
-        console.error(`[MAIL] Resend fallo (intento ${attempt}):`, err && err.message ? err.message : err);
-        // small backoff
+        console.error(`[MAIL] Resend fallo (int ${attempt}):`, err && err.message ? err.message : err);
         await sleep(400 * attempt);
       }
     }
     return { ok: false, provider: "resend", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
-  /* ---------- SMTP (fallback) ---------- */
+  // Fallback SMTP
+  if (!transporter && (SMTP_HOST || SMTP_USER || EMAIL_USER)) {
+    initSmtp();
+  }
+
   if (transporter) {
     let lastErr = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`[MAIL] (smtp) intento ${attempt} →`, tos);
-        const info = await withTimeout(transporter.sendMail({
-          from: `"Leones Broker" <${EMAIL_USER}>`,
-          to: tos.join(","),
-          subject,
-          html
-        }), 12000); // 12s timeout
-        console.log("✅ Email enviado SMTP:", info.messageId || info);
+        console.log(`[MAIL] (smtp) intento ${attempt} →`, toArr);
+        const info = await withTimeout(
+          transporter.sendMail({
+            from: `"Leones Broker" <${from}>`,
+            to: toArr.join(","),
+            subject,
+            text,
+            html,
+          }),
+          15_000
+        );
+        console.log("[MAIL] ✅ Enviado via SMTP:", info.messageId || info);
         return { ok: true, provider: "smtp", messageId: info.messageId || null, info };
       } catch (err) {
         lastErr = err;
-        console.error(`[MAIL] SMTP fallo (intento ${attempt}):`, (err && err.message) ? err.message : err);
+        console.error(`[MAIL] SMTP fallo (int ${attempt}):`, err && err.message ? err.message : err);
         await sleep(400 * attempt);
       }
     }
     return { ok: false, provider: "smtp", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
-  /* ---------- SIN PROVEEDOR (simulado/log) ---------- */
-  console.warn("⚠️ No hay proveedor de email configurado — simulando envío");
-  console.log("📧 Email simulado → Para:", tos, "Asunto:", subject);
-  // No lanzar: devolvemos ok=true pero marcado como simulado para que el flujo siga.
-  return { ok: true, provider: "simulated", simulated: true, to: tos, subject };
+  // No provider — simulate (non-fatal)
+  console.warn("[MAIL] ⚠️ Ningún proveedor configurado. Envío simulado. (set RESEND_API_KEY or SMTP_* vars)");
+  console.log("[MAIL] Simulado → to:", toArr, "subject:", subject, "from:", from);
+  // Keep ok=true so flows that create users don't fail; mark simulated.
+  return { ok: true, provider: "simulated", simulated: true, to: toArr, subject, from };
 };
+
+export default sendEmail;
