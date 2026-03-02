@@ -8,10 +8,12 @@ import { sendEmail } from "../utils/sendEmail.js";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const BASE_URL = (process.env.BASE_URL || "").replace(/\/+$/, "");
+const ALLOW_LOGIN_UNVERIFIED = (process.env.ALLOW_LOGIN_UNVERIFIED || "false").toLowerCase() === "true";
 
 function sanitizeUser(userDoc) {
   if (!userDoc) return null;
-  const u = userDoc.toObject ? userDoc.toObject() : { ...userDoc };
+  const u = typeof userDoc.toObject === "function" ? userDoc.toObject() : { ...userDoc };
+  // Campos que no queremos devolver al cliente
   delete u.password;
   delete u.passwordHash;
   delete u.verifyToken;
@@ -53,7 +55,9 @@ export async function register(req, res) {
     const newUser = new User({
       name,
       email: normalizedEmail,
+      // Guardamos en ambos campos por compatibilidad con distintos esquemas
       password: passwordHash,
+      passwordHash,
       phone: phone || "",
       address: address || "",
       verified: false,
@@ -64,7 +68,7 @@ export async function register(req, res) {
 
     await newUser.save();
 
-    // create jwt token for immediate session if you want
+    // create jwt token for immediate session (opcional)
     const token = signToken(newUser._id);
 
     // Build verification link
@@ -118,22 +122,23 @@ export async function login(req, res) {
     const user = await User.findOne({ email: normalizedEmail }).exec();
     if (!user) return res.status(401).json({ ok: false, message: "Credenciales inválidas" });
 
-    // Compare password
-    const match = await bcrypt.compare(password, user.password || user.passwordHash || "");
+    // Compare password against both possible fields
+    const hashedCandidate = user.password || user.passwordHash || "";
+    const match = await bcrypt.compare(password, hashedCandidate);
     if (!match) return res.status(401).json({ ok: false, message: "Credenciales inválidas" });
 
-    // Optional: block login if not verified (you can change behavior)
-    if (user.verified === false) {
-      // still return token if you prefer, but frontend currently blocks if token missing.
-      // We will return a 403 with info so frontend can show "revisa tu correo".
+    // Handle verification policy
+    if (user.verified === false && !ALLOW_LOGIN_UNVERIFIED) {
+      // Si NO permitimos login de no verificados, devolvemos 403 con mensaje claro
       return res.status(403).json({ ok: false, message: "Cuenta no verificada. Revisa tu correo." });
     }
 
-    const token = signToken(user._1?._id || user._id || user.id);
-    // Above line is defensive: prefers _id; fallback to id if present.
+    // Generar token correctamente (corregido typo)
+    const token = signToken(user._id);
     const userSafe = sanitizeUser(user);
 
-    return res.json({ ok: true, message: "Login correcto", data: { token, user: userSafe } });
+    // Incluir campo verified para que el frontend pueda reaccionar en caso necesario
+    return res.json({ ok: true, message: "Login correcto", data: { token, user: userSafe, verified: !!user.verified } });
   } catch (err) {
     console.error("[AUTH] login error:", err && err.message ? err.message : err);
     return res.status(500).json({ ok: false, message: "Error en login", error: err && err.message ? err.message : String(err) });
