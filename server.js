@@ -1,10 +1,8 @@
-// server.js (CSP dinámico con nonce + seguridad + comentarios)
+// server.js (CSP desactivado — versión limpia)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
-import fs from "fs";
-import crypto from "crypto";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { createServer } from "http";
@@ -81,82 +79,13 @@ mongoose.connection.on("disconnected", () => {
 });
 
 /* ======================================================
-   SECURITY MIDDLEWARES (helmet básico, compression, sanitize)
+   SECURITY MIDDLEWARES
+   - Helmet activo pero CSP desactivado para evitar bloqueos del frontend
    ====================================================== */
-
-/*
-  Nota:
-  - Desactivamos la CSP default de Helmet para aplicar una CSP dinámica
-    basada en nonces por petición (más segura que 'unsafe-inline').
-  - Si temporalmente necesitas permitir inline por compatibilidad inmediata,
-    configura en tu .env: CSP_ALLOW_UNSAFE_INLINE=true
-*/
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
-
-/* ======================================================
-   CSP dinámico con nonce por petición
-   - Genera res.locals.nonce (base64)
-   - Construye header Content-Security-Policy por petición
-   - Respeta env CSP_ALLOW_UNSAFE_INLINE para hotfix temporal
-   ====================================================== */
-app.use((req, res, next) => {
-  try {
-    const nonce = crypto.randomBytes(16).toString("base64");
-    res.locals.nonce = nonce;
-
-    const allowUnsafeInline = (process.env.CSP_ALLOW_UNSAFE_INLINE || "false").toLowerCase() === "true";
-
-    const scriptSrcArr = [
-      "'self'",
-      `'nonce-${nonce}'`,
-      "https://unpkg.com",
-      "https://s3.tradingview.com",
-      "https://cdnjs.cloudflare.com",
-    ];
-
-    // Hotfix temporal (NO recomendado en producción prolongada)
-    if (allowUnsafeInline) {
-      // esto permite handlers inline (onclick="...") y otros inline scripts
-      scriptSrcArr.push("'unsafe-inline'");
-      console.warn("⚠️ CSP_ALLOW_UNSAFE_INLINE=true -> 'unsafe-inline' habilitado (temporal)");
-    }
-
-    const scriptSrc = scriptSrcArr.join(" ");
-
-    const scriptSrcElemArr = [
-      "'self'",
-      `'nonce-${nonce}'`,
-      "https://unpkg.com",
-      "https://s3.tradingview.com",
-      "https://cdnjs.cloudflare.com",
-    ];
-    if (allowUnsafeInline) scriptSrcElemArr.push("'unsafe-inline'");
-
-    const directives = [
-      `default-src 'self'`,
-      `script-src ${scriptSrc}`,
-      `script-src-elem ${scriptSrcElemArr.join(" ")}`,
-      // NOTA: style-src incluye 'unsafe-inline' para permitir estilos inline
-      `style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com`,
-      `font-src 'self' https://cdnjs.cloudflare.com`,
-      `img-src 'self' data: blob: https://s3.tradingview.com`,
-      `connect-src 'self' wss: https://api.polygon.io https://leones-broker.onrender.com https://*.polygon.io`,
-      `object-src 'none'`,
-      `frame-ancestors 'self'`,
-    ];
-
-    // Construimos CSP final y lo seteamos
-    const cspHeader = directives.join("; ");
-    res.setHeader("Content-Security-Policy", cspHeader);
-  } catch (e) {
-    console.warn("No se pudo generar CSP nonce:", e);
-    // no rompemos la app, continuamos sin CSP dinámico (menos seguro)
-  }
-  next();
-});
 
 /* ======================================================
    RATE LIMIT (basic)
@@ -427,27 +356,19 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
-   - Express sirve assets estáticos normalmente
-   - Para index.html inyectamos nonce en los <script nonce="REPLACE_NONCE"> usando res.locals.nonce
+   - Servimos assets estáticos y devolvemos index.html tal cual
+   - Si tu public/index.html tiene atributos nonce (REPLACE_NONCE),
+     no afectan la ejecución de scripts cuando CSP no está presente.
    ====================================================== */
 app.use(express.static(path.join(__dirname, "public")));
 
-// Serve index.html replacing REPLACE_NONCE with the generated nonce.
-// Ensure your public/index.html uses: <script nonce="REPLACE_NONCE"> for inline scripts you want to allow.
 app.get("*", (req, res) => {
   const indexPath = path.join(__dirname, "public", "index.html");
-  // Si index.html existe, lo leemos y reemplazamos el placeholder REPLACE_NONCE
-  fs.readFile(indexPath, "utf8", (err, data) => {
+  res.sendFile(indexPath, (err) => {
     if (err) {
-      // fallback: enviar archivo estático si lectura falla
-      console.error("Error leyendo index.html:", err);
-      return res.sendFile(indexPath);
+      console.error("Error sirviendo index.html:", err);
+      res.status(err.status || 500).send("Error loading app");
     }
-    const nonce = res.locals.nonce || "";
-    // Reemplazamos todas las ocurrencias de REPLACE_NONCE
-    const out = data.replace(/REPLACE_NONCE/g, nonce);
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(out);
   });
 });
 
