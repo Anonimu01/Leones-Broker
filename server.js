@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { createServer } from "http";
 import { Server as IOServer } from "socket.io";
+import fs from "fs";
 
 import helmet from "helmet";
 import compression from "compression";
@@ -485,12 +486,41 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
+   - Detectamos la carpeta estática real (public / publico / público)
    - Servimos assets estáticos y devolvemos index.html tal cual
    ====================================================== */
-app.use(express.static(path.join(__dirname, "public")));
+const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+let staticDirName = null;
+
+for (const cand of staticCandidates) {
+  const p = path.join(__dirname, cand);
+  try {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+if (!staticDirName) {
+  // fallback a "public" (lo habitual) pero avisamos
+  staticDirName = "public";
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
+  );
+} else {
+  console.log(`Static folder detected: '${staticDirName}'`);
+}
+
+const staticPath = path.join(__dirname, staticDirName);
+app.use(express.static(staticPath));
 
 app.get("*", (req, res) => {
-  const indexPath = path.join(__dirname, "public", "index.html");
+  const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
       console.error("Error sirviendo index.html:", err);
