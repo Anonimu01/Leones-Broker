@@ -520,6 +520,9 @@ let account = {
     (location.hostname === "localhost" ? "http://localhost:3000/api" : (location.origin + "/api"));
   const WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
 
+  // make a local API constant used by some functions (keeps compatibility con tu código)
+  const API = window.API || API_BASE;
+
   /* ========== UTILITIES ========== */
   const log = (...a) => { try { console.log("[LEONES]", ...a); } catch (e) {} };
   const warn = (...a) => { try { console.warn("[LEONES]", ...a); } catch (e) {} };
@@ -532,10 +535,10 @@ let account = {
   // Mask or obfuscate name/email so user's full name never appears in UI
   function safeDisplayName(user = {}) {
     // Prefer alias if present, else mask email
-    if (user.alias && typeof user.alias === "string" && user.alias.trim().length) {
+    if (user && user.alias && typeof user.alias === "string" && user.alias.trim().length) {
       return user.alias;
     }
-    const email = user.email || "";
+    const email = (user && user.email) ? user.email : "";
     if (!email.includes("@")) return "Cuenta";
     const [local, domain] = String(email).split("@");
     const maskedLocal = local.length <= 2 ? (local[0] + "*") : (local[0] + local.slice(1,2).replace(/./g,"*") + local.slice(-1));
@@ -549,7 +552,7 @@ let account = {
     if (!(opts.body instanceof FormData)) headers["Content-Type"] = headers["Content-Type"] || "application/json";
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const url = path.startsWith("http") ? path : API_BASE + (path.startsWith("/") ? path : "/" + path);
+    const url = path.startsWith("http") ? path : (API_BASE.replace(/\/+$/, "") + (path.startsWith("/") ? path : "/" + path));
     let res;
     try {
       res = await fetch(url, { ...opts, headers, credentials: "include" });
@@ -890,7 +893,7 @@ let account = {
         dispatchEvent(new CustomEvent("leones:openRegister"));
         return;
       }
-      if(txt === "iniciar sesión" || txt === "iniciar sesión" || el.dataset?.action === "open-login") {
+      if(txt === "iniciar sesión" || el.dataset?.action === "open-login") {
         ev.preventDefault && ev.preventDefault();
         dispatchEvent(new CustomEvent("leones:openLogin"));
         return;
@@ -923,34 +926,53 @@ let account = {
 
 })(); // EOF main.js
 
+/* ============================
+   Account helpers / functions
+   ============================ */
+
 async function loadAccount() {
   try {
-    const token = localStorage.getItem("BROKER_TOKEN");
+    const token = localStorage.getItem("BROKER_TOKEN") || localStorage.getItem("token");
+    // Use the global API constant (avoid accidental /api/api)
+    const base = (typeof window !== "undefined" && window.API) ? window.API : (typeof API !== "undefined" ? API : "");
+    const url = (base || "").replace(/\/+$/, "") + "/account";
 
-    const res = await fetch(`${API}/account`, {
+    const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    const data = await res.json();
+    // handle non-json gracefully
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
 
     if (res.ok) {
-      account = data;
+      // If backend returns account object or full payload, map defensively
+      if (data && data.account) account = data.account;
+      else if (data && typeof data === "object") {
+        // pick common fields if present
+        account.balance = Number(data.balance ?? data.bal ?? account.balance);
+        account.leverage = Number(data.leverage ?? account.leverage);
+        account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
+        account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
+      } else if (Array.isArray(data)) {
+        // unexpected array -> ignore
+      }
       updateMarginMetrics();
       updateAccountUI();
+    } else {
+      // non-ok: log for debugging but don't throw here (frontend should stay responsive)
+      console.warn("loadAccount failed", res.status, data);
     }
   } catch (err) {
     console.error("Error cargando cuenta:", err);
   }
 }
 
-
 function calculateFloatingPnL() {
   let total = 0;
-
-  account.positions.forEach(pos => {
-    total += pos.pnl || 0;
+  (account.positions || []).forEach(pos => {
+    total += Number(pos.pnl || 0);
   });
-
   return total;
 }
 
@@ -961,14 +983,41 @@ function calculateMargin(lotSize, price) {
 }
 
 function updateMarginMetrics() {
-  account.equity = account.balance + calculateFloatingPnL();
-  account.freeMargin = account.equity - account.marginUsed;
+  account.equity = Number(account.balance || 0) + Number(calculateFloatingPnL());
+  account.freeMargin = Number(account.equity) - Number(account.marginUsed || 0);
 
   account.marginLevel =
     account.marginUsed > 0
       ? (account.equity / account.marginUsed) * 100
       : 0;
 }
+
+/* Minimal updateAccountUI to prevent "not defined" errors and update basic DOM if present */
+function updateAccountUI() {
+  try {
+    // update simple elements if they exist
+    const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setText("balanceEl", (account.balance || 0).toLocaleString());
+    setText("equityEl", (account.equity || 0).toLocaleString());
+    setText("marginUsedEl", (account.marginUsed || 0).toLocaleString());
+    setText("freeMarginEl", (account.freeMargin || 0).toLocaleString());
+    setText("marginLevelEl", (account.marginLevel ? (Math.round(account.marginLevel*100)/100 + "%") : "0%"));
+    // positions list
+    const listEl = document.getElementById("positionsList");
+    if (listEl) {
+      const rows = (account.positions || []).map(p => `<div class="pos-row">${(p.symbol||"")} ${(p.side||"").toUpperCase()} ${p.lots || 0} lots PnL:${(p.pnl||0)}</div>`);
+      listEl.innerHTML = rows.join("");
+    }
+  } catch (e) {
+    console.warn("updateAccountUI error", e);
+  }
+}
+
+/* expose for other scripts */
+window._LEONES = window._LEONES || {};
+window._LEONES.loadAccount = loadAccount;
+window._LEONES.updateAccountUI = updateAccountUI;
+window._LEONES.calculateMargin = calculateMargin;
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
