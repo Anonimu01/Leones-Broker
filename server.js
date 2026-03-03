@@ -1,4 +1,4 @@
-// server.js (CSP desactivado — versión limpia)
+// server.js (CSP desactivado — versión limpia + Resend/SMTP sendEmail helper)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -13,6 +13,8 @@ import compression from "compression";
 import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
+
+import nodemailer from "nodemailer";
 
 import { connectDB } from "./config/db.js";
 
@@ -159,6 +161,133 @@ app.get("/api/health", (req, res) => {
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
+});
+
+/* ======================================================
+   SEND EMAIL HELPER (Resend API fallback to SMTP)
+   - app.locals.sendEmail available
+   - endpoint /api/_send_test_email para probar
+   ====================================================== */
+
+async function sendViaResend(from, to, subject, html) {
+  // Resend expects: { from, to: [..], subject, html }
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error("RESEND_API_KEY no configurado");
+
+  const body = {
+    from,
+    to: Array.isArray(to) ? to : [to],
+    subject: subject || "(no subject)",
+    html: html || "",
+  };
+
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => null);
+    const err = new Error(`Resend error ${resp.status}: ${txt || resp.statusText}`);
+    err.status = resp.status;
+    err.body = txt;
+    throw err;
+  }
+
+  const json = await resp.json().catch(() => ({}));
+  return json;
+}
+
+let smtpTransporter = null;
+async function getSmtpTransporter() {
+  if (smtpTransporter) return smtpTransporter;
+
+  const host = process.env.MAIL_HOST;
+  const port = Number(process.env.MAIL_PORT) || (process.env.MAIL_PORT ? Number(process.env.MAIL_PORT) : 465);
+  const user = process.env.EMAIL_USER || process.env.SMTP_USER;
+  const pass = process.env.EMAIL_PASS || process.env.SMTP_PASS;
+
+  if (!host || !user || !pass) {
+    throw new Error("SMTP no configurado (MAIL_HOST / EMAIL_USER / EMAIL_PASS faltantes)");
+  }
+
+  smtpTransporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465, // true for 465, false for other ports
+    auth: { user, pass },
+  });
+
+  // verify once
+  try {
+    await smtpTransporter.verify();
+    console.log("SMTP transporter verificado");
+  } catch (e) {
+    console.warn("Warn: SMTP verify falló:", e && e.message ? e.message : e);
+  }
+
+  return smtpTransporter;
+}
+
+async function sendViaSmtp(from, to, subject, html) {
+  const transporter = await getSmtpTransporter();
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html,
+  });
+  return info;
+}
+
+async function sendEmail(to, subject, html, opts = {}) {
+  // opts.from override
+  const from = opts.from || process.env.SENDER_EMAIL || process.env.EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/^https?:\/\//, "") || "localhost"}`;
+
+  // Prefer Resend when configured
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const r = await sendViaResend(from, to, subject, html);
+      return { ok: true, provider: "resend", result: r };
+    } catch (e) {
+      console.error("Resend send failed:", e && e.message ? e.message : e);
+      // fall through to SMTP if available
+    }
+  }
+
+  // Fallback to SMTP
+  try {
+    const info = await sendViaSmtp(from, to, subject, html);
+    return { ok: true, provider: "smtp", result: info };
+  } catch (e) {
+    console.error("SMTP send failed:", e && e.message ? e.message : e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// expose helper on app.locals so other modules (or devs) can use it
+app.locals.sendEmail = sendEmail;
+
+// Route to test sending email from server
+app.post("/api/_send_test_email", async (req, res) => {
+  const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
+  if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
+
+  const subject = req.body.subject || "Prueba de correo - Leones Broker";
+  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+
+  try {
+    const r = await sendEmail(to, subject, html);
+    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result });
+    return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
+  } catch (err) {
+    console.error("test email error:", err);
+    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
+  }
 });
 
 /* ======================================================
@@ -357,8 +486,6 @@ app.use("/api", (req, res) => {
 /* ======================================================
    STATIC FRONTEND
    - Servimos assets estáticos y devolvemos index.html tal cual
-   - Si tu public/index.html tiene atributos nonce (REPLACE_NONCE),
-     no afectan la ejecución de scripts cuando CSP no está presente.
    ====================================================== */
 app.use(express.static(path.join(__dirname, "public")));
 
