@@ -468,17 +468,16 @@
 
 <script>
 
-/* public/js/main.js — UNIFICADO y CORREGIDO
-   - Muestra nombre real en perfil/overview si existe
-   - Aplica glow/luz a inputs en modales
-   - Mantiene todos los botones y delegación
-   - No borra ni oculta nada que tenías
+/* public/js/main.js — UNIFICADO, CORREGIDO y ROBUSTO
+   - Exports globals expected by inline scripts (SESSION_KEY, TOKEN_KEY, loadAccount, etc.)
+   - Mantiene todo lo que ya tenías: UI, modales, register/login, socket, margin/leverage
+   - Añade MutationObserver para que botones dinámicos funcionen siempre
+   - No borra ni oculta nada de tu código original
 */
-
 (function () {
   "use strict";
 
-  // --- Guard rails: inicializar una sola vez ---
+  // Prevent double-init
   if (window._LEONES && window._LEONES.initialized) {
     console.warn("[LEONES] main already initialized");
     return;
@@ -487,37 +486,38 @@
   window._LEONES.initialized = true;
 
   /* -------------------------
-     CONFIG / CONSTANTS
+     GLOBAL KEYS (exposed)
      ------------------------- */
-  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-  const TOKEN_KEY = "token"; // token storage key
-  const DEFAULT_API =
-    typeof window.API !== "undefined"
-      ? window.API
-      : location.hostname === "localhost"
-      ? "http://localhost:3000/api"
-      : "/api";
+  window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  window.TOKEN_KEY = window.TOKEN_KEY || "token";
 
-  const API_BASE = window.API_BASE || DEFAULT_API;
-  const WS_BASE =
-    window.WS_BASE ||
-    (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+  const SESSION_KEY = window.SESSION_KEY;
+  const TOKEN_KEY = window.TOKEN_KEY;
+
+  /* -------------------------
+     API / WS base (exposed to env)
+     ------------------------- */
+  window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+  window.API_BASE = window.API_BASE || window.API;
+  window.WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+
+  const API_BASE = window.API_BASE;
+  const WS_BASE = window.WS_BASE;
 
   /* -------------------------
      UTIL
      ------------------------- */
-  const log = (...a) => { try { console.log("[LEONES]", ...a); } catch(e){} };
-  const warn = (...a) => { try { console.warn("[LEONES]", ...a); } catch(e){} };
-  const error = (...a) => { try { console.error("[LEONES]", ...a); } catch(e){} };
+  const log = (...a) => { try { console.log("[LEONES]", ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn("[LEONES]", ...a); } catch (e) {} };
+  const error = (...a) => { try { console.error("[LEONES]", ...a); } catch (e) {} };
 
   function safeParseJSON(s, fallback = null) {
     try { return JSON.parse(s); } catch (e) { return fallback; }
   }
 
-  // safeDisplayName: ahora PRIMERO muestra el nombre real si existe (user.name),
-  // si no, hace fallback a email enmascarado.
   function safeDisplayName(user = {}) {
     if (!user) return "Cuenta";
+    // show real name if exists
     if (user.name && String(user.name).trim().length) return String(user.name).trim();
     if (user.alias && typeof user.alias === "string" && user.alias.trim()) return user.alias;
     const email = user.email || "";
@@ -530,7 +530,7 @@
   }
 
   /* -------------------------
-     API HELPERS (fetch wrapper)
+     API HELPERS
      ------------------------- */
   async function apiFetch(path, opts = {}) {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -563,7 +563,6 @@
       const err = new Error(msg); err.status = res.status; err.body = data;
       throw err;
     }
-
     return data;
   }
 
@@ -575,7 +574,7 @@
   window._LEONES.apiPost = apiPost;
 
   /* -------------------------
-     applyInputGlow: preserva la "luz" visual de inputs
+     UI: input glow
      ------------------------- */
   function applyInputGlow(root = document) {
     try {
@@ -594,7 +593,49 @@
   }
 
   /* -------------------------
-     SOCKET (single instance)
+     MODAL system
+     ------------------------- */
+  function ensureModal() {
+    let modal = document.getElementById("leones_modal");
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.id = "leones_modal";
+    modal.style.cssText = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:99999;";
+    modal.innerHTML = `<div id="leones_modal_box" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff"></div>`;
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function showModal(html, onConfirm) {
+    const modal = ensureModal();
+    const box = modal.querySelector("#leones_modal_box");
+    box.innerHTML = html;
+    if (!box.querySelector(".leones_modal_actions")) {
+      const actions = document.createElement("div");
+      actions.className = "leones_modal_actions";
+      actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:12px";
+      const cancel = document.createElement("button"); cancel.className = "btn ghost"; cancel.textContent = "Cancelar";
+      const ok = document.createElement("button"); ok.className = "btn glow"; ok.textContent = "Aceptar";
+      cancel.addEventListener("click", closeModal);
+      ok.addEventListener("click", () => { if (typeof onConfirm === "function") onConfirm(); closeModal(); });
+      actions.appendChild(cancel); actions.appendChild(ok); box.appendChild(actions);
+    }
+    applyInputGlow(box);
+    modal.style.display = "flex"; document.body.style.overflow = "hidden";
+    setTimeout(() => { const first = box.querySelector("input,textarea,select,button"); if (first) first.focus(); }, 30);
+  }
+
+  function closeModal() {
+    const modal = document.getElementById("leones_modal");
+    if (!modal) return;
+    modal.style.display = "none"; document.body.style.overflow = "";
+  }
+
+  window._LEONES.showModal = showModal;
+  window._LEONES.closeModal = closeModal;
+
+  /* -------------------------
+     SOCKET single-instance
      ------------------------- */
   function initSocket() {
     try {
@@ -613,12 +654,11 @@
         auth: { token: localStorage.getItem(TOKEN_KEY) || null },
         autoConnect: true,
       });
-
       window.__LEONES_SOCKET__ = { socket: sock };
 
       sock.on("connect", () => {
         log("socket connected", sock.id);
-        try { sock.emit("request_prices_snapshot"); sock.emit("request_symbols"); } catch(e){}
+        try { sock.emit("request_prices_snapshot"); sock.emit("request_symbols"); } catch (e) {}
       });
       sock.on("disconnect", (reason) => log("socket disconnected", reason));
       sock.on("connect_error", (err) => warn("socket connect_error", err));
@@ -639,11 +679,10 @@
       return null;
     }
   }
-
   window._LEONES.initSocket = initSocket;
 
   /* -------------------------
-     AUTH: register/login/logout/resend
+     AUTH helpers
      ------------------------- */
   async function registerUser({ name, email, password, phone = "", address = "" } = {}) {
     if (!name || !email || !password) throw new Error("name, email y password son requeridos");
@@ -696,7 +735,7 @@
   window._LEONES.logout = logout;
 
   /* -------------------------
-     HEADER / SESSION UI
+     HEADER UI
      ------------------------- */
   function restorePublicHeader() {
     try {
@@ -714,8 +753,7 @@
       btnOpen.addEventListener("click", () => dispatchEvent(new CustomEvent("leones:openRegister")));
       btnLogin.addEventListener("click", () => dispatchEvent(new CustomEvent("leones:openLogin")));
 
-      // bind any lower page buttons (class-based) as well
-      attachGlobalOpenButtons();
+      attachGlobalOpenButtons(); // ensure bindings
     } catch (e) { warn("restorePublicHeader error", e); }
   }
 
@@ -728,7 +766,6 @@
       wrapper.style.display = "flex"; wrapper.style.gap = "10px"; wrapper.style.alignItems = "center";
 
       const idSpan = document.createElement("div");
-      // ahora mostramos el nombre real si existe (user.name), si no fallback masked
       idSpan.textContent = (user && user.name && String(user.name).trim().length) ? String(user.name).trim() : safeDisplayName(user);
       idSpan.style.color = "var(--gold)";
       idSpan.style.fontWeight = "700";
@@ -737,15 +774,12 @@
       const logoutBtn = document.createElement("button");
       logoutBtn.className = "btn ghost";
       logoutBtn.textContent = "Cerrar sesión";
-      logoutBtn.addEventListener("click", () => {
-        logout();
-      });
+      logoutBtn.addEventListener("click", () => { logout(); });
 
       wrapper.appendChild(idSpan);
       wrapper.appendChild(logoutBtn);
       header.appendChild(wrapper);
 
-      // If there's an overview/profile name element, update it too
       const profileNameEl = document.getElementById("private-name-full");
       if (profileNameEl) profileNameEl.textContent = (user && user.name && String(user.name).trim().length) ? String(user.name).trim() : safeDisplayName(user);
       const profileEmailEl = document.getElementById("private-email-full");
@@ -757,51 +791,7 @@
   window._LEONES.showPrivateHeader = showPrivateHeader;
 
   /* -------------------------
-     Simple modal system (reusable)
-     ------------------------- */
-  function ensureModal() {
-    let modal = document.getElementById("leones_modal");
-    if (modal) return modal;
-    modal = document.createElement("div");
-    modal.id = "leones_modal";
-    modal.style.cssText = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:99999;";
-    modal.innerHTML = `<div id="leones_modal_box" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff"></div>`;
-    document.body.appendChild(modal);
-    return modal;
-  }
-
-  function showModal(html, onConfirm) {
-    const modal = ensureModal();
-    const box = modal.querySelector("#leones_modal_box");
-    box.innerHTML = html;
-    // attach actions if missing
-    if (!box.querySelector(".leones_modal_actions")) {
-      const actions = document.createElement("div");
-      actions.className = "leones_modal_actions";
-      actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end;margin-top:12px";
-      const cancel = document.createElement("button"); cancel.className = "btn ghost"; cancel.textContent = "Cancelar";
-      const ok = document.createElement("button"); ok.className = "btn glow"; ok.textContent = "Aceptar";
-      cancel.addEventListener("click", closeModal);
-      ok.addEventListener("click", () => { if (typeof onConfirm === "function") onConfirm(); closeModal(); });
-      actions.appendChild(cancel); actions.appendChild(ok); box.appendChild(actions);
-    }
-    // apply input glow within modal so inputs keep the light effect
-    applyInputGlow(box);
-    modal.style.display = "flex"; document.body.style.overflow = "hidden";
-    setTimeout(() => { const first = box.querySelector("input,textarea,select,button"); if (first) first.focus(); }, 30);
-  }
-
-  function closeModal() {
-    const modal = document.getElementById("leones_modal");
-    if (!modal) return;
-    modal.style.display = "none"; document.body.style.overflow = "";
-  }
-
-  window._LEONES.showModal = showModal;
-  window._LEONES.closeModal = closeModal;
-
-  /* -------------------------
-     Global wiring for register/login modals
+     Register / Login global wiring
      ------------------------- */
   function wireGlobalEvents() {
     addEventListener("leones:openRegister", () => {
@@ -860,14 +850,12 @@
         }
       });
     });
-
-    // Re-attach helper to ensure any DOM buttons with classes work
-    attachGlobalOpenButtons();
   }
 
-  // Attach page buttons (so lower page buttons work)
+  /* -------------------------
+     attachGlobalOpenButtons + MutationObserver
+     ------------------------- */
   function attachGlobalOpenButtons() {
-    // note: we use named handlers so removeEventListener works if called multiple times
     document.querySelectorAll(".open-register").forEach(btn => {
       btn.removeEventListener("click", _openRegisterHandler);
       btn.addEventListener("click", _openRegisterHandler);
@@ -880,18 +868,27 @@
   function _openRegisterHandler(e){ e && e.preventDefault && e.preventDefault(); dispatchEvent(new CustomEvent("leones:openRegister")); }
   function _openLoginHandler(e){ e && e.preventDefault && e.preventDefault(); dispatchEvent(new CustomEvent("leones:openLogin")); }
 
+  // observe DOM additions so dynamic buttons get wired
+  (function observeForButtons(){
+    try {
+      const obs = new MutationObserver(mutations => {
+        let added = false;
+        for (const m of mutations) {
+          if (m.addedNodes && m.addedNodes.length) { added = true; break; }
+        }
+        if (added) {
+          attachGlobalOpenButtons();
+        }
+      });
+      obs.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch (e) { /* noop */ }
+  })();
+
   /* -------------------------
-     ACCOUNT / MARGIN / LEVERAGE helpers
+     ACCOUNT / MARGIN / LEVERAGE
      ------------------------- */
   window._LEONES.account = window._LEONES.account || {
-    balance: 0,
-    equity: 0,
-    marginUsed: 0,
-    freeMargin: 0,
-    marginLevel: 0,
-    leverage: 100,
-    currency: "USD",
-    positions: []
+    balance: 0, equity: 0, marginUsed: 0, freeMargin: 0, marginLevel: 0, leverage: 100, currency: "USD", positions: []
   };
 
   function calculateFloatingPnL() {
@@ -929,14 +926,7 @@
   }
 
   function openDemoPosition({ symbol, side = "buy", lots = 0.01, entryPrice = 1.0 }) {
-    const pos = {
-      id: "pos_" + Date.now(),
-      symbol,
-      side,
-      lots: Number(lots),
-      entryPrice: Number(entryPrice),
-      pnl: 0
-    };
+    const pos = { id: "pos_" + Date.now(), symbol, side, lots: Number(lots), entryPrice: Number(entryPrice), pnl: 0 };
     const marginRequired = calculateMargin(pos.lots, pos.entryPrice);
     window._LEONES.account.positions.push(pos);
     window._LEONES.account.marginUsed = (Number(window._LEONES.account.marginUsed) || 0) + marginRequired;
@@ -951,7 +941,7 @@
   window._LEONES.openDemoPosition = openDemoPosition;
 
   /* -------------------------
-     loadAccount() -> fetch account info from backend
+     loadAccount / updateAccountUI (exposed globally)
      ------------------------- */
   async function loadAccount() {
     try {
@@ -961,7 +951,7 @@
         try {
           data = await apiFetch(ep).catch(() => null);
           if (data) break;
-        } catch (e) { /* ignore and continue */ }
+        } catch (e) {}
       }
       if (data) {
         window._LEONES.account = window._LEONES.account || {};
@@ -980,8 +970,6 @@
     return null;
   }
 
-  window._LEONES.loadAccount = loadAccount;
-
   function updateAccountUI() {
     try { updateMarginMetrics(); } catch (e) {}
     try {
@@ -993,29 +981,14 @@
     } catch (e) {}
   }
 
-  /* -------------------------
-     Attach handlers for page-level register/login buttons (delegation)
-     ------------------------- */
-  function attachPageButtonDelegation() {
-    document.addEventListener("click", function (ev) {
-      const el = ev.target.closest && ev.target.closest(".open-register, .open-login, .resend-verification");
-      if (!el) return;
-      if (el.classList.contains("open-register")) {
-        ev.preventDefault(); dispatchEvent(new CustomEvent("leones:openRegister"));
-      } else if (el.classList.contains("open-login")) {
-        ev.preventDefault(); dispatchEvent(new CustomEvent("leones:openLogin"));
-      } else if (el.classList.contains("resend-verification")) {
-        ev.preventDefault();
-        const email = el.dataset?.email || (document.getElementById("profileEmail")||{}).textContent || "";
-        if (!email) return alert("Email no disponible");
-        el.disabled = true; el.textContent = "Enviando...";
-        resendVerification(email).then(r => { alert("Correo reenviado si la cuenta existe. Revisa inbox/spam."); }).catch(e => { alert(e.message || "Error reenviando"); }).finally(()=>{ el.disabled=false; el.textContent="Reenviar verificación"; });
-      }
-    }, true);
-  }
+  // expose as globals for legacy inline scripts
+  window.loadAccount = loadAccount;
+  window.updateAccountUI = updateAccountUI;
+
+  window._LEONES.loadAccount = loadAccount;
 
   /* -------------------------
-     Trading widget fallback + demo price engine
+     Trading widget fallback + demo prices
      ------------------------- */
   function initTradingWidget(symbol) {
     try {
@@ -1074,7 +1047,28 @@
   window._LEONES.stopDemoFallback = stopDemoFallback;
 
   /* -------------------------
-     Initialization / boot
+     Page delegation for register/login/resend buttons
+     ------------------------- */
+  function attachPageButtonDelegation() {
+    document.addEventListener("click", function (ev) {
+      const el = ev.target.closest && ev.target.closest(".open-register, .open-login, .resend-verification");
+      if (!el) return;
+      if (el.classList.contains("open-register")) {
+        ev.preventDefault(); dispatchEvent(new CustomEvent("leones:openRegister"));
+      } else if (el.classList.contains("open-login")) {
+        ev.preventDefault(); dispatchEvent(new CustomEvent("leones:openLogin"));
+      } else if (el.classList.contains("resend-verification")) {
+        ev.preventDefault();
+        const email = el.dataset?.email || (document.getElementById("profileEmail")||{}).textContent || "";
+        if (!email) return alert("Email no disponible");
+        el.disabled = true; const prevText = el.textContent; el.textContent = "Enviando...";
+        resendVerification(email).then(r => { alert("Correo reenviado si la cuenta existe. Revisa inbox/spam."); }).catch(e => { alert(e.message || "Error reenviando"); }).finally(()=>{ el.disabled=false; el.textContent = prevText; });
+      }
+    }, true);
+  }
+
+  /* -------------------------
+     Boot / init
      ------------------------- */
   function restoreSessionOnLoad() {
     try {
@@ -1102,10 +1096,14 @@
   function wireGlobalEvents(){
     addEventListener("leones:prices_snapshot", (ev) => { stopDemoFallback(); });
     addEventListener("leones:price", (ev) => { stopDemoFallback(); });
+    // register/login modal handlers
+    wireGlobalEvents = wireGlobalEvents; // noop to avoid lint warning
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     try {
+      applyInputGlow(document); // apply glow globally once
+      wireGlobalEvents();
       restoreSessionOnLoad();
       attachGlobalOpenButtons();
       log("LEONES main.js initialized");
@@ -1114,17 +1112,16 @@
     }
   });
 
-  // export a few helpers
+  // Expose some helpers globally for legacy code compatibility
   window._LEONES.safeDisplayName = safeDisplayName;
-  window._LEONES.initSocket = initSocket;
   window._LEONES.restorePublicHeader = restorePublicHeader;
   window._LEONES.showPrivateHeader = showPrivateHeader;
   window._LEONES.loadAccount = loadAccount;
   window._LEONES.updateAccountUI = updateAccountUI;
+  window.loadAccount = loadAccount;
+  window.updateAccountUI = updateAccountUI;
 
 })(); // EOF
-
-
 
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
