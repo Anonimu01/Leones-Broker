@@ -2043,6 +2043,14 @@ window.ALL_SYMBOLS = window.ALL_SYMBOLS || [
 window.symbolPrices = window.symbolPrices || {};
 window.orderStore = window.orderStore || [];
 
+/* --- Compat defaults mínimos (no sobrescribir si ya están) --- */
+window.CATEGORIES = window.CATEGORIES || ['All','Crypto','Forex','Stocks'];
+let activeCategory = (typeof activeCategory !== 'undefined' && activeCategory) || (window.activeCategory || 'All');
+let currentSymbol = (typeof currentSymbol !== 'undefined' && currentSymbol) || (window.ALL_SYMBOLS && window.ALL_SYMBOLS[0] && window.ALL_SYMBOLS[0].symbol) || null;
+const API_BASE = window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
+const SOCKET_BASE = window.SOCKET_BASE || window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
+const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+
 function $(sel){ return document.querySelector(sel); }
 function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
 function fmt(n){ try{ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:6}); }catch(e){return '--'} }
@@ -2123,7 +2131,7 @@ function buildCategoryTabs(){
   catTabsEl = document.getElementById('catTabs');
   if(!catTabsEl) return;
   catTabsEl.innerHTML = '';
-  CATEGORIES.forEach(cat=>{
+  (window.CATEGORIES || []).forEach(cat=>{
     const b = document.createElement('button'); b.className = 'cat-tab' + (cat===activeCategory ? ' active':''); b.innerText = cat;
     b.onclick = ()=> { activeCategory = cat; buildCategoryTabs(); renderSymbolsGrid(); };
     catTabsEl.appendChild(b);
