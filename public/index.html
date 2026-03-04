@@ -494,6 +494,19 @@ let account = {
   currency: "USD",
   positions: []
 };
+
+/* ========== Compatibility: global aliases for legacy code ========== */
+/* Some inline code (or other scripts) referenced SESSION_KEY, API, etc.
+   Make them globally available to avoid ReferenceError in production. */
+window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+var SESSION_KEY = window.SESSION_KEY; // global identifier for legacy references
+
+window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+var API = window.API; // global var used by some functions outside modules
+
+window.SOCKET_URL = window.SOCKET_URL || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+var SOCKET_URL = window.SOCKET_URL;
+
 /**
  * main.js — core: auth, session, socket bootstrap, simple UI + helpers
  * Put in: public/js/main.js
@@ -513,7 +526,7 @@ let account = {
   window._LEONES = window._LEONES || {};
 
   /* ========== CONFIG ========== */
-  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  const LOCAL_SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
   const API_BASE =
     window.API_BASE ||
     window.API ||
@@ -521,7 +534,7 @@ let account = {
   const WS_BASE = window.WS_BASE || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
 
   // make a local API constant used by some functions (keeps compatibility con tu código)
-  const API = window.API || API_BASE;
+  const API_LOCAL = window.API || API_BASE;
 
   /* ========== UTILITIES ========== */
   const log = (...a) => { try { console.log("[LEONES]", ...a); } catch (e) {} };
@@ -552,7 +565,25 @@ let account = {
     if (!(opts.body instanceof FormData)) headers["Content-Type"] = headers["Content-Type"] || "application/json";
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const url = path.startsWith("http") ? path : (API_BASE.replace(/\/+$/, "") + (path.startsWith("/") ? path : "/" + path));
+    // Normalize URL building to avoid duplicate /api/api when API_BASE already contains /api
+    let url;
+    try {
+      if (typeof path === "string" && path.startsWith("http")) {
+        url = path;
+      } else {
+        const prefix = (API_BASE || window.API || "").replace(/\/+$/, "");
+        let p = (typeof path === "string" ? path : "").trim();
+        if (!p.startsWith("/")) p = "/" + p;
+        // If both prefix and path include '/api' at the boundary, remove the duplicated leading '/api'
+        if (p.startsWith("/api") && prefix.endsWith("/api")) {
+          p = p.replace(/^\/api/, "");
+        }
+        url = prefix + p;
+      }
+    } catch (e) {
+      url = path;
+    }
+
     let res;
     try {
       res = await fetch(url, { ...opts, headers, credentials: "include" });
@@ -568,7 +599,7 @@ let account = {
 
     if (!res.ok) {
       if (res.status === 401) {
-        try { localStorage.removeItem("token"); localStorage.removeItem(SESSION_KEY); } catch (e) {}
+        try { localStorage.removeItem("token"); localStorage.removeItem(LOCAL_SESSION_KEY); } catch (e) {}
         const msg = (data && (data.msg || data.error || data.message)) || "Token requerido";
         const err = new Error(msg); err.status = res.status; err.body = data;
         throw err;
@@ -643,17 +674,17 @@ let account = {
     // If backend returns token/data structure, keep consistent
     if (res && res.data && res.data.token) {
       localStorage.setItem("token", res.data.token);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(res.data.user || { email: normalizedEmail }));
+      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(res.data.user || { email: normalizedEmail }));
     } else if (res && res.token) {
       localStorage.setItem("token", res.token);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(res.user || { email: normalizedEmail }));
+      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(res.user || { email: normalizedEmail }));
     }
     return res;
   }
 
   function logout() {
     try {
-      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(LOCAL_SESSION_KEY);
       localStorage.removeItem("token");
       // disconnect socket safely
       try {
@@ -779,7 +810,7 @@ let account = {
   /* ========== Session restore on load ========== */
   function restoreSessionOnLoad() {
     try {
-      const s = localStorage.getItem(SESSION_KEY);
+      const s = localStorage.getItem(LOCAL_SESSION_KEY);
       const token = localStorage.getItem("token");
       const sock = initSocket();
       if (s && token) {
@@ -843,7 +874,7 @@ let account = {
           const res = await loginUser({ email, password: pass });
           // showPrivateHeader uses masked display
           const user = (res && res.data && res.data.user) ? res.data.user : (res.user || { email });
-          localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+          localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(user));
           showPrivateHeader(user);
           initSocket(); // ensure socket gets token
           dispatchEvent(new CustomEvent("leones:loggedIn", { detail: user }));
@@ -1018,6 +1049,589 @@ window._LEONES = window._LEONES || {};
 window._LEONES.loadAccount = loadAccount;
 window._LEONES.updateAccountUI = updateAccountUI;
 window._LEONES.calculateMargin = calculateMargin;
+</script>
+
+<script>
+/**
+ * trading.js — trading UI: symbols/grid, trading widget, leverage & margin math,
+ * positions and order placement (frontend).
+ * Put in: public/js/trading.js
+ *
+ * Note: relies on window._LEONES.apiFetch / initSocket from main.js
+ * and on socket.io client (/socket.io/socket.io.js).
+ */
+
+(function () {
+  "use strict";
+
+  const NS = window._LEONES || {};
+  const apiFetch = NS.apiFetch || window.apiFetch;
+  const initSocket = NS.initSocket || (() => window.__LEONES_SOCKET__?.socket || null);
+
+  // Local state
+  let socket = null;
+  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+  const state = window.__LEONES_TRADING__;
+
+  state.ALL_SYMBOLS = state.ALL_SYMBOLS || [];
+  state.symbolPrices = state.symbolPrices || {};
+  state.positions = state.positions || [];
+
+  /* ========== Helpers ========== */
+  function log(...a) { try { console.log("[TRADING]", ...a); } catch (e) {} }
+  function warn(...a) { try { console.warn("[TRADING]", ...a); } catch (e) {} }
+  function err(...a) { try { console.error("[TRADING]", ...a); } catch (e) {} }
+
+  function formatNumber(n, digits = 6) {
+    const num = Number(n);
+    if (!isFinite(num)) return "--";
+    if (Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    return num.toLocaleString(undefined, { maximumFractionDigits: digits });
+  }
+
+  /* ========== Socket wiring for trading data ========== */
+  function ensureSocket() {
+    try {
+      if (socket && socket.connected) return socket;
+      socket = initSocket();
+      if (!socket) {
+        warn("socket not available — realtime disabled");
+        return null;
+      }
+
+      // Subscribe handlers if not already
+      socket.on("prices_snapshot", (snap) => {
+        try {
+          if (!snap) return;
+          if (Array.isArray(snap)) {
+            snap.forEach(it => { if (it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v, ts: it.ts ?? Date.now() }; });
+          } else {
+            Object.keys(snap).forEach(k => { const it = snap[k]; state.symbolPrices[k] = { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() }; });
+          }
+          renderSymbolsGrid();
+        } catch (e) { warn("prices_snapshot handler", e); }
+      });
+
+      socket.on("price", (p) => {
+        try {
+          const symbol = p?.symbol || p?.s || p?.t;
+          if (!symbol) return;
+          const price = p.price ?? p.p ?? p.v ?? p;
+          state.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+          updatePriceInUI(symbol, price);
+        } catch (e) { warn("price event error", e); }
+      });
+
+      socket.on("symbols_update", (symbols) => {
+        try {
+          if (!symbols) return;
+          if (Array.isArray(symbols)) state.ALL_SYMBOLS = symbols;
+          else state.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || "Crypto" }));
+          renderSymbolsGrid();
+        } catch (e) { warn("symbols_update handler", e); }
+      });
+
+      socket.on("orderbook", (ob) => {
+        try {
+          if (!ob || !ob.symbol) return;
+          state.orderBooks = state.orderBooks || {};
+          state.orderBooks[ob.symbol] = ob;
+          if ((document.getElementById("ob-bids") || {}).dataset?.symbol === ob.symbol) updateOrderBookUI(ob);
+        } catch (e) {}
+      });
+
+      socket.on("connect_error", (err) => { warn("socket connect_error", err); });
+
+      return socket;
+    } catch (e) {
+      warn("ensureSocket error", e);
+      return null;
+    }
+  }
+
+  /* ========== SYMBOLS GRID ========== */
+  function buildSymbolsContainer() {
+    const container = document.getElementById("symbolsGrid");
+    if (!container) return null;
+    container.style.display = "grid";
+    container.style.gridTemplateColumns = "repeat(auto-fill,minmax(220px,1fr))";
+    container.style.gap = "8px";
+    return container;
+  }
+
+  function renderSymbolsGrid() {
+    const container = buildSymbolsContainer();
+    if (!container) return;
+    container.innerHTML = "";
+    const list = (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length) ? state.ALL_SYMBOLS : [
+      { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+      { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+      { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
+    ];
+
+    list.forEach(s => {
+      const card = document.createElement("div");
+      card.className = "symbol-card";
+      card.style.cssText = "background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer";
+      const priceObj = state.symbolPrices[s.symbol];
+      const price = priceObj ? priceObj.price : null;
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+            <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || "Unknown")} · ${escapeHtml(s.symbol)}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : "—"}</div>
+            <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+          </div>
+        </div>
+      `;
+      card.addEventListener("click", () => selectSymbol(s.symbol));
+      container.appendChild(card);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, function (m) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m];
+    });
+  }
+
+  /* ========== TRADING PANEL (leverage & margin) ========== */
+  let currentSymbol = state.ALL_SYMBOLS && state.ALL_SYMBOLS[0] ? state.ALL_SYMBOLS[0].symbol : "BINANCE:BTCUSDT";
+  let currentLeverage = 10; // default x10
+  let currentPositionSize = 0; // in quote currency (USD etc)
+  let currentEntryPrice = null;
+
+  function selectSymbol(symbol) {
+    currentSymbol = symbol;
+    // render UI
+    const ts = document.getElementById("tradingSymbol");
+    if (ts) ts.innerText = (symbol && symbol.split(":").pop()) || symbol;
+    // attempt to init trading widget if available
+    if (typeof window.initTradingWidget === "function") try { window.initTradingWidget(symbol); } catch (e) {}
+    // update price
+    const priceObj = state.symbolPrices[symbol];
+    if (priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+    // request orderbook
+    try { if (socket && socket.emit) socket.emit("request_orderbook", { symbol }); } catch (e) {}
+  }
+
+  function updatePriceInUI(symbol, price) {
+    try {
+      const els = document.querySelectorAll(`[data-symbol="${symbol}"]`);
+      els.forEach(el => el.textContent = formatNumber(price));
+      const opPrice = document.getElementById("op-price");
+      if (opPrice && (document.getElementById("tradingSymbol")?.innerText || "").includes((symbol || "").split(":").pop())) opPrice.textContent = formatNumber(price);
+      // update calculators if open
+      if (!currentEntryPrice) currentEntryPrice = price;
+      renderMarginCalculator();
+    } catch (e) {}
+  }
+
+  function updateOrderBookUI(ob) {
+    try {
+      const bidsEl = document.getElementById("ob-bids");
+      const asksEl = document.getElementById("ob-asks");
+      if (bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0, 8).map(b => `${Number(b[0]).toFixed(6)} • ${b[1]}`).join("<br/>") : '<div class="muted-small">—</div>';
+      if (asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0, 8).map(a => `${Number(a[0]).toFixed(6)} • ${a[1]}`).join("<br/>") : '<div class="muted-small">—</div>';
+    } catch (e) {}
+  }
+
+  /* ----- Margin & Leverage math ----- */
+  // positionSize: amount in quote currency (e.g., USD) the user wants to control
+  // leverage: x (e.g., 10)
+  // entryPrice: price per unit
+  // returns { requiredMargin, notional, qty }
+  function calculateMargin({ positionSize = 0, leverage = 1, entryPrice = 0 } = {}) {
+    // notional is the amount of underlying controlled
+    // requiredMargin = positionSize / leverage
+    const pos = Number(positionSize) || 0;
+    const lev = Number(leverage) || 1;
+    const ep = Number(entryPrice) || 0;
+    const notional = pos; // if user supplies notional in quote
+    const requiredMargin = lev > 0 ? (pos / lev) : pos;
+    // qty = notional / entryPrice (units)
+    const qty = ep > 0 ? pos / ep : 0;
+    return { requiredMargin, notional, qty };
+  }
+
+  function renderMarginCalculator() {
+    try {
+      const marginEl = document.getElementById("marginCalc");
+      if (!marginEl) return;
+      const priceObj = state.symbolPrices[currentSymbol];
+      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
+      const posSize = Number(document.getElementById("input_position_size")?.value || 0);
+      const lev = Number(document.getElementById("input_leverage")?.value || currentLeverage || 1);
+
+      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
+      marginEl.innerHTML = `
+        <div>Simulación — ${escapeHtml((currentSymbol||"").split(":").pop() || currentSymbol)}</div>
+        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
+        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
+        <div>Qty aprox.: <strong>${formatNumber(res.qty, 8)}</strong></div>
+        <div>Apalancamiento: <strong>${lev}x</strong></div>
+        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin, 2)}</strong></div>
+      `;
+    } catch (e) { warn("renderMarginCalculator", e); }
+  }
+
+  /* ========== Orders & Positions (frontend) ========== */
+  async function placeOrder({ side = "buy", positionSize = 0, leverage = 1, type = "market", price = null } = {}) {
+    try {
+      // build payload - adapt to backend contract (adjust if necessary)
+      const payload = {
+        symbol: currentSymbol,
+        side,
+        type,
+        notional: Number(positionSize) || 0,
+        leverage: Number(leverage) || 1,
+        price: price ? Number(price) : undefined,
+      };
+      const res = await apiFetch("/trade/place", { method: "POST", body: JSON.stringify(payload) }).catch(async (e) => {
+        // Try alternate endpoint
+        try { return await apiFetch("/api/trade/place", { method: "POST", body: JSON.stringify(payload) }); } catch (err) { throw e; }
+      });
+      alert("Orden enviada: " + (res && res.message ? res.message : "OK"));
+      // refresh positions
+      await fetchPositions();
+      return res;
+    } catch (e) {
+      warn("placeOrder error", e);
+      alert(e.message || "Error enviando orden");
+      throw e;
+    }
+  }
+
+  async function fetchPositions() {
+    try {
+      // Try only normalized endpoints; apiFetch now avoids duplicate /api/api
+      const res = await apiFetch("/positions").catch(() => null) || await apiFetch("/api/positions").catch(() => null);
+      if (!res) return;
+      state.positions = Array.isArray(res) ? res : (res.positions || []);
+      renderPositions();
+    } catch (e) { warn("fetchPositions error", e); }
+  }
+
+  function renderPositions() {
+    try {
+      const el = document.getElementById("positionsList");
+      if (!el) return;
+      el.innerHTML = "";
+      if (!state.positions || !state.positions.length) {
+        el.innerHTML = "<div class='muted-small'>— sin posiciones —</div>";
+        return;
+      }
+      state.positions.forEach(p => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)";
+        const symbol = p.symbol || p.s || currentSymbol;
+        const size = p.notional || p.size || 0;
+        const entry = p.entryPrice || p.price || p.avgPrice || 0;
+        const pl = p.unrealizedPnl ?? (p.pnl || 0);
+        row.innerHTML = `
+          <div style="font-weight:700">${escapeHtml(symbol)}</div>
+          <div style="text-align:right">
+            <div>Size: ${formatNumber(size)}</div>
+            <div>Entry: ${formatNumber(entry)}</div>
+            <div>PnL: ${formatNumber(pl,2)}</div>
+          </div>
+        `;
+        el.appendChild(row);
+      });
+    } catch (e) {}
+  }
+
+  /* ========== Trading UI wiring (buttons, inputs) ========== */
+  function wireTradingUI() {
+    try {
+      // margin calculator inputs
+      const posInput = document.getElementById("input_position_size");
+      const levInput = document.getElementById("input_leverage");
+      const marginEl = document.getElementById("marginCalc");
+
+      if (posInput) posInput.addEventListener("input", renderMarginCalculator);
+      if (levInput) {
+        levInput.addEventListener("input", (e) => {
+          currentLeverage = Number(e.target.value) || currentLeverage;
+          renderMarginCalculator();
+        });
+      }
+
+      // place order
+      const buyBtn = document.getElementById("btnBuy");
+      const sellBtn = document.getElementById("btnSell");
+      if (buyBtn) buyBtn.addEventListener("click", async () => {
+        const pos = Number(document.getElementById("input_position_size")?.value || 0);
+        const lev = Number(document.getElementById("input_leverage")?.value || currentLeverage);
+        await placeOrder({ side: "buy", positionSize: pos, leverage: lev, type: "market" });
+      });
+      if (sellBtn) sellBtn.addEventListener("click", async () => {
+        const pos = Number(document.getElementById("input_position_size")?.value || 0);
+        const lev = Number(document.getElementById("input_leverage")?.value || currentLeverage);
+        await placeOrder({ side: "sell", positionSize: pos, leverage: lev, type: "market" });
+      });
+
+      // refresh buttons
+      const refreshBtn = document.getElementById("btnRefreshPositions");
+      if (refreshBtn) refreshBtn.addEventListener("click", () => fetchPositions().catch(() => {}));
+
+      // symbols refresh
+      const fetchSymBtn = document.getElementById("btnFetchSymbols");
+      if (fetchSymBtn) fetchSymBtn.addEventListener("click", () => {
+        // try backend endpoints
+        (async () => {
+          try {
+            const endpoints = ["/market/list","/market/symbols","/api/market/list","/api/symbols","/symbols"];
+            for (const ep of endpoints) {
+              try {
+                const r = await apiFetch(ep).catch(() => null);
+                if (Array.isArray(r) && r.length) { state.ALL_SYMBOLS = r; renderSymbolsGrid(); break; }
+              } catch (e) {}
+            }
+          } catch (e) {}
+        })();
+      });
+
+      // init margin calc initially
+      renderMarginCalculator();
+    } catch (e) {
+      warn("wireTradingUI error", e);
+    }
+  }
+
+  /* ========== Trading widget fallback (if TradingView not available) ========== */
+  function provideTradingWidgetFallback() {
+    try {
+      if (typeof window.initTradingWidget === "function") return;
+      window.initTradingWidget = function (symbol) {
+        const cont = document.getElementById("tv_chart_container");
+        if (!cont) return;
+        cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||"").split(":").pop()||symbol)} (widget no disponible)</div>`;
+      };
+    } catch (e) {}
+  }
+
+  /* ========== Demo fallback for prices (if websocket not connected) ========== */
+  let demoTicker = null;
+  function startDemoPrices() {
+    if (demoTicker) return;
+    demoTicker = setInterval(() => {
+      (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length ? state.ALL_SYMBOLS : [{symbol:"BINANCE:BTCUSDT", label:"BTC/USDT"}]).forEach(s => {
+        const key = s.symbol;
+        const old = (state.symbolPrices[key] && Number(state.symbolPrices[key].price)) || (Math.random()*100);
+        const change = (Math.random() - 0.5) * (Math.max(0.0001, Math.abs(old) * 0.002));
+        const next = Number(Math.max(0.00001, old + change).toFixed(6));
+        state.symbolPrices[key] = { price: next, ts: Date.now() };
+      });
+      renderSymbolsGrid();
+      renderMarginCalculator();
+    }, 1200);
+  }
+  function stopDemoPrices() { if (demoTicker) { clearInterval(demoTicker); demoTicker = null; } }
+
+  /* ========== Init function ========== */
+  async function initTradingModule() {
+    try {
+      // prepare UI elements existence — if your index.html lacks them, create lightweight containers
+      if (!document.getElementById("symbolsGrid")) {
+        const s = document.createElement("div");
+        s.id = "symbolsGrid";
+        s.style.cssText = "padding:8px;max-width:1200px;margin:12px auto";
+        document.body.insertBefore(s, document.body.firstChild);
+      }
+      if (!document.getElementById("tradingPanel")) {
+        // append a small trading panel skeleton
+        const panel = document.createElement("div");
+        panel.id = "tradingPanel";
+        panel.style.cssText = "max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px";
+        panel.innerHTML = `
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+            <div>Precio:<strong id="op-price">-</strong></div>
+            <div>Equity:<strong id="user-equity">--</strong></div>
+            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+          </div>
+          <hr/>
+          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <label>Posición (USD)</label>
+                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+                <label style="margin-top:8px">Apalancamiento (x)</label>
+                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+              </div>
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div style="font-weight:700">Posiciones</div>
+                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+                </div>
+                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+              </div>
+            </div>
+          </div>
+          <hr/>
+          <div style="display:flex;gap:8px">
+            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          </div>
+        `;
+        document.body.appendChild(panel);
+      }
+
+      // ensure socket and fetch initial data
+      ensureSocket();
+
+      // try fetching symbols from backend
+      try {
+        const endpoints = ["/market/list","/market/symbols","/api/market/list","/api/symbols","/symbols"];
+        for (const ep of endpoints) {
+          try {
+            const r = await apiFetch(ep).catch(() => null);
+            if (Array.isArray(r) && r.length) { state.ALL_SYMBOLS = r; break; }
+          } catch (e) {}
+        }
+      } catch (e) {}
+
+      renderSymbolsGrid();
+      wireTradingUI();
+      provideTradingWidgetFallback();
+
+      // attempt to fetch positions and user equity
+      try { await fetchPositions(); } catch (e) {}
+      try {
+        const acc = await apiFetch("/wallet").catch(() => null) || await apiFetch("/api/wallet").catch(()=>null);
+        if (acc && acc.balance !== undefined) {
+          const el = document.getElementById("user-equity");
+          if (el) el.textContent = formatNumber(acc.balance,2);
+        }
+      } catch (e) {}
+
+      // fallback if no socket prices arrive
+      setTimeout(() => {
+        const anyPrice = Object.keys(state.symbolPrices || {}).length;
+        if (!anyPrice) startDemoPrices();
+      }, 2000);
+
+    } catch (e) {
+      err("initTradingModule error", e);
+    }
+  }
+
+  /* ========== Boot ========== */
+  document.addEventListener("DOMContentLoaded", () => {
+    try { initTradingModule(); } catch (e) { err("trading boot error", e); }
+  });
+
+  // expose public functions for debugging / manual usage
+  window._LEONES_TRADING = window._LEONES_TRADING || {};
+  window._LEONES_TRADING.selectSymbol = selectSymbol;
+  window._LEONES_TRADING.placeOrder = placeOrder;
+  window._LEONES_TRADING.fetchPositions = fetchPositions;
+  window._LEONES_TRADING.calculateMargin = calculateMargin;
+
+})(); // EOF trading.js
+
+/* ======================================================
+   Compatibility aliases (global) - minimal, safe
+   - loadPositions() alias for legacy callers
+   - ensure global API var exists for functions that used `API` identifier
+   ====================================================== */
+
+window.loadPositions = window.loadPositions || (async function() {
+  try {
+    if (window._LEONES_TRADING && typeof window._LEONES_TRADING.fetchPositions === "function") {
+      return await window._LEONES_TRADING.fetchPositions();
+    }
+    if (typeof fetchPositions === "function") {
+      return await fetchPositions();
+    }
+  } catch (e) {
+    console.warn("loadPositions alias error", e);
+  }
+});
+
+// Ensure global API var (already set above, but keep for redundancy)
+window.API = window.API || API;
+var API = window.API || (typeof API !== "undefined" ? API : "/api");
+
+async function openTrade(symbol, type, lot, price, sl, tp) {
+  try {
+    const token = localStorage.getItem("BROKER_TOKEN");
+
+    const res = await fetch(`${(window.API||API).replace(/\/+$/,"")}/trade/open`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        symbol,
+        type,
+        lot,
+        price,
+        sl,
+        tp
+      })
+    });
+
+    const data = await (res.text().then(t => { try { return JSON.parse(t); } catch(e){ return null; } })).catch(()=>null);
+
+    if (res.ok) {
+      await loadAccount();
+      await loadPositions();
+    } else {
+      alert((data && data.message) || "Error abriendo trade");
+    }
+  } catch (err) {
+    console.error("Error abriendo trade:", err);
+  }
+}
+
+async function closeTrade(positionId) {
+  try {
+    const token = localStorage.getItem("BROKER_TOKEN");
+
+    const res = await fetch(`${(window.API||API).replace(/\/+$/,"")}/trade/close`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ positionId })
+    });
+
+    if (res.ok) {
+      loadAccount();
+      loadPositions();
+    }
+  } catch (err) {
+    console.error("Error cerrando trade:", err);
+  }
+}
+
+function checkMarginCall() {
+  if (account.marginLevel < 50) {
+    alert("Margin Call - posiciones cerradas automáticamente");
+    account.positions.forEach(pos => {
+      closeTrade(pos._id);
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadAccount();
+  // loadPositions alias will call the trading fetchPositions safely
+  loadPositions && typeof loadPositions === "function" && loadPositions();
+});
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
