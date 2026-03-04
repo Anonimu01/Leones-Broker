@@ -469,1051 +469,1045 @@
 <script>
 /*
   Unified script consolidado (main + account + trading + UI helpers)
-  - Mantiene una sola implementación de: apiFetch, apiPost, initSocket, trading engine
-  - Añade UI helpers (categorías, búsquedas, órdenes frontend, forms) sin duplicar funciones críticas
-  - Comentarios en español; no cambié la lógica que ya tenías
+  - Versión reforzada contra inicializaciones dobles y llamadas a endpoints protegidos sin token.
+  - Mantiene las APIs y comportamiento que ya tenías; sólo añade guardas defensivas.
 */
 
-/* ===========================
-   Global config / compatibility
-   =========================== */
-window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
-window.SOCKET_URL = window.SOCKET_URL || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
-window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-var API = window.API; // legacy global
-var SOCKET_URL = window.SOCKET_URL;
-var SESSION_KEY = window.SESSION_KEY;
+if (window.__LEONES_BOOTED__) {
+  console.warn('[LEONES] script already booted, skipping re-evaluation.');
+} else {
+  window.__LEONES_BOOTED__ = true;
 
-/* Minimal account state (legacy-friendly) */
-let account = {
-  balance: 0,
-  equity: 0,
-  marginUsed: 0,
-  freeMargin: 0,
-  marginLevel: 0,
-  leverage: 100,
-  currency: "USD",
-  positions: []
-};
+  /* ===========================
+     Global config / compatibility
+     =========================== */
+  window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+  window.SOCKET_URL = window.SOCKET_URL || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+  window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  var API = window.API; // legacy global
+  var SOCKET_URL = window.SOCKET_URL;
+  var SESSION_KEY = window.SESSION_KEY;
 
-/* ===========================
-   Namespace and small utils
-   =========================== */
-window._LEONES = window._LEONES || {};
-const NS = window._LEONES;
+  /* Minimal account state (legacy-friendly) */
+  let account = {
+    balance: 0,
+    equity: 0,
+    marginUsed: 0,
+    freeMargin: 0,
+    marginLevel: 0,
+    leverage: 100,
+    currency: "USD",
+    positions: []
+  };
 
-/* Foundation API_BASE / WS_BASE (used by apiFetch / initSocket) */
-const API_BASE = (window.API_BASE || window.API || API).replace(/\/+$/,'');
-const WS_BASE = (window.WS_BASE || window.SOCKET_URL || SOCKET_URL || location.origin).replace(/\/+$/,'');
+  /* ===========================
+     Namespace and small utils
+     =========================== */
+  window._LEONES = window._LEONES || {};
+  const NS = window._LEONES;
 
-const log = (...a) => { try{ console.log('[LEONES]',...a); }catch(e){} };
-const warn = (...a) => { try{ console.warn('[LEONES]',...a); }catch(e){} };
-const error = (...a) => { try{ console.error('[LEONES]',...a); }catch(e){} };
+  const API_BASE = (window.API_BASE || window.API || API).replace(/\/+$/,'');
+  const WS_BASE = (window.WS_BASE || window.SOCKET_URL || SOCKET_URL || location.origin).replace(/\/+$/,'');
 
-function safeParseJSON(s, fallback=null){ try{ return JSON.parse(s); }catch(e){ return fallback; } }
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function formatNumber(n,d=6){ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:d}); }
+  const log = (...a) => { try{ console.log('[LEONES]',...a); }catch(e){} };
+  const warn = (...a) => { try{ console.warn('[LEONES]',...a); }catch(e){} };
+  const error = (...a) => { try{ console.error('[LEONES]',...a); }catch(e){} };
 
-/* ===========================
-   apiFetch / apiPost (single robust impl)
-   =========================== */
-async function apiFetch(path, opts={}) {
-  const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-  const headers = opts.headers && typeof opts.headers === 'object' ? {...opts.headers} : {};
-  // If body present and not FormData, set content-type
-  if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
-    headers['Content-Type'] = 'application/json';
-  }
-  if(token && !headers['Authorization'] && !headers['authorization']){
-    headers['Authorization'] = 'Bearer ' + token;
-  }
+  function safeParseJSON(s, fallback=null){ try{ return JSON.parse(s); }catch(e){ return fallback; } }
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function formatNumber(n,d=6){ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:d}); }
 
-  // build normalized URL
-  let url = '';
-  try {
-    if(typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) url = path;
-    else {
-      let p = String(path || '').trim();
-      if(!p.startsWith('/')) p = '/' + p;
-      // avoid duplicate /api/api
-      const baseNoSlash = API_BASE.replace(/\/+$/,'');
-      if(baseNoSlash.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/,'');
-      url = baseNoSlash + p;
+  /* ===========================
+     apiFetch / apiPost (single robust impl)
+     =========================== */
+  async function apiFetch(path, opts={}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
+    const headers = opts.headers && typeof opts.headers === 'object' ? {...opts.headers} : {};
+    if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
+      headers['Content-Type'] = 'application/json';
     }
-  } catch(e){ url = path; }
+    if(token && !headers['Authorization'] && !headers['authorization']){
+      headers['Authorization'] = 'Bearer ' + token;
+    }
 
-  let res;
-  try {
-    res = await fetch(url, { credentials: 'include', ...opts, headers });
-  } catch(e){
-    const err = new Error('Network error');
-    err.body = e;
-    throw err;
-  }
+    // build normalized URL
+    let url = '';
+    try {
+      if(typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) url = path;
+      else {
+        let p = String(path || '').trim();
+        if(!p.startsWith('/')) p = '/' + p;
+        const baseNoSlash = API_BASE.replace(/\/+$/,'');
+        if(baseNoSlash.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/,'');
+        url = baseNoSlash + p;
+      }
+    } catch(e){ url = path; }
 
-  const txt = await res.text().catch(()=>null);
-  let data = null;
-  try { data = txt ? JSON.parse(txt) : null; } catch(e){ data = txt; }
-
-  if(!res.ok){
-    if(res.status === 401){
-      try { localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); } catch(e){}
-      const msg = (data && (data.msg || data.error || data.message)) || 'Unauthorized';
-      const err = new Error(msg); err.status = 401; err.body = data;
+    let res;
+    try {
+      res = await fetch(url, { credentials: 'include', ...opts, headers });
+    } catch(e){
+      const err = new Error('Network error');
+      err.body = e;
       throw err;
     }
-    const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'API error');
-    const err = new Error(msg); err.status = res.status; err.body = data;
-    throw err;
-  }
-  return data;
-}
-async function apiPost(path, body={}){ return apiFetch(path, { method:'POST', body: JSON.stringify(body) }); }
 
-NS.apiFetch = NS.apiFetch || apiFetch;
-NS.apiPost = NS.apiPost || apiPost;
-
-/* ===========================
-   Socket init (single, idempotent)
-   =========================== */
-function initSocket(){
-  try{
-    if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket){
-      log('Socket already initialized');
-      return window.__LEONES_SOCKET__.socket;
-    }
-    if(typeof io !== 'function'){
-      warn('socket.io client missing');
-      return null;
-    }
-    const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-    const sock = io(WS_BASE, {
-      path: '/socket.io',
-      transports: ['websocket','polling'],
-      withCredentials: true,
-      auth: token ? { token } : undefined,
-      autoConnect: true
-    });
-    window.__LEONES_SOCKET__ = { socket: sock };
-    sock.on('connect', () => log('socket connected', sock.id));
-    sock.on('disconnect', (r) => log('socket disconnected', r));
-    sock.on('connect_error', (err) => warn('socket connect_error', err));
-    // lightweight no-op listeners (modules attach their own)
-    sock.on('prices_snapshot', ()=>{});
-    sock.on('symbols_update', ()=>{});
-    return sock;
-  }catch(e){
-    warn('initSocket error', e);
-    return null;
-  }
-}
-NS.initSocket = NS.initSocket || initSocket;
-
-/* ===========================
-   Auth helpers
-   =========================== */
-async function registerUser({ name, email, password, phone='', address='' } = {}){ 
-  if(!name || !email || !password) throw new Error('name, email y password son requeridos');
-  const normalized = String(email).trim().toLowerCase();
-  return apiPost('/auth/register', { name, email: normalized, password, phone, address });
-}
-async function loginUser({ email, password } = {}){
-  if(!email || !password) throw new Error('email y password requeridos');
-  const normalized = String(email).trim().toLowerCase();
-  const res = await apiPost('/auth/login', { email: normalized, password });
-  // Normalize token storage
-  if(res && res.data && res.data.token){
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(res.data.user || { email: normalized }));
-  } else if(res && res.token){
-    localStorage.setItem('token', res.token);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(res.user || { email: normalized }));
-  }
-  return res;
-}
-function logout(){
-  try{
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('token');
-    // disconnect socket
-    try { const s = window.__LEONES_SOCKET__?.socket; if(s && typeof s.disconnect === 'function') s.disconnect(); } catch(e){}
-    restorePublicHeader();
-  }catch(e){ warn('logout error', e); }
-}
-NS.registerUser = registerUser;
-NS.loginUser = loginUser;
-NS.logout = logout;
-
-/* ===========================
-   Header UI helpers (masked display)
-   =========================== */
-function safeDisplayName(user={}){
-  if(user && user.alias) return user.alias;
-  const email = user && user.email ? String(user.email) : '';
-  if(!email.includes('@')) return 'Cuenta';
-  const [local, domain] = email.split('@');
-  if(local.length <= 2) return local[0] + '*' + '@' + domain;
-  const maskedLocal = local[0] + local.slice(1,2).replace(/./g,'*') + local.slice(-1);
-  return maskedLocal + '@' + domain;
-}
-
-function restorePublicHeader(){
-  try{
-    const header = document.getElementById('headerActions');
-    if(!header) return;
-    header.innerHTML = '';
-    const openBtn = document.createElement('button'); openBtn.className='btn glow open-register'; openBtn.id='openAccountBtn'; openBtn.textContent='Abrir Cuenta';
-    const loginBtn = document.createElement('button'); loginBtn.className='btn ghost glow open-login'; loginBtn.id='loginBtn'; loginBtn.textContent='Iniciar Sesión';
-    header.appendChild(openBtn); header.appendChild(loginBtn);
-    // ensure class wiring
-    attachGlobalOpenButtons();
-  }catch(e){ warn('restorePublicHeader', e); }
-}
-
-function showPrivateHeader(user={}){
-  try{
-    const header = document.getElementById('headerActions');
-    if(!header) return;
-    header.innerHTML = '';
-    const profile = document.createElement('div');
-    profile.style.display='flex'; profile.style.gap='10px'; profile.style.alignItems='center';
-    const idSpan = document.createElement('div'); idSpan.textContent = safeDisplayName(user); idSpan.style.color='var(--gold)'; idSpan.style.fontWeight='700';
-    const logoutBtn = document.createElement('button'); logoutBtn.className='btn ghost'; logoutBtn.textContent='Cerrar sesión';
-    logoutBtn.addEventListener('click', () => { logout(); dispatchEvent(new CustomEvent('leones:loggedOut')); });
-    profile.appendChild(idSpan); profile.appendChild(logoutBtn); header.appendChild(profile);
-  }catch(e){ warn('showPrivateHeader', e); }
-}
-NS.restorePublicHeader = restorePublicHeader;
-NS.showPrivateHeader = showPrivateHeader;
-
-/* ===========================
-   Modal system
-   =========================== */
-function ensureModal(){
-  let m = document.getElementById('leones_modal');
-  if(m) return m;
-  m = document.createElement('div'); m.id='leones_modal';
-  m.style.cssText='position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:99999;';
-  m.innerHTML = `<div id="leones_modal_box" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff"></div>`;
-  document.body.appendChild(m);
-  return m;
-}
-function showModal(html, onConfirm){
-  const modal = ensureModal();
-  const box = modal.querySelector('#leones_modal_box');
-  box.innerHTML = html;
-  if(!box.querySelector('.leones_modal_actions')){
-    const actions = document.createElement('div'); actions.className='leones_modal_actions';
-    actions.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:12px';
-    const cancel = document.createElement('button'); cancel.className='btn ghost'; cancel.textContent='Cancelar';
-    const ok = document.createElement('button'); ok.className='btn glow'; ok.textContent='Aceptar';
-    cancel.addEventListener('click', closeModal);
-    ok.addEventListener('click', () => { if(typeof onConfirm === 'function') onConfirm(); closeModal(); });
-    actions.appendChild(cancel); actions.appendChild(ok); box.appendChild(actions);
-  }
-  modal.style.display='flex'; document.body.style.overflow='hidden';
-  setTimeout(()=>{ const first = box.querySelector('input,textarea,select,button'); if(first) first.focus(); },40);
-}
-function closeModal(){ const m=document.getElementById('leones_modal'); if(!m) return; m.style.display='none'; document.body.style.overflow=''; }
-NS.showModal = showModal; NS.closeModal = closeModal;
-
-/* ===========================
-   Session restore & event wiring
-   =========================== */
-function restoreSessionOnLoad(){
-  try{
-    const s = localStorage.getItem(SESSION_KEY);
-    const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
-    const sock = initSocket();
-    if(s && token){
-      const u = safeParseJSON(s,{});
-      showPrivateHeader(u);
-      if(sock && sock.auth) sock.auth = { token };
-      if(sock && !sock.connected && typeof sock.connect==='function') sock.connect();
-    } else {
-      restorePublicHeader();
-    }
-  }catch(e){ warn('restoreSessionOnLoad', e); restorePublicHeader(); }
-}
-
-/* global events wiring for open/login modals */
-function wireGlobalEvents(){
-  addEventListener('leones:openRegister', () => {
-    const html = `
-      <div style="display:grid;gap:8px">
-        <input id="r_name" placeholder="Nombre" />
-        <input id="r_email" placeholder="Correo" type="email" />
-        <input id="r_phone" placeholder="Teléfono" />
-        <input id="r_address" placeholder="Dirección" />
-        <input id="r_pass" placeholder="Contraseña" type="password" />
-      </div>
-    `;
-    showModal(html, async () => {
-      try{
-        const name = (document.getElementById('r_name')||{}).value||'';
-        const email = ((document.getElementById('r_email')||{}).value||'').trim().toLowerCase();
-        const phone = (document.getElementById('r_phone')||{}).value||'';
-        const address = (document.getElementById('r_address')||{}).value||'';
-        const pass = (document.getElementById('r_pass')||{}).value||'';
-        if(!name||!email||!pass) return alert('Completa los campos requeridos');
-        await registerUser({ name, email, password: pass, phone, address });
-        alert('Registro completado. Revisa tu correo.');
-      }catch(e){ console.error('register error', e); alert(e.message || 'Error registrando'); }
-    });
-  });
-
-  addEventListener('leones:openLogin', () => {
-    const html = `
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <input id="l_email" placeholder="Correo" type="email" />
-        <input id="l_pass" placeholder="Contraseña" type="password" />
-      </div>
-    `;
-    showModal(html, async () => {
-      try{
-        const email = ((document.getElementById('l_email')||{}).value||'').trim().toLowerCase();
-        const pass = (document.getElementById('l_pass')||{}).value||'';
-        if(!email||!pass) return alert('Completa los campos');
-        const res = await loginUser({ email, password: pass });
-        const user = (res && res.data && res.data.user) ? res.data.user : (res.user || { email });
-        localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-        showPrivateHeader(user);
-        initSocket();
-        dispatchEvent(new CustomEvent('leones:loggedIn', { detail: user }));
-      }catch(e){ console.error('login error', e); alert(e.message || 'Error iniciando sesión'); }
-    });
-  });
-}
-
-/* attach class-based open buttons */
-function attachGlobalOpenButtons(){
-  try {
-    document.querySelectorAll('.open-register').forEach(btn=>{
-      btn.removeEventListener('click', _openRegisterHandler);
-      btn.addEventListener('click', _openRegisterHandler);
-    });
-    document.querySelectorAll('.open-login').forEach(btn=>{
-      btn.removeEventListener('click', _openLoginHandler);
-      btn.addEventListener('click', _openLoginHandler);
-    });
-  } catch(e){ }
-}
-function _openRegisterHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); }
-function _openLoginHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); }
-
-/* convenience click delegation (text match) */
-document.addEventListener('click', function(ev){
-  try{
-    const el = ev.target.closest && ev.target.closest('button,a,div,span');
-    if(!el) return;
-    if(el.closest && el.closest('#leones_modal')) return;
-    const txt = (el.textContent||'').trim().toLowerCase();
-    if(txt === 'abrir cuenta' || el.dataset?.action === 'open-register'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); return; }
-    if(txt === 'iniciar sesión' || el.dataset?.action === 'open-login'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); return; }
-  }catch(e){}
-}, true);
-
-/* ===========================
-   Account helpers + UI
-   =========================== */
-async function loadAccount(){
-  try{
-    const token = localStorage.getItem('BROKER_TOKEN') || localStorage.getItem('token');
-    if(!token) {
-      // nothing to do if no token
-      updateAccountUI();
-      return null;
-    }
-    const url = (API_BASE + '/account').replace(/\/+$/,'');
-    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, credentials: 'include' }).catch(()=>null);
+    const txt = await res.text().catch(()=>null);
     let data = null;
-    try{ data = res ? await res.json() : null; }catch(e){ data = null; }
-    if(res && res.ok){
-      if(data && data.account) account = data.account;
-      else if(data && typeof data === 'object'){
-        account.balance = Number(data.balance ?? data.bal ?? account.balance);
-        account.leverage = Number(data.leverage ?? account.leverage);
-        account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
-        account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
+    try { data = txt ? JSON.parse(txt) : null; } catch(e){ data = txt; }
+
+    if(!res.ok){
+      if(res.status === 401){
+        try { localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); } catch(e){}
+        const msg = (data && (data.msg || data.error || data.message)) || 'Unauthorized';
+        const err = new Error(msg); err.status = 401; err.body = data;
+        throw err;
       }
-      updateMarginMetrics();
-      updateAccountUI();
-      window.__LEONES_ACCOUNT = account;
-      return account;
-    } else {
-      log('loadAccount failed', res && res.status, data);
-      return null;
+      const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'API error');
+      const err = new Error(msg); err.status = res.status; err.body = data;
+      throw err;
     }
-  }catch(e){ console.error('Error cargando cuenta:', e); return null; }
-}
+    return data;
+  }
+  async function apiPost(path, body={}){ return apiFetch(path, { method:'POST', body: JSON.stringify(body) }); }
 
-function calculateFloatingPnL(){
-  let total = 0;
-  (account.positions || []).forEach(pos => { total += Number(pos.pnl || 0); });
-  return total;
-}
-function calculateMargin(lotSize, price){
-  const contractSize = 100000;
-  const margin = (lotSize * contractSize * price) / (account.leverage || 1);
-  return margin;
-}
-function updateMarginMetrics(){
-  account.equity = Number(account.balance || 0) + Number(calculateFloatingPnL());
-  account.freeMargin = Number(account.equity) - Number(account.marginUsed || 0);
-  account.marginLevel = account.marginUsed > 0 ? (account.equity / account.marginUsed) * 100 : 0;
-}
-function updateAccountUI(){
-  try{
-    const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
-    setText('balanceEl', (account.balance||0).toLocaleString());
-    setText('equityEl', (account.equity||0).toLocaleString());
-    setText('marginUsedEl', (account.marginUsed||0).toLocaleString());
-    setText('freeMarginEl', (account.freeMargin||0).toLocaleString());
-    setText('marginLevelEl', account.marginLevel ? (Math.round(account.marginLevel*100)/100 + '%') : '0%');
-    const listEl = document.getElementById('positionsList');
-    if(listEl){
-      const rows = (account.positions || []).map(p => `<div class="pos-row">${escapeHtml(p.symbol||'')} ${(p.side||'').toUpperCase()} ${p.lots || 0} lots PnL:${p.pnl||0}</div>`);
-      listEl.innerHTML = rows.join('');
-    }
-  }catch(e){ warn('updateAccountUI error', e); }
-}
-NS.loadAccount = loadAccount;
-NS.updateAccountUI = updateAccountUI;
-NS.calculateMargin = calculateMargin;
+  NS.apiFetch = NS.apiFetch || apiFetch;
+  NS.apiPost = NS.apiPost || apiPost;
 
-/* ===========================
-   Trading module (symbols, orders, positions)
-   - Uses NS.apiFetch and NS.initSocket
-   =========================== */
-window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-const T = window.__LEONES_TRADING__;
-T.ALL_SYMBOLS = T.ALL_SYMBOLS || [
-  {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
-  {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
-  {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'}
-];
-T.symbolPrices = T.symbolPrices || {};
-T.positions = T.positions || [];
-T.orderBooks = T.orderBooks || {};
-
-let tradingSocket = null;
-let demoTicker = null;
-let currentSymbol = (T.ALL_SYMBOLS && T.ALL_SYMBOLS[0] && T.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
-let currentLeverage = 10;
-let currentEntryPrice = null;
-
-/* ensureTradingSocket / socket handlers (reusable) */
-function ensureTradingSocket(){
-  try{
-    if(tradingSocket && tradingSocket.connected) return tradingSocket;
-    tradingSocket = (NS.initSocket && typeof NS.initSocket === 'function') ? NS.initSocket() : initSocket();
-    if(!tradingSocket){
-      startDemoPrices();
-      return null;
-    }
-    if(tradingSocket.__leones_trading_attached) return tradingSocket;
-    tradingSocket.__leones_trading_attached = true;
-
-    tradingSocket.on('prices_snapshot', snap => {
-      try{
-        if(!snap) return;
-        if(Array.isArray(snap)){
-          snap.forEach(it => { if(it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
-        } else if(typeof snap === 'object'){
-          Object.keys(snap).forEach(k => {
-            const it = snap[k];
-            T.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
-          });
-        }
-        renderSymbolsGrid();
-      }catch(e){ warn('prices_snapshot', e); }
-    });
-
-    tradingSocket.on('price', p => {
-      try{
-        const symbol = p?.symbol || p?.s || p?.t;
-        if(!symbol) return;
-        const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
-        T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
-        updatePriceInUI(symbol, price);
-      }catch(e){ warn('price event', e); }
-    });
-
-    tradingSocket.on('symbols_update', symbols => {
-      try{
-        if(!symbols) return;
-        if(Array.isArray(symbols)) T.ALL_SYMBOLS = symbols;
-        else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
-        renderSymbolsGrid();
-      }catch(e){ warn('symbols_update handler', e); }
-    });
-
-    tradingSocket.on('orderbook', ob => {
-      try{
-        if(!ob || !ob.symbol) return;
-        T.orderBooks = T.orderBooks || {};
-        T.orderBooks[ob.symbol] = ob;
-        const bidsEl = document.getElementById('ob-bids');
-        if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
-      }catch(e){}
-    });
-
-    tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
-
-    // stop demo once connected
-    tradingSocket.on('connect', () => stopDemoPrices());
-
-    return tradingSocket;
-  }catch(e){ warn('ensureTradingSocket', e); startDemoPrices(); return null; }
-}
-
-/* Symbols grid (already robust): renders T.ALL_SYMBOLS and T.symbolPrices */
-function buildSymbolsContainer(){
-  const c = document.getElementById('symbolsGrid');
-  if(!c) return null;
-  c.style.display='grid'; c.style.gridTemplateColumns='repeat(auto-fill,minmax(220px,1fr))'; c.style.gap='8px';
-  return c;
-}
-function renderSymbolsGrid(){
-  const container = buildSymbolsContainer();
-  if(!container) return;
-  container.innerHTML = '';
-  const list = (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length) ? T.ALL_SYMBOLS : [];
-  list.forEach(s => {
+  /* ===========================
+     Socket init (single, idempotent)
+     =========================== */
+  function initSocket(){
     try{
-      const card = document.createElement('div'); card.className='symbol-card';
-      card.style.cssText='background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
-      const priceObj = T.symbolPrices[s.symbol];
-      const price = priceObj ? priceObj.price : null;
-      card.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label||s.symbol)}</div>
-            <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market||'Unknown')} · ${escapeHtml(s.symbol)}</div>
-          </div>
-          <div style="text-align:right">
-            <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
-            <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-          </div>
+      if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket){
+        log('Socket already initialized');
+        return window.__LEONES_SOCKET__.socket;
+      }
+      if(typeof io !== 'function'){
+        warn('socket.io client missing');
+        return null;
+      }
+      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
+      const sock = io(WS_BASE, {
+        path: '/socket.io',
+        transports: ['websocket','polling'],
+        withCredentials: true,
+        auth: token ? { token } : undefined,
+        autoConnect: true
+      });
+      window.__LEONES_SOCKET__ = { socket: sock };
+      sock.on('connect', () => log('socket connected', sock.id));
+      sock.on('disconnect', (r) => log('socket disconnected', r));
+      sock.on('connect_error', (err) => warn('socket connect_error', err));
+      // lightweight no-op listeners (modules attach their own)
+      sock.on('prices_snapshot', ()=>{});
+      sock.on('symbols_update', ()=>{});
+      return sock;
+    }catch(e){
+      warn('initSocket error', e);
+      return null;
+    }
+  }
+  NS.initSocket = NS.initSocket || initSocket;
+
+  /* ===========================
+     Auth helpers
+     =========================== */
+  async function registerUser({ name, email, password, phone='', address='' } = {}){ 
+    if(!name || !email || !password) throw new Error('name, email y password son requeridos');
+    const normalized = String(email).trim().toLowerCase();
+    return apiPost('/auth/register', { name, email: normalized, password, phone, address });
+  }
+  async function loginUser({ email, password } = {}) {
+    if(!email || !password) throw new Error('email y password requeridos');
+    const normalized = String(email).trim().toLowerCase();
+    const res = await apiPost('/auth/login', { email: normalized, password });
+    if(res && res.data && res.data.token){
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(res.data.user || { email: normalized }));
+    } else if(res && res.token){
+      localStorage.setItem('token', res.token);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(res.user || { email: normalized }));
+    }
+    return res;
+  }
+  function logout(){
+    try{
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('token');
+      try { const s = window.__LEONES_SOCKET__?.socket; if(s && typeof s.disconnect === 'function') s.disconnect(); } catch(e){}
+      restorePublicHeader();
+    }catch(e){ warn('logout error', e); }
+  }
+  NS.registerUser = registerUser;
+  NS.loginUser = loginUser;
+  NS.logout = logout;
+
+  /* ===========================
+     Header UI helpers (masked display)
+     =========================== */
+  function safeDisplayName(user={}) {
+    if(user && user.alias) return user.alias;
+    const email = user && user.email ? String(user.email) : '';
+    if(!email.includes('@')) return 'Cuenta';
+    const [local, domain] = email.split('@');
+    if(local.length <= 2) return local[0] + '*' + '@' + domain;
+    const maskedLocal = local[0] + local.slice(1,2).replace(/./g,'*') + local.slice(-1);
+    return maskedLocal + '@' + domain;
+  }
+
+  function restorePublicHeader(){
+    try{
+      const header = document.getElementById('headerActions');
+      if(!header) return;
+      header.innerHTML = '';
+      const openBtn = document.createElement('button'); openBtn.className='btn glow open-register'; openBtn.id='openAccountBtn'; openBtn.textContent='Abrir Cuenta';
+      const loginBtn = document.createElement('button'); loginBtn.className='btn ghost glow open-login'; loginBtn.id='loginBtn'; loginBtn.textContent='Iniciar Sesión';
+      header.appendChild(openBtn); header.appendChild(loginBtn);
+      attachGlobalOpenButtons();
+    }catch(e){ warn('restorePublicHeader', e); }
+  }
+
+  function showPrivateHeader(user={}){
+    try{
+      const header = document.getElementById('headerActions');
+      if(!header) return;
+      header.innerHTML = '';
+      const profile = document.createElement('div');
+      profile.style.display='flex'; profile.style.gap='10px'; profile.style.alignItems='center';
+      const idSpan = document.createElement('div'); idSpan.textContent = safeDisplayName(user); idSpan.style.color='var(--gold)'; idSpan.style.fontWeight='700';
+      const logoutBtn = document.createElement('button'); logoutBtn.className='btn ghost'; logoutBtn.textContent='Cerrar sesión';
+      logoutBtn.addEventListener('click', () => { logout(); dispatchEvent(new CustomEvent('leones:loggedOut')); });
+      profile.appendChild(idSpan); profile.appendChild(logoutBtn); header.appendChild(profile);
+    }catch(e){ warn('showPrivateHeader', e); }
+  }
+  NS.restorePublicHeader = restorePublicHeader;
+  NS.showPrivateHeader = showPrivateHeader;
+
+  /* ===========================
+     Modal system
+     =========================== */
+  function ensureModal(){
+    let m = document.getElementById('leones_modal');
+    if(m) return m;
+    m = document.createElement('div'); m.id='leones_modal';
+    m.style.cssText='position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:99999;';
+    m.innerHTML = `<div id="leones_modal_box" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff"></div>`;
+    document.body.appendChild(m);
+    return m;
+  }
+  function showModal(html, onConfirm){
+    const modal = ensureModal();
+    const box = modal.querySelector('#leones_modal_box');
+    box.innerHTML = html;
+    if(!box.querySelector('.leones_modal_actions')){
+      const actions = document.createElement('div'); actions.className='leones_modal_actions';
+      actions.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:12px';
+      const cancel = document.createElement('button'); cancel.className='btn ghost'; cancel.textContent='Cancelar';
+      const ok = document.createElement('button'); ok.className='btn glow'; ok.textContent='Aceptar';
+      cancel.addEventListener('click', closeModal);
+      ok.addEventListener('click', () => { if(typeof onConfirm === 'function') onConfirm(); closeModal(); });
+      actions.appendChild(cancel); actions.appendChild(ok); box.appendChild(actions);
+    }
+    modal.style.display='flex'; document.body.style.overflow='hidden';
+    setTimeout(()=>{ const first = box.querySelector('input,textarea,select,button'); if(first) first.focus(); },40);
+  }
+  function closeModal(){ const m=document.getElementById('leones_modal'); if(!m) return; m.style.display='none'; document.body.style.overflow=''; }
+  NS.showModal = showModal; NS.closeModal = closeModal;
+
+  /* ===========================
+     Session restore & event wiring
+     =========================== */
+  function restoreSessionOnLoad(){
+    try{
+      const s = localStorage.getItem(SESSION_KEY);
+      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
+      const sock = initSocket();
+      if(s && token){
+        const u = safeParseJSON(s,{});
+        showPrivateHeader(u);
+        if(sock && sock.auth) sock.auth = { token };
+        if(sock && !sock.connected && typeof sock.connect==='function') sock.connect();
+      } else {
+        restorePublicHeader();
+      }
+    }catch(e){ warn('restoreSessionOnLoad', e); restorePublicHeader(); }
+  }
+
+  function wireGlobalEvents(){
+    addEventListener('leones:openRegister', () => {
+      const html = `
+        <div style="display:grid;gap:8px">
+          <input id="r_name" placeholder="Nombre" />
+          <input id="r_email" placeholder="Correo" type="email" />
+          <input id="r_phone" placeholder="Teléfono" />
+          <input id="r_address" placeholder="Dirección" />
+          <input id="r_pass" placeholder="Contraseña" type="password" />
         </div>
       `;
-      card.addEventListener('click', () => selectSymbol(s.symbol));
-      container.appendChild(card);
+      showModal(html, async () => {
+        try{
+          const name = (document.getElementById('r_name')||{}).value||'';
+          const email = ((document.getElementById('r_email')||{}).value||'').trim().toLowerCase();
+          const phone = (document.getElementById('r_phone')||{}).value||'';
+          const address = (document.getElementById('r_address')||{}).value||'';
+          const pass = (document.getElementById('r_pass')||{}).value||'';
+          if(!name||!email||!pass) return alert('Completa los campos requeridos');
+          await registerUser({ name, email, password: pass, phone, address });
+          alert('Registro completado. Revisa tu correo.');
+        }catch(e){ console.error('register error', e); alert(e.message || 'Error registrando'); }
+      });
+    });
+
+    addEventListener('leones:openLogin', () => {
+      const html = `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input id="l_email" placeholder="Correo" type="email" />
+          <input id="l_pass" placeholder="Contraseña" type="password" />
+        </div>
+      `;
+      showModal(html, async () => {
+        try{
+          const email = ((document.getElementById('l_email')||{}).value||'').trim().toLowerCase();
+          const pass = (document.getElementById('l_pass')||{}).value||'';
+          if(!email||!pass) return alert('Completa los campos');
+          const res = await loginUser({ email, password: pass });
+          const user = (res && res.data && res.data.user) ? res.data.user : (res.user || { email });
+          localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+          showPrivateHeader(user);
+          initSocket();
+          dispatchEvent(new CustomEvent('leones:loggedIn', { detail: user }));
+        }catch(e){ console.error('login error', e); alert(e.message || 'Error iniciando sesión'); }
+      });
+    });
+  }
+
+  /* attach class-based open buttons (safe: handler vars reused) */
+  function attachGlobalOpenButtons(){
+    try {
+      document.querySelectorAll('.open-register').forEach(btn=>{
+        btn.removeEventListener('click', _openRegisterHandler);
+        btn.addEventListener('click', _openRegisterHandler);
+      });
+      document.querySelectorAll('.open-login').forEach(btn=>{
+        btn.removeEventListener('click', _openLoginHandler);
+        btn.addEventListener('click', _openLoginHandler);
+      });
+    } catch(e){ }
+  }
+  function _openRegisterHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); }
+  function _openLoginHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); }
+
+  /* convenience click delegation (text match) */
+  document.addEventListener('click', function(ev){
+    try{
+      const el = ev.target.closest && ev.target.closest('button,a,div,span');
+      if(!el) return;
+      if(el.closest && el.closest('#leones_modal')) return;
+      const txt = (el.textContent||'').trim().toLowerCase();
+      if(txt === 'abrir cuenta' || el.dataset?.action === 'open-register'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); return; }
+      if(txt === 'iniciar sesión' || el.dataset?.action === 'open-login'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); return; }
     }catch(e){}
-  });
-}
+  }, true);
 
-/* select symbol + trading panel */
-function selectSymbol(symbol){
-  currentSymbol = symbol;
-  const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
-  if(typeof window.initTradingWidget === 'function') try{ window.initTradingWidget(symbol); }catch(e){}
-  const priceObj = T.symbolPrices[symbol]; if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
-  try{ const s = ensureTradingSocket(); if(s && s.emit) s.emit('request_orderbook', { symbol }); }catch(e){}
-}
+  /* ===========================
+     Account helpers + UI
+     =========================== */
+  async function loadAccount(){
+    try{
+      const token = localStorage.getItem('BROKER_TOKEN') || localStorage.getItem('token');
+      if(!token) {
+        updateAccountUI();
+        return null;
+      }
+      const url = (API_BASE + '/account').replace(/\/+$/,'');
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, credentials: 'include' }).catch(()=>null);
+      let data = null;
+      try{ data = res ? await res.json() : null; }catch(e){ data = null; }
+      if(res && res.ok){
+        if(data && data.account) account = data.account;
+        else if(data && typeof data === 'object'){
+          account.balance = Number(data.balance ?? data.bal ?? account.balance);
+          account.leverage = Number(data.leverage ?? account.leverage);
+          account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
+          account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
+        }
+        updateMarginMetrics();
+        updateAccountUI();
+        window.__LEONES_ACCOUNT = account;
+        return account;
+      } else {
+        log('loadAccount failed', res && res.status, data);
+        return null;
+      }
+    }catch(e){ console.error('Error cargando cuenta:', e); return null; }
+  }
 
-function updatePriceInUI(symbol, price){
-  try{
-    document.querySelectorAll(`[data-symbol="${symbol}"]`).forEach(el => el.textContent = formatNumber(price));
-    const tsText = document.getElementById('tradingSymbol')?.innerText || '';
-    if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
-      const opPrice = document.getElementById('op-price'); if(opPrice) opPrice.textContent = formatNumber(price);
-    }
-    if(!currentEntryPrice) currentEntryPrice = price;
-    renderMarginCalculator();
-  }catch(e){}
-}
+  function calculateFloatingPnL(){
+    let total = 0;
+    (account.positions || []).forEach(pos => { total += Number(pos.pnl || 0); });
+    return total;
+  }
+  function calculateMargin(lotSize, price){
+    const contractSize = 100000;
+    const margin = (lotSize * contractSize * price) / (account.leverage || 1);
+    return margin;
+  }
+  function updateMarginMetrics(){
+    account.equity = Number(account.balance || 0) + Number(calculateFloatingPnL());
+    account.freeMargin = Number(account.equity) - Number(account.marginUsed || 0);
+    account.marginLevel = account.marginUsed > 0 ? (account.equity / account.marginUsed) * 100 : 0;
+  }
+  function updateAccountUI(){
+    try{
+      const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+      setText('balanceEl', (account.balance||0).toLocaleString());
+      setText('equityEl', (account.equity||0).toLocaleString());
+      setText('marginUsedEl', (account.marginUsed||0).toLocaleString());
+      setText('freeMarginEl', (account.freeMargin||0).toLocaleString());
+      setText('marginLevelEl', account.marginLevel ? (Math.round(account.marginLevel*100)/100 + '%') : '0%');
+      const listEl = document.getElementById('positionsList');
+      if(listEl){
+        const rows = (account.positions || []).map(p => `<div class="pos-row">${escapeHtml(p.symbol||'')} ${(p.side||'').toUpperCase()} ${p.lots || 0} lots PnL:${p.pnl||0}</div>`);
+        listEl.innerHTML = rows.join('');
+      }
+    }catch(e){ warn('updateAccountUI error', e); }
+  }
+  NS.loadAccount = loadAccount;
+  NS.updateAccountUI = updateAccountUI;
+  NS.calculateMargin = calculateMargin;
 
-function updateOrderBookUI(ob){
-  try{
-    const bidsEl = document.getElementById('ob-bids'); const asksEl = document.getElementById('ob-asks');
-    if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-    if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-  }catch(e){}
-}
+  /* ===========================
+     Trading module (symbols, orders, positions)
+     - Uses NS.apiFetch and NS.initSocket
+     =========================== */
+  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+  const T = window.__LEONES_TRADING__;
+  T.ALL_SYMBOLS = T.ALL_SYMBOLS || [
+    {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+    {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+    {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'}
+  ];
+  T.symbolPrices = T.symbolPrices || {};
+  T.positions = T.positions || [];
+  T.orderBooks = T.orderBooks || {};
 
-/* margin calculator */
-function calculateMargin({ positionSize=0, leverage=1, entryPrice=0 } = {}){
-  const pos = Number(positionSize)||0; const lev = Number(leverage)||1; const ep = Number(entryPrice)||0;
-  const notional = pos; const requiredMargin = lev>0 ? (pos/lev) : pos; const qty = ep>0 ? pos/ep : 0;
-  return { requiredMargin, notional, qty };
-}
-function renderMarginCalculator(){
-  try{
-    const marginEl = document.getElementById('marginCalc'); if(!marginEl) return;
-    const priceObj = T.symbolPrices[currentSymbol];
-    const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
-    const posSize = Number(document.getElementById('input_position_size')?.value || 0);
-    const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
-    const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
-    marginEl.innerHTML = `
-      <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop()||currentSymbol)}</div>
-      <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
-      <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
-      <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
-      <div>Apalancamiento: <strong>${lev}x</strong></div>
-      <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
-    `;
-  }catch(e){ warn('renderMarginCalculator', e); }
-}
+  let tradingSocket = null;
+  let demoTicker = null;
+  let currentSymbol = (T.ALL_SYMBOLS && T.ALL_SYMBOLS[0] && T.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
+  let currentLeverage = 10;
+  let currentEntryPrice = null;
 
-/* orders & positions */
-async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){
-  try{
-    const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined };
-    const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
-    let res=null;
-    for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }); if(res) break; }catch(e){} }
-    alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
-    await fetchPositions().catch(()=>{});
-    return res;
-  }catch(e){ warn('placeOrder', e); alert(e?.body?.message || e.message || 'Error enviando orden'); throw e; }
-}
+  /* ensureTradingSocket / socket handlers (reusable) */
+  function ensureTradingSocket(){
+    try{
+      if(tradingSocket && tradingSocket.connected) return tradingSocket;
+      tradingSocket = (NS.initSocket && typeof NS.initSocket === 'function') ? NS.initSocket() : initSocket();
+      if(!tradingSocket){
+        startDemoPrices();
+        return null;
+      }
+      if(tradingSocket.__leones_trading_attached) return tradingSocket;
+      tradingSocket.__leones_trading_attached = true;
 
-async function fetchPositions(){
-  try{
-    const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
-    let res=null;
-    for(const ep of candidates){ try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){} }
-    if(!res) return null;
-    T.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
-    renderPositions();
-    return T.positions;
-  }catch(e){ warn('fetchPositions', e); return null; }
-}
+      tradingSocket.on('prices_snapshot', snap => {
+        try{
+          if(!snap) return;
+          if(Array.isArray(snap)){
+            snap.forEach(it => { if(it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
+          } else if(typeof snap === 'object'){
+            Object.keys(snap).forEach(k => {
+              const it = snap[k];
+              T.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
+            });
+          }
+          renderSymbolsGrid();
+        }catch(e){ warn('prices_snapshot', e); }
+      });
 
-function renderPositions(){
-  try{
-    const el = document.getElementById('positionsList'); if(!el) return;
-    el.innerHTML = '';
-    if(!T.positions || !T.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
-    T.positions.forEach(p => {
+      tradingSocket.on('price', p => {
+        try{
+          const symbol = p?.symbol || p?.s || p?.t;
+          if(!symbol) return;
+          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
+          T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+          updatePriceInUI(symbol, price);
+        }catch(e){ warn('price event', e); }
+      });
+
+      tradingSocket.on('symbols_update', symbols => {
+        try{
+          if(!symbols) return;
+          if(Array.isArray(symbols)) T.ALL_SYMBOLS = symbols;
+          else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
+          renderSymbolsGrid();
+        }catch(e){ warn('symbols_update handler', e); }
+      });
+
+      tradingSocket.on('orderbook', ob => {
+        try{
+          if(!ob || !ob.symbol) return;
+          T.orderBooks = T.orderBooks || {};
+          T.orderBooks[ob.symbol] = ob;
+          const bidsEl = document.getElementById('ob-bids');
+          if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
+        }catch(e){}
+      });
+
+      tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
+      tradingSocket.on('connect', () => stopDemoPrices());
+      return tradingSocket;
+    }catch(e){ warn('ensureTradingSocket', e); startDemoPrices(); return null; }
+  }
+
+  /* Symbols grid (already robust): renders T.ALL_SYMBOLS and T.symbolPrices */
+  function buildSymbolsContainer(){
+    const c = document.getElementById('symbolsGrid');
+    if(!c) return null;
+    c.style.display='grid'; c.style.gridTemplateColumns='repeat(auto-fill,minmax(220px,1fr))'; c.style.gap='8px';
+    return c;
+  }
+  function renderSymbolsGrid(){
+    const container = buildSymbolsContainer();
+    if(!container) return;
+    container.innerHTML = '';
+    const list = (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length) ? T.ALL_SYMBOLS : [];
+    list.forEach(s => {
       try{
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
-        const symbol = p.symbol || p.s || currentSymbol;
-        const size = p.notional || p.size || 0;
-        const entry = p.entryPrice || p.price || p.avgPrice || 0;
-        const pl = p.unrealizedPnl ?? p.pnl ?? 0;
-        row.innerHTML = `<div style="font-weight:700">${escapeHtml(symbol)}</div>
-          <div style="text-align:right"><div>Size: ${formatNumber(size)}</div><div>Entry: ${formatNumber(entry)}</div><div>PnL: ${formatNumber(pl,2)}</div></div>`;
-        el.appendChild(row);
+        const card = document.createElement('div'); card.className='symbol-card';
+        card.style.cssText='background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
+        const priceObj = T.symbolPrices[s.symbol];
+        const price = priceObj ? priceObj.price : null;
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label||s.symbol)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market||'Unknown')} · ${escapeHtml(s.symbol)}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+            </div>
+          </div>
+        `;
+        card.addEventListener('click', () => selectSymbol(s.symbol));
+        container.appendChild(card);
       }catch(e){}
     });
-  }catch(e){}
-}
+  }
 
-/* TradingView fallback */
-function provideTradingWidgetFallback(){ if(typeof window.initTradingWidget === 'function') return; window.initTradingWidget = function(symbol){ const cont = document.getElementById('tv_chart_container'); if(!cont) return; cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`; }; }
+  /* select symbol + trading panel */
+  function selectSymbol(symbol){
+    currentSymbol = symbol;
+    const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
+    if(typeof window.initTradingWidget === 'function') try{ window.initTradingWidget(symbol); }catch(e){}
+    const priceObj = T.symbolPrices[symbol]; if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+    try{ const s = ensureTradingSocket(); if(s && s.emit) s.emit('request_orderbook', { symbol }); }catch(e){}
+  }
 
-/* demo prices fallback (reused name) */
-function startDemoPrices(){ if(demoTicker) return; demoTicker = setInterval(()=>{ (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => { const k=s.symbol; const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random()*100); const change=(Math.random()-0.5)*Math.max(0.0001,Math.abs(old)*0.002); const next = Number(Math.max(0.00001, old+change).toFixed(6)); T.symbolPrices[k] = { price: next, ts: Date.now() }; }); renderSymbolsGrid(); renderMarginCalculator(); }, 1200); }
-function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker=null; } }
+  function updatePriceInUI(symbol, price){
+    try{
+      document.querySelectorAll(`[data-symbol="${symbol}"]`).forEach(el => el.textContent = formatNumber(price));
+      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
+      if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
+        const opPrice = document.getElementById('op-price'); if(opPrice) opPrice.textContent = formatNumber(price);
+      }
+      if(!currentEntryPrice) currentEntryPrice = price;
+      renderMarginCalculator();
+    }catch(e){}
+  }
 
-/* openTrade / closeTrade wrappers (legacy) */
-async function openTrade(symbol, type, lot, price, sl, tp){
-  try{
-    const payload = { symbol, type, lot, price, sl, tp };
-    const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
-    for(const ep of candidates){
-      try{
-        const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
-        if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-      }catch(e){}
-    }
-    throw new Error('No endpoint responded for openTrade');
-  }catch(e){ error('openTrade', e); throw e; }
-}
-async function closeTrade(positionId){
-  try{
-    const payload = { positionId };
-    const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
-    for(const ep of candidates){
-      try{
-        const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
-        if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-      }catch(e){}
-    }
-    throw new Error('No endpoint responded for closeTrade');
-  }catch(e){ error('closeTrade', e); throw e; }
-}
+  function updateOrderBookUI(ob){
+    try{
+      const bidsEl = document.getElementById('ob-bids'); const asksEl = document.getElementById('ob-asks');
+      if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+      if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+    }catch(e){}
+  }
 
-/* margin call */
-async function checkMarginCall(){
-  try{
-    const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
-    if(!acc) return false;
-    const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
-    if(marginLevel !== null && Number(marginLevel) < 50){
-      alert('Margin Call - posiciones cerradas automáticamente');
-      const poses = acc.positions ?? T.positions ?? [];
-      for(const pos of poses){ try{ const pid = pos._id || pos.id || pos.positionId || pos.position_id; if(pid) await closeTrade(pid).catch(()=>{}); }catch(e){} }
-      return true;
-    }
-    return false;
-  }catch(e){ warn('checkMarginCall', e); return false; }
-}
+  /* margin calculator */
+  function calculateMargin({ positionSize=0, leverage=1, entryPrice=0 } = {}){
+    const pos = Number(positionSize)||0; const lev = Number(leverage)||1; const ep = Number(entryPrice)||0;
+    const notional = pos; const requiredMargin = lev>0 ? (pos/lev) : pos; const qty = ep>0 ? pos/ep : 0;
+    return { requiredMargin, notional, qty };
+  }
+  function renderMarginCalculator(){
+    try{
+      const marginEl = document.getElementById('marginCalc'); if(!marginEl) return;
+      const priceObj = T.symbolPrices[currentSymbol];
+      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
+      const posSize = Number(document.getElementById('input_position_size')?.value || 0);
+      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
+      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
+      marginEl.innerHTML = `
+        <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop()||currentSymbol)}</div>
+        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
+        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
+        <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
+        <div>Apalancamiento: <strong>${lev}x</strong></div>
+        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
+      `;
+    }catch(e){ warn('renderMarginCalculator', e); }
+  }
 
-/* init trading UI & boot */
-async function initTradingModule(){
-  try{
-    // ensure containers
-    if(!document.getElementById('symbolsGrid')){ const s=document.createElement('div'); s.id='symbolsGrid'; s.style.cssText='padding:8px;max-width:1200px;margin:12px auto'; document.body.insertBefore(s, document.body.firstChild); }
-    if(!document.getElementById('tradingPanel')){ const panel = document.createElement('div'); panel.id='tradingPanel'; panel.style.cssText='max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px'; panel.innerHTML = `
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-        <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
-        <div>Precio:<strong id="op-price">-</strong></div>
-        <div>Equity:<strong id="user-equity">--</strong></div>
-        <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
-      </div>
-      <hr/>
-      <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
-        <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <div style="background:#080808;padding:8px;border-radius:8px">
-            <label>Posición (USD)</label>
-            <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
-            <label style="margin-top:8px">Apalancamiento (x)</label>
-            <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
-            <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
-            <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
-          </div>
-          <div style="background:#080808;padding:8px;border-radius:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div style="font-weight:700">Posiciones</div>
-              <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+  /* orders & positions */
+  async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){
+    try{
+      const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined };
+      const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
+      let res=null;
+      for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }); if(res) break; }catch(e){} }
+      alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
+      await fetchPositions().catch(()=>{});
+      return res;
+    }catch(e){ warn('placeOrder', e); alert(e?.body?.message || e.message || 'Error enviando orden'); throw e; }
+  }
+
+  async function fetchPositions(){
+    try{
+      // if no token, avoid calling protected endpoints to prevent 401 spam
+      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
+      if(!token){
+        log('Skipping fetchPositions — no auth token present');
+        return null;
+      }
+      const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
+      let res=null;
+      for(const ep of candidates){ try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){} }
+      if(!res) return null;
+      T.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
+      renderPositions();
+      return T.positions;
+    }catch(e){ warn('fetchPositions', e); return null; }
+  }
+
+  function renderPositions(){
+    try{
+      const el = document.getElementById('positionsList'); if(!el) return;
+      el.innerHTML = '';
+      if(!T.positions || !T.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
+      T.positions.forEach(p => {
+        try{
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
+          const symbol = p.symbol || p.s || currentSymbol;
+          const size = p.notional || p.size || 0;
+          const entry = p.entryPrice || p.price || p.avgPrice || 0;
+          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
+          row.innerHTML = `<div style="font-weight:700">${escapeHtml(symbol)}</div>
+            <div style="text-align:right"><div>Size: ${formatNumber(size)}</div><div>Entry: ${formatNumber(entry)}</div><div>PnL: ${formatNumber(pl,2)}</div></div>`;
+          el.appendChild(row);
+        }catch(e){}
+      });
+    }catch(e){}
+  }
+
+  /* TradingView fallback */
+  function provideTradingWidgetFallback(){ if(typeof window.initTradingWidget === 'function') return; window.initTradingWidget = function(symbol){ const cont = document.getElementById('tv_chart_container'); if(!cont) return; cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`; }; }
+
+  /* demo prices fallback (reused name) */
+  function startDemoPrices(){ if(demoTicker) return; demoTicker = setInterval(()=>{ (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => { const k=s.symbol; const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random()*100); const change=(Math.random()-0.5)*Math.max(0.0001,Math.abs(old)*0.002); const next = Number(Math.max(0.00001, old+change).toFixed(6)); T.symbolPrices[k] = { price: next, ts: Date.now() }; }); renderSymbolsGrid(); renderMarginCalculator(); }, 1200); }
+  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker=null; } }
+
+  /* openTrade / closeTrade wrappers (legacy) */
+  async function openTrade(symbol, type, lot, price, sl, tp){
+    try{
+      const payload = { symbol, type, lot, price, sl, tp };
+      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for openTrade');
+    }catch(e){ error('openTrade', e); throw e; }
+  }
+  async function closeTrade(positionId){
+    try{
+      const payload = { positionId };
+      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for closeTrade');
+    }catch(e){ error('closeTrade', e); throw e; }
+  }
+
+  /* margin call */
+  async function checkMarginCall(){
+    try{
+      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
+      if(!acc) return false;
+      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
+      if(marginLevel !== null && Number(marginLevel) < 50){
+        alert('Margin Call - posiciones cerradas automáticamente');
+        const poses = acc.positions ?? T.positions ?? [];
+        for(const pos of poses){ try{ const pid = pos._id || pos.id || pos.positionId || pos.position_id; if(pid) await closeTrade(pid).catch(()=>{}); }catch(e){} }
+        return true;
+      }
+      return false;
+    }catch(e){ warn('checkMarginCall', e); return false; }
+  }
+
+  /* init trading UI & boot (guarded to run only once) */
+  async function initTradingModule(){
+    try{
+      if(window.__LEONES_TRADING_INITED__){
+        log('initTradingModule already run — skipping');
+        return;
+      }
+      window.__LEONES_TRADING_INITED__ = true;
+
+      if(!document.getElementById('symbolsGrid')){ const s=document.createElement('div'); s.id='symbolsGrid'; s.style.cssText='padding:8px;max-width:1200px;margin:12px auto'; document.body.insertBefore(s, document.body.firstChild); }
+      if(!document.getElementById('tradingPanel')){ const panel = document.createElement('div'); panel.id='tradingPanel'; panel.style.cssText='max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px'; panel.innerHTML = `
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+          <div>Precio:<strong id="op-price">-</strong></div>
+          <div>Equity:<strong id="user-equity">--</strong></div>
+          <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+        </div>
+        <hr/>
+        <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+          <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="background:#080808;padding:8px;border-radius:8px">
+              <label>Posición (USD)</label>
+              <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+              <label style="margin-top:8px">Apalancamiento (x)</label>
+              <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+              <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
             </div>
-            <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+            <div style="display:flex;gap:8px">
+              <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+              <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+            </div>
+            <div style="background:#080808;padding:8px;border-radius:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div style="font-weight:700">Posiciones</div>
+                <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+              </div>
+              <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+            </div>
           </div>
         </div>
-      </div>
-      <hr/>
-      <div style="display:flex;gap:8px">
-        <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
-        <div id='ob-asks' data-symbol='' style='flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px'></div>
-      </div>
-    `; document.body.appendChild(panel); }
+        <hr/>
+        <div style="display:flex;gap:8px">
+          <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          <div id='ob-asks' data-symbol='' style='flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px'></div>
+        </div>
+      `; document.body.appendChild(panel); }
 
-    // socket and handlers
-    ensureTradingSocket();
+      ensureTradingSocket();
 
-    // try fetching symbols
-    try{
-      const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
-      for(const ep of endpoints){
-        try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r) && r.length){ T.ALL_SYMBOLS = r; break; } }catch(e){}
-      }
-    }catch(e){}
-
-    renderSymbolsGrid();
-
-    // wire UI controls
-    try{
-      const posInput = document.getElementById('input_position_size');
-      const levInput = document.getElementById('input_leverage');
-      if(posInput) posInput.addEventListener('input', renderMarginCalculator);
-      if(levInput) levInput.addEventListener('input', (e)=>{ currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
-
-      const buyBtn = document.getElementById('btnBuy'); const sellBtn = document.getElementById('btnSell');
-      if(buyBtn) buyBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'buy', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
-      if(sellBtn) sellBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'sell', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
-
-      const refreshBtn = document.getElementById('btnRefreshPositions'); if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
-      const fetchSymBtn = document.getElementById('btnFetchSymbols'); if(fetchSymBtn) fetchSymBtn.addEventListener('click', async ()=>{ const eps=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of eps){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r)&&r.length){ T.ALL_SYMBOLS = r; renderSymbolsGrid(); break; } }catch(e){} } });
-
-      renderMarginCalculator();
-    }catch(e){ warn('wireTradingUI', e); }
-
-    provideTradingWidgetFallback();
-
-    await fetchPositions().catch(()=>{});
-    await loadAccount().catch(()=>{});
-
-    // fallback demo
-    setTimeout(()=>{ const anyPrice = Object.keys(T.symbolPrices || {}).length; if(!anyPrice) startDemoPrices(); }, 2000);
-
-  }catch(e){ error('initTradingModule', e); }
-}
-
-/* alias for legacy loadPositions */
-window.loadPositions = window.loadPositions || (async function(){ try{ if(window.__LEONES_TRADING__ && typeof window.__LEONES_TRADING__.fetchPositions === 'function'){ return await window.__LEONES_TRADING__.fetchPositions(); } if(typeof fetchPositions === 'function') return await fetchPositions(); }catch(e){ console.warn('loadPositions alias error', e); } });
-
-/* expose public */
-window._LEONES_TRADING = window._LEONES_TRADING || {};
-window._LEONES_TRADING.selectSymbol = selectSymbol;
-window._LEONES_TRADING.placeOrder = placeOrder;
-window._LEONES_TRADING.fetchPositions = fetchPositions;
-window._LEONES_TRADING.calculateMargin = calculateMargin;
-window._LEONES_TRADING.openTrade = openTrade;
-window._LEONES_TRADING.closeTrade = closeTrade;
-window._LEONES_TRADING.loadAccount = loadAccount;
-window._LEONES_TRADING.checkMarginCall = checkMarginCall;
-
-/* ===========================
-   UI Helpers imported from second script (non-duplicating)
-   - category tabs, search, orders UI, forms
-   =========================== */
-
-/* Basic UI state (only if not already present) */
-window.CATEGORIES = window.CATEGORIES || ['All','Crypto','Forex','Stocks'];
-let activeCategory = (typeof window.activeCategory !== 'undefined' && window.activeCategory) ? window.activeCategory :
-                     (window.CATEGORIES && window.CATEGORIES[0]) || 'All';
-
-let orderStore = window.orderStore || []; // local orders store (frontend demo)
-let symbolSearchInput = null;
-
-/* Build category tabs (uses renderSymbolsGrid existing implementation) */
-function buildCategoryTabs(){
-  const catTabsEl = document.getElementById('catTabs');
-  if(!catTabsEl) return;
-  catTabsEl.innerHTML = '';
-  (window.CATEGORIES || []).forEach(cat=>{
-    const b = document.createElement('button');
-    b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
-    b.innerText = cat;
-    b.addEventListener('click', ()=> {
-      activeCategory = cat;
-      // Filter T.ALL_SYMBOLS into a temporary list and render using renderSymbolsGridFiltered
-      renderSymbolsGridFiltered();
-      // update tab active classes
-      buildCategoryTabs();
-    });
-    catTabsEl.appendChild(b);
-  });
-}
-
-/* Filtering helper that renders only matching symbols (keeps trading render separate) */
-function filterSymbolsList(q, category){
-  q = (q||'').trim().toLowerCase();
-  return (T.ALL_SYMBOLS || []).filter(s=>{
-    if(category && category !== 'All' && (s.market||'').toLowerCase() !== category.toLowerCase()) return false;
-    if(!q) return true;
-    return ((s.label||'').toLowerCase().includes(q) || (s.symbol||'').toLowerCase().includes(q));
-  });
-}
-
-/* UI-specific renderer (doesn't overwrite trading renderSymbolsGrid) */
-function renderSymbolsGridFiltered(){
-  const container = document.getElementById('symbolsGrid');
-  if(!container) return;
-  container.innerHTML = '';
-  const q = (symbolSearchInput && symbolSearchInput.value) ? symbolSearchInput.value : '';
-  const list = filterSymbolsList(q, activeCategory);
-  if(!list.length){ container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>'; return; }
-  list.forEach(s=>{
-    const el = document.createElement('div'); el.className = 'symbol-card'; el.setAttribute('data-symbol', s.symbol);
-    el.addEventListener('click', ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); });
-    const rawPrice = T.symbolPrices[s.symbol];
-    const priceVal = (rawPrice && typeof rawPrice === 'object') ? (rawPrice.price ?? rawPrice) : rawPrice;
-    const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
-    let ptext = '--';
-    if(numeric !== null && !isNaN(numeric)) ptext = (Math.abs(numeric)>1000)? numeric.toLocaleString(undefined,{maximumFractionDigits:1}) : numeric.toFixed(6);
-    else if(priceVal !== null && priceVal !== undefined) ptext = String(priceVal);
-    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-      </div>
-    </div>`;
-    container.appendChild(el);
-  });
-}
-
-/* select symbol and open trading panel (UI wrapper that uses selectSymbol) */
-function selectSymbolAndOpenTrading(symbol, label){
-  selectSymbol(symbol); // reuse existing
-  const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
-  const opSymbolEl = document.getElementById('op-symbol'); if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
-  const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
-  showPanelById && showPanelById('tradingPanel');
-  try{ if(window.TradingView && typeof TradingView.widget === 'function'){ initTradingWidget(symbol); } }catch(e){}
-  const priceVal = (T.symbolPrices && T.symbolPrices[symbol] && T.symbolPrices[symbol].price) ? T.symbolPrices[symbol].price : null;
-  if(priceVal !== null) { const op = document.getElementById('op-price'); if(op) op.textContent = formatNumber(priceVal); }
-}
-
-/* Orders UI (frontend store + optional backend submit) */
-function refreshOrdersUI(){
-  const list = document.getElementById('orders-list');
-  if(!list) return;
-  if(!orderStore.length) { list.innerText = '— no hay órdenes —'; return; }
-  list.innerHTML = orderStore.map(o=>`<div style="padding:6px 0">${escapeHtml(o.side)} ${escapeHtml(o.symbol)} ${o.qty} @ ${o.price || 'mkt'} <small style="color:var(--muted)">(${o.type})</small></div>`).join('');
-}
-
-async function createOrder(side){
-  try{
-    const type = (document.getElementById('order-type')||{}).value || 'Market';
-    const qty = Number((document.getElementById('order-qty')||{}).value || 0);
-    const price = (document.getElementById('order-price')||{}).value || null;
-    if(!qty || qty <= 0){ alert('Cantidad inválida'); return; }
-    const token = localStorage.getItem('token');
-    const body = { symbol: currentSymbol, side, qty, price: price || null, type };
-    orderStore.push({ ...body, createdAt: Date.now() });
-    refreshOrdersUI();
-
-    if(token){
       try{
-        const res = await fetch(API_BASE + '/orders', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(body) });
-        if(!res.ok){ const t = await res.text().catch(()=>null); console.warn('order backend error', res.status, t); }
-        else { const data = await res.json().catch(()=>null); console.log('order accepted', data); }
-      }catch(e){ console.warn('order send failed', e); }
-    } else {
-      console.warn('No token: orden creada solo localmente (demo).');
-    }
-  }catch(e){ console.error('createOrder error', e); alert('Error al crear orden'); }
-}
-
-/* document upload form */
-async function submitDoc(ev){
-  ev && ev.preventDefault && ev.preventDefault();
-  try{
-    const fileEl = document.getElementById('doc-file');
-    if(!fileEl || !fileEl.files || !fileEl.files[0]){ alert('Seleccione un archivo'); return; }
-    const fd = new FormData(); fd.append('file', fileEl.files[0]); fd.append('type', ev?.target?.querySelector('select')?.value || 'document');
-    const token = localStorage.getItem('token');
-    const headers = token ? { 'Authorization': 'Bearer '+token } : {};
-    const res = await fetch(API_BASE + '/verification/upload', { method:'POST', body: fd, headers });
-    if(res.ok){ alert('Documento subido. Revisaremos tu verificación.'); } else { const t=await res.text().catch(()=>null); alert('Error al subir documento: '+ (t||res.status)); }
-  }catch(e){ console.error('submitDoc', e); alert('Error al subir documento'); }
-}
-
-/* transaction form handler */
-async function submitTransaction(ev, kind){
-  ev && ev.preventDefault && ev.preventDefault();
-  try{
-    const token = localStorage.getItem('token');
-    const amount = Number((document.getElementById(kind==='deposit' ? 'tx-amount-deposit' : 'tx-amount-withdraw')||{}).value || 0);
-    if(!amount || amount <= 0){ alert('Monto inválido'); return; }
-    const method = (document.getElementById('tx-method-deposit')||{}).value || 'Transferencia';
-    const accountField = (document.getElementById('tx-account-withdraw')||{}).value || '';
-    const payload = { kind, amount, method, account: accountField };
-    if(token){
-      const res = await fetch(API_BASE + '/transactions', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(payload) });
-      if(res.ok){ alert('Transacción enviada. Verifique el estado en Historial.'); } else { const t = await res.text().catch(()=>null); alert('Error: '+(t||res.status)); }
-    } else {
-      alert('Debe iniciar sesión para operar (demo).');
-    }
-  }catch(e){ console.error('submitTransaction', e); alert('Error al enviar transacción'); }
-}
-
-/* ===========================
-   Small navigation / modal UI helpers used by second script
-   (showPanelById, hideAllPanels, sidebar toggle, private area show)
-   These do not duplicate the main logic already present above.
-   =========================== */
-
-function hideAllPanels(){ document.querySelectorAll('.panel').forEach(p=> p.style.display='none'); document.querySelectorAll('.menu-item').forEach(m=> m.classList.remove('active')); document.querySelectorAll('.fnav-item').forEach(f=> f.classList.remove('active')); }
-function showPanelById(id){
-  hideAllPanels();
-  const el = document.getElementById(id);
-  if(el) el.style.display = 'block';
-  const menu = document.querySelectorAll('.menu-item[data-target="'+id+'"]');
-  if(menu && menu[0]) menu[0].classList.add('active');
-  const foot = document.querySelectorAll('.fnav-item[data-target="'+id+'"]');
-  if(foot && foot[0]) foot[0].classList.add('active');
-}
-function navSidebar(ev){
-  const target = (ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target) || (ev.currentTarget && ev.currentTarget.getAttribute && ev.currentTarget.getAttribute('data-target'));
-  if(!target) return;
-  showPanelById(target);
-  const sb = document.getElementById('sidebar');
-  if(window.innerWidth < 1000 && sb) sb.classList.add('hidden');
-}
-function footerNavClick(ev){
-  const t = ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target;
-  if(!t) return;
-  showPanelById(t);
-}
-
-document.addEventListener('click', function(e){
-  const btn = e.target.closest('#sidebarToggle');
-  if(btn){
-    const sb = document.getElementById('sidebar');
-    if(sb) sb.classList.toggle('hidden');
-  }
-});
-
-/* show/hide info modal (UI) */
-function showModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='flex'; }
-function hideModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='none'; }
-
-/* show private area after verification (does not auto-show on load) */
-function showPrivateArea(user){
-  try{
-    const pa = document.getElementById('privateArea_full');
-    if(!pa) return;
-    pa.style.display = 'block';
-    const name = (user && (user.name || user.email)) ? (user.name || user.email) : null;
-    if(name){
-      const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = name;
-      const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = name;
-      const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (name[0]||'U').toUpperCase();
-    }
-    try{ fetchSymbolsBackendAndInit(); }catch(e){}
-    showPanelById('dashboardPanel');
-  }catch(e){ console.warn('showPrivateArea error', e); }
-}
-
-/* ===========================
-   Helper: fetchSymbolsBackendAndInit (fetch remote symbols and init UI)
-   - re-uses API_BASE and renderSymbolsGridFiltered
-   =========================== */
-async function fetchSymbolsBackendAndInit(){
-  try{
-    const endpoints = ['/symbols','/api/symbols','/markets/symbols','/market/symbols','/markets','/api/markets'];
-    for(const ep of endpoints){
-      try{
-        const base = String(API_BASE).replace(/\/api\/?$/,'');
-        const url = base + ep;
-        const res = await fetch(url, { method:'GET' }).catch(()=>null);
-        if(!res || !res.ok) continue;
-        const data = await res.json().catch(()=>null);
-        if(Array.isArray(data) && data.length){
-          T.ALL_SYMBOLS = data.map(it=> typeof it === 'string' ? { symbol: it, label: it, market: 'Unknown' } : ({ symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol, market: it.market||it.mkt||'Unknown' }));
-          break;
-        }
-        if(data && typeof data === 'object' && Object.keys(data).length){
-          T.ALL_SYMBOLS = Object.keys(data).map(k=> ({ symbol: k, label: data[k].label || k, market: data[k].market || 'Unknown' }));
-          break;
+        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
+        for(const ep of endpoints){
+          try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r) && r.length){ T.ALL_SYMBOLS = r; break; } }catch(e){}
         }
       }catch(e){}
+
+      renderSymbolsGrid();
+
+      try{
+        const posInput = document.getElementById('input_position_size');
+        const levInput = document.getElementById('input_leverage');
+        if(posInput) posInput.addEventListener('input', renderMarginCalculator);
+        if(levInput) levInput.addEventListener('input', (e)=>{ currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
+
+        const buyBtn = document.getElementById('btnBuy'); const sellBtn = document.getElementById('btnSell');
+        if(buyBtn) buyBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'buy', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
+        if(sellBtn) sellBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'sell', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
+
+        const refreshBtn = document.getElementById('btnRefreshPositions'); if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
+        const fetchSymBtn = document.getElementById('btnFetchSymbols'); if(fetchSymBtn) fetchSymBtn.addEventListener('click', async ()=>{ const eps=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of eps){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r)&&r.length){ T.ALL_SYMBOLS = r; renderSymbolsGrid(); break; } }catch(e){} } });
+
+        renderMarginCalculator();
+      }catch(e){ warn('wireTradingUI', e); }
+
+      provideTradingWidgetFallback();
+
+      await fetchPositions().catch(()=>{});
+      await loadAccount().catch(()=>{});
+
+      setTimeout(()=>{ const anyPrice = Object.keys(T.symbolPrices || {}).length; if(!anyPrice) startDemoPrices(); }, 2000);
+
+    }catch(e){ error('initTradingModule', e); }
+  }
+
+  /* alias for legacy loadPositions */
+  window.loadPositions = window.loadPositions || (async function(){ try{ if(window.__LEONES_TRADING__ && typeof window.__LEONES_TRADING__.fetchPositions === 'function'){ return await window.__LEONES_TRADING__.fetchPositions(); } if(typeof fetchPositions === 'function') return await fetchPositions(); }catch(e){ console.warn('loadPositions alias error', e); } });
+
+  /* expose public */
+  window._LEONES_TRADING = window._LEONES_TRADING || {};
+  window._LEONES_TRADING.selectSymbol = selectSymbol;
+  window._LEONES_TRADING.placeOrder = placeOrder;
+  window._LEONES_TRADING.fetchPositions = fetchPositions;
+  window._LEONES_TRADING.calculateMargin = calculateMargin;
+  window._LEONES_TRADING.openTrade = openTrade;
+  window._LEONES_TRADING.closeTrade = closeTrade;
+  window._LEONES_TRADING.loadAccount = loadAccount;
+  window._LEONES_TRADING.checkMarginCall = checkMarginCall;
+
+  /* ===========================
+     UI Helpers (category tabs, search, orders UI, forms)
+     =========================== */
+
+  window.CATEGORIES = window.CATEGORIES || ['All','Crypto','Forex','Stocks'];
+  let activeCategory = (typeof window.activeCategory !== 'undefined' && window.activeCategory) ? window.activeCategory :
+                       (window.CATEGORIES && window.CATEGORIES[0]) || 'All';
+
+  let orderStore = window.orderStore || []; // local orders store (frontend demo)
+  let symbolSearchInput = null;
+
+  function buildCategoryTabs(){
+    const catTabsEl = document.getElementById('catTabs');
+    if(!catTabsEl) return;
+    catTabsEl.innerHTML = '';
+    (window.CATEGORIES || []).forEach(cat=>{
+      const b = document.createElement('button');
+      b.className = 'cat-tab' + (cat===activeCategory ? ' active':'');
+      b.innerText = cat;
+      b.addEventListener('click', ()=> {
+        activeCategory = cat;
+        renderSymbolsGridFiltered();
+        buildCategoryTabs();
+      });
+      catTabsEl.appendChild(b);
+    });
+  }
+
+  function filterSymbolsList(q, category){
+    q = (q||'').trim().toLowerCase();
+    return (T.ALL_SYMBOLS || []).filter(s=>{
+      if(category && category !== 'All' && (s.market||'').toLowerCase() !== category.toLowerCase()) return false;
+      if(!q) return true;
+      return ((s.label||'').toLowerCase().includes(q) || (s.symbol||'').toLowerCase().includes(q));
+    });
+  }
+
+  function renderSymbolsGridFiltered(){
+    const container = document.getElementById('symbolsGrid');
+    if(!container) return;
+    container.innerHTML = '';
+    const q = (symbolSearchInput && symbolSearchInput.value) ? symbolSearchInput.value : '';
+    const list = filterSymbolsList(q, activeCategory);
+    if(!list.length){ container.innerHTML = '<div style="color:var(--muted)">— no se encontraron símbolos —</div>'; return; }
+    list.forEach(s=>{
+      const el = document.createElement('div'); el.className = 'symbol-card'; el.setAttribute('data-symbol', s.symbol);
+      el.addEventListener('click', ()=> { selectSymbolAndOpenTrading(s.symbol, s.label); });
+      const rawPrice = T.symbolPrices[s.symbol];
+      const priceVal = (rawPrice && typeof rawPrice === 'object') ? (rawPrice.price ?? rawPrice) : rawPrice;
+      const numeric = (priceVal === undefined || priceVal === null) ? null : Number(priceVal);
+      let ptext = '--';
+      if(numeric !== null && !isNaN(numeric)) ptext = (Math.abs(numeric)>1000)? numeric.toLocaleString(undefined,{maximumFractionDigits:1}) : numeric.toFixed(6);
+      else if(priceVal !== null && priceVal !== undefined) ptext = String(priceVal);
+      el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:6px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:800;color:var(--text);font-size:14px">${ptext}</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+        </div>
+      </div>`;
+      container.appendChild(el);
+    });
+  }
+
+  function selectSymbolAndOpenTrading(symbol, label){
+    selectSymbol(symbol);
+    const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (label || symbol.split(':').pop()).replace('_','/');
+    const opSymbolEl = document.getElementById('op-symbol'); if(opSymbolEl) opSymbolEl.innerText = (document.getElementById('tradingSymbol')?.innerText || '');
+    const opEx = document.getElementById('op-exchange'); if(opEx) opEx.innerText = symbol.includes('OANDA') ? 'Market: FOREX' : (symbol.includes('INDEX') ? 'Market: INDEX' : 'Market: BINANCE');
+    if(typeof showPanelById === 'function') showPanelById('tradingPanel');
+    try{ if(window.TradingView && typeof TradingView.widget === 'function'){ initTradingWidget(symbol); } }catch(e){}
+    const priceVal = (T.symbolPrices && T.symbolPrices[symbol] && T.symbolPrices[symbol].price) ? T.symbolPrices[symbol].price : null;
+    if(priceVal !== null) { const op = document.getElementById('op-price'); if(op) op.textContent = formatNumber(priceVal); }
+  }
+
+  function refreshOrdersUI(){
+    const list = document.getElementById('orders-list');
+    if(!list) return;
+    if(!orderStore.length) { list.innerText = '— no hay órdenes —'; return; }
+    list.innerHTML = orderStore.map(o=>`<div style="padding:6px 0">${escapeHtml(o.side)} ${escapeHtml(o.symbol)} ${o.qty} @ ${o.price || 'mkt'} <small style="color:var(--muted)">(${o.type})</small></div>`).join('');
+  }
+
+  async function createOrder(side){
+    try{
+      const type = (document.getElementById('order-type')||{}).value || 'Market';
+      const qty = Number((document.getElementById('order-qty')||{}).value || 0);
+      const price = (document.getElementById('order-price')||{}).value || null;
+      if(!qty || qty <= 0){ alert('Cantidad inválida'); return; }
+      const token = localStorage.getItem('token');
+      const body = { symbol: currentSymbol, side, qty, price: price || null, type };
+      orderStore.push({ ...body, createdAt: Date.now() });
+      refreshOrdersUI();
+
+      if(token){
+        try{
+          const res = await fetch(API_BASE + '/orders', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(body) });
+          if(!res.ok){ const t = await res.text().catch(()=>null); console.warn('order backend error', res.status, t); }
+          else { const data = await res.json().catch(()=>null); console.log('order accepted', data); }
+        }catch(e){ console.warn('order send failed', e); }
+      } else {
+        console.warn('No token: orden creada solo localmente (demo).');
+      }
+    }catch(e){ console.error('createOrder error', e); alert('Error al crear orden'); }
+  }
+
+  async function submitDoc(ev){
+    ev && ev.preventDefault && ev.preventDefault();
+    try{
+      const fileEl = document.getElementById('doc-file');
+      if(!fileEl || !fileEl.files || !fileEl.files[0]){ alert('Seleccione un archivo'); return; }
+      const fd = new FormData(); fd.append('file', fileEl.files[0]); fd.append('type', ev?.target?.querySelector('select')?.value || 'document');
+      const token = localStorage.getItem('token');
+      const headers = token ? { 'Authorization': 'Bearer '+token } : {};
+      const res = await fetch(API_BASE + '/verification/upload', { method:'POST', body: fd, headers });
+      if(res.ok){ alert('Documento subido. Revisaremos tu verificación.'); } else { const t=await res.text().catch(()=>null); alert('Error al subir documento: '+ (t||res.status)); }
+    }catch(e){ console.error('submitDoc', e); alert('Error al subir documento'); }
+  }
+
+  async function submitTransaction(ev, kind){
+    ev && ev.preventDefault && ev.preventDefault();
+    try{
+      const token = localStorage.getItem('token');
+      const amount = Number((document.getElementById(kind==='deposit' ? 'tx-amount-deposit' : 'tx-amount-withdraw')||{}).value || 0);
+      if(!amount || amount <= 0){ alert('Monto inválido'); return; }
+      const method = (document.getElementById('tx-method-deposit')||{}).value || 'Transferencia';
+      const accountField = (document.getElementById('tx-account-withdraw')||{}).value || '';
+      const payload = { kind, amount, method, account: accountField };
+      if(token){
+        const res = await fetch(API_BASE + '/transactions', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token }, body: JSON.stringify(payload) });
+        if(res.ok){ alert('Transacción enviada. Verifique el estado en Historial.'); } else { const t = await res.text().catch(()=>null); alert('Error: '+(t||res.status)); }
+      } else {
+        alert('Debe iniciar sesión para operar (demo).');
+      }
+    }catch(e){ console.error('submitTransaction', e); alert('Error al enviar transacción'); }
+  }
+
+  /* ===========================
+     Small navigation / modal UI helpers
+     =========================== */
+  function hideAllPanels(){ document.querySelectorAll('.panel').forEach(p=> p.style.display='none'); document.querySelectorAll('.menu-item').forEach(m=> m.classList.remove('active')); document.querySelectorAll('.fnav-item').forEach(f=> f.classList.remove('active')); }
+  function showPanelById(id){
+    hideAllPanels();
+    const el = document.getElementById(id);
+    if(el) el.style.display = 'block';
+    const menu = document.querySelectorAll('.menu-item[data-target="'+id+'"]');
+    if(menu && menu[0]) menu[0].classList.add('active');
+    const foot = document.querySelectorAll('.fnav-item[data-target="'+id+'"]');
+    if(foot && foot[0]) foot[0].classList.add('active');
+  }
+  function navSidebar(ev){
+    const target = (ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target) || (ev.currentTarget && ev.currentTarget.getAttribute && ev.currentTarget.getAttribute('data-target'));
+    if(!target) return;
+    showPanelById(target);
+    const sb = document.getElementById('sidebar');
+    if(window.innerWidth < 1000 && sb) sb.classList.add('hidden');
+  }
+  function footerNavClick(ev){
+    const t = ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.target;
+    if(!t) return;
+    showPanelById(t);
+  }
+
+  document.addEventListener('click', function(e){
+    const btn = e.target.closest('#sidebarToggle');
+    if(btn){
+      const sb = document.getElementById('sidebar');
+      if(sb) sb.classList.toggle('hidden');
     }
-  }catch(e){ console.warn('fetchSymbolsBackendAndInit error', e); }
-  buildCategoryTabs();
-  symbolSearchInput = document.getElementById('symbolSearch');
-  if(symbolSearchInput) symbolSearchInput.addEventListener('input', ()=> renderSymbolsGridFiltered());
-  renderSymbolsGridFiltered();
-  ensureTradingSocket(); // attach socket if possible (will fallback to demo prices)
-}
+  });
 
-/* ===========================
-   Boot: single DOMContentLoaded
-   =========================== */
-document.addEventListener('DOMContentLoaded', () => {
-  try{
-    wireGlobalEvents();
-    restoreSessionOnLoad();
-    attachGlobalOpenButtons();
-    // observe DOM for late-inserted buttons (keep reattaching)
-    try{ const mo = new MutationObserver(()=>{ attachGlobalOpenButtons(); }); mo.observe(document.documentElement||document.body, { childList:true, subtree:true }); }catch(e){}
-    // init trading module
-    initTradingModule().catch(()=>{});
-    // kick account load & positions (safe if no token)
-    loadAccount().catch(()=>{});
-    // initialize UI symbol list & socket
-    fetchSymbolsBackendAndInit();
-    // loadPositions alias will call fetchPositions
-    try{ (window.loadPositions && typeof window.loadPositions === 'function') && window.loadPositions(); }catch(e){}
-  }catch(e){ console.error('Unified script init error', e); }
-});
+  function showModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='flex'; }
+  function hideModalInfo(){ const m = document.getElementById('infoModal'); if(m) m.style.display='none'; }
 
-/* End of consolidated script */
+  function showPrivateArea(user){
+    try{
+      const pa = document.getElementById('privateArea_full');
+      if(!pa) return;
+      pa.style.display = 'block';
+      const name = (user && (user.name || user.email)) ? (user.name || user.email) : null;
+      if(name){
+        const headerName = document.getElementById('privateHeaderName'); if(headerName) headerName.textContent = name;
+        const welcomeName = document.getElementById('privateWelcomeName'); if(welcomeName) welcomeName.textContent = name;
+        const avatar = document.getElementById('privateAvatar'); if(avatar) avatar.textContent = (name[0]||'U').toUpperCase();
+      }
+      try{ fetchSymbolsBackendAndInit(); }catch(e){}
+      showPanelById('dashboardPanel');
+    }catch(e){ console.warn('showPrivateArea error', e); }
+  }
+
+  /* ===========================
+     Helper: fetchSymbolsBackendAndInit (fetch remote symbols and init UI)
+     =========================== */
+  async function fetchSymbolsBackendAndInit(){
+    try{
+      const endpoints = ['/symbols','/api/symbols','/markets/symbols','/market/symbols','/markets','/api/markets'];
+      for(const ep of endpoints){
+        try{
+          const base = String(API_BASE).replace(/\/api\/?$/,'');
+          const url = base + ep;
+          const res = await fetch(url, { method:'GET' }).catch(()=>null);
+          if(!res || !res.ok) continue;
+          const data = await res.json().catch(()=>null);
+          if(Array.isArray(data) && data.length){
+            T.ALL_SYMBOLS = data.map(it=> typeof it === 'string' ? { symbol: it, label: it, market: 'Unknown' } : ({ symbol: it.symbol||it.sym||it.t, label: it.label||it.name||it.symbol, market: it.market||it.mkt||'Unknown' }));
+            break;
+          }
+          if(data && typeof data === 'object' && Object.keys(data).length){
+            T.ALL_SYMBOLS = Object.keys(data).map(k=> ({ symbol: k, label: data[k].label || k, market: data[k].market || 'Unknown' }));
+            break;
+          }
+        }catch(e){}
+      }
+    }catch(e){ console.warn('fetchSymbolsBackendAndInit error', e); }
+    buildCategoryTabs();
+    symbolSearchInput = document.getElementById('symbolSearch');
+    if(symbolSearchInput) symbolSearchInput.addEventListener('input', ()=> renderSymbolsGridFiltered());
+    renderSymbolsGridFiltered();
+    ensureTradingSocket();
+  }
+
+  /* ===========================
+     Boot: single DOMContentLoaded (protected with one-time guards)
+     =========================== */
+  document.addEventListener('DOMContentLoaded', () => {
+    try{
+      if(window.__LEONES_DOMCONTENT_LOADED__) {
+        log('DOMContentLoaded handlers already executed — skipping');
+        return;
+      }
+      window.__LEONES_DOMCONTENT_LOADED__ = true;
+
+      wireGlobalEvents();
+      restoreSessionOnLoad();
+      attachGlobalOpenButtons();
+
+      // single MutationObserver to reattach buttons (saved to window to avoid duplicates)
+      try{
+        if(!window.__LEONES_MO__){
+          const mo = new MutationObserver(()=>{ attachGlobalOpenButtons(); });
+          mo.observe(document.documentElement||document.body, { childList:true, subtree:true });
+          window.__LEONES_MO__ = mo;
+        }
+      }catch(e){}
+
+      initTradingModule().catch(()=>{});
+      loadAccount().catch(()=>{});
+      fetchSymbolsBackendAndInit();
+      try{ (window.loadPositions && typeof window.loadPositions === 'function') && window.loadPositions(); }catch(e){}
+    }catch(e){ console.error('Unified script init error', e); }
+  });
+
+  log('[LEONES] unified script loaded (defensive mode ON)');
+} // end boot guard
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
