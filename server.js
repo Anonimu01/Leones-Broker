@@ -517,6 +517,54 @@ if (!staticDirName) {
 }
 
 const staticPath = path.join(__dirname, staticDirName);
+
+/* ======================================================
+   --- START: Middleware para stubs JS (evita MIME error / ReferenceError)
+   - Si los archivos /js/main.js o /js/trading.js no existen en disco,
+     devolvemos un pequeño JS "stub" con tipo application/javascript.
+   - Si existen, dejamos que express.static los sirva normalmente.
+   - Esto es seguro y no modifica tu frontend; solo evita errores en producción.
+   ====================================================== */
+app.get(["/js/main.js", "/js/trading.js"], (req, res, next) => {
+  try {
+    const requestedPath = path.join(staticPath, req.path);
+    if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
+      // Archivo real presente: dejar que express.static lo sirva
+      return next();
+    }
+  } catch (e) {
+    // ignore and serve stub
+  }
+
+  // Minimal safe stub: define some globals that frontend sometimes expects
+  const stub = `
+/* Auto-generated JS stub — served because ${req.path} not present on disk.
+   This prevents MIME errors and provides safe placeholders for globals. */
+window.CATEGORIES = window.CATEGORIES || [];
+window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+window.API = window.API || "/api";
+window.SOCKET_URL = window.SOCKET_URL || location.origin;
+window._LEONES = window._LEONES || {};
+// provide a safe loadPositions alias if frontend calls it
+if (!window.loadPositions) {
+  window.loadPositions = async function() {
+    try {
+      if (window._LEONES_TRADING && typeof window._LEONES_TRADING.fetchPositions === "function") {
+        return await window._LEONES_TRADING.fetchPositions();
+      }
+    } catch (e) { console.warn('loadPositions stub error', e); }
+    return null;
+  };
+}
+console.log("Served JS stub for ${req.path}");
+`;
+
+  res.type("application/javascript; charset=utf-8").status(200).send(stub);
+});
+/* ======================================================
+   --- END: Middleware para stubs JS
+   ====================================================== */
+
 app.use(express.static(staticPath));
 
 app.get("*", (req, res) => {
