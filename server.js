@@ -56,7 +56,6 @@ app.set("trust proxy", 1);
 // DB CONNECT
 connectDB();
 
-// Mongoose listeners (logging + start jobs after DB ready)
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 
@@ -172,12 +171,9 @@ app.get("/api/health", (req, res) => {
 
 /* ======================================================
    SEND EMAIL HELPER (Resend API fallback to SMTP)
-   - app.locals.sendEmail available
-   - endpoint /api/_send_test_email para probar
    ====================================================== */
 
 async function sendViaResend(from, to, subject, html) {
-  // Resend expects: { from, to: [..], subject, html }
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error("RESEND_API_KEY no configurado");
 
@@ -225,11 +221,10 @@ async function getSmtpTransporter() {
   smtpTransporter = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465, // true for 465, false for other ports
+    secure: port === 465,
     auth: { user, pass },
   });
 
-  // verify once
   try {
     await smtpTransporter.verify();
     console.log("SMTP transporter verificado");
@@ -242,31 +237,22 @@ async function getSmtpTransporter() {
 
 async function sendViaSmtp(from, to, subject, html) {
   const transporter = await getSmtpTransporter();
-  const info = await transporter.sendMail({
-    from,
-    to,
-    subject,
-    html,
-  });
+  const info = await transporter.sendMail({ from, to, subject, html });
   return info;
 }
 
 async function sendEmail(to, subject, html, opts = {}) {
-  // opts.from override
   const from = opts.from || process.env.SENDER_EMAIL || process.env.EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/^https?:\/\//, "") || "localhost"}`;
 
-  // Prefer Resend when configured
   if (process.env.RESEND_API_KEY) {
     try {
       const r = await sendViaResend(from, to, subject, html);
       return { ok: true, provider: "resend", result: r };
     } catch (e) {
       console.error("Resend send failed:", e && e.message ? e.message : e);
-      // fall through to SMTP if available
     }
   }
 
-  // Fallback to SMTP
   try {
     const info = await sendViaSmtp(from, to, subject, html);
     return { ok: true, provider: "smtp", result: info };
@@ -276,10 +262,8 @@ async function sendEmail(to, subject, html, opts = {}) {
   }
 }
 
-// expose helper on app.locals so other modules (or devs) can use it
 app.locals.sendEmail = sendEmail;
 
-// Route to test sending email from server
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
   if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
@@ -485,8 +469,6 @@ io.on("connection", (socket) => {
 
 /* ======================================================
    Helper: obtener usuario desde token (si aplica)
-   - intenta decodificar Bearer token con process.env.JWT_SECRET
-   - busca User en DB y devuelve usuario o null
    ====================================================== */
 async function getUserFromBearer(req) {
   try {
@@ -514,23 +496,29 @@ async function getUserFromBearer(req) {
    Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
    ====================================================== */
 app.use("/api/api", (req, res) => {
-  // redirect preserving path/query; this helps faulty client requests like /api/api/positions
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
 });
 
 /* ======================================================
+   Compat: redirigir /api/trade/positions -> /api/positions
+   (evita 404 en clientes antiguos)
+   ====================================================== */
+app.get("/api/trade/positions", (req, res) => {
+  // preserve query
+  const qs = req.originalUrl.split("?")[1] || "";
+  const target = "/api/positions" + (qs ? `?${qs}` : "");
+  return res.redirect(307, target);
+});
+
+/* ======================================================
    Compat endpoints: /api/account  y /api/wallet
-   - Si token presente: intenta devolver datos reales desde DB (User/Wallet/Position)
-   - Si no hay token: 401 (no autorizado)
-   - Si no hay datos: devuelve shape por defecto (para no romper frontend)
    ====================================================== */
 app.get("/api/account", async (req, res) => {
   try {
     const user = await getUserFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    // try to fetch wallet & positions if models exist
     let wallet = null;
     try {
       wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
@@ -568,7 +556,6 @@ app.get("/api/wallet", async (req, res) => {
     } catch (e) { wallet = null; }
 
     if (wallet) return res.json(wallet);
-    // fallback shape
     return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
   } catch (e) {
     console.error("/api/wallet error", e);
@@ -585,10 +572,8 @@ app.use("/api", (req, res) => {
 
 /* ======================================================
    STATIC FRONTEND
-   - Detectamos la carpeta estática real (public / publico / público)
-   - Servimos assets estáticos y devolvemos index.html tal cual
    ====================================================== */
-const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+const staticCandidates = ["public", "publico", "público", "Public", "Publico", "dist", "build", "www", "static"];
 let staticDirName = null;
 
 for (const cand of staticCandidates) {
@@ -604,7 +589,6 @@ for (const cand of staticCandidates) {
 }
 
 if (!staticDirName) {
-  // fallback a "public" (lo habitual) pero avisamos
   staticDirName = "public";
   console.warn(
     `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
@@ -618,33 +602,48 @@ if (!staticDirName) {
 const staticPath = path.join(__dirname, staticDirName);
 
 /* ======================================================
-   --- START: Middleware para stubs JS (evita MIME error / ReferenceError)
-   - Si los archivos /js/main.js o /js/trading.js no existen en disco,
-     devolvemos un pequeño JS "stub" con tipo application/javascript.
-   - Si existen, dejamos que express.static los sirva normalmente.
-   - Esto es seguro y no modifica tu frontend; solo evita errores en producción.
+   --- START: Middleware para stubs JS (mejorado)
+   - Sólo sirve stub si NO existe el archivo en ninguna ruta conocida
+   - También busca en dist/build subfolders (common on bundlers)
+   - Log claro cuando sirve el stub para debug
    ====================================================== */
 app.get(["/js/main.js", "/js/trading.js"], (req, res, next) => {
   try {
-    const requestedPath = path.join(staticPath, req.path);
-    if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
-      // Archivo real presente: dejar que express.static lo sirva
-      return next();
+    const requestedRel = req.path.replace(/^\//, ""); // "js/main.js"
+    const candidatePaths = [
+      path.join(staticPath, requestedRel),
+      path.join(__dirname, "dist", requestedRel),
+      path.join(__dirname, "build", requestedRel),
+      path.join(__dirname, "www", requestedRel),
+      path.join(__dirname, "static", requestedRel),
+    ];
+
+    for (const p of candidatePaths) {
+      try {
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+          // Archivo real presente en alguna carpeta: dejar que express.static lo sirva
+          console.log(`Serving real file for ${req.path} from ${p}`);
+          return next();
+        }
+      } catch (e) {
+        // ignore and continue
+      }
     }
   } catch (e) {
-    // ignore and serve stub
+    // ignore and fallthrough to stub
   }
 
-  // Minimal safe stub: define some globals that frontend sometimes expects
+  // If we reach here: file doesn't exists in expected places -> serve minimal stub
   const stub = `
 /* Auto-generated JS stub — served because ${req.path} not present on disk.
-   This prevents MIME errors and provides safe placeholders for globals. */
+   This prevents MIME errors. If you see this message it means the real ${req.path}
+   was NOT found in ${staticPath} or dist/build/www/static. Please ensure your build
+   output places js files under the static folder. */
 window.CATEGORIES = window.CATEGORIES || [];
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 window.API = window.API || "/api";
 window.SOCKET_URL = window.SOCKET_URL || location.origin;
 window._LEONES = window._LEONES || {};
-// provide a safe loadPositions alias if frontend calls it
 if (!window.loadPositions) {
   window.loadPositions = async function() {
     try {
@@ -655,7 +654,7 @@ if (!window.loadPositions) {
     return null;
   };
 }
-console.log("Served JS stub for ${req.path}");
+console.warn("Served JS stub for ${req.path} — real file not found in static paths.");
 `;
 
   res.type("application/javascript; charset=utf-8").status(200).send(stub);
