@@ -16,6 +16,7 @@ import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
 
 import nodemailer from "nodemailer";
+import jwt from "jsonwebtoken";
 
 import { connectDB } from "./config/db.js";
 
@@ -32,6 +33,11 @@ import { startRiskWatcher } from "./jobs/risk.job.js";
 import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
+
+// Models (used for account/wallet endpoints fallback)
+import User from "./models/user.model.js";
+import Wallet from "./models/wallet.model.js";
+import Position from "./models/position.model.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -478,7 +484,100 @@ io.on("connection", (socket) => {
 });
 
 /* ======================================================
-   404 API
+   Helper: obtener usuario desde token (si aplica)
+   - intenta decodificar Bearer token con process.env.JWT_SECRET
+   - busca User en DB y devuelve usuario o null
+   ====================================================== */
+async function getUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return null;
+    }
+    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+    const user = await User.findById(userId).lean().exec().catch(()=>null);
+    return user || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ======================================================
+   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
+   ====================================================== */
+app.use("/api/api", (req, res) => {
+  // redirect preserving path/query; this helps faulty client requests like /api/api/positions
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
+});
+
+/* ======================================================
+   Compat endpoints: /api/account  y /api/wallet
+   - Si token presente: intenta devolver datos reales desde DB (User/Wallet/Position)
+   - Si no hay token: 401 (no autorizado)
+   - Si no hay datos: devuelve shape por defecto (para no romper frontend)
+   ====================================================== */
+app.get("/api/account", async (req, res) => {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    // try to fetch wallet & positions if models exist
+    let wallet = null;
+    try {
+      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
+    } catch (e) { wallet = null; }
+    let positions = [];
+    try {
+      positions = await Position.find({ user: user._id }).lean().exec().catch(()=>[]);
+    } catch (e) { positions = []; }
+
+    const account = {
+      balance: wallet?.balance ?? user.balance ?? 0,
+      equity: wallet?.balance ?? user.balance ?? 0,
+      marginUsed: 0,
+      freeMargin: wallet?.balance ?? user.balance ?? 0,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    };
+    return res.json({ account });
+  } catch (e) {
+    console.error("/api/account error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/wallet", async (req, res) => {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    let wallet = null;
+    try {
+      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
+    } catch (e) { wallet = null; }
+
+    if (wallet) return res.json(wallet);
+    // fallback shape
+    return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
+  } catch (e) {
+    console.error("/api/wallet error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ======================================================
+   404 API (único fallback para /api)
    ====================================================== */
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
