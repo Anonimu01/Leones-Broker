@@ -175,6 +175,9 @@ app.get("/api/health", (req, res) => {
    SEND EMAIL HELPER (Resend API fallback to SMTP)
    ====================================================== */
 
+/**
+ * sendViaResend: use global fetch if available, otherwise dynamic-import node-fetch
+ */
 async function sendViaResend(from, to, subject, html) {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error("RESEND_API_KEY no configurado");
@@ -186,7 +189,19 @@ async function sendViaResend(from, to, subject, html) {
     html: html || "",
   };
 
-  const resp = await fetch("https://api.resend.com/emails", {
+  // ensure fetch exists (node 18+ has global fetch; otherwise try node-fetch)
+  let fetchFn = globalThis.fetch;
+  if (!fetchFn) {
+    try {
+      // dynamic import to avoid require issues in ESM
+      const mod = await import("node-fetch");
+      fetchFn = mod.default || mod;
+    } catch (e) {
+      throw new Error("fetch no disponible en el runtime y node-fetch no pudo importarse");
+    }
+  }
+
+  const resp = await fetchFn("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,
@@ -504,6 +519,7 @@ async function getUserFromBearer(req) {
    Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
    ====================================================== */
 app.use("/api/api", (req, res) => {
+  // Redirigir al mismo path sin duplicar /api
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
 });
@@ -542,10 +558,9 @@ app.get("/api/account", async (req, res) => {
   }
 });
 
-// alias español /api/cuenta
-app.get("/api/cuenta", async (req, res) => {
-  // Reuse same implementation: simplemente llamar internamente a /api/account
-  return app._router.handle({ ...req, url: "/api/account" }, res);
+// alias español /api/cuenta -> redirige a /api/account
+app.get("/api/cuenta", (req, res) => {
+  return res.redirect(307, "/api/account");
 });
 
 app.get("/api/wallet", async (req, res) => {
@@ -566,9 +581,9 @@ app.get("/api/wallet", async (req, res) => {
   }
 });
 
-// alias español /api/billetera
-app.get("/api/billetera", async (req, res) => {
-  return app._router.handle({ ...req, url: "/api/wallet" }, res);
+// alias español /api/billetera -> redirige a /api/wallet
+app.get("/api/billetera", (req, res) => {
+  return res.redirect(307, "/api/wallet");
 });
 
 /* ======================================================
@@ -609,12 +624,14 @@ const staticPath = path.join(__dirname, staticDirName);
 
 /* ======================================================
    JS STUBS middleware (evita MIME error / ReferenceError)
+   - ahora soporta /js/* para evitar que index.html sea servido como JS cuando faltan assets
    ====================================================== */
-app.get(["/js/main.js", "/js/trading.js"], (req, res, next) => {
+app.get(["/js/main.js", "/js/trading.js", "/js/*"], (req, res, next) => {
   try {
+    // resolvemos sin querystring: Express ya separa query, req.path no incluye ?
     const requestedPath = path.join(staticPath, req.path);
     if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
-      return next();
+      return next(); // si existe, que lo sirva express.static
     }
   } catch (e) {}
 
@@ -645,6 +662,10 @@ console.log("Served JS stub for ${req.path}");
 app.use(express.static(staticPath));
 
 app.get("*", (req, res) => {
+  // evitar servir index.html para rutas de API
+  if (req.path.startsWith("/api/") || req.path === "/api") {
+    return res.status(404).json({ error: "API endpoint not found" });
+  }
   const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -659,6 +680,7 @@ app.get("*", (req, res) => {
    ====================================================== */
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
+  // En producción no mandamos detalles
   res.status(err.status || 500).json({
     error: "Server error",
     message: process.env.NODE_ENV === "development" ? err.message : undefined,
