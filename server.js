@@ -56,6 +56,7 @@ app.set("trust proxy", 1);
 // DB CONNECT
 connectDB();
 
+// Mongoose listeners (logging + start jobs after DB ready)
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 
@@ -117,6 +118,7 @@ const allowedOrigins = new Set(
     "http://127.0.0.1:3000",
     "http://localhost:4000",
     "http://127.0.0.1:4000",
+    "https://leones-broker.onrender.com", // añadido por seguridad/compat
   ].filter(Boolean)
 );
 
@@ -221,7 +223,7 @@ async function getSmtpTransporter() {
   smtpTransporter = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    secure: port === 465, // true for 465, false for other ports
     auth: { user, pass },
   });
 
@@ -237,7 +239,12 @@ async function getSmtpTransporter() {
 
 async function sendViaSmtp(from, to, subject, html) {
   const transporter = await getSmtpTransporter();
-  const info = await transporter.sendMail({ from, to, subject, html });
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html,
+  });
   return info;
 }
 
@@ -282,12 +289,13 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   API ROUTES
+   API ROUTES - montamos rutas principales (ingles)
    ====================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
 app.use("/api/wallet", walletRoutes);
+// positions + trade routes: montamos en inglés y también alias en español más abajo
 app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 
@@ -333,7 +341,7 @@ const io = new IOServer(httpServer, {
 const priceHandler = new PriceHandler(io);
 
 /* ======================================================
-   POLYGON SOCKET
+   POLYGON SOCKET (realtime provider)
    ====================================================== */
 let polygonSocket = null;
 try {
@@ -501,18 +509,7 @@ app.use("/api/api", (req, res) => {
 });
 
 /* ======================================================
-   Compat: redirigir /api/trade/positions -> /api/positions
-   (evita 404 en clientes antiguos)
-   ====================================================== */
-app.get("/api/trade/positions", (req, res) => {
-  // preserve query
-  const qs = req.originalUrl.split("?")[1] || "";
-  const target = "/api/positions" + (qs ? `?${qs}` : "");
-  return res.redirect(307, target);
-});
-
-/* ======================================================
-   Compat endpoints: /api/account  y /api/wallet
+   Compat endpoints: /api/account  y /api/wallet (añado alias en español)
    ====================================================== */
 app.get("/api/account", async (req, res) => {
   try {
@@ -545,6 +542,12 @@ app.get("/api/account", async (req, res) => {
   }
 });
 
+// alias español /api/cuenta
+app.get("/api/cuenta", async (req, res) => {
+  // Reuse same implementation: simplemente llamar internamente a /api/account
+  return app._router.handle({ ...req, url: "/api/account" }, res);
+});
+
 app.get("/api/wallet", async (req, res) => {
   try {
     const user = await getUserFromBearer(req);
@@ -563,6 +566,11 @@ app.get("/api/wallet", async (req, res) => {
   }
 });
 
+// alias español /api/billetera
+app.get("/api/billetera", async (req, res) => {
+  return app._router.handle({ ...req, url: "/api/wallet" }, res);
+});
+
 /* ======================================================
    404 API (único fallback para /api)
    ====================================================== */
@@ -573,7 +581,7 @@ app.use("/api", (req, res) => {
 /* ======================================================
    STATIC FRONTEND
    ====================================================== */
-const staticCandidates = ["public", "publico", "público", "Public", "Publico", "dist", "build", "www", "static"];
+const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
 
 for (const cand of staticCandidates) {
@@ -583,9 +591,7 @@ for (const cand of staticCandidates) {
       staticDirName = cand;
       break;
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 }
 
 if (!staticDirName) {
@@ -602,43 +608,19 @@ if (!staticDirName) {
 const staticPath = path.join(__dirname, staticDirName);
 
 /* ======================================================
-   --- START: Middleware para stubs JS (mejorado)
-   - Sólo sirve stub si NO existe el archivo en ninguna ruta conocida
-   - También busca en dist/build subfolders (common on bundlers)
-   - Log claro cuando sirve el stub para debug
+   JS STUBS middleware (evita MIME error / ReferenceError)
    ====================================================== */
 app.get(["/js/main.js", "/js/trading.js"], (req, res, next) => {
   try {
-    const requestedRel = req.path.replace(/^\//, ""); // "js/main.js"
-    const candidatePaths = [
-      path.join(staticPath, requestedRel),
-      path.join(__dirname, "dist", requestedRel),
-      path.join(__dirname, "build", requestedRel),
-      path.join(__dirname, "www", requestedRel),
-      path.join(__dirname, "static", requestedRel),
-    ];
-
-    for (const p of candidatePaths) {
-      try {
-        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-          // Archivo real presente en alguna carpeta: dejar que express.static lo sirva
-          console.log(`Serving real file for ${req.path} from ${p}`);
-          return next();
-        }
-      } catch (e) {
-        // ignore and continue
-      }
+    const requestedPath = path.join(staticPath, req.path);
+    if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
+      return next();
     }
-  } catch (e) {
-    // ignore and fallthrough to stub
-  }
+  } catch (e) {}
 
-  // If we reach here: file doesn't exists in expected places -> serve minimal stub
   const stub = `
 /* Auto-generated JS stub — served because ${req.path} not present on disk.
-   This prevents MIME errors. If you see this message it means the real ${req.path}
-   was NOT found in ${staticPath} or dist/build/www/static. Please ensure your build
-   output places js files under the static folder. */
+   This prevents MIME errors and provides safe placeholders for globals. */
 window.CATEGORIES = window.CATEGORIES || [];
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 window.API = window.API || "/api";
@@ -654,14 +636,11 @@ if (!window.loadPositions) {
     return null;
   };
 }
-console.warn("Served JS stub for ${req.path} — real file not found in static paths.");
+console.log("Served JS stub for ${req.path}");
 `;
 
   res.type("application/javascript; charset=utf-8").status(200).send(stub);
 });
-/* ======================================================
-   --- END: Middleware para stubs JS
-   ====================================================== */
 
 app.use(express.static(staticPath));
 
