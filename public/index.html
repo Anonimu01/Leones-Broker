@@ -1349,12 +1349,11 @@ if (window.__LEONES_BOOTED__) {
 
 <script>
 /*
-  trading.js - módulo de trading separado
+  trading.js - módulo de trading separado (corregido)
   - Reusa NS.apiFetch y NS.initSocket si existen.
-  - Si no, usa fallback interno seguro.
-  - Evita referencias a variables no declaradas.
+  - Fallback seguro para apiFetch / socket.
+  - Evita referencias a variables no declaradas y previene inicializaciones dobles.
 */
-
 (function(){
   "use strict";
 
@@ -1366,23 +1365,26 @@ if (window.__LEONES_BOOTED__) {
   window._LEONES = window._LEONES || {};
   const NS = window._LEONES;
 
-  // fallback apiFetch (very small, will be replaced by NS.apiFetch if available)
+  // fallback apiFetch (will be replaced by NS.apiFetch if available)
   async function apiFetchFallback(path, opts = {}){
     const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
     // normalize url
     let url = '';
     path = String(path || '');
-    if(path.startsWith('http://') || path.startsWith('https://')) url = path;
-    else {
+    if(path.startsWith('http://') || path.startsWith('https://')) {
+      url = path;
+    } else {
       const baseNoApi = String(API_BASE).replace(/\/api\/?$/,'');
       if(path.startsWith('/')) url = baseNoApi + path;
       else url = (API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE) + (path.startsWith('/') ? path : ('/' + path));
     }
+
     const headers = (opts.headers && typeof opts.headers === 'object') ? {...opts.headers} : {};
     if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
       headers['Content-Type'] = 'application/json';
     }
     if(token && !headers['Authorization'] && !headers['authorization']) headers['Authorization'] = 'Bearer ' + token;
+
     const fetchOpts = { method: opts.method || 'GET', credentials: 'include', ...opts, headers };
     const res = await fetch(url, fetchOpts);
     if(res.status === 204) return {};
@@ -1390,14 +1392,17 @@ if (window.__LEONES_BOOTED__) {
     let data = null;
     if(text) { try { data = JSON.parse(text); } catch(e) { data = text; } }
     if(!res.ok){
-      const err = new Error('HTTP ' + res.status); err.status = res.status; err.body = data; throw err;
+      const err = new Error('HTTP ' + res.status);
+      err.status = res.status;
+      err.body = data;
+      throw err;
     }
     return data;
   }
 
-  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
-  const initSocket = NS.initSocket || (async function(){
-    // try to use window.__LEONES_SOCKET__ if present, otherwise try window.io if available
+  // pick central implementations if provided
+  const apiFetch = (NS && typeof NS.apiFetch === 'function') ? NS.apiFetch : (window.apiFetch || apiFetchFallback);
+  const initSocketFallback = async function(){
     if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) return window.__LEONES_SOCKET__.socket;
     if(typeof io === 'function'){
       const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
@@ -1406,7 +1411,8 @@ if (window.__LEONES_BOOTED__) {
       return s;
     }
     return null;
-  });
+  };
+  const initSocket = (NS && typeof NS.initSocket === 'function') ? NS.initSocket : initSocketFallback;
 
   // state
   window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
@@ -1431,10 +1437,10 @@ if (window.__LEONES_BOOTED__) {
   function formatNumber(n,d=6){ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:d}); }
   function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+  // try to get a socket and attach handlers
   async function ensureTradingSocket(){
     try{
       if(tradingSocket && tradingSocket.connected) return tradingSocket;
-      // try to use NS.initSocket if provided by unified
       const s = (NS && typeof NS.initSocket === 'function') ? await NS.initSocket() : await initSocket();
       if(!s){
         warn('trading socket not available — realtime disabled');
@@ -1445,48 +1451,96 @@ if (window.__LEONES_BOOTED__) {
       if(tradingSocket.__leones_trading_attached) return tradingSocket;
       tradingSocket.__leones_trading_attached = true;
 
-      tradingSocket.on('prices_snapshot', snap => {
-        try{
-          if(!snap) return;
-          if(Array.isArray(snap)) snap.forEach(it=>{ if(it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
-          else if(typeof snap === 'object') Object.keys(snap).forEach(k => { const it = snap[k]; T.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() }; });
-        }catch(e){ warn('prices_snapshot handler', e); }
-        renderSymbolsGrid();
-      });
+      if(typeof tradingSocket.on === 'function'){
+        tradingSocket.on('prices_snapshot', snap => {
+          try{
+            if(!snap) return;
+            if(Array.isArray(snap)) {
+              snap.forEach(it=>{ if(it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
+            } else if(typeof snap === 'object') {
+              Object.keys(snap).forEach(k => {
+                const it = snap[k];
+                T.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
+              });
+            }
+          }catch(e){ warn('prices_snapshot handler', e); }
+          renderSymbolsGrid();
+        });
 
-      tradingSocket.on('price', p => {
-        try{ const symbol = p?.symbol || p?.s || p?.t; if(!symbol) return; const price = p.price ?? p.p ?? p.v ?? p.value ?? p; T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() }; updatePriceInUI(symbol, price); }catch(e){ warn('price event error', e); }
-      });
+        tradingSocket.on('price', p => {
+          try{
+            const symbol = p?.symbol || p?.s || p?.t;
+            if(!symbol) return;
+            const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
+            T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+            updatePriceInUI(symbol, price);
+          }catch(e){ warn('price event error', e); }
+        });
 
-      tradingSocket.on('symbols_update', symbols => {
-        try{ if(!symbols) return; if(Array.isArray(symbols)) T.ALL_SYMBOLS = symbols; else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' })); }catch(e){ warn('symbols_update handler', e); }
-        renderSymbolsGrid();
-      });
+        tradingSocket.on('symbols_update', symbols => {
+          try{
+            if(!symbols) return;
+            if(Array.isArray(symbols)) T.ALL_SYMBOLS = symbols;
+            else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
+          }catch(e){ warn('symbols_update handler', e); }
+          renderSymbolsGrid();
+        });
 
-      tradingSocket.on('orderbook', ob => { try{ if(!ob || !ob.symbol) return; T.orderBooks[ob.symbol] = ob; const bidsEl = document.getElementById('ob-bids'); if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob); }catch(e){} });
+        tradingSocket.on('orderbook', ob => {
+          try{
+            if(!ob || !ob.symbol) return;
+            T.orderBooks[ob.symbol] = ob;
+            const bidsEl = document.getElementById('ob-bids');
+            if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
+          }catch(e){}
+        });
 
-      tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
-      tradingSocket.on('disconnect', (r) => { log('trading socket disconnected', r); });
+        tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
+        tradingSocket.on('disconnect', (r) => { log('trading socket disconnected', r); });
+      }
 
       return tradingSocket;
-    }catch(e){ warn('ensureTradingSocket error', e); startDemoPrices(); return null; }
+    }catch(e){
+      warn('ensureTradingSocket error', e);
+      startDemoPrices();
+      return null;
+    }
   }
 
   // UI / Symbols
   function buildSymbolsContainer(){
-    const c = document.getElementById('symbolsGrid'); if(!c) return null;
-    c.style.display='grid'; c.style.gridTemplateColumns='repeat(auto-fill,minmax(220px,1fr))'; c.style.gap='8px';
+    const c = document.getElementById('symbolsGrid');
+    if(!c) return null;
+    c.style.display='grid';
+    c.style.gridTemplateColumns='repeat(auto-fill,minmax(220px,1fr))';
+    c.style.gap='8px';
     return c;
   }
+
   function renderSymbolsGrid(){
-    const container = buildSymbolsContainer(); if(!container) return;
+    const container = buildSymbolsContainer();
+    if(!container) return;
     container.innerHTML = '';
     const list = (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length) ? T.ALL_SYMBOLS : [];
     list.forEach(s => {
       try{
-        const card = document.createElement('div'); card.className='symbol-card'; card.style.cssText='background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
-        const priceObj = T.symbolPrices[s.symbol]; const price = priceObj ? priceObj.price : null;
-        card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label||s.symbol)}</div><div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market||'Unknown')} · ${escapeHtml(s.symbol)}</div></div><div style="text-align:right"><div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div><div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div></div></div>`;
+        const card = document.createElement('div');
+        card.className='symbol-card';
+        card.style.cssText='background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
+        const priceObj = T.symbolPrices[s.symbol];
+        const price = priceObj ? priceObj.price : null;
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label||s.symbol)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market||'Unknown')} · ${escapeHtml(s.symbol)}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+            </div>
+          </div>
+        `;
         card.addEventListener('click', ()=> selectSymbol(s.symbol));
         container.appendChild(card);
       }catch(e){}
@@ -1495,10 +1549,12 @@ if (window.__LEONES_BOOTED__) {
 
   function selectSymbol(symbol){
     currentSymbol = symbol;
-    const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
+    const ts = document.getElementById('tradingSymbol');
+    if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
     if(typeof window.initTradingWidget === 'function') try{ window.initTradingWidget(symbol); }catch(e){}
-    const priceObj = T.symbolPrices[symbol]; if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
-    try{ if(tradingSocket && tradingSocket.emit) tradingSocket.emit('request_orderbook', { symbol }); }catch(e){}
+    const priceObj = T.symbolPrices[symbol];
+    if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+    try{ if(tradingSocket && typeof tradingSocket.emit === 'function') tradingSocket.emit('request_orderbook', { symbol }); }catch(e){}
   }
 
   function updatePriceInUI(symbol, price){
@@ -1506,7 +1562,8 @@ if (window.__LEONES_BOOTED__) {
       document.querySelectorAll(`[data-symbol="${symbol}"]`).forEach(el => el.textContent = formatNumber(price));
       const tsText = document.getElementById('tradingSymbol')?.innerText || '';
       if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
-        const opPrice = document.getElementById('op-price'); if(opPrice) opPrice.textContent = formatNumber(price);
+        const opPrice = document.getElementById('op-price');
+        if(opPrice) opPrice.textContent = formatNumber(price);
       }
       if(!currentEntryPrice) currentEntryPrice = price;
       renderMarginCalculator();
@@ -1515,7 +1572,8 @@ if (window.__LEONES_BOOTED__) {
 
   function updateOrderBookUI(ob){
     try{
-      const bidsEl = document.getElementById('ob-bids'); const asksEl = document.getElementById('ob-asks');
+      const bidsEl = document.getElementById('ob-bids');
+      const asksEl = document.getElementById('ob-asks');
       if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
       if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
     }catch(e){}
@@ -1523,14 +1581,35 @@ if (window.__LEONES_BOOTED__) {
 
   // margin & UI wiring
   function calculateMargin({ positionSize=0, leverage=1, entryPrice=0 } = {}){ const pos = Number(positionSize)||0; const lev = Number(leverage)||1; const ep = Number(entryPrice)||0; const notional = pos; const requiredMargin = lev>0 ? (pos/lev) : pos; const qty = ep>0 ? pos/ep : 0; return { requiredMargin, notional, qty }; }
-  function renderMarginCalculator(){ try{ const marginEl = document.getElementById('marginCalc'); if(!marginEl) return; const priceObj = T.symbolPrices[currentSymbol]; const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0; const posSize = Number(document.getElementById('input_position_size')?.value || 0); const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1); const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice }); marginEl.innerHTML = `<div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop()||currentSymbol)}</div><div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div><div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div><div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div><div>Apalancamiento: <strong>${lev}x</strong></div><div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>`; }catch(e){ warn('renderMarginCalculator', e); } }
+
+  function renderMarginCalculator(){
+    try{
+      const marginEl = document.getElementById('marginCalc');
+      if(!marginEl) return;
+      const priceObj = T.symbolPrices[currentSymbol];
+      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
+      const posSize = Number(document.getElementById('input_position_size')?.value || 0);
+      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
+      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
+      marginEl.innerHTML = `
+        <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop() || currentSymbol)}</div>
+        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
+        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
+        <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
+        <div>Apalancamiento: <strong>${lev}x</strong></div>
+        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
+      `;
+    }catch(e){ warn('renderMarginCalculator', e); }
+  }
 
   async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){
     try{
       const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined };
       const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
       let res = null;
-      for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null); if(res) break; }catch(e){} }
+      for(const ep of candidates){
+        try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null); if(res) break; }catch(e){}
+      }
       alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
       await fetchPositions().catch(()=>{});
       return res;
@@ -1541,34 +1620,55 @@ if (window.__LEONES_BOOTED__) {
     try{
       const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
       let res = null;
-      for(const ep of candidates){ try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){} }
+      for(const ep of candidates){
+        try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
+      }
       if(!res) return null;
       T.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
-      renderPositions(); return T.positions;
+      renderPositions();
+      return T.positions;
     }catch(e){ warn('fetchPositions error', e); return null; }
   }
 
   function renderPositions(){
     try{
-      const el = document.getElementById('positionsList'); if(!el) return; el.innerHTML = '';
+      const el = document.getElementById('positionsList');
+      if(!el) return;
+      el.innerHTML = '';
       if(!T.positions || !T.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
-      T.positions.forEach(p => { try{ const row = document.createElement('div'); row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)'; const symbol = p.symbol || p.s || currentSymbol; const size = p.notional || p.size || 0; const entry = p.entryPrice || p.price || p.avgPrice || 0; const pl = p.unrealizedPnl ?? p.pnl ?? 0; row.innerHTML = `<div style="font-weight:700">${escapeHtml(symbol)}</div><div style="text-align:right"><div>Size: ${formatNumber(size)}</div><div>Entry: ${formatNumber(entry)}</div><div>PnL: ${formatNumber(pl,2)}</div></div>`; el.appendChild(row); }catch(e){} });
+      T.positions.forEach(p => {
+        try{
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
+          const symbol = p.symbol || p.s || currentSymbol;
+          const size = p.notional || p.size || 0;
+          const entry = p.entryPrice || p.price || p.avgPrice || 0;
+          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
+          row.innerHTML = `<div style="font-weight:700">${escapeHtml(symbol)}</div><div style="text-align:right"><div>Size: ${formatNumber(size)}</div><div>Entry: ${formatNumber(entry)}</div><div>PnL: ${formatNumber(pl,2)}</div></div>`;
+          el.appendChild(row);
+        }catch(e){}
+      });
     }catch(e){}
   }
 
   // UI wiring
   function wireTradingUI(){
     try{
-      const posInput = document.getElementById('input_position_size'); const levInput = document.getElementById('input_leverage');
+      const posInput = document.getElementById('input_position_size');
+      const levInput = document.getElementById('input_leverage');
       if(posInput) posInput.addEventListener('input', renderMarginCalculator);
       if(levInput) levInput.addEventListener('input', (e)=>{ currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
 
-      const buyBtn = document.getElementById('btnBuy'); const sellBtn = document.getElementById('btnSell');
+      const buyBtn = document.getElementById('btnBuy');
+      const sellBtn = document.getElementById('btnSell');
       if(buyBtn) buyBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'buy', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
       if(sellBtn) sellBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'sell', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
 
-      const refreshBtn = document.getElementById('btnRefreshPositions'); if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
-      const fetchSymBtn = document.getElementById('btnFetchSymbols'); if(fetchSymBtn) fetchSymBtn.addEventListener('click', async ()=>{ const endpoints=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of endpoints){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r)&&r.length){ T.ALL_SYMBOLS = r; renderSymbolsGrid(); break; } }catch(e){} } });
+      const refreshBtn = document.getElementById('btnRefreshPositions');
+      if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
+
+      const fetchSymBtn = document.getElementById('btnFetchSymbols');
+      if(fetchSymBtn) fetchSymBtn.addEventListener('click', async ()=>{ const endpoints=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of endpoints){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r)&&r.length){ T.ALL_SYMBOLS = r; renderSymbolsGrid(); break; } }catch(e){} } });
 
       renderMarginCalculator();
     }catch(e){ warn('wireTradingUI error', e); }
@@ -1576,10 +1676,23 @@ if (window.__LEONES_BOOTED__) {
 
   function provideTradingWidgetFallback(){ if(typeof window.initTradingWidget === 'function') return; window.initTradingWidget = function(symbol){ const cont = document.getElementById('tv_chart_container'); if(!cont) return; cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`; }; }
 
-  function startDemoPrices(){ if(demoTicker) return; demoTicker = setInterval(()=>{ (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => { const k=s.symbol; const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random()*100); const change=(Math.random()-0.5)*Math.max(0.0001,Math.abs(old)*0.002); const next = Number(Math.max(0.00001, old+change).toFixed(6)); T.symbolPrices[k] = { price: next, ts: Date.now() }; }); renderSymbolsGrid(); renderMarginCalculator(); }, 1200); }
-  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker=null; } }
+  function startDemoPrices(){
+    if(demoTicker) return;
+    demoTicker = setInterval(()=>{
+      (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => {
+        const k = s.symbol;
+        const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random()*100);
+        const change = (Math.random()-0.5) * Math.max(0.0001, Math.abs(old) * 0.002);
+        const next = Number(Math.max(0.00001, old + change).toFixed(6));
+        T.symbolPrices[k] = { price: next, ts: Date.now() };
+      });
+      renderSymbolsGrid();
+      renderMarginCalculator();
+    }, 1200);
+  }
+  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker = null; } }
 
-  // account helpers (simple)
+  // account helpers
   async function loadAccount(){
     try{
       const candidates = ['/account','/api/account','/wallet','/api/wallet'];
@@ -1590,30 +1703,137 @@ if (window.__LEONES_BOOTED__) {
       if(balance !== null){
         const el = document.getElementById('user-equity'); if(el) el.textContent = formatNumber(balance,2);
       }
-      window.__LEONES_ACCOUNT = acc; return acc;
+      window.__LEONES_ACCOUNT = acc;
+      return acc;
     }catch(e){ warn('loadAccount error', e); return null; }
   }
 
   async function openTrade(symbol, type, lot, price, sl, tp){
-    try{ const payload = { symbol, type, lot, price, sl, tp }; const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place']; for(const ep of candidates){ try{ const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null); if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; } }catch(e){} } throw new Error('No endpoint responded for openTrade'); }catch(e){ throw e; }
+    try{
+      const payload = { symbol, type, lot, price, sl, tp };
+      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for openTrade');
+    }catch(e){ throw e; }
   }
-  async function closeTrade(positionId){ try{ const payload = { positionId }; const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition']; for(const ep of candidates){ try{ const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null); if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; } }catch(e){} } throw new Error('No endpoint responded for closeTrade'); }catch(e){ throw e; }
 
-  async function checkMarginCall(){ try{ const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null); if(!acc) return false; const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null; if(marginLevel !== null && Number(marginLevel) < 50){ alert('Margin Call - posiciones cerradas automáticamente'); const poses = acc.positions ?? T.positions ?? []; for(const pos of poses){ try{ const pid = pos._id || pos.id || pos.positionId || pos.position_id; if(pid) await closeTrade(pid).catch(()=>{}); }catch(e){} } return true; } return false; }catch(e){ warn('checkMarginCall error', e); return false; } }
+  async function closeTrade(positionId){
+    try{
+      const payload = { positionId };
+      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for closeTrade');
+    }catch(e){ throw e; }
+  }
+
+  async function checkMarginCall(){
+    try{
+      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
+      if(!acc) return false;
+      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
+      if(marginLevel !== null && Number(marginLevel) < 50){
+        alert('Margin Call - posiciones cerradas automáticamente');
+        const poses = acc.positions ?? T.positions ?? [];
+        for(const pos of poses){
+          try{
+            const pid = pos._id || pos.id || pos.positionId || pos.position_id;
+            if(pid) await closeTrade(pid).catch(()=>{});
+          }catch(e){}
+        }
+        return true;
+      }
+      return false;
+    }catch(e){ warn('checkMarginCall error', e); return false; }
+  }
 
   // init trading module
   async function initTradingModule(){
     try{
       if(window.__LEONES_TRADING_INITED__) return;
       window.__LEONES_TRADING_INITED__ = true;
-      if(!document.getElementById('symbolsGrid')){ const s=document.createElement('div'); s.id='symbolsGrid'; s.style.cssText='padding:8px;max-width:1200px;margin:12px auto'; document.body.insertBefore(s, document.body.firstChild); }
-      if(!document.getElementById('tradingPanel')){ const panel = document.createElement('div'); panel.id='tradingPanel'; panel.style.cssText='max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)'; panel.innerHTML = `...`; document.body.appendChild(panel); }
+
+      if(!document.getElementById('symbolsGrid')){
+        const s=document.createElement('div');
+        s.id='symbolsGrid';
+        s.style.cssText='padding:8px;max-width:1200px;margin:12px auto';
+        document.body.insertBefore(s, document.body.firstChild);
+      }
+      if(!document.getElementById('tradingPanel')){
+        const panel = document.createElement('div');
+        panel.id='tradingPanel';
+        panel.style.cssText='max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)';
+        panel.innerHTML = `
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+            <div>Precio:<strong id="op-price">-</strong></div>
+            <div>Equity:<strong id="user-equity">--</strong></div>
+            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+          </div>
+          <hr/>
+          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <label>Posición (USD)</label>
+                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+                <label style="margin-top:8px">Apalancamiento (x)</label>
+                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+              </div>
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div style="font-weight:700">Posiciones</div>
+                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+                </div>
+                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto;color:var(--text)"></div>
+              </div>
+            </div>
+          </div>
+          <hr/>
+          <div style="display:flex;gap:8px">
+            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          </div>
+        `;
+        document.body.appendChild(panel);
+      }
+
       await ensureTradingSocket();
-      // try fetch symbols
-      try{ const endpoints=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of endpoints){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r) && r.length){ T.ALL_SYMBOLS = r; break; } }catch(e){} } }catch(e){}
-      renderSymbolsGrid(); wireTradingUI(); provideTradingWidgetFallback();
-      await fetchPositions().catch(()=>{}); await loadAccount().catch(()=>{});
+
+      // try fetching symbols from backend
+      try{
+        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
+        for(const ep of endpoints){
+          try{
+            const r = await apiFetch(ep).catch(()=>null);
+            if(Array.isArray(r) && r.length){ T.ALL_SYMBOLS = r; break; }
+          }catch(e){}
+        }
+      }catch(e){}
+
+      renderSymbolsGrid();
+      wireTradingUI();
+      provideTradingWidgetFallback();
+
+      await fetchPositions().catch(()=>{});
+      await loadAccount().catch(()=>{});
+
       setTimeout(()=>{ const anyPrice = Object.keys(T.symbolPrices || {}).length; if(!anyPrice) startDemoPrices(); }, 2000);
+
       log('Trading module initialized');
     }catch(e){ warn('initTradingModule error', e); }
   }
@@ -1625,7 +1845,7 @@ if (window.__LEONES_BOOTED__) {
     setTimeout(initTradingModule, 0);
   }
 
-  // expose
+  // expose public API
   window._LEONES_TRADING = window._LEONES_TRADING || {};
   Object.assign(window._LEONES_TRADING, { selectSymbol, placeOrder, fetchPositions, calculateMargin, openTrade, closeTrade, loadAccount, checkMarginCall });
 
