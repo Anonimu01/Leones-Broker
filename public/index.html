@@ -519,7 +519,6 @@ if (window.__LEONES_BOOTED__) {
       headers['Authorization'] = 'Bearer ' + token;
     }
 
-    // build normalized URL
     let url = '';
     try {
       if(typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) url = path;
@@ -527,7 +526,7 @@ if (window.__LEONES_BOOTED__) {
         let p = String(path || '').trim();
         if(!p.startsWith('/')) p = '/' + p;
         const baseNoSlash = API_BASE.replace(/\/+$/,'');
-        if(baseNoSlash.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/,''); // avoid /api/api
+        if(baseNoSlash.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/,'');
         url = baseNoSlash + p;
       }
     } catch(e){ url = path; }
@@ -567,7 +566,6 @@ if (window.__LEONES_BOOTED__) {
 
   /* ===========================
      Safe fetch monkey-patch (adds Authorization for same-origin /api/* when token present)
-     This helps stop 401 spam from other scripts that call fetch directly.
   =========================== */
   (function installSafeFetch(){
     try{
@@ -578,20 +576,17 @@ if (window.__LEONES_BOOTED__) {
       window.fetch = async function(input, init){
         try{
           const token = await getSavedToken();
-          // normalize URL
           let url = '';
           let isReqObj = false;
-          if (input && typeof input === 'object' && input.url) { // Request object
+          if (input && typeof input === 'object' && input.url) {
             isReqObj = true;
             url = input.url;
           } else {
             url = String(input || '');
           }
-          // same-origin & api path detection
-          const normalized = url.startsWith('http') ? url : location.origin + (url.startsWith('/') ? '' : '/') + url;
+          const normalized = url.startsWith('http') ? url : (url.startsWith('/') ? location.origin + url : location.origin + '/' + url);
           const sameOrigin = normalized.startsWith(location.origin);
           const touchesApi = normalized.includes('/api/');
-          // If it's a same-origin API call and there is a token, inject Authorization if missing
           if (sameOrigin && touchesApi && token) {
             if (isReqObj && input instanceof Request) {
               const newHeaders = new Headers(input.headers || {});
@@ -601,7 +596,6 @@ if (window.__LEONES_BOOTED__) {
             } else {
               init = init || {};
               init.headers = init.headers || {};
-              // unify Header names (handle Headers object or plain object)
               if(init.headers instanceof Headers){
                 if(!init.headers.has('Authorization')) init.headers.set('Authorization', 'Bearer ' + token);
               } else {
@@ -612,7 +606,6 @@ if (window.__LEONES_BOOTED__) {
             }
           }
         }catch(e){
-          // don't break on fetch patch errors — fallback to original fetch
           console.warn('[LEONES] fetch patch error', e);
         }
         return _origFetch(input, init);
@@ -637,7 +630,6 @@ if (window.__LEONES_BOOTED__) {
         return null;
       }
       const tokenPromise = getSavedToken();
-      // tokenPromise is async, but socket auth can accept a function or we pass token after creation
       const s = io(WS_BASE, {
         path: '/socket.io',
         transports: ['websocket','polling'],
@@ -645,7 +637,6 @@ if (window.__LEONES_BOOTED__) {
         auth: undefined,
         autoConnect: true
       });
-      // set auth after token resolved
       tokenPromise.then(token => { if(token) s.auth = { token }; });
       window.__LEONES_SOCKET__ = { socket: s };
       s.on('connect', () => log('socket connected', s.id));
@@ -662,7 +653,7 @@ if (window.__LEONES_BOOTED__) {
   NS.initSocket = NS.initSocket || initSocket;
 
   /* ===========================
-     Auth helpers (login stores token consistently)
+     Auth helpers
   =========================== */
   async function registerUser({ name, email, password, phone='', address='' } = {}){ 
     if(!name || !email || !password) throw new Error('name, email y password son requeridos');
@@ -675,7 +666,6 @@ if (window.__LEONES_BOOTED__) {
     const normalized = String(email).trim().toLowerCase();
     const res = await apiPost('/auth/login', { email: normalized, password });
 
-    // Support responses with multiple shapes: { data: { token, user } } or { token, user }
     try{
       let token = null;
       let user = null;
@@ -691,7 +681,6 @@ if (window.__LEONES_BOOTED__) {
       }
       if(token){
         localStorage.setItem('token', token);
-        // ensure stored session includes token so older code checking session.token works
         const sess = user && typeof user === 'object' ? {...user, token} : { email: normalized, token };
         localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
       }
@@ -834,7 +823,6 @@ if (window.__LEONES_BOOTED__) {
           const pass = (document.getElementById('l_pass')||{}).value||'';
           if(!email||!pass) return alert('Completa los campos');
           const res = await loginUser({ email, password: pass });
-          // pick user object returned by login response
           let user = null;
           if(res && res.data && res.data.user) user = res.data.user;
           else if(res && res.user) user = res.user;
@@ -878,19 +866,28 @@ if (window.__LEONES_BOOTED__) {
   }, true);
 
   /* ===========================
-     Account / Trading modules (kept as in your unified script)
-     - Important fix: loadAccount uses apiFetch (centralized auth)
-     =========================== */
+     Account / Trading modules
+     - loadAccount uses apiFetch (centralized auth)
+  =========================== */
+
+  let account = {
+    balance: 0,
+    equity: 0,
+    marginUsed: 0,
+    freeMargin: 0,
+    marginLevel: 0,
+    leverage: 100,
+    currency: "USD",
+    positions: []
+  };
 
   async function loadAccount(){
     try{
-      // use apiFetch so Authorization header is centralized
       let data = null;
       try {
         const res = await apiFetch('/account').catch(()=>null);
         data = res;
       } catch(e){
-        // if 401 or other, return null gracefully
         log('loadAccount: apiFetch failed', e && e.status ? e.status : e);
         return null;
       }
@@ -901,8 +898,6 @@ if (window.__LEONES_BOOTED__) {
         account.leverage = Number(data.leverage ?? account.leverage);
         account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
         account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
-      } else {
-        // keep defaults
       }
       updateMarginMetrics();
       updateAccountUI();
@@ -1075,26 +1070,14 @@ if (window.__LEONES_BOOTED__) {
   function calculateMargin({ positionSize=0, leverage=1, entryPrice=0 } = {}){ const pos = Number(positionSize)||0; const lev = Number(leverage)||1; const ep = Number(entryPrice)||0; const notional = pos; const requiredMargin = lev>0 ? (pos/lev) : pos; const qty = ep>0 ? pos/ep : 0; return { requiredMargin, notional, qty }; }
   function renderMarginCalculator(){ try{ const marginEl = document.getElementById('marginCalc'); if(!marginEl) return; const priceObj = T.symbolPrices[currentSymbol]; const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0; const posSize = Number(document.getElementById('input_position_size')?.value || 0); const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1); const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice }); marginEl.innerHTML = `<div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop()||currentSymbol)}</div><div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div><div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div><div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div><div>Apalancamiento: <strong>${lev}x</strong></div><div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>`; }catch(e){ warn('renderMarginCalculator', e); } }
 
-  async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){
-    try{
-      const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined };
-      const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
-      let res=null;
-      for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }); if(res) break; }catch(e){} }
-      alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
-      await fetchPositions().catch(()=>{});
-      return res;
-    }catch(e){ warn('placeOrder', e); alert(e?.body?.message || e.message || 'Error enviando orden'); throw e; }
-  }
+  async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){ try{ const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined }; const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders']; let res=null; for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }); if(res) break; }catch(e){} } alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK')); await fetchPositions().catch(()=>{}); return res; }catch(e){ warn('placeOrder', e); alert(e?.body?.message || e.message || 'Error enviando orden'); throw e; } }
 
   async function fetchPositions(){
     try{
-      // centralized call via apiFetch to avoid 401 spam
       let res = null;
       try {
         res = await apiFetch('/positions').catch(()=>null);
       } catch(e){
-        // try multiple candidate endpoints if the primary doesn't exist
         const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
         for(const ep of candidates){
           try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
@@ -1270,9 +1253,6 @@ if (window.__LEONES_BOOTED__) {
   window._LEONES_TRADING.loadAccount = loadAccount;
   window._LEONES_TRADING.checkMarginCall = checkMarginCall;
 
-  /* UI helpers omitted here for brevity (kept identical to your earlier combined UI) */
-  // ... (you can keep the rest of your UI helpers here — they will use the new centralized apiFetch/fetch behavior)
-
   document.addEventListener('DOMContentLoaded', () => {
     try{
       if(window.__LEONES_DOMCONTENT_LOADED__) {
@@ -1295,13 +1275,12 @@ if (window.__LEONES_BOOTED__) {
 
       initTradingModule().catch(()=>{});
       loadAccount().catch(()=>{});
-      // fetchSymbolsBackendAndInit(); // call if you have that helper in your UI block
       try{ (window.loadPositions && typeof window.loadPositions === 'function') && window.loadPositions(); }catch(e){}
     }catch(e){ console.error('Unified script init error', e); }
   });
 
   log('[LEONES] unified script loaded (defensive mode ON)');
-} // end boot guard
+}
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
@@ -1698,35 +1677,31 @@ if (window.__LEONES_BOOTED__) {
 
 
 
+<!-- antes de este script -->
+<script src="/socket.io/socket.io.js"></script>
+
 <script>
 /**
- * trading.js — trading UI (corregido)
+ * trading.js — trading UI (corregido y completo)
  *
- * Cambios/objetivos:
- * - Añadí un fallback robusto para `apiFetch` (envía token si existe).
- * - Eliminé referencias a variables antes de declararlas y protegí init/socket.
- * - Implementé loadAccount / fetchPositions / openTrade / closeTrade (robustos).
- * - Evité doble DOMContentLoaded; el módulo inicializa y expone funciones.
- * - Manejo defensivo de errores, 401 y demo fallback.
- *
- * Revisa: API_BASE y token en localStorage ('token' o 'BROKER_TOKEN').
+ * Instrucciones:
+ * - Incluye /socket.io/socket.io.js antes de este script.
+ * - Usa localStorage 'token' o 'BROKER_TOKEN' para autenticación.
+ * - Este módulo es defensivo: evita inicializaciones dobles y soporta fallbacks demo.
  */
-
 (function () {
   "use strict";
 
   // ====== CONFIG / GLOBALS ======
   const API_BASE = window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
   const SOCKET_BASE = window.SOCKET_BASE || window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
-  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+  window.SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
 
-  // Local module NS
-  const NS = window._LEONES || {};
-  // Prefer existing apiFetch if app already defines it, otherwise use fallback
-  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
-  const initSocket = NS.initSocket || (() => window.__LEONES_SOCKET__?.socket || null);
+  // Ensure global namespace exists
+  window._LEONES = window._LEONES || {};
+  const NS = window._LEONES;
 
-  // Module state
+  // Module state (exposed globally)
   window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
   const state = window.__LEONES_TRADING__;
   state.ALL_SYMBOLS = state.ALL_SYMBOLS || [];
@@ -1734,9 +1709,10 @@ if (window.__LEONES_BOOTED__) {
   state.positions = state.positions || [];
   state.orderBooks = state.orderBooks || {};
 
+  // Local socket ref
   let socket = null;
 
-  // ====== UTIL ======
+  // ====== UTILS ======
   function log(...a){ try{ console.log('[TRADING]', ...a); }catch(e){} }
   function warn(...a){ try{ console.warn('[TRADING]', ...a); }catch(e){} }
   function err(...a){ try{ console.error('[TRADING]', ...a); }catch(e){} }
@@ -1753,22 +1729,20 @@ if (window.__LEONES_BOOTED__) {
   }
 
   // ====== apiFetch fallback (robusto) ======
-  async function apiFetchFallback(path, opts = {}){
+  async function apiFetchFallback(path, opts = {}) {
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-      // build url
+      // normalize url
       let url = '';
-      if(typeof path !== 'string') path = String(path || '');
+      path = String(path || '');
       if(path.startsWith('http://') || path.startsWith('https://')) url = path;
       else {
-        // base without trailing /api
         const baseNoApi = String(API_BASE).replace(/\/api\/?$/,'');
         if(path.startsWith('/')) url = baseNoApi + path;
         else url = (API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE) + (path.startsWith('/') ? path : ('/' + path));
       }
 
       const headers = (opts.headers && typeof opts.headers === 'object') ? {...opts.headers} : {};
-      // If body is not FormData and not omitted, ensure content-type
       if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
         headers['Content-Type'] = 'application/json';
       }
@@ -1778,46 +1752,45 @@ if (window.__LEONES_BOOTED__) {
 
       const fetchOpts = {
         method: opts.method || 'GET',
-        credentials: opts.credentials || 'same-origin',
+        credentials: 'include',
         ...opts,
         headers
       };
 
       const res = await fetch(url, fetchOpts);
-      // 204 no content
       if(res.status === 204) return {};
-      // attempt parse json safely
-      let data = null;
       const text = await res.text().catch(()=>null);
-      if(text) {
+      let data = null;
+      if(text){
         try { data = JSON.parse(text); } catch(e) { data = text; }
       }
       if(res.ok) return data;
-      // non-ok -> throw useful error
       const error = new Error('HTTP ' + res.status);
       error.status = res.status;
       error.body = data;
       throw error;
     } catch(e){
-      // propagate for callers to handle
       throw e;
     }
   }
 
+  // choose central apiFetch (prefer existing app-provided)
+  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
+
+  // initSocket fallback (if app provides one use it)
+  const initSocket = NS.initSocket || (() => (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) ? window.__LEONES_SOCKET__.socket : null);
+
   // ====== SOCKET wiring (defensivo) ======
   function ensureSocket(){
     try {
-      // if socket exists and connected, return it
       if(socket && socket.connected) return socket;
 
-      // try initSocket (may return existing window socket or null)
       socket = initSocket();
       if(!socket){
         warn('socket not available — realtime disabled');
         return null;
       }
 
-      // avoid re-registering handlers: attach only once
       if(socket.__leones_trading_attached) return socket;
       socket.__leones_trading_attached = true;
 
@@ -1825,9 +1798,7 @@ if (window.__LEONES_BOOTED__) {
         try{
           if(!snap) return;
           if(Array.isArray(snap)){
-            snap.forEach(it => {
-              if(it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() };
-            });
+            snap.forEach(it => { if(it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
           } else if(typeof snap === 'object'){
             Object.keys(snap).forEach(k => {
               const it = snap[k];
@@ -1862,13 +1833,14 @@ if (window.__LEONES_BOOTED__) {
           if(!ob || !ob.symbol) return;
           state.orderBooks = state.orderBooks || {};
           state.orderBooks[ob.symbol] = ob;
-          // update only if orderbook panel shows this symbol
           const bidsEl = document.getElementById('ob-bids');
           if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
         }catch(e){}
       });
 
       socket.on('connect_error', e => { warn('socket connect_error', e); });
+
+      socket.on('disconnect', (r) => { log('socket disconnected', r); });
 
       return socket;
     } catch(e){
@@ -1922,7 +1894,7 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  // ====== TRADING PANEL ======
+  // ====== TRADING PANEL & HELPERS ======
   let currentSymbol = (state.ALL_SYMBOLS && state.ALL_SYMBOLS[0] && state.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
   let currentLeverage = 10;
   let currentEntryPrice = null;
@@ -1939,11 +1911,9 @@ if (window.__LEONES_BOOTED__) {
 
   function updatePriceInUI(symbol, price){
     try{
-      // update all elements with data-symbol attr
       const els = document.querySelectorAll(`[data-symbol="${symbol}"]`);
       els.forEach(el => { el.textContent = formatNumber(price); });
 
-      // if trading panel is open and symbol matches, update op-price
       const tsText = document.getElementById('tradingSymbol')?.innerText || '';
       if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
         const opPrice = document.getElementById('op-price');
@@ -2006,7 +1976,6 @@ if (window.__LEONES_BOOTED__) {
         leverage: Number(leverage) || 1,
         price: (price !== null && price !== undefined) ? Number(price) : undefined
       };
-      // try candidate endpoints
       const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
       let res = null;
       for(const ep of candidates){
@@ -2032,8 +2001,7 @@ if (window.__LEONES_BOOTED__) {
       for(const ep of candidates){
         try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
       }
-      if(!res) return;
-      // normalize
+      if(!res) return null;
       state.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
       renderPositions();
       return state.positions;
@@ -2146,22 +2114,19 @@ if (window.__LEONES_BOOTED__) {
         try{ acc = await apiFetch(ep).catch(()=>null); if(acc) break; }catch(e){}
       }
       if(!acc) return null;
-      // If backend returns { balance } or { account: { balance }}
       const balance = acc.balance ?? acc.account?.balance ?? acc.data?.balance ?? null;
-      if(balance !== null && document.getElementById('user-equity')){
-        document.getElementById('user-equity').textContent = formatNumber(balance,2);
+      if(balance !== null){
+        const el = document.getElementById('user-equity');
+        if(el) el.textContent = formatNumber(balance,2);
       }
-      // expose global account
       window.__LEONES_ACCOUNT = acc;
       return acc;
     }catch(e){ warn('loadAccount error', e); return null; }
   }
 
-  // ====== openTrade / closeTrade (reemplaza viejas versiones que usaban API var) ======
+  // ====== openTrade / closeTrade ======
   async function openTrade(symbol, type, lot, price, sl, tp){
     try{
-      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
-      // choose endpoint
       const payload = { symbol, type, lot, price, sl, tp };
       const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
       for(const ep of candidates){
@@ -2212,7 +2177,11 @@ if (window.__LEONES_BOOTED__) {
   // ====== INIT ======
   async function initTradingModule(){
     try{
-      // create minimal containers if missing
+      // prevent double init
+      if(window.__LEONES_TRADING_INITED__) return;
+      window.__LEONES_TRADING_INITED__ = true;
+
+      // create containers if missing (full panel markup)
       if(!document.getElementById('symbolsGrid')){
         const s = document.createElement('div');
         s.id = 'symbolsGrid';
@@ -2222,15 +2191,51 @@ if (window.__LEONES_BOOTED__) {
       if(!document.getElementById('tradingPanel')){
         const panel = document.createElement('div');
         panel.id = 'tradingPanel';
-        panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px';
-        panel.innerHTML = `...`;// simplified inlined template omitted for brevity (the host page likely has the full markup)
+        panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)';
+        panel.innerHTML = `
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+            <div>Precio:<strong id="op-price">-</strong></div>
+            <div>Equity:<strong id="user-equity">--</strong></div>
+            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+          </div>
+          <hr/>
+          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <label>Posición (USD)</label>
+                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+                <label style="margin-top:8px">Apalancamiento (x)</label>
+                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+              </div>
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div style="font-weight:700">Posiciones</div>
+                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+                </div>
+                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto;color:var(--text)"></div>
+              </div>
+            </div>
+          </div>
+          <hr/>
+          <div style="display:flex;gap:8px">
+            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          </div>
+        `;
         document.body.appendChild(panel);
       }
 
-      // socket & symbols
+      // connect socket & handlers (if available)
       ensureSocket();
 
-      // try fetching symbols (candidates)
+      // try fetching symbols from backend
       try{
         const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
         for(const ep of endpoints){
@@ -2248,34 +2253,40 @@ if (window.__LEONES_BOOTED__) {
       await fetchPositions().catch(()=>{});
       await loadAccount().catch(()=>{});
 
-      // if server prices didn't arrive, start demo
+      // fallback to demo prices if no prices received
       setTimeout(() => {
         const anyPrice = Object.keys(state.symbolPrices || {}).length;
         if(!anyPrice) startDemoPrices();
       }, 2000);
 
+      log('Trading module initialized');
     }catch(e){
       err('initTradingModule error', e);
     }
   }
 
   // Boot once on DOMContentLoaded
-  document.addEventListener('DOMContentLoaded', function(){
-    try{ initTradingModule(); }catch(e){ err('trading boot error', e); }
-  });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTradingModule);
+  } else {
+    // already loaded
+    setTimeout(initTradingModule, 0);
+  }
 
   // Expose functions
   window._LEONES_TRADING = window._LEONES_TRADING || {};
-  window._LEONES_TRADING.selectSymbol = selectSymbol;
-  window._LEONES_TRADING.placeOrder = placeOrder;
-  window._LEONES_TRADING.fetchPositions = fetchPositions;
-  window._LEONES_TRADING.calculateMargin = calculateMargin;
-  window._LEONES_TRADING.openTrade = openTrade;
-  window._LEONES_TRADING.closeTrade = closeTrade;
-  window._LEONES_TRADING.loadAccount = loadAccount;
-  window._LEONES_TRADING.checkMarginCall = checkMarginCall;
+  Object.assign(window._LEONES_TRADING, {
+    selectSymbol,
+    placeOrder,
+    fetchPositions,
+    calculateMargin,
+    openTrade,
+    closeTrade,
+    loadAccount,
+    checkMarginCall
+  });
 
-})(); // EOF module
+})(); // EOF
 </script>
 </div>
 
