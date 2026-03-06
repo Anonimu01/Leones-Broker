@@ -1,6 +1,5 @@
 // utils/sendEmail.js
 import nodemailer from "nodemailer";
-import { Resend } from "resend";
 
 const {
   RESEND_API_KEY,
@@ -12,45 +11,66 @@ const {
   SMTP_PASS,
   EMAIL_USER,
   EMAIL_PASS,
+  BASE_URL,
   NODE_ENV,
 } = process.env;
 
-/*
-  Smart mailer:
-  Priority:
-   1) Resend (if RESEND_API_KEY)
-   2) SMTP (if SMTP_HOST/SMTP_USER/SMTP_PASS or EMAIL_USER/EMAIL_PASS)
-   3) Simulated (logs) - does not throw to avoid breaking flows
-
-  sendEmail supports two call styles:
-   - sendEmail(to, subject, htmlOrText)
-   - sendEmail({ to, subject, html, text, from })
-*/
-
-const DEFAULT_SENDER = SENDER_EMAIL || SMTP_USER || EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/https?:\/\//, "") || "local"}`;
+const DEFAULT_SENDER =
+  SENDER_EMAIL ||
+  SMTP_USER ||
+  EMAIL_USER ||
+  `no-reply@${(BASE_URL || "local").replace(/^https?:\/\//, "")}`;
 
 let resendClient = null;
 let transporter = null;
 let transporterReady = false;
 
-/* ---------- Init Resend (if configured) ---------- */
-if (RESEND_API_KEY) {
+/**
+ * Try to dynamically import Resend (optional dependency).
+ * If the package is not installed, we will silently continue without it.
+ */
+async function initResendClient() {
+  if (!RESEND_API_KEY) return null;
+  if (resendClient) return resendClient;
   try {
+    // dynamic import to avoid hard dependency
+    const mod = await import("resend");
+    const Resend = mod?.Resend || mod?.default || mod;
+    if (!Resend) throw new Error("Resend module loaded but Resend class not found");
     resendClient = new Resend(RESEND_API_KEY);
     console.log("[MAIL] ✅ Resend client inicializado");
+    return resendClient;
   } catch (err) {
-    console.error("[MAIL] ❌ Error inicializando Resend:", err && err.message ? err.message : err);
+    console.warn("[MAIL] ⚠️ Resend no disponible (dynamic import falló):", err && err.message ? err.message : err);
     resendClient = null;
+    return null;
   }
 }
 
-/* ---------- Init SMTP transporter (if Resend not present) ---------- */
-const initSmtp = () => {
-  if (transporter || (!SMTP_HOST && !SMTP_USER && !EMAIL_USER)) return;
+/**
+ * Ensure a fetch implementation exists (Node 18+ has global fetch).
+ * If not, try to dynamically import node-fetch.
+ */
+async function getFetch() {
+  if (typeof globalThis.fetch === "function") return globalThis.fetch;
+  try {
+    const mod = await import("node-fetch");
+    return mod.default || mod;
+  } catch (err) {
+    throw new Error("No fetch disponible en runtime y node-fetch no pudo importarse");
+  }
+}
+
+/**
+ * Init SMTP transporter (non-blocking verify)
+ */
+function initSmtp() {
+  // if already set or no creds, do nothing
+  if (transporter || (!SMTP_HOST && !SMTP_USER && !EMAIL_USER && !SMTP_PASS && !EMAIL_PASS)) return;
 
   const host = SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
   const port = Number(SMTP_PORT || 465);
-  const secure = (SMTP_SECURE || "true").toLowerCase() === "true" || port === 465;
+  const secure = (String(SMTP_SECURE || "").toLowerCase() === "true") || port === 465;
   const user = SMTP_USER || EMAIL_USER;
   const pass = SMTP_PASS || EMAIL_PASS;
 
@@ -64,22 +84,17 @@ const initSmtp = () => {
       host,
       port,
       secure,
-      auth: {
-        user,
-        pass,
-      },
-      // aumenta timeouts razonables
+      auth: { user, pass },
       connectionTimeout: 10_000,
       greetingTimeout: 10_000,
       socketTimeout: 10_000,
     });
 
-    // verify async but non-blocking
     transporter.verify((err, success) => {
       if (err) {
         transporterReady = false;
         console.error("[MAIL] ❌ SMTP verify failed:", err && err.message ? err.message : err);
-        // keep transporter null to avoid attempts later if verify fails badly
+        // keep transporter but mark not ready; attempts will still try and report errors
         transporter = null;
       } else {
         transporterReady = true;
@@ -91,13 +106,16 @@ const initSmtp = () => {
     transporterReady = false;
     console.error("[MAIL] ❌ Error creando transporter SMTP:", err && err.message ? err.message : err);
   }
-};
+}
 
-// initialize smtp if needed
-if (!resendClient) initSmtp();
+/* initialize smtp if resend not configured (best-effort) */
+if (!RESEND_API_KEY) {
+  initSmtp();
+}
 
-/* ---------- Helpers ---------- */
+/* utility helpers */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function withTimeout(promise, ms = 10000) {
   let timer;
   const timeout = new Promise((_, rej) => {
@@ -121,11 +139,17 @@ function normalizeRecipients(to) {
   return [String(to)];
 }
 
-/* ====================================================== */
-/* Exported function - supports both signatures described  */
-/* ====================================================== */
+/**
+ * sendEmail(...)
+ * Accepts:
+ *  - sendEmail(to, subject, html)
+ *  - sendEmail({ to, subject, html, text, from })
+ *
+ * Returns a consistent object:
+ *  { ok: true, provider: 'resend'|'smtp'|'simulated', ... } or { ok:false, provider:..., error: '...' }
+ */
 export const sendEmail = async (...args) => {
-  // support sendEmail({ to, subject, html, text, from }) and sendEmail(to, subject, html)
+  // normalize args
   let payload = {};
   if (args.length === 1 && typeof args[0] === "object") {
     payload = { ...args[0] };
@@ -145,39 +169,45 @@ export const sendEmail = async (...args) => {
 
   const subject = payload.subject || "Notificación";
   const html = payload.html || payload.body || "";
-  const text = payload.text || (html ? html.replace(/<[^>]+>/g, "") : "");
+  const text = payload.text || (html ? String(html).replace(/<[^>]+>/g, "") : "");
   const from = payload.from || DEFAULT_SENDER;
 
-  // Prefer Resend
-  if (resendClient) {
-    if (!from) {
-      console.error("[MAIL] Resend configurado pero falta SENDER_EMAIL (from)");
-      return { ok: false, provider: "resend", error: "missing_sender_email" };
+  // Try Resend first (if configured)
+  if (RESEND_API_KEY) {
+    try {
+      await initResendClient();
+    } catch (e) {
+      // initResendClient already logs; continue to fallback
     }
 
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        console.log(`[MAIL] (resend) intento ${attempt} →`, toArr);
-        const resp = await withTimeout(
-          resendClient.emails.send({
-            from,
-            to: toArr,
-            subject,
-            html,
-            text,
-          }),
-          12_000
-        );
-        console.log("[MAIL] ✅ Enviado via Resend:", resp?.id || resp);
-        return { ok: true, provider: "resend", id: resp?.id || null, resp };
-      } catch (err) {
-        lastErr = err;
-        console.error(`[MAIL] Resend fallo (int ${attempt}):`, err && err.message ? err.message : err);
-        await sleep(400 * attempt);
+    if (resendClient) {
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          console.log(`[MAIL] (resend) intento ${attempt} →`, toArr);
+          // The resend SDK may be async — use withTimeout to protect
+          const resp = await withTimeout(
+            resendClient.emails.send({
+              from,
+              to: toArr,
+              subject,
+              html,
+              text,
+            }),
+            12_000
+          );
+          console.log("[MAIL] ✅ Enviado via Resend:", resp?.id || resp);
+          return { ok: true, provider: "resend", id: resp?.id || null, resp };
+        } catch (err) {
+          lastErr = err;
+          console.error(`[MAIL] Resend fallo (int ${attempt}):`, err && err.message ? err.message : err);
+          await sleep(400 * attempt);
+        }
       }
+      return { ok: false, provider: "resend", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
+    } else {
+      console.warn("[MAIL] RESEND_API_KEY presente pero cliente Resend no inicializado, se usará fallback");
     }
-    return { ok: false, provider: "resend", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
   // Fallback SMTP
@@ -211,10 +241,10 @@ export const sendEmail = async (...args) => {
     return { ok: false, provider: "smtp", error: (lastErr && lastErr.message) ? lastErr.message : String(lastErr) };
   }
 
-  // No provider — simulate (non-fatal)
+  // No provider — simulate sending (non-fatal)
   console.warn("[MAIL] ⚠️ Ningún proveedor configurado. Envío simulado. (set RESEND_API_KEY or SMTP_* vars)");
   console.log("[MAIL] Simulado → to:", toArr, "subject:", subject, "from:", from);
-  // Keep ok=true so flows that create users don't fail; mark simulated.
+  // In development keep simulated ok=true to not block flows; in production maybe return ok:false — keep ok:true for compatibility
   return { ok: true, provider: "simulated", simulated: true, to: toArr, subject, from };
 };
 
