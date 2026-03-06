@@ -1,354 +1,2296 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Leones - Trading Dashboard</title>
-  <style>
-    :root{
-      --bg:#0b0b0b; --panel:#0f1720; --muted:#9aa4b2; --accent:#f59e0b;
-      --glass: rgba(255,255,255,0.03);
-    }
-    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:var(--bg);color:#e6eef6;}
-    .app {display:flex;height:100vh;gap:12px;padding:12px;box-sizing:border-box;}
-    .sidebar{width:320px;background:var(--panel);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:12px;overflow:auto}
-    .search{display:flex;gap:8px}
-    .search input{flex:1;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
-    .market-tabs{display:flex;gap:8px;flex-wrap:wrap}
-    .market-tab{padding:6px 8px;border-radius:6px;background:var(--glass);cursor:pointer;font-size:13px}
-    .market-tab.active{background:linear-gradient(90deg,#111827,#0b1220);box-shadow:0 4px 14px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.02)}
-    .symbols{display:flex;flex-direction:column;gap:6px}
-    .symbol-row{display:flex;justify-content:space-between;gap:8px;padding:8px;border-radius:6px;cursor:pointer}
-    .symbol-row:hover{background:rgba(255,255,255,0.02)}
-    .symbol-left{display:flex;gap:8px;align-items:center}
-    .symbol-name{font-weight:600}
-    .symbol-label{font-size:12px;color:var(--muted)}
-    .symbol-price{font-weight:700}
-    .main{flex:1;display:flex;flex-direction:column;gap:12px}
-    .chart-wrap{flex:1;background:linear-gradient(180deg,#071019,#071420);border-radius:8px;padding:12px;display:flex;flex-direction:column}
-    .chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-    .meta{display:flex;gap:12px;align-items:center}
-    .btn{padding:8px 10px;border-radius:6px;background:var(--accent);color:#0b0b0b;cursor:pointer;border:none}
-    #chart{height:calc(100% - 64px);border-radius:6px;overflow:hidden}
-    .rightpanel{width:320px;background:var(--panel);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:12px}
-    .muted{color:var(--muted);font-size:13px}
-  </style>
+  
+
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Leones Broker — Tu Puerta al Mercado Global</title>
+<meta name="description" content="Leones Broker - Plataforma de trading. Público y área privada." />
+
+<!-- FONT AWESOME (necesario para los íconos del bloque de depósito) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+    background:#0b0b0b;color:#e9e6e1;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+    line-height:1.45;overflow-x:hidden;
+  }
+  :root{ --gold:#cfa240; --muted:#bfc6c9; --card:#141414; }
+
+  img{display:block;max-width:100%;height:auto;object-fit:cover}
+  a{color:var(--gold);text-decoration:none}
+
+  header{
+    position:fixed;top:0;left:0;right:0;height:72px;z-index:1400;
+    display:flex;align-items:center;justify-content:space-between;padding:12px 22px;
+    background:linear-gradient(180deg, rgba(11,11,11,0.75), rgba(11,11,11,0.22));
+    backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,0.03)
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand img{height:44px;width:auto;object-fit:contain}
+  .brand h1{margin:0;font-size:18px;color:var(--gold);font-weight:800}
+  .nav-actions{display:flex;gap:10px;align-items:center}
+  .btn{background:var(--gold);color:#111;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--gold);border:2px solid rgba(207,162,67,0.12)}
+  /* Glow animation for prominent CTA */
+  .glow {
+    box-shadow: 0 0 8px rgba(207,162,67,0.9), 0 0 20px rgba(207,162,67,0.18) inset;
+    animation: pulseGlow 2.6s infinite ease-in-out;
+  }
+  @keyframes pulseGlow {
+    0% { box-shadow: 0 0 6px rgba(207,162,67,0.7), 0 0 12px rgba(207,162,67,0.12) inset; transform: translateY(0); }
+    50% { box-shadow: 0 0 12px rgba(207,162,67,0.95), 0 0 26px rgba(207,162,67,0.18) inset; transform: translateY(-1px); }
+    100% { box-shadow: 0 0 6px rgba(207,162,67,0.7), 0 0 12px rgba(207,162,67,0.12) inset; transform: translateY(0); }
+  }
+
+  main{width:100%;margin:0;padding-top:88px}
+  /* CONTENIDO AOCUPAR TODA LA PÁGINA */
+  .container{width:100%;max-width:none;margin:0;padding:24px} /* cambiado para ocupar página completa */
+
+  /* Hero */
+  .hero-strip{position:relative;height:56vh;min-height:420px;display:flex;align-items:center;overflow:hidden}
+  .hero-strip .bg{position:absolute;inset:0;z-index:1;overflow:hidden}
+  .hero-strip .bg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:contrast(1.02) saturate(.9)}
+  .hero-content{position:relative;z-index:3;width:100%;display:flex;align-items:center}
+  .hero-inner{display:grid;grid-template-columns:1fr 480px;gap:28px;align-items:center;width:100%;padding:24px}
+  .hero-text{color:#f6efe6;text-align:left;padding:20px;background:linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.06));border-radius:12px}
+  .hero-text h2{margin:0;color:var(--gold);font-size:clamp(28px,5vw,56px);line-height:1.03;font-weight:800}
+  .hero-text p.lead{margin:12px 0 0;color:var(--muted);font-size:clamp(14px,1.6vw,20px)}
+  .cta-group{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}
+  .hero-visual{border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,0.6)}
+  .hero-visual img{width:100%;height:56vh;min-height:320px;object-fit:cover}
+
+  /* Sections */
+  h3{color:var(--gold);font-size:28px;margin:0 0 12px}
+  h4{color:var(--gold);margin:0 0 8px}
+  p{margin:0;color:var(--muted);line-height:1.6}
+
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.04));padding:18px;border-radius:12px;border:1px solid rgba(255,255,255,0.03)}
+  .card .thumb{width:100%;height:140px;border-radius:8px;overflow:hidden}
+
+  /* Accent cards (mobile look) */
+  .card-list{display:flex;flex-direction:column;gap:16px}
+  .accent-card{background:var(--card);border-radius:12px;padding:20px;position:relative;overflow:hidden;border:1px solid rgba(255,255,255,0.02)}
+  .accent-card::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:12px;border-radius:8px;background:linear-gradient(180deg,#D9B34A,#C79E40)}
+
+  /* Private area */
+  .private-wrapper{display:flex;min-height:calc(100vh - 72px);background:linear-gradient(180deg,#0f0f0f,#0d0d0d)}
+  .private-aside{width:260px;background:#0c0c0c;border-right:1px solid rgba(255,255,255,0.02);padding:18px;position:fixed;top:72px;bottom:0;left:0}
+  .private-main{margin-left:280px;flex:1;padding:28px;max-width:1200px}
+  .menu-item{display:block;padding:10px 12px;border-radius:8px;color:var(--muted);margin-bottom:6px;cursor:pointer}
+  .menu-item.active{background:rgba(207,162,67,0.08);color:var(--gold);font-weight:700}
+
+  footer{padding:28px 24px;text-align:center;color:var(--muted)}
+
+  /* modal */
+  #modal{display:none;position:fixed;inset:0;align-items:center;justify-content:center;background:rgba(0,0,0,0.65);z-index:3000}
+  #modal .box{width:100%;max-width:780px;padding:18px;border-radius:12px;background:linear-gradient(180deg,#0b0b0b,#121212);border:1px solid rgba(255,255,255,0.03)}
+
+  /* fallback */
+  .img-fallback{display:flex;align-items:center;justify-content:center;background:#121212;color:var(--muted);height:140px;border-radius:8px;padding:10px;text-align:center}
+
+  @media (max-width:900px){
+    .hero-inner{grid-template-columns:1fr}
+    .hero-visual img{height:40vh;min-height:200px}
+    .grid-3{grid-template-columns:1fr}
+    .private-aside{position:static;width:100%;margin-bottom:12px}
+    .private-main{margin-left:0}
+    .container{padding:18px}
+    .hero-inner{padding:16px}
+  }
+
+  /* =========================
+     BLOQUE: Deposita y Retira (estilos añadidos del bloque)
+     ========================= */
+  .deposit-section {
+      padding: 40px 0 60px 0;
+      background-color: var(--background, #0b0b0b);
+      color: #e9e6e1;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+  }
+  .deposit-title {
+      text-align: left;
+      font-size: 2rem;
+      font-weight: 400;
+      color: var(--gold);
+      margin-bottom: 18px;
+  }
+  .deposit-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 30px;
+      flex-wrap: wrap;
+  }
+  .info-column { flex:1; max-width:380px; padding:0 12px; }
+  .info-item { margin: 18px 0; line-height:1.5; }
+  .item-title { font-size:1.2rem; font-weight:600; margin-bottom:6px; color:#fff }
+  .item-description { font-size:1rem; color:var(--muted) }
+  .deposit-footer { text-align:left;color:var(--muted);margin-top:20px;font-size:0.9rem }
+
+  .circle-chart {
+      position: relative;
+      width: 380px;
+      height: 380px;
+      border-radius: 50%;
+      background-color: transparent;
+      flex-shrink: 0;
+      margin: 0 20px;
+      overflow: hidden;
+      box-shadow: 0 0 15px rgba(0,0,0,0.4);
+  }
+  @media (max-width: 500px) {
+      .circle-chart { width: 300px; height: 300px; margin: 0 auto; }
+      .info-column { max-width:100%; text-align:center; }
+  }
+  .center-circle {
+      position:absolute; top:50%; left:50%; width:160px; height:160px; border-radius:50%;
+      transform:translate(-50%,-50%); background-color:var(--center-color, #0b0b0b); z-index:2;
+  }
+  .segment {
+      --segment-size:50%;
+      position:absolute; width:var(--segment-size); height:var(--segment-size);
+      background-color:var(--segment-color, #333333); display:flex; justify-content:center; align-items:center;
+      color:#fff; font-size:2em; z-index:1; box-sizing:border-box; border:1px solid rgba(0,0,0,0.2);
+  }
+  .segment-1 { top:0; left:0; }
+  .segment-2 { top:0; right:0; }
+  .segment-3 { bottom:0; right:0; }
+  .segment-4 { bottom:0; left:0; }
+  .segment-5 { bottom:0; left:0; }
+  .segment i { color:#e9e6e1; position:absolute; font-size:1.6em; }
+  /* End deposit block styles */
+</style>
 </head>
+
+
+
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="search">
-        <input id="searchInput" placeholder="Buscar símbolo o mercado (ej. BTC, ETH, Forex...)" />
-        <button id="reloadBtn" class="btn">Refrescar</button>
-      </div>
 
-      <div class="market-tabs" id="marketTabs"></div>
-
-      <div style="font-size:13px;color:var(--muted)">Símbolos</div>
-      <div class="symbols" id="symbolsList"></div>
-    </aside>
-
-    <main class="main">
-      <div class="chart-wrap">
-        <div class="chart-header">
-          <div class="meta">
-            <div id="selectedSymbol" style="font-size:18px;font-weight:700">Selecciona un símbolo</div>
-            <div id="selectedLabel" class="muted"></div>
-            <div id="priceBadge" style="margin-left:12px"></div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select id="intervalSelect" title="Intervalo">
-              <option value="1">1s</option>
-              <option value="5">5s</option>
-              <option value="60">1m</option>
-              <option value="300">5m</option>
-              <option value="900">15m</option>
-              <option value="3600">1h</option>
-              <option value="86400">1d</option>
-            </select>
-            <button id="tvWidgetBtn" class="btn">Abrir TradingView</button>
-          </div>
-        </div>
-
-        <div id="chart"></div>
-      </div>
-
-      <div style="display:flex;gap:12px">
-        <div style="flex:1;background:var(--panel);padding:12px;border-radius:8px">
-          <div style="font-weight:700;margin-bottom:8px">Orden rápida</div>
-          <div class="muted">Qty</div>
-          <input id="qty" type="number" value="1" style="width:100%;padding:8px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit" />
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button id="buyBtn" class="btn" style="flex:1">Buy</button>
-            <button id="sellBtn" class="btn" style="flex:1">Sell</button>
-          </div>
-        </div>
-
-        <aside class="rightpanel">
-          <div style="font-weight:700">Resumen</div>
-          <div id="positionsSummary" class="muted">Sin posiciones</div>
-          <div style="font-weight:700;margin-top:8px">Info</div>
-          <div id="debug" class="muted"></div>
-        </aside>
-      </div>
-    </main>
-
-    <aside class="rightpanel" style="min-width:320px">
-      <div style="font-weight:700">Conexión</div>
-      <div id="socketStatus" class="muted">Conectando...</div>
-      <div style="font-weight:700;margin-top:8px">Cuenta</div>
-      <div id="acctInfo" class="muted">-</div>
-      <div style="font-weight:700;margin-top:8px">Notas</div>
-      <div class="muted">Inicia sesión para ver tu cuenta/posiciones reales.</div>
-    </aside>
+<header>
+  <div class="brand">
+    <img id="logoImg" src="/imge.img/logo leones.avif" alt="Leones Broker logo" onerror="this.style.display='none'"/>
+    <h1>Leones Broker</h1>
   </div>
+  <div class="nav-actions" id="headerActions">
+    <!-- Added glow class to highlight these buttons -->
+    <button class="btn glow" id="openAccountBtn">Abrir Cuenta</button>
+    <button class="btn ghost glow" id="loginBtn">Iniciar Sesión</button>
+  </div>
+</header>
 
-  <!-- dependencias -->
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<main id="publicMain">
 
-  <script>
-    (function(){
-      // refs
-      const symbolsListEl = document.getElementById('symbolsList');
-      const marketTabsEl = document.getElementById('marketTabs');
-      const searchInput = document.getElementById('searchInput');
-      const reloadBtn = document.getElementById('reloadBtn');
-      const selectedSymbolEl = document.getElementById('selectedSymbol');
-      const selectedLabelEl = document.getElementById('selectedLabel');
-      const priceBadge = document.getElementById('priceBadge');
-      const socketStatus = document.getElementById('socketStatus');
-      const debug = document.getElementById('debug');
-      const tvWidgetBtn = document.getElementById('tvWidgetBtn');
-      const intervalSelect = document.getElementById('intervalSelect');
+  <!-- HERO -->
+  <section class="hero-strip" aria-label="Hero">
+    <div class="bg"><img src="" alt="Hero banner" onerror="this.style.display='none'"></div>
 
-      let allSymbols = []; // array of {symbol,label,market}
-      let currentMarket = null;
-      let filteredSymbols = [];
-      let selectedSymbol = null;
-      let chart, series;
+    <div class="hero-content container">
+      <div class="hero-inner">
+        <div class="hero-text">
+          <!-- EXACT TEXT (intro) -->
+          <h2>Bienvenido a Leones Broker:<br>Tu Puerta al Mercado Global</h2>
+          <p class="lead">Descubre un mundo de oportunidades con nuestra plataforma de trading avanzada. ¡Regístrate hoy y comienza tu viaje financiero!</p>
 
-      // init socket (uses same origin /socket.io/)
-      const socket = io({ path: '/socket.io' });
+          <div class="cta-group">
+            <!-- also glowing CTAs -->
+            <button class="btn glow" id="ctaAbrir">Abrir Cuenta</button>
+            <button class="btn ghost glow" id="ctaLogin">Iniciar Sesión</button>
+          </div>
+        </div>
 
-      socket.on('connect', () => {
-        socketStatus.textContent = 'Socket conectado (' + socket.id + ')';
-        socketStatus.style.color = '#7ed957';
-        // request initial snapshot
-        try { socket.emit('request_prices_snapshot'); } catch(e){}
-        try { socket.emit('request_symbols'); } catch(e){}
-      });
-      socket.on('disconnect', () => {
-        socketStatus.textContent = 'Socket desconectado';
-        socketStatus.style.color = '#ff6b6b';
-      });
+        <div class="hero-visual" aria-hidden="true">
+          <img src="/imge.img/cc80JmF0w-yls-Phj6T3e.jpg" alt="Visual" onerror="this.style.display='none'">
+        </div>
+      </div>
+    </div>
+  </section>
 
-      // handle server price snapshot (object of symbol->price data)
-      socket.on('prices_snapshot', (prices) => {
-        debug.textContent = 'snapshot ' + Object.keys(prices || {}).length + ' symbols';
-        // set initial prices badges in list if present
-        for(const key of Object.keys(prices || {})){
-          // we'll update when listed
-          updateSymbolPriceInList(key, prices[key]);
-        }
-      });
+  <!-- EXPLORA LOS MERCADOS -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Explora los Mercados que Te Mueven</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:14px">
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/tgZ6DN5F0VWApXkvuUqkv.jpg" alt="Forex" onerror="this.style.display='none'">
+          </div>
+          <h4>Forex</h4>
+          <p>Opera con las principales divisas globales.</p>
+        </div>
 
-      // symbols_update: list of symbols from server
-      socket.on('symbols_update', (arr) => {
-        if(Array.isArray(arr) && arr.length){
-          // normalize to {symbol,label,market}
-          allSymbols = arr.map(s => {
-            if(typeof s === 'string') return { symbol: s, label: s, market: 'Unknown' };
-            return { symbol: s.symbol || s.ticker || s, label: s.label || s.symbol || s.ticker || s, market: s.market || 'Unknown' };
-          });
-          renderMarketsAndList();
-        }
-      });
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/2IBw_mVFi2j9_lZ0B5drJ.jpg" alt="Criptomonedas" onerror="this.style.display='none'">
+          </div>
+          <h4>Criptomonedas</h4>
+          <p>Invierte en el futuro del dinero digital.</p>
+        </div>
 
-      // fallback: fetch lists from REST if socket doesn't provide
-      async function fetchSymbolsFromApi(){
-        try {
-          const res = await fetch('/api/market/list');
-          const list = await res.json();
-          if(Array.isArray(list)) allSymbols = list.map(s => ({ symbol: s.symbol, label: s.label, market: s.market }));
-          else if(list && list.markets) { /* ignore */ }
-        } catch(e){
-          console.warn('no se pudo cargar /api/market/list', e);
-        }
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/wDJ7kLiUHiwmQUy0WTa3y.jpg" alt="Índices" onerror="this.style.display='none'">
+          </div>
+          <h4>Índices</h4>
+          <p>Accede a los principales mercados bursátiles del mundo.</p>
+        </div>
 
-        try {
-          const res2 = await fetch('/api/symbols');
-          const s2 = await res2.json();
-          if(Array.isArray(s2)) {
-            // merge, avoid duplicates
-            const map = new Map();
-            allSymbols.forEach(s => s && map.set(s.symbol, s));
-            s2.forEach(s => {
-              const k = s.symbol || s.ticker;
-              if(!map.has(k)) map.set(k, { symbol: k, label: s.label || k, market: s.market || 'Unknown' });
-            });
-            allSymbols = Array.from(map.values());
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/M6y8BjWWbmAp6xTqxhV6m.jpg" alt="Materias Primas" onerror="this.style.display='none'">
+          </div>
+          <h4>Materias Primas</h4>
+          <p>Desde el oro y la plata hasta el petróleo y el gas.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/SblHxbuPnj0bDONBbTJKq.jpg" alt="Acciones y ETFs" onerror="this.style.display='none'">
+          </div>
+          <h4>Acciones y ETFs</h4>
+          <p>Participa en el crecimiento de las empresas líderes.</p>
+        </div>
+
+        <div class="card">
+          <div class="thumb">
+            <img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="CFDs y Futuros" onerror="this.style.display='none'">
+          </div>
+          <h4>CFDs y Futuros</h4>
+          <p>Maximiza tus oportunidades con instrumentos derivados.</p>
+        </div>
+      </div>
+
+      <p style="margin-top:18px;color:var(--muted)">Ofrecemos una amplia gama de instrumentos para diversificar tu cartera.</p>
+
+      <!-- ====== BLOQUE DEPOSIT MOVIDO AQUÍ (debajo de la frase solicitada) ====== -->
+      <section class="deposit-section" aria-label="Depositos y Retiros">
+        <div class="container">
+            <h2 class="deposit-title">Deposita y Retira con Facilidad y Seguridad</h2>
+
+            <div class="deposit-content">
+                <div class="info-column left" style="padding-left: 0;">
+                    <div class="info-item">
+                        <h3 class="item-title">Tarjetas de Crédito/Débito</h3>
+                        <p class="item-description">Rápido y seguro, las opciones más populares.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">Pagos Locales</h3>
+                        <p class="item-description">Opciones específicas para cada región.</p>
+                    </div>
+                </div>
+
+                <div class="circle-chart" id="circleChart">
+                    <div class="center-circle"></div>
+                    <div class="segment segment-1" data-index="0" data-origin="100% 100%"><i class="fa-solid fa-credit-card"></i></div>
+                    <div class="segment segment-2" data-index="1" data-origin="0% 100%"><i class="fa-solid fa-money-bill-transfer"></i></div>
+                    <div class="segment segment-3" data-index="2" data-origin="0% 0%"><i class="fa-brands fa-bitcoin"></i></div>
+                    <div class="segment segment-4" data-index="3" data-origin="100% 0%"><i class="fa-solid fa-wallet"></i></div>
+                    <div class="segment segment-5" data-index="4" data-origin="100% 0%"><i class="fa-solid fa-users"></i></div>
+                </div>
+
+                <div class="info-column right" style="padding-right: 0;">
+                    <div class="info-item">
+                        <h3 class="item-title">Transferencias Bancarias</h3>
+                        <p class="item-description">Directo desde tu banco, ideal para montos mayores.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">Criptomonedas</h3>
+                        <p class="item-description">Financia tu cuenta con activos digitales.</p>
+                    </div>
+                    <div class="info-item">
+                        <h3 class="item-title">e-Wallets</h3>
+                        <p class="item-description">PayPal, Skrill, Neteller y otros monederos electrónicos.</p>
+                    </div>
+                </div>
+            </div>
+
+            <p class="deposit-footer">Todos los métodos cuentan con tiempos de aprobación transparentes para tu comodidad</p>
+        </div>
+      </section>
+      <!-- ====== FIN BLOQUE DEPOSIT ====== -->
+
+    </div>
+  </section>
+
+  <!-- INSTRUMENTOS DETALLE (mantenidos, ahora más ancho) -->
+  <section style="padding:36px 0">
+    <div class="container">
+      <h3>Instrumentos de Trading: Conoce Cada Detalle</h3>
+
+      <div class="card-list" style="margin-top:14px">
+        <div class="accent-card">
+          <h4>Spreads y Comisiones</h4>
+          <p>Transparencia total en nuestros costos para que operes con confianza.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Apalancamiento</h4>
+          <p>Amplifica tus operaciones con opciones de apalancamiento flexibles.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Swaps y Márgenes</h4>
+          <p>Información clara sobre swaps y requisitos de margen para una gestión eficaz.</p>
+        </div>
+
+        <div class="accent-card">
+          <h4>Horarios de Mercado</h4>
+          <p>Consulta los horarios de trading para cada instrumento y planifica tus estrategias.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:18px" class="img-slot">
+        <img src="/imge.img/3O9hTbpVd0U6NXnh1joLF (1).jpg" alt="Instruments detail" onerror="this.style.display='none'">
+      </div>
+    </div>
+  </section>
+
+  <!-- PLATAFORMAS -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Plataformas de Trading Intuitivas y Potentes</h3>
+      <p style="color:var(--muted);margin-top:8px">Opera desde cualquier lugar con nuestras plataformas diseñadas para tu éxito.</p>
+
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:16px">
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/Yy7o1e5hqgD_UtiDhBAU0.jpg" alt="WebTrader" onerror="this.style.display='none'">
+          </div>
+          <h4>WebTrader</h4>
+          <p>Acceso instantáneo desde tu navegador sin descargas.</p>
+        </div>
+
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/wDJ7kLiUHiwmQUy0WTa3y.jpg" alt="App Móvil" onerror="this.style.display='none'">
+          </div>
+          <h4>App Móvil</h4>
+          <p>Gestiona tus operaciones en movimiento con nuestra app intuitiva.</p>
+        </div>
+
+        <div style="flex:1;min-width:220px" class="card">
+          <div style="height:100px;overflow:hidden;border-radius:8px;margin-bottom:12px">
+            <img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="MT4/MT5/cTrader" onerror="this.style.display='none'">
+          </div>
+          <h4>MT4/MT5/cTrader</h4>
+          <p>Plataformas líderes para traders avanzados.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:18px" class="img-slot">
+        <img src="/imge.img/suBwzhDGDXvJSbuANOGH_ (1).jpg" alt="Manuales y Tutoriales" onerror="this.style.display='none'">
+      </div>
+      <p style="margin-top:12px;color:var(--muted)">Manuales y Tutoriales — Guías completas para dominar cada función de la plataforma.</p>
+    </div>
+  </section>
+
+  <!-- CUENTAS Y PAGOS (mantengo) -->
+  <section style="padding:36px 0">
+    <div class="container">
+      <h3>Elige la Cuenta Perfecta para Ti</h3>
+      <p style="color:var(--muted);margin-top:8px">Ofrecemos diferentes tipos de cuentas para adaptarse a tus necesidades y estilo de trading.</p>
+
+      <div class="grid-3" style="margin-top:14px">
+        <div class="card"><h4>Cuenta Estándar</h4><p class="muted">Ideal para principiantes y traders con experiencia moderada.</p></div>
+        <div class="card"><h4>Cuenta ECN</h4><p class="muted">Para operaciones directas al mercado con spreads muy bajos.</p></div>
+        <div class="card"><h4>Cuenta VIP</h4><p class="muted">Beneficios exclusivos y condiciones premium para grandes volúmenes.</p></div>
+      </div>
+
+      <h3 style="margin-top:22px">Deposita y Retira con Facilidad y Seguridad</h3>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px">
+        <div style="flex:1;min-width:300px" class="card">
+          <div class="thumb"><img src="/imge.img/LA1QmiMDzMWegyH1Lxc1J.jpg" alt="Tarjetas" onerror="this.style.display='none'"></div>
+          <h4>Tarjetas de Crédito/Débito</h4><p class="muted">Rápido y seguro, las opciones más populares.</p>
+        </div>
+
+        <div style="flex:1;min-width:300px" class="card">
+          <div class="thumb"><img src="/imge.img/x5n0qkWTef4rcYY3qNxyu.jpg" alt="Transferencias" onerror="this.style.display='none'"></div>
+          <h4>Transferencias Bancarias / Criptomonedas / e-Wallets</h4>
+          <p class="muted">Directo desde tu banco, criptomonedas, y monederos electrónicos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REGULACIÓN, EDUCACIÓN, SOPORTE -->
+  <section style="padding:36px 0;background:#0d0d0d">
+    <div class="container">
+      <h3>Regulación y Seguridad: Nuestra Prioridad</h3>
+      <p class="muted">Operamos bajo estrictas regulaciones para garantizar un entorno de trading seguro y transparente.</p>
+
+      <ul style="color:var(--muted);margin-top:12px">
+        <li>Número de licencia claramente visible.</li>
+        <li>País de regulación y autoridad supervisora.</li>
+        <li>Términos y Condiciones, Política de Privacidad, Política de Riesgos y Política de Cookies.</li>
+      </ul>
+
+      <h3 style="margin-top:18px">Centro Educativo: Desarrolla Tus Habilidades</h3>
+      <p class="muted">Cursos interactivos, webinars en vivo, noticias de mercado y calendario económico.</p>
+
+      <h3 style="margin-top:18px">Soporte Dedicado: Siempre a Tu Lado</h3>
+      <p class="muted">Chat en Vivo · WhatsApp <strong>786-872-0660</strong> · Email <strong>contactoleonesbroker@gmail.com</strong></p>
+
+      <div style="margin-top:18px">
+        <img src="/imge.img/Yy7o1e5hqgD_UtiDhBAU0.jpg" alt="licence" style="width:100%;max-width:480px;border-radius:12px" onerror="this.style.display='none'">
+      </div>
+    </div>
+  </section>
+
+</main>
+
+
+<footer id="publicFooter">© Leones Broker — Público</footer>
+
+<!-- Modal -->
+<div id="modal" aria-hidden="true">
+  <div class="box">
+    <h3 id="modalTitle" style="color:var(--gold);margin:0 0 12px">Modal</h3>
+    <div id="modalBody"></div>
+    <div style="text-align:right;margin-top:12px">
+      <button class="btn ghost" id="modalCancel">Cancelar</button>
+      <button class="btn" id="modalOk">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+
+
+<script>
+/* Unified script — versión corregida y defensiva
+   - Guarda token consistemente
+   - apiFetch usa token desde token | BROKER_TOKEN | SESSION_KEY
+   - Override de window.fetch para añadir Authorization en fetch('/api/...') si hay token
+   - Evita inicializaciones dobles
+*/
+
+if (window.__LEONES_BOOTED__) {
+  console.warn('[LEONES] script already booted, skipping re-evaluation.');
+} else {
+  window.__LEONES_BOOTED__ = true;
+
+  /* ===========================
+     Config / util
+  =========================== */
+  window.API = window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+  window.SOCKET_URL = window.SOCKET_URL || (location.hostname === "localhost" ? "http://localhost:3000" : location.origin);
+  window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  var API = window.API;
+  var SOCKET_URL = window.SOCKET_URL;
+  var SESSION_KEY = window.SESSION_KEY;
+
+  const API_BASE = (window.API_BASE || window.API || API).replace(/\/+$/,'');
+  const WS_BASE = (window.WS_BASE || window.SOCKET_URL || SOCKET_URL || location.origin).replace(/\/+$/,'');
+
+  const log = (...a) => { try{ console.log('[LEONES]',...a); }catch(e){} };
+  const warn = (...a) => { try{ console.warn('[LEONES]',...a); }catch(e){} };
+  const error = (...a) => { try{ console.error('[LEONES]',...a); }catch(e){} };
+
+  function safeParseJSON(s, fallback=null){ try{ return JSON.parse(s); }catch(e){ return fallback; } }
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function formatNumber(n,d=6){ const num=Number(n); if(!isFinite(num)) return '--'; if(Math.abs(num)>=1000) return num.toLocaleString(undefined,{maximumFractionDigits:1}); return num.toLocaleString(undefined,{maximumFractionDigits:d}); }
+
+  /* ===========================
+     apiFetch / apiPost
+  =========================== */
+  async function getSavedToken(){
+    try{
+      const t1 = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
+      if(t1) return t1;
+      const s = safeParseJSON(localStorage.getItem(SESSION_KEY) || null, null);
+      if(s && s.token) return s.token;
+    }catch(e){}
+    return null;
+  }
+
+  async function apiFetch(path, opts={}) {
+    const token = await getSavedToken();
+    const headers = opts.headers && typeof opts.headers === 'object' ? {...opts.headers} : {};
+    if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
+      headers['Content-Type'] = 'application/json';
+    }
+    if(token && !headers['Authorization'] && !headers['authorization']){
+      headers['Authorization'] = 'Bearer ' + token;
+    }
+
+    let url = '';
+    try {
+      if(typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) url = path;
+      else {
+        let p = String(path || '').trim();
+        if(!p.startsWith('/')) p = '/' + p;
+        const baseNoSlash = API_BASE.replace(/\/+$/,'');
+        if(baseNoSlash.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/,'');
+        url = baseNoSlash + p;
+      }
+    } catch(e){ url = path; }
+
+    let res;
+    try {
+      res = await fetch(url, { credentials: 'include', ...opts, headers });
+    } catch(e){
+      const err = new Error('Network error');
+      err.body = e;
+      throw err;
+    }
+
+    const txt = await res.text().catch(()=>null);
+    let data = null;
+    try { data = txt ? JSON.parse(txt) : null; } catch(e){ data = txt; }
+
+    if(!res.ok){
+      if(res.status === 401){
+        try { localStorage.removeItem('token'); localStorage.removeItem(SESSION_KEY); } catch(e){}
+        const msg = (data && (data.msg || data.error || data.message)) || 'Unauthorized';
+        const err = new Error(msg); err.status = 401; err.body = data;
+        throw err;
+      }
+      const msg = (data && (data.msg || data.error || data.message)) || (typeof data === 'string' ? data : 'API error');
+      const err = new Error(msg); err.status = res.status; err.body = data;
+      throw err;
+    }
+    return data;
+  }
+  async function apiPost(path, body={}){ return apiFetch(path, { method:'POST', body: JSON.stringify(body) }); }
+
+  window._LEONES = window._LEONES || {};
+  const NS = window._LEONES;
+  NS.apiFetch = NS.apiFetch || apiFetch;
+  NS.apiPost = NS.apiPost || apiPost;
+
+  /* ===========================
+     Safe fetch monkey-patch (adds Authorization for same-origin /api/* when token present)
+  =========================== */
+  (function installSafeFetch(){
+    try{
+      if(window.__LEONES_FETCH_PATCHED__) return;
+      window.__LEONES_FETCH_PATCHED__ = true;
+      const _origFetch = window.fetch.bind(window);
+
+      window.fetch = async function(input, init){
+        try{
+          const token = await getSavedToken();
+          let url = '';
+          let isReqObj = false;
+          if (input && typeof input === 'object' && input.url) {
+            isReqObj = true;
+            url = input.url;
+          } else {
+            url = String(input || '');
           }
-        } catch(e){}
-        renderMarketsAndList();
-      }
-
-      function renderMarketsAndList(){
-        // build markets
-        const markets = Array.from(new Set(allSymbols.map(s => s.market || 'Unknown')));
-        marketTabsEl.innerHTML = '';
-        markets.forEach(m=>{
-          const el = document.createElement('div');
-          el.className = 'market-tab' + ((!currentMarket && m==='Crypto') || (currentMarket===m) ? ' active' : '');
-          el.textContent = m;
-          el.addEventListener('click', () => { currentMarket = m; renderSymbols(); markActiveTab(m); });
-          marketTabsEl.appendChild(el);
-        });
-
-        if(!currentMarket) currentMarket = markets[0] || null;
-        renderSymbols();
-      }
-
-      function markActiveTab(m){
-        Array.from(marketTabsEl.children).forEach(ch => ch.classList.toggle('active', ch.textContent === m));
-      }
-
-      function renderSymbols(){
-        const q = (searchInput.value||'').trim().toLowerCase();
-        filteredSymbols = allSymbols.filter(s => (s.market||'').toLowerCase().includes((currentMarket||'').toLowerCase()) && (!q || s.symbol.toLowerCase().includes(q) || (s.label||'').toLowerCase().includes(q)));
-        // sort by symbol
-        filteredSymbols.sort((a,b)=> (a.symbol>b.symbol?1:-1));
-        symbolsListEl.innerHTML = '';
-        filteredSymbols.slice(0, 200).forEach(s=>{
-          const row = document.createElement('div');
-          row.className = 'symbol-row';
-          row.innerHTML = `<div class="symbol-left"><div style="width:8px"></div><div>
-            <div class="symbol-name">${s.symbol}</div>
-            <div class="symbol-label">${s.label}</div>
-          </div></div>
-          <div style="text-align:right">
-            <div class="symbol-price" id="price-${escapeId(s.symbol)}">-</div>
-            <div class="muted" id="chg-${escapeId(s.symbol)}"></div>
-          </div>`;
-          row.addEventListener('click', () => selectSymbol(s));
-          symbolsListEl.appendChild(row);
-        });
-      }
-
-      function escapeId(id){ return id.replace(/[^a-z0-9_-]/gi,'_'); }
-
-      function updateSymbolPriceInList(symbol, info){
-        const el = document.getElementById('price-' + escapeId(symbol));
-        const ch = document.getElementById('chg-' + escapeId(symbol));
-        if(el){
-          const price = (info && (info.price || info.last || info.p)) || null;
-          el.textContent = price !== null ? (Number(price).toFixed(6).replace(/\.?0+$/,'') ) : '-';
-          if(ch){
-            let c = '';
-            if(info && info.change != null) c = (info.change>0? '+' : '') + (Number(info.change).toFixed(2)) + '%';
-            ch.textContent = c;
-          }
-        }
-      }
-
-      async function selectSymbol(s){
-        if(!s) return;
-        selectedSymbol = s;
-        selectedSymbolEl.textContent = s.symbol;
-        selectedLabelEl.textContent = s.label ? ' · ' + s.label : '';
-        // reset chart + series
-        if(!chart){
-          initChart();
-        } else {
-          // clear series points by removing and readding
-          chart.removeSeries(series);
-          series = chart.addLineSeries({ color: '#4ade80' });
-        }
-        // send subscribe to socket
-        try { socket.emit('subscribe', { symbol: s.symbol }); } catch(e){ console.warn('subscribe err', e); }
-        // fetch initial price (if REST available)
-        try {
-          const r = await fetch('/api/symbols');
-          const data = await r.json();
-          if(Array.isArray(data)){
-            const found = data.find(x => (x.symbol||x.ticker) === s.symbol);
-            if(found && found.price) {
-              const t = Math.floor(Date.now()/1000);
-              series.setData([{ time: t, value: found.price }]);
-              priceBadge.textContent = found.price;
+          const normalized = url.startsWith('http') ? url : (url.startsWith('/') ? location.origin + url : location.origin + '/' + url);
+          const sameOrigin = normalized.startsWith(location.origin);
+          const touchesApi = normalized.includes('/api/');
+          if (sameOrigin && touchesApi && token) {
+            if (isReqObj && input instanceof Request) {
+              const newHeaders = new Headers(input.headers || {});
+              if(!newHeaders.has('Authorization')) newHeaders.set('Authorization', 'Bearer ' + token);
+              const newReq = new Request(input, { headers: newHeaders });
+              return await _origFetch(newReq, init);
+            } else {
+              init = init || {};
+              init.headers = init.headers || {};
+              if(init.headers instanceof Headers){
+                if(!init.headers.has('Authorization')) init.headers.set('Authorization', 'Bearer ' + token);
+              } else {
+                if(!init.headers['Authorization'] && !init.headers['authorization']){
+                  init.headers['Authorization'] = 'Bearer ' + token;
+                }
+              }
             }
           }
-        } catch(e){}
-      }
-
-      function initChart(){
-        const container = document.getElementById('chart');
-        container.innerHTML = '';
-        chart = LightweightCharts.createChart(container, {
-          layout: { background: { color: '#071019' }, textColor: '#dbeafe' },
-          timeScale: { rightOffset: 5, barSpacing: 12 },
-          grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } }
-        });
-        series = chart.addLineSeries({ color: '#4ade80' });
-        chart.timeScale().fitContent();
-      }
-
-      // receive live updates (this maps to whatever your priceHandler emits)
-      socket.on('price_update', (payload) => {
-        // expected payload: { symbol, price, time, change }
-        if(!payload || !payload.symbol) return;
-        if(selectedSymbol && payload.symbol === selectedSymbol.symbol){
-          const t = payload.time ? Math.floor(payload.time/1000) : Math.floor(Date.now()/1000);
-          const v = Number(payload.price);
-          if(Number.isFinite(v)){
-            try { series.update({ time: t, value: v }); } catch(e){}
-            priceBadge.textContent = v;
-          }
+        }catch(e){
+          console.warn('[LEONES] fetch patch error', e);
         }
-        // update list too
-        updateSymbolPriceInList(payload.symbol, payload);
+        return _origFetch(input, init);
+      };
+      log('[LEONES] window.fetch patched to auto-add Authorization for /api/ calls when token present');
+    }catch(e){
+      console.warn('[LEONES] could not patch fetch', e);
+    }
+  })();
+
+  /* ===========================
+     initSocket (idempotent)
+  =========================== */
+  function initSocket(){
+    try{
+      if(window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket){
+        log('Socket already initialized');
+        return window.__LEONES_SOCKET__.socket;
+      }
+      if(typeof io !== 'function'){
+        warn('socket.io client missing');
+        return null;
+      }
+      const tokenPromise = getSavedToken();
+      const s = io(WS_BASE, {
+        path: '/socket.io',
+        transports: ['websocket','polling'],
+        withCredentials: true,
+        auth: undefined,
+        autoConnect: true
+      });
+      tokenPromise.then(token => { if(token) s.auth = { token }; });
+      window.__LEONES_SOCKET__ = { socket: s };
+      s.on('connect', () => log('socket connected', s.id));
+      s.on('disconnect', (r) => log('socket disconnected', r));
+      s.on('connect_error', (err) => warn('socket connect_error', err));
+      s.on('prices_snapshot', ()=>{});
+      s.on('symbols_update', ()=>{});
+      return s;
+    }catch(e){
+      warn('initSocket error', e);
+      return null;
+    }
+  }
+  NS.initSocket = NS.initSocket || initSocket;
+
+  /* ===========================
+     Auth helpers
+  =========================== */
+  async function registerUser({ name, email, password, phone='', address='' } = {}){ 
+    if(!name || !email || !password) throw new Error('name, email y password son requeridos');
+    const normalized = String(email).trim().toLowerCase();
+    return apiPost('/auth/register', { name, email: normalized, password, phone, address });
+  }
+
+  async function loginUser({ email, password } = {}) {
+    if(!email || !password) throw new Error('email y password requeridos');
+    const normalized = String(email).trim().toLowerCase();
+    const res = await apiPost('/auth/login', { email: normalized, password });
+
+    try{
+      let token = null;
+      let user = null;
+      if(res && res.data && res.data.token){
+        token = res.data.token;
+        user = res.data.user || res.data;
+      } else if(res && res.token){
+        token = res.token;
+        user = res.user || res;
+      } else if(res && res.accessToken){
+        token = res.accessToken;
+        user = res.user || res;
+      }
+      if(token){
+        localStorage.setItem('token', token);
+        const sess = user && typeof user === 'object' ? {...user, token} : { email: normalized, token };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+      }
+    }catch(e){ console.warn('loginUser: store token failed', e); }
+
+    return res;
+  }
+
+  function logout(){
+    try{
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('token');
+      try { const s = window.__LEONES_SOCKET__?.socket; if(s && typeof s.disconnect === 'function') s.disconnect(); } catch(e){}
+      restorePublicHeader();
+    }catch(e){ warn('logout error', e); }
+  }
+
+  NS.registerUser = registerUser;
+  NS.loginUser = loginUser;
+  NS.logout = logout;
+
+  /* ===========================
+     Header / modal / session helpers
+  =========================== */
+  function safeDisplayName(user={}) {
+    if(user && user.alias) return user.alias;
+    const email = user && user.email ? String(user.email) : '';
+    if(!email.includes('@')) return 'Cuenta';
+    const [local, domain] = email.split('@');
+    if(local.length <= 2) return local[0] + '*' + '@' + domain;
+    const maskedLocal = local[0] + local.slice(1,2).replace(/./g,'*') + local.slice(-1);
+    return maskedLocal + '@' + domain;
+  }
+
+  function restorePublicHeader(){
+    try{
+      const header = document.getElementById('headerActions');
+      if(!header) return;
+      header.innerHTML = '';
+      const openBtn = document.createElement('button'); openBtn.className='btn glow open-register'; openBtn.id='openAccountBtn'; openBtn.textContent='Abrir Cuenta';
+      const loginBtn = document.createElement('button'); loginBtn.className='btn ghost glow open-login'; loginBtn.id='loginBtn'; loginBtn.textContent='Iniciar Sesión';
+      header.appendChild(openBtn); header.appendChild(loginBtn);
+      attachGlobalOpenButtons();
+    }catch(e){ warn('restorePublicHeader', e); }
+  }
+
+  function showPrivateHeader(user={}){
+    try{
+      const header = document.getElementById('headerActions');
+      if(!header) return;
+      header.innerHTML = '';
+      const profile = document.createElement('div');
+      profile.style.display='flex'; profile.style.gap='10px'; profile.style.alignItems='center';
+      const idSpan = document.createElement('div'); idSpan.textContent = safeDisplayName(user); idSpan.style.color='var(--gold)'; idSpan.style.fontWeight='700';
+      const logoutBtn = document.createElement('button'); logoutBtn.className='btn ghost'; logoutBtn.textContent='Cerrar sesión';
+      logoutBtn.addEventListener('click', () => { logout(); dispatchEvent(new CustomEvent('leones:loggedOut')); });
+      profile.appendChild(idSpan); profile.appendChild(logoutBtn); header.appendChild(profile);
+    }catch(e){ warn('showPrivateHeader', e); }
+  }
+
+  function ensureModal(){
+    let m = document.getElementById('leones_modal');
+    if(m) return m;
+    m = document.createElement('div'); m.id='leones_modal';
+    m.style.cssText='position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.65);z-index:99999;';
+    m.innerHTML = `<div id="leones_modal_box" style="max-width:720px;width:94%;background:#0b0b0b;padding:16px;border-radius:12px;color:#fff"></div>`;
+    document.body.appendChild(m);
+    return m;
+  }
+  function showModal(html, onConfirm){
+    const modal = ensureModal();
+    const box = modal.querySelector('#leones_modal_box');
+    box.innerHTML = html;
+    if(!box.querySelector('.leones_modal_actions')){
+      const actions = document.createElement('div'); actions.className='leones_modal_actions';
+      actions.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:12px';
+      const cancel = document.createElement('button'); cancel.className='btn ghost'; cancel.textContent='Cancelar';
+      const ok = document.createElement('button'); ok.className='btn glow'; ok.textContent='Aceptar';
+      cancel.addEventListener('click', closeModal);
+      ok.addEventListener('click', () => { if(typeof onConfirm === 'function') onConfirm(); closeModal(); });
+      actions.appendChild(cancel); actions.appendChild(ok); box.appendChild(actions);
+    }
+    modal.style.display='flex'; document.body.style.overflow='hidden';
+    setTimeout(()=>{ const first = box.querySelector('input,textarea,select,button'); if(first) first.focus(); },40);
+  }
+  function closeModal(){ const m=document.getElementById('leones_modal'); if(!m) return; m.style.display='none'; document.body.style.overflow=''; }
+  NS.showModal = showModal; NS.closeModal = closeModal;
+
+  function restoreSessionOnLoad(){
+    try{
+      const s = localStorage.getItem(SESSION_KEY);
+      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
+      const sock = initSocket();
+      if(s && token){
+        const u = safeParseJSON(s,{});
+        showPrivateHeader(u);
+        if(sock && sock.auth) sock.auth = { token };
+        if(sock && !sock.connected && typeof sock.connect==='function') sock.connect();
+      } else {
+        restorePublicHeader();
+      }
+    }catch(e){ warn('restoreSessionOnLoad', e); restorePublicHeader(); }
+  }
+
+  function wireGlobalEvents(){
+    addEventListener('leones:openRegister', () => {
+      const html = `
+        <div style="display:grid;gap:8px">
+          <input id="r_name" placeholder="Nombre" />
+          <input id="r_email" placeholder="Correo" type="email" />
+          <input id="r_phone" placeholder="Teléfono" />
+          <input id="r_address" placeholder="Dirección" />
+          <input id="r_pass" placeholder="Contraseña" type="password" />
+        </div>
+      `;
+      showModal(html, async () => {
+        try{
+          const name = (document.getElementById('r_name')||{}).value||'';
+          const email = ((document.getElementById('r_email')||{}).value||'').trim().toLowerCase();
+          const phone = (document.getElementById('r_phone')||{}).value||'';
+          const address = (document.getElementById('r_address')||{}).value||'';
+          const pass = (document.getElementById('r_pass')||{}).value||'';
+          if(!name||!email||!pass) return alert('Completa los campos requeridos');
+          await registerUser({ name, email, password: pass, phone, address });
+          alert('Registro completado. Revisa tu correo.');
+        }catch(e){ console.error('register error', e); alert(e.message || 'Error registrando'); }
+      });
+    });
+
+    addEventListener('leones:openLogin', () => {
+      const html = `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input id="l_email" placeholder="Correo" type="email" />
+          <input id="l_pass" placeholder="Contraseña" type="password" />
+        </div>
+      `;
+      showModal(html, async () => {
+        try{
+          const email = ((document.getElementById('l_email')||{}).value||'').trim().toLowerCase();
+          const pass = (document.getElementById('l_pass')||{}).value||'';
+          if(!email||!pass) return alert('Completa los campos');
+          const res = await loginUser({ email, password: pass });
+          let user = null;
+          if(res && res.data && res.data.user) user = res.data.user;
+          else if(res && res.user) user = res.user;
+          else {
+            const sess = safeParseJSON(localStorage.getItem(SESSION_KEY) || null, null);
+            user = sess || { email };
+          }
+          localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+          showPrivateHeader(user);
+          initSocket();
+          dispatchEvent(new CustomEvent('leones:loggedIn', { detail: user }));
+        }catch(e){ console.error('login error', e); alert(e.message || 'Error iniciando sesión'); }
+      });
+    });
+  }
+
+  function attachGlobalOpenButtons(){
+    try {
+      document.querySelectorAll('.open-register').forEach(btn=>{
+        btn.removeEventListener('click', _openRegisterHandler);
+        btn.addEventListener('click', _openRegisterHandler);
+      });
+      document.querySelectorAll('.open-login').forEach(btn=>{
+        btn.removeEventListener('click', _openLoginHandler);
+        btn.addEventListener('click', _openLoginHandler);
+      });
+    } catch(e){ }
+  }
+  function _openRegisterHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); }
+  function _openLoginHandler(e){ e&&e.preventDefault&&e.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); }
+
+  document.addEventListener('click', function(ev){
+    try{
+      const el = ev.target.closest && ev.target.closest('button,a,div,span');
+      if(!el) return;
+      if(el.closest && el.closest('#leones_modal')) return;
+      const txt = (el.textContent||'').trim().toLowerCase();
+      if(txt === 'abrir cuenta' || el.dataset?.action === 'open-register'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openRegister')); return; }
+      if(txt === 'iniciar sesión' || el.dataset?.action === 'open-login'){ ev.preventDefault&&ev.preventDefault(); dispatchEvent(new CustomEvent('leones:openLogin')); return; }
+    }catch(e){}
+  }, true);
+
+  /* ===========================
+     Account / Trading modules
+     - loadAccount uses apiFetch (centralized auth)
+  =========================== */
+
+  let account = {
+    balance: 0,
+    equity: 0,
+    marginUsed: 0,
+    freeMargin: 0,
+    marginLevel: 0,
+    leverage: 100,
+    currency: "USD",
+    positions: []
+  };
+
+  async function loadAccount(){
+    try{
+      let data = null;
+      try {
+        const res = await apiFetch('/account').catch(()=>null);
+        data = res;
+      } catch(e){
+        log('loadAccount: apiFetch failed', e && e.status ? e.status : e);
+        return null;
+      }
+      if(data && data.account){
+        account = data.account;
+      } else if(data && typeof data === 'object'){
+        account.balance = Number(data.balance ?? data.bal ?? account.balance);
+        account.leverage = Number(data.leverage ?? account.leverage);
+        account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
+        account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
+      }
+      updateMarginMetrics();
+      updateAccountUI();
+      window.__LEONES_ACCOUNT = account;
+      return account;
+    }catch(e){ console.error('Error cargando cuenta:', e); return null; }
+  }
+
+  function calculateFloatingPnL(){ let total = 0; (account.positions || []).forEach(pos => { total += Number(pos.pnl || 0); }); return total; }
+  function calculateMargin(lotSize, price){ const contractSize = 100000; const margin = (lotSize * contractSize * price) / (account.leverage || 1); return margin; }
+  function updateMarginMetrics(){ account.equity = Number(account.balance || 0) + Number(calculateFloatingPnL()); account.freeMargin = Number(account.equity) - Number(account.marginUsed || 0); account.marginLevel = account.marginUsed > 0 ? (account.equity / account.marginUsed) * 100 : 0; }
+  function updateAccountUI(){
+    try{
+      const setText = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+      setText('balanceEl', (account.balance||0).toLocaleString());
+      setText('equityEl', (account.equity||0).toLocaleString());
+      setText('marginUsedEl', (account.marginUsed||0).toLocaleString());
+      setText('freeMarginEl', (account.freeMargin||0).toLocaleString());
+      setText('marginLevelEl', account.marginLevel ? (Math.round(account.marginLevel*100)/100 + '%') : '0%');
+      const listEl = document.getElementById('positionsList');
+      if(listEl){
+        const rows = (account.positions || []).map(p => `<div class="pos-row">${escapeHtml(p.symbol||'')} ${(p.side||'').toUpperCase()} ${p.lots || 0} lots PnL:${p.pnl||0}</div>`);
+        listEl.innerHTML = rows.join('');
+      }
+    }catch(e){ warn('updateAccountUI error', e); }
+  }
+  NS.loadAccount = loadAccount;
+  NS.updateAccountUI = updateAccountUI;
+  NS.calculateMargin = calculateMargin;
+
+  /* Trading - symbols / positions */
+  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+  const T = window.__LEONES_TRADING__;
+  T.ALL_SYMBOLS = T.ALL_SYMBOLS || [
+    {symbol:'BINANCE:BTCUSDT', label:'BTC/USDT', market:'Crypto'},
+    {symbol:'BINANCE:ETHUSDT', label:'ETH/USDT', market:'Crypto'},
+    {symbol:'NASDAQ:AAPL', label:'AAPL', market:'Stocks'}
+  ];
+  T.symbolPrices = T.symbolPrices || {};
+  T.positions = T.positions || [];
+  T.orderBooks = T.orderBooks || {};
+
+  let tradingSocket = null;
+  let demoTicker = null;
+  let currentSymbol = (T.ALL_SYMBOLS && T.ALL_SYMBOLS[0] && T.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
+  let currentLeverage = 10;
+  let currentEntryPrice = null;
+
+  function ensureTradingSocket(){
+    try{
+      if(tradingSocket && tradingSocket.connected) return tradingSocket;
+      tradingSocket = (NS.initSocket && typeof NS.initSocket === 'function') ? NS.initSocket() : initSocket();
+      if(!tradingSocket){ startDemoPrices(); return null; }
+      if(tradingSocket.__leones_trading_attached) return tradingSocket;
+      tradingSocket.__leones_trading_attached = true;
+
+      tradingSocket.on('prices_snapshot', snap => {
+        try{
+          if(!snap) return;
+          if(Array.isArray(snap)){
+            snap.forEach(it => { if(it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
+          } else if(typeof snap === 'object'){
+            Object.keys(snap).forEach(k => {
+              const it = snap[k];
+              T.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
+            });
+          }
+          renderSymbolsGrid();
+        }catch(e){ warn('prices_snapshot', e); }
       });
 
-      // fallback - server might emit generic updates in other keys
-      socket.on('symbols_update', (arr) => {
-        // handled above
+      tradingSocket.on('price', p => {
+        try{
+          const symbol = p?.symbol || p?.s || p?.t;
+          if(!symbol) return;
+          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
+          T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+          updatePriceInUI(symbol, price);
+        }catch(e){ warn('price event', e); }
       });
 
-      // search handler
-      searchInput.addEventListener('input', () => renderSymbols());
-      reloadBtn.addEventListener('click', () => fetchSymbolsFromApi());
-      tvWidgetBtn.addEventListener('click', () => {
-        // Quick open TradingView chart in a new tab for advanced features
-        if(!selectedSymbol) return alert('Selecciona un símbolo primero');
-        const s = selectedSymbol.symbol.replace(':','/');
-        const tvUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s)}`;
-        window.open(tvUrl, '_blank');
+      tradingSocket.on('symbols_update', symbols => {
+        try{
+          if(!symbols) return;
+          if(Array.isArray(symbols)) T.ALL_SYMBOLS = symbols;
+          else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
+          renderSymbolsGrid();
+        }catch(e){ warn('symbols_update handler', e); }
       });
 
-      // quick buy/sell (demo: emits a socket event, your backend must secure these)
-      document.getElementById('buyBtn').addEventListener('click', () => {
-        if(!selectedSymbol) return alert('Selecciona símbolo');
-        const qty = Number(document.getElementById('qty').value) || 0;
-        socket.emit('trade', { action: 'buy', symbol: selectedSymbol.symbol, qty });
-        alert('Orden buy enviada (demo)');
-      });
-      document.getElementById('sellBtn').addEventListener('click', () => {
-        if(!selectedSymbol) return alert('Selecciona símbolo');
-        const qty = Number(document.getElementById('qty').value) || 0;
-        socket.emit('trade', { action: 'sell', symbol: selectedSymbol.symbol, qty });
-        alert('Orden sell enviada (demo)');
+      tradingSocket.on('orderbook', ob => {
+        try{
+          if(!ob || !ob.symbol) return;
+          T.orderBooks = T.orderBooks || {};
+          T.orderBooks[ob.symbol] = ob;
+          const bidsEl = document.getElementById('ob-bids');
+          if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
+        }catch(e){}
       });
 
-      // init
-      fetchSymbolsFromApi();
+      tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
+      tradingSocket.on('connect', () => stopDemoPrices());
+      return tradingSocket;
+    }catch(e){ warn('ensureTradingSocket', e); startDemoPrices(); return null; }
+  }
 
-      // small compatibility: also try rest endpoints and socket fallback
-      setTimeout(()=>{ try{ socket.emit('request_symbols'); }catch(e){} }, 800);
+  function buildSymbolsContainer(){
+    const c = document.getElementById('symbolsGrid');
+    if(!c) return null;
+    c.style.display='grid'; c.style.gridTemplateColumns='repeat(auto-fill,minmax(220px,1fr))'; c.style.gap='8px';
+    return c;
+  }
+  function renderSymbolsGrid(){
+    const container = buildSymbolsContainer();
+    if(!container) return;
+    container.innerHTML = '';
+    const list = (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length) ? T.ALL_SYMBOLS : [];
+    list.forEach(s => {
+      try{
+        const card = document.createElement('div'); card.className='symbol-card';
+        card.style.cssText='background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
+        const priceObj = T.symbolPrices[s.symbol];
+        const price = priceObj ? priceObj.price : null;
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label||s.symbol)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market||'Unknown')} · ${escapeHtml(s.symbol)}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+            </div>
+          </div>
+        `;
+        card.addEventListener('click', () => selectSymbol(s.symbol));
+        container.appendChild(card);
+      }catch(e){}
+    });
+  }
 
-      // expose for debug
-      window._LEONES_DASH = { socket, selectSymbol, allSymbols };
+  function selectSymbol(symbol){
+    currentSymbol = symbol;
+    const ts = document.getElementById('tradingSymbol'); if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
+    if(typeof window.initTradingWidget === 'function') try{ window.initTradingWidget(symbol); }catch(e){}
+    const priceObj = T.symbolPrices[symbol]; if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+    try{ const s = ensureTradingSocket(); if(s && s.emit) s.emit('request_orderbook', { symbol }); }catch(e){}
+  }
 
-    })();
-  </script>
+  function updatePriceInUI(symbol, price){
+    try{
+      document.querySelectorAll(`[data-symbol="${symbol}"]`).forEach(el => el.textContent = formatNumber(price));
+      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
+      if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
+        const opPrice = document.getElementById('op-price'); if(opPrice) opPrice.textContent = formatNumber(price);
+      }
+      if(!currentEntryPrice) currentEntryPrice = price;
+      renderMarginCalculator();
+    }catch(e){}
+  }
+
+  function updateOrderBookUI(ob){
+    try{
+      const bidsEl = document.getElementById('ob-bids'); const asksEl = document.getElementById('ob-asks');
+      if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b=>`${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+      if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a=>`${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+    }catch(e){}
+  }
+
+  function calculateMargin({ positionSize=0, leverage=1, entryPrice=0 } = {}){ const pos = Number(positionSize)||0; const lev = Number(leverage)||1; const ep = Number(entryPrice)||0; const notional = pos; const requiredMargin = lev>0 ? (pos/lev) : pos; const qty = ep>0 ? pos/ep : 0; return { requiredMargin, notional, qty }; }
+  function renderMarginCalculator(){ try{ const marginEl = document.getElementById('marginCalc'); if(!marginEl) return; const priceObj = T.symbolPrices[currentSymbol]; const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0; const posSize = Number(document.getElementById('input_position_size')?.value || 0); const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1); const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice }); marginEl.innerHTML = `<div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop()||currentSymbol)}</div><div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div><div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div><div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div><div>Apalancamiento: <strong>${lev}x</strong></div><div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>`; }catch(e){ warn('renderMarginCalculator', e); } }
+
+  async function placeOrder({ side='buy', positionSize=0, leverage=1, type='market', price=null } = {}){ try{ const payload = { symbol: currentSymbol, side, type, notional: Number(positionSize)||0, leverage: Number(leverage)||1, price: (price!==null && price!==undefined) ? Number(price) : undefined }; const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders']; let res=null; for(const ep of candidates){ try{ res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }); if(res) break; }catch(e){} } alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK')); await fetchPositions().catch(()=>{}); return res; }catch(e){ warn('placeOrder', e); alert(e?.body?.message || e.message || 'Error enviando orden'); throw e; } }
+
+  async function fetchPositions(){
+    try{
+      let res = null;
+      try {
+        res = await apiFetch('/positions').catch(()=>null);
+      } catch(e){
+        const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
+        for(const ep of candidates){
+          try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
+        }
+      }
+      if(!res) return null;
+      T.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
+      renderPositions();
+      return T.positions;
+    }catch(e){ warn('fetchPositions', e); return null; }
+  }
+
+  function renderPositions(){
+    try{
+      const el = document.getElementById('positionsList'); if(!el) return;
+      el.innerHTML = '';
+      if(!T.positions || !T.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
+      T.positions.forEach(p => {
+        try{
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
+          const symbol = p.symbol || p.s || currentSymbol;
+          const size = p.notional || p.size || 0;
+          const entry = p.entryPrice || p.price || p.avgPrice || 0;
+          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
+          row.innerHTML = `<div style="font-weight:700">${escapeHtml(symbol)}</div><div style="text-align:right"><div>Size: ${formatNumber(size)}</div><div>Entry: ${formatNumber(entry)}</div><div>PnL: ${formatNumber(pl,2)}</div></div>`;
+          el.appendChild(row);
+        }catch(e){}
+      });
+    }catch(e){}
+  }
+
+  function provideTradingWidgetFallback(){ if(typeof window.initTradingWidget === 'function') return; window.initTradingWidget = function(symbol){ const cont = document.getElementById('tv_chart_container'); if(!cont) return; cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`; }; }
+
+  function startDemoPrices(){ if(demoTicker) return; demoTicker = setInterval(()=>{ (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => { const k=s.symbol; const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random()*100); const change=(Math.random()-0.5)*Math.max(0.0001,Math.abs(old)*0.002); const next = Number(Math.max(0.00001, old+change).toFixed(6)); T.symbolPrices[k] = { price: next, ts: Date.now() }; }); renderSymbolsGrid(); renderMarginCalculator(); }, 1200); }
+  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker=null; } }
+
+  async function openTrade(symbol, type, lot, price, sl, tp){
+    try{
+      const payload = { symbol, type, lot, price, sl, tp };
+      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for openTrade');
+    }catch(e){ error('openTrade', e); throw e; }
+  }
+  async function closeTrade(positionId){
+    try{
+      const payload = { positionId };
+      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method:'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for closeTrade');
+    }catch(e){ error('closeTrade', e); throw e; }
+  }
+
+  async function checkMarginCall(){
+    try{
+      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
+      if(!acc) return false;
+      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
+      if(marginLevel !== null && Number(marginLevel) < 50){
+        alert('Margin Call - posiciones cerradas automáticamente');
+        const poses = acc.positions ?? T.positions ?? [];
+        for(const pos of poses){ try{ const pid = pos._id || pos.id || pos.positionId || pos.position_id; if(pid) await closeTrade(pid).catch(()=>{}); }catch(e){} }
+        return true;
+      }
+      return false;
+    }catch(e){ warn('checkMarginCall', e); return false; }
+  }
+
+  async function initTradingModule(){
+    try{
+      if(window.__LEONES_TRADING_INITED__){
+        log('initTradingModule already run — skipping');
+        return;
+      }
+      window.__LEONES_TRADING_INITED__ = true;
+
+      if(!document.getElementById('symbolsGrid')){ const s=document.createElement('div'); s.id='symbolsGrid'; s.style.cssText='padding:8px;max-width:1200px;margin:12px auto'; document.body.insertBefore(s, document.body.firstChild); }
+      if(!document.getElementById('tradingPanel')){ const panel = document.createElement('div'); panel.id='tradingPanel'; panel.style.cssText='max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px'; panel.innerHTML = `
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+          <div>Precio:<strong id="op-price">-</strong></div>
+          <div>Equity:<strong id="user-equity">--</strong></div>
+          <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+        </div>
+        <hr/>
+        <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+          <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="background:#080808;padding:8px;border-radius:8px">
+              <label>Posición (USD)</label>
+              <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+              <label style="margin-top:8px">Apalancamiento (x)</label>
+              <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+              <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+              <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+            </div>
+            <div style="background:#080808;padding:8px;border-radius:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div style="font-weight:700">Posiciones</div>
+                <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+              </div>
+              <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+            </div>
+          </div>
+        </div>
+        <hr/>
+        <div style="display:flex;gap:8px">
+          <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          <div id='ob-asks' data-symbol='' style='flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px'></div>
+        </div>
+      `; document.body.appendChild(panel); }
+
+      ensureTradingSocket();
+
+      try{
+        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
+        for(const ep of endpoints){
+          try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r) && r.length){ T.ALL_SYMBOLS = r; break; } }catch(e){}
+        }
+      }catch(e){}
+
+      renderSymbolsGrid();
+
+      try{
+        const posInput = document.getElementById('input_position_size');
+        const levInput = document.getElementById('input_leverage');
+        if(posInput) posInput.addEventListener('input', renderMarginCalculator);
+        if(levInput) levInput.addEventListener('input', (e)=>{ currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
+
+        const buyBtn = document.getElementById('btnBuy'); const sellBtn = document.getElementById('btnSell');
+        if(buyBtn) buyBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'buy', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
+        if(sellBtn) sellBtn.addEventListener('click', async ()=>{ const pos=Number(document.getElementById('input_position_size')?.value||0); const lev=Number(document.getElementById('input_leverage')?.value||currentLeverage); await placeOrder({ side:'sell', positionSize: pos, leverage: lev, type:'market' }).catch(()=>{}); });
+
+        const refreshBtn = document.getElementById('btnRefreshPositions'); if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
+        const fetchSymBtn = document.getElementById('btnFetchSymbols'); if(fetchSymBtn) fetchSymBtn.addEventListener('click', async ()=>{ const eps=['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols']; for(const ep of eps){ try{ const r = await apiFetch(ep).catch(()=>null); if(Array.isArray(r)&&r.length){ T.ALL_SYMBOLS = r; renderSymbolsGrid(); break; } }catch(e){} } });
+
+        renderMarginCalculator();
+      }catch(e){ warn('wireTradingUI', e); }
+
+      provideTradingWidgetFallback();
+
+      await fetchPositions().catch(()=>{});
+      await loadAccount().catch(()=>{});
+
+      setTimeout(()=>{ const anyPrice = Object.keys(T.symbolPrices || {}).length; if(!anyPrice) startDemoPrices(); }, 2000);
+
+    }catch(e){ error('initTradingModule', e); }
+  }
+
+  window.loadPositions = window.loadPositions || (async function(){ try{ if(window.__LEONES_TRADING__ && typeof window.__LEONES_TRADING__.fetchPositions === 'function'){ return await window.__LEONES_TRADING__.fetchPositions(); } if(typeof fetchPositions === 'function') return await fetchPositions(); }catch(e){ console.warn('loadPositions alias error', e); } });
+
+  window._LEONES_TRADING = window._LEONES_TRADING || {};
+  window._LEONES_TRADING.selectSymbol = selectSymbol;
+  window._LEONES_TRADING.placeOrder = placeOrder;
+  window._LEONES_TRADING.fetchPositions = fetchPositions;
+  window._LEONES_TRADING.calculateMargin = calculateMargin;
+  window._LEONES_TRADING.openTrade = openTrade;
+  window._LEONES_TRADING.closeTrade = closeTrade;
+  window._LEONES_TRADING.loadAccount = loadAccount;
+  window._LEONES_TRADING.checkMarginCall = checkMarginCall;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    try{
+      if(window.__LEONES_DOMCONTENT_LOADED__) {
+        log('DOMContentLoaded handlers already executed — skipping');
+        return;
+      }
+      window.__LEONES_DOMCONTENT_LOADED__ = true;
+
+      wireGlobalEvents();
+      restoreSessionOnLoad();
+      attachGlobalOpenButtons();
+
+      try{
+        if(!window.__LEONES_MO__){
+          const mo = new MutationObserver(()=>{ attachGlobalOpenButtons(); });
+          mo.observe(document.documentElement||document.body, { childList:true, subtree:true });
+          window.__LEONES_MO__ = mo;
+        }
+      }catch(e){}
+
+      initTradingModule().catch(()=>{});
+      loadAccount().catch(()=>{});
+      try{ (window.loadPositions && typeof window.loadPositions === 'function') && window.loadPositions(); }catch(e){}
+    }catch(e){ console.error('Unified script init error', e); }
+  });
+
+  log('[LEONES] unified script loaded (defensive mode ON)');
+}
+</script>
+<!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
+<!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
+
+<!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
+<style>
+  :root{
+    --bg:#070707; --surface:#0f0f0f; --muted:#9aa0a6; --text:#e9e6e0;
+    --gold:#d4af37; --danger:#cf304a; --line:rgba(255,255,255,0.06);
+    --focus-glow: rgba(212,175,55,0.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,Arial;
+    background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+    line-height:1.35; font-size:14px; overflow:auto;
+  }
+
+  /* Header */
+  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
+  .header-left{display:flex;align-items:center;gap:12px}
+  /* menu-toggle moved into sidebar; keep style for potential reuse */
+  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
+  .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
+  .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
+
+  /* Layout */
+  .main-wrap{padding-top:80px;max-width:none; width: auto; margin:0 2%;}
+  .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
+  .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px); position:relative;}
+  .sidebar.hidden{transform:translateX(-110%)}
+  .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .sidebar .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
+  .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
+
+  .panel{background:linear-gradient(180deg,#0b0b0b,#0c0c0c);border-radius:12px;padding:18px;border:1px solid var(--line);height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6)}
+  .title{font-size:20px;color:var(--text);margin-bottom:12px;font-weight:800}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:14px;border:1px solid rgba(212,175,55,0.06)}
+  .card .value{font-weight:800;color:var(--gold);font-size:18px}
+  .muted{color:var(--muted);font-size:13px}
+
+  .table-box{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:12px;border:1px solid var(--line);overflow:auto}
+  table{width:100%;border-collapse:collapse;color:var(--text);font-size:13px}
+  th{text-align:left;padding:10px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line)}
+  td{padding:10px;border-bottom:1px dashed rgba(255,255,255,0.02)}
+  tr.clickable{cursor:pointer}
+  tr.clickable:hover{background:rgba(212,175,55,0.02)}
+
+  /* Symbols list */
+  .symbols-top{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .cat-tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .cat-tab{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
+  .cat-tab.active{background:rgba(212,175,55,0.06);color:var(--gold)}
+  .search-input{flex:1;min-width:200px;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0b0b0b;color:var(--text)}
+  .symbols-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px; margin-top:10px}
+  .symbol-card{padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg,#0f0f0f,#0d0d0d);cursor:pointer}
+  .symbol-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.5);border-color:rgba(212,175,55,0.08)}
+
+  /* Trading specifics */
+  .chart-area{display:flex;flex-direction:column;min-height:420px}
+  #tv_chart_container {width:100%;flex:1;min-height:420px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.03)}
+  .order-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .ob-col{background:transparent;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
+  .ob-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:var(--muted)}
+
+  .trade-panel{display:grid;grid-template-columns:1fr 320px;gap:12px;margin-top:12px}
+  .trade-box{background:#0b0b0b;border-radius:8px;border:1px solid var(--line);padding:12px}
+  .form-row{display:flex;gap:8px;margin-bottom:8px}
+  .form-input,.form-select{background:#0b0b0b;border:1px solid var(--line);color:var(--text);padding:8px;border-radius:6px;width:100%}
+
+  .btn-primary{background:var(--gold);color:#07100a;border:none;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer;box-shadow:0 6px 20px rgba(201,161,46,0.12)}
+  .btn-secondary{background:transparent;color:var(--gold);border:1px solid rgba(212,175,55,0.18);padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:700}
+
+  .positions-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .pos-card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);padding:10px;border-radius:8px;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+  .pos-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.4)}
+
+  /* Focus / glow for all fields where user types */
+  .panel input[type="text"], .panel input[type="number"], .panel input[type="email"], .panel input[type="file"], .panel textarea, .panel select,
+  .form-input, .form-select, .search-input {
+    transition: box-shadow .18s ease, border-color .18s ease, transform .08s ease;
+    outline: none;
+  }
+  .panel input:focus, .panel textarea:focus, .panel select:focus, .form-input:focus, .form-select:focus, .search-input:focus {
+    box-shadow: 0 0 0 6px var(--focus-glow), 0 8px 30px rgba(0,0,0,0.6);
+    border-color: rgba(212,175,55,0.45);
+    transform: translateY(-1px);
+  }
+  /* Visible focus for keyboard only */
+  .panel input:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible {
+    outline: 3px solid rgba(212,175,55,0.12);
+  }
+
+  /* Footer nav */
+  .footer-nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:60}
+  .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer}
+  .fnav-item.active{color:var(--gold);font-weight:800}
+  .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
+
+  @media(max-width:1000px){
+    .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
+    #tv_chart_container{min-height:300px}
+    .trade-panel{grid-template-columns:1fr}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
+    .sidebar.hidden{transform:translateX(-120%)}
+  }
+
+  .muted-small{color:var(--muted);font-size:12px}
+  .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
+</style>
+
+<!-- MARCA: PARTE PRIVADA (HTML) -->
+<div id="privateArea_full" style="display:none;">
+  <!-- BEGIN: contenido importado de la parte privada (BrokerPro) -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
+    </div>
+
+    <!-- ADDED: headerActions (usado por los scripts) -->
+    <div id="headerActions" style="display:flex;align-items:center;gap:10px;margin-right:12px;"></div>
+
+    <div class="user">
+      <div style="text-align:right">
+        <div style="font-weight:800;color:var(--gold)" id="privateHeaderName">Usuario</div>
+        <div style="font-size:12px;color:var(--muted)">Bienvenido</div>
+      </div>
+      <div class="avatar" id="privateAvatar">P</div>
+      <button class="btn-primary" onclick="logout()" style="padding:8px 10px;margin-left:8px">Salir</button>
+    </div>
+  </header>
+
+  <!-- ================= SCRIPTS (COMPLETO Y CORREGIDO) ================= -->
+  <!-- TradingView official script (needed for real charts) -->
+  
+
+  <div class="main-wrap">
+    <div class="layout">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div style="font-weight:800;color:var(--gold)">Menú</div>
+          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+        </div>
+
+        <div class="menu-item active" data-target="dashboardPanel" onclick="navSidebar(event)"><i class="fa-solid fa-house"></i> Overview</div>
+        <div class="menu-item" data-target="tradingPanel" onclick="navSidebar(event)"><i class="fa-solid fa-chart-line"></i> Trading</div>
+        <div class="menu-item" data-target="historyPanel" onclick="navSidebar(event)"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+        <div class="menu-item" data-target="verificationPanel" onclick="navSidebar(event)"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+        <div class="menu-item" data-target="depositPanel" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        <div class="menu-item" data-target="withdrawPanel" onclick="navSidebar(event)"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+
+        <div style="height:8px"></div>
+        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
+        <div class="menu-item" onclick="showModalInfo()"><i class="fa-solid fa-circle-info"></i> Info</div>
+      </aside>
+
+      <!-- Panels -->
+      <section class="panel" id="dashboardPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Bienvenido, <span style="color:var(--gold)" id="privateWelcomeName">Pedro</span></div>
+            <div class="muted">Resumen rápido de tu cuenta — abajo verás el listado completo de símbolos</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted">Saldo disponible</div>
+            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">10000.00</span></div>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">$125,430.50</div><div class="muted" style="margin-top:6px">Estado en tiempo real</div></div>
+          <div class="card"><div class="muted">Inversiones Activas</div><div class="value">$98,250.00</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
+          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">$10,000.00</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
+          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">+$8,430.50</div><div class="muted" style="margin-top:6px">Este mes</div></div>
+        </div>
+
+        <!-- SYMBOL SEARCH + CATEGORIES (sin gráfico) -->
+        <div>
+          <div class="symbols-top">
+            <div class="cat-tabs" id="catTabs"></div>
+            <input id="symbolSearch" class="search-input" placeholder="Buscar símbolo, ej: BTC, ETH, EURUSD, AAPL..." />
+          </div>
+          <div id="symbolsGrid" class="symbols-grid"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="tradingPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">BTC/USDT</span></div>
+            <div class="muted" id="trading-sub">Market: BINANCE</div>
+          </div>
+          <div class="muted">Estado: <span id="ws-status">demo</span></div>
+        </div>
+
+        <div class="market-list" id="market-list"></div>
+
+        <div style="display:flex;gap:12px;flex-direction:column">
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div class="chart-area" style="flex:1; min-width:320px; position:relative">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
+                  <div class="muted" id="op-exchange">Market: BINANCE</div>
+                </div>
+                <div style="text-align:right">
+                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">87,243.3</div>
+                  <div class="muted-small">Último</div>
+                </div>
+              </div>
+
+              <!-- chart: se carga solo aquí -->
+              <div id="tv_chart_container" style="margin-top:12px; height:420px;"></div>
+
+              <div class="order-book-grid">
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">BIDS</div>
+                  <div id="ob-bids" class="muted"></div>
+                </div>
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">ASKS</div>
+                  <div id="ob-asks" class="muted"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TRADE BOX -->
+            <aside style="width:320px">
+              <div class="trade-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-weight:800;color:var(--gold)">Crear Orden</div>
+                  <div class="muted-small">Saldo USDT: $<span id="bal-usdt">10000.00</span></div>
+                </div>
+
+                <div style="margin-bottom:8px">
+                  <label class="muted-small">Tipo</label>
+                  <select id="order-type" class="form-select">
+                    <option>Market</option>
+                    <option>Limit</option>
+                    <option>Stop Loss</option>
+                    <option>Take Profit</option>
+                    <option>Stop Limit</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Precio (si aplica)</label>
+                    <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn-primary" onclick="createOrder('BUY')">Buy</button>
+                  <button class="btn-secondary" onclick="createOrder('SELL')">Sell</button>
+                </div>
+
+                <div class="orders-box" id="orders-box" style="margin-top:12px">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
+                  <div id="orders-list" class="muted-small">— no hay órdenes —</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="positionsPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Posiciones Abiertas</div>
+            <div class="muted">Clic en una posición para abrirla en Trading con su gráfico</div>
+          </div>
+          <div class="muted">Total: <span id="pos-count-top">0</span></div>
+        </div>
+
+        <div id="positionsList" class="positions-list"></div>
+      </section>
+
+      <section class="panel" id="marketsPanel" style="display:none">
+        <div class="title">Mercados</div>
+        <div class="muted" style="margin-bottom:8px">Selecciona un mercado desde la lista — todo el mercado disponible</div>
+
+        <div class="symbols-top" style="margin-top:8px">
+          <div id="catTabsMarket" class="cat-tabs"></div>
+          <input id="marketSearch" class="search-input" placeholder="Buscar símbolo o mercado..." />
+        </div>
+
+        <div id="marketsSymbolsGrid" class="symbols-grid"></div>
+      </section>
+
+      <section class="panel" id="activosPanel" style="display:none">
+        <div class="title">Activos</div>
+        <div class="table-box">
+          <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Billetera</div>
+          <table>
+            <thead><tr><th>Activo</th><th>Cantidad</th><th>Valor Estimado</th></tr></thead>
+            <tbody id="walletRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="historyPanel" style="display:none">
+        <div class="title">Historial de Transacciones</div>
+        <div class="table-box">
+          <table><thead><tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Método</th><th>Monto</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td>#TRX-8821</td><td>2025-12-10</td><td>Depósito</td><td>Transferencia</td><td class="muted-small">+$5,000.00</td><td><span class="kbd">Completado</span></td></tr>
+          </tbody></table>
+        </div>
+      </section>
+
+      <section class="panel" id="verificationPanel" style="display:none">
+        <div class="title">Verificación de Documentos</div>
+        <div class="muted">Sube tus documentos aquí</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitDoc(event)">
+            <label class="muted-small">Tipo</label>
+            <select class="form-select" style="margin-bottom:8px"><option>Identificación</option><option>Comprobante de domicilio</option></select>
+            <input type="file" required class="form-input" style="margin-bottom:8px" id="doc-file">
+            <button class="btn-primary" type="submit">Subir</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="depositPanel" style="display:none">
+        <div class="title">Depósito</div>
+        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event,'deposit')">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-deposit">
+            <label class="muted-small">Método</label>
+            <select class="form-select" style="margin-bottom:8px" id="tx-method-deposit"><option>Transferencia</option><option>Crypto</option></select>
+            <button class="btn-primary" type="submit">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" id="withdrawPanel" style="display:none">
+        <div class="title">Retiro</div>
+        <div class="muted">Solicita un retiro a tu cuenta registrada</div>
+        <div style="margin-top:12px" class="table-box">
+          <form onsubmit="submitTransaction(event,'withdraw')">
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-withdraw">
+            <label class="muted-small">Cuenta destino</label>
+            <input class="form-input" type="text" required id="tx-account-withdraw">
+            <button class="btn-primary" type="submit">Solicitar</button>
+          </form>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Footer nav -->
+  <nav class="footer-nav">
+    <div class="fnav-item active" data-target="dashboardPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-house"></i>Inicio</div>
+    <div class="fnav-item" data-target="tradingPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-line"></i>Trading</div>
+    <div class="fnav-item" data-target="positionsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-layer-group"></i>Posiciones</div>
+    <div class="fnav-item" data-target="marketsPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-chart-simple"></i>Mercados</div>
+    <div class="fnav-item" data-target="activosPanel" onclick="footerNavClick(event)"><i class="fa-solid fa-wallet"></i>Activos</div>
+  </nav>
+
+  <!-- Info modal -->
+  <div id="infoModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:120">
+    <div style="background:#0b0b0b;padding:18px;border-radius:10px;border:1px solid var(--line);width:90%;max-width:520px;color:var(--text)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="color:var(--gold)">BrokerPro — Info</strong>
+        <button onclick="hideModalInfo()" style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
+      </div>
+      <div style="color:var(--muted)">Demo. Para operar con capital real se requiere integración de APIs en back-end.</div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
+
+
+
+
+<!-- antes de este script -->
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+/**
+ * trading.js — trading UI (corregido y completo)
+ *
+ * Instrucciones:
+ * - Incluye /socket.io/socket.io.js antes de este script.
+ * - Usa localStorage 'token' o 'BROKER_TOKEN' para autenticación.
+ * - Este módulo es defensivo: evita inicializaciones dobles y soporta fallbacks demo.
+ */
+(function () {
+  "use strict";
+
+  // ====== CONFIG / GLOBALS ======
+  const API_BASE = window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
+  const SOCKET_BASE = window.SOCKET_BASE || window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
+  window.SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+
+  // Ensure global namespace exists
+  window._LEONES = window._LEONES || {};
+  const NS = window._LEONES;
+
+  // Module state (exposed globally)
+  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+  const state = window.__LEONES_TRADING__;
+  state.ALL_SYMBOLS = state.ALL_SYMBOLS || [];
+  state.symbolPrices = state.symbolPrices || {};
+  state.positions = state.positions || [];
+  state.orderBooks = state.orderBooks || {};
+
+  // Local socket ref
+  let socket = null;
+
+  // ====== UTILS ======
+  function log(...a){ try{ console.log('[TRADING]', ...a); }catch(e){} }
+  function warn(...a){ try{ console.warn('[TRADING]', ...a); }catch(e){} }
+  function err(...a){ try{ console.error('[TRADING]', ...a); }catch(e){} }
+
+  function formatNumber(n, digits = 6){
+    const num = Number(n);
+    if(!isFinite(num)) return '--';
+    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined,{maximumFractionDigits:1});
+    return num.toLocaleString(undefined,{maximumFractionDigits:digits});
+  }
+
+  function escapeHtml(s){
+    return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});
+  }
+
+  // ====== apiFetch fallback (robusto) ======
+  async function apiFetchFallback(path, opts = {}) {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
+      // normalize url
+      let url = '';
+      path = String(path || '');
+      if(path.startsWith('http://') || path.startsWith('https://')) url = path;
+      else {
+        const baseNoApi = String(API_BASE).replace(/\/api\/?$/,'');
+        if(path.startsWith('/')) url = baseNoApi + path;
+        else url = (API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE) + (path.startsWith('/') ? path : ('/' + path));
+      }
+
+      const headers = (opts.headers && typeof opts.headers === 'object') ? {...opts.headers} : {};
+      if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
+        headers['Content-Type'] = 'application/json';
+      }
+      if(token && !headers['Authorization'] && !headers['authorization']){
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+
+      const fetchOpts = {
+        method: opts.method || 'GET',
+        credentials: 'include',
+        ...opts,
+        headers
+      };
+
+      const res = await fetch(url, fetchOpts);
+      if(res.status === 204) return {};
+      const text = await res.text().catch(()=>null);
+      let data = null;
+      if(text){
+        try { data = JSON.parse(text); } catch(e) { data = text; }
+      }
+      if(res.ok) return data;
+      const error = new Error('HTTP ' + res.status);
+      error.status = res.status;
+      error.body = data;
+      throw error;
+    } catch(e){
+      throw e;
+    }
+  }
+
+  // choose central apiFetch (prefer existing app-provided)
+  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
+
+  // initSocket fallback (if app provides one use it)
+  const initSocket = NS.initSocket || (() => (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) ? window.__LEONES_SOCKET__.socket : null);
+
+  // ====== SOCKET wiring (defensivo) ======
+  function ensureSocket(){
+    try {
+      if(socket && socket.connected) return socket;
+
+      socket = initSocket();
+      if(!socket){
+        warn('socket not available — realtime disabled');
+        return null;
+      }
+
+      if(socket.__leones_trading_attached) return socket;
+      socket.__leones_trading_attached = true;
+
+      socket.on('prices_snapshot', snap => {
+        try{
+          if(!snap) return;
+          if(Array.isArray(snap)){
+            snap.forEach(it => { if(it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
+          } else if(typeof snap === 'object'){
+            Object.keys(snap).forEach(k => {
+              const it = snap[k];
+              state.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
+            });
+          }
+          renderSymbolsGrid();
+        }catch(e){ warn('prices_snapshot handler', e); }
+      });
+
+      socket.on('price', p => {
+        try{
+          const symbol = p?.symbol || p?.s || p?.t;
+          if(!symbol) return;
+          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
+          state.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+          updatePriceInUI(symbol, price);
+        }catch(e){ warn('price event error', e); }
+      });
+
+      socket.on('symbols_update', symbols => {
+        try{
+          if(!symbols) return;
+          if(Array.isArray(symbols)) state.ALL_SYMBOLS = symbols;
+          else state.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
+          renderSymbolsGrid();
+        }catch(e){ warn('symbols_update handler', e); }
+      });
+
+      socket.on('orderbook', ob => {
+        try{
+          if(!ob || !ob.symbol) return;
+          state.orderBooks = state.orderBooks || {};
+          state.orderBooks[ob.symbol] = ob;
+          const bidsEl = document.getElementById('ob-bids');
+          if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
+        }catch(e){}
+      });
+
+      socket.on('connect_error', e => { warn('socket connect_error', e); });
+
+      socket.on('disconnect', (r) => { log('socket disconnected', r); });
+
+      return socket;
+    } catch(e){
+      warn('ensureSocket error', e);
+      return null;
+    }
+  }
+
+  // ====== SYMBOLS GRID ======
+  function buildSymbolsContainer(){
+    const container = document.getElementById('symbolsGrid');
+    if(!container) return null;
+    container.style.display = 'grid';
+    container.style.gridTemplateColumns = 'repeat(auto-fill,minmax(220px,1fr))';
+    container.style.gap = '8px';
+    return container;
+  }
+
+  function renderSymbolsGrid(){
+    const container = buildSymbolsContainer();
+    if(!container) return;
+    container.innerHTML = '';
+    const list = (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length) ? state.ALL_SYMBOLS : [
+      { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+      { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+      { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
+    ];
+
+    list.forEach(s => {
+      try{
+        const card = document.createElement('div');
+        card.className = 'symbol-card';
+        card.style.cssText = 'background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
+        const priceObj = state.symbolPrices[s.symbol];
+        const price = priceObj ? priceObj.price : null;
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || "Unknown")} · ${escapeHtml(s.symbol)}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : "—"}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+            </div>
+          </div>
+        `;
+        card.addEventListener('click', () => selectSymbol(s.symbol));
+        container.appendChild(card);
+      }catch(e){}
+    });
+  }
+
+  // ====== TRADING PANEL & HELPERS ======
+  let currentSymbol = (state.ALL_SYMBOLS && state.ALL_SYMBOLS[0] && state.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
+  let currentLeverage = 10;
+  let currentEntryPrice = null;
+
+  function selectSymbol(symbol){
+    currentSymbol = symbol;
+    const ts = document.getElementById('tradingSymbol');
+    if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
+    if(typeof window.initTradingWidget === 'function') try { window.initTradingWidget(symbol); } catch(e){}
+    const priceObj = state.symbolPrices[symbol];
+    if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+    try { if(socket && socket.emit) socket.emit('request_orderbook', { symbol }); } catch(e){}
+  }
+
+  function updatePriceInUI(symbol, price){
+    try{
+      const els = document.querySelectorAll(`[data-symbol="${symbol}"]`);
+      els.forEach(el => { el.textContent = formatNumber(price); });
+
+      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
+      if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
+        const opPrice = document.getElementById('op-price');
+        if(opPrice) opPrice.textContent = formatNumber(price);
+      }
+
+      if(!currentEntryPrice) currentEntryPrice = price;
+      renderMarginCalculator();
+    }catch(e){}
+  }
+
+  function updateOrderBookUI(ob){
+    try{
+      const bidsEl = document.getElementById('ob-bids');
+      const asksEl = document.getElementById('ob-asks');
+      if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b => `${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+      if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a => `${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
+    }catch(e){}
+  }
+
+  // ====== Margin math ======
+  function calculateMargin({ positionSize = 0, leverage = 1, entryPrice = 0 } = {}) {
+    const pos = Number(positionSize) || 0;
+    const lev = Number(leverage) || 1;
+    const ep = Number(entryPrice) || 0;
+    const notional = pos;
+    const requiredMargin = lev > 0 ? (pos / lev) : pos;
+    const qty = ep > 0 ? pos / ep : 0;
+    return { requiredMargin, notional, qty };
+  }
+
+  function renderMarginCalculator(){
+    try{
+      const marginEl = document.getElementById('marginCalc');
+      if(!marginEl) return;
+      const priceObj = state.symbolPrices[currentSymbol];
+      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
+      const posSize = Number(document.getElementById('input_position_size')?.value || 0);
+      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
+      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
+      marginEl.innerHTML = `
+        <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop() || currentSymbol)}</div>
+        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
+        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
+        <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
+        <div>Apalancamiento: <strong>${lev}x</strong></div>
+        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
+      `;
+    }catch(e){ warn('renderMarginCalculator', e); }
+  }
+
+  // ====== Orders & Positions ======
+  async function placeOrder({ side = 'buy', positionSize = 0, leverage = 1, type = 'market', price = null } = {}) {
+    try {
+      const payload = {
+        symbol: currentSymbol,
+        side,
+        type,
+        notional: Number(positionSize) || 0,
+        leverage: Number(leverage) || 1,
+        price: (price !== null && price !== undefined) ? Number(price) : undefined
+      };
+      const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
+      let res = null;
+      for(const ep of candidates){
+        try{
+          res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
+          if(res) break;
+        }catch(e){}
+      }
+      alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
+      await fetchPositions().catch(()=>{});
+      return res;
+    } catch (e) {
+      warn('placeOrder error', e);
+      alert(e?.body?.message || e.message || 'Error enviando orden');
+      throw e;
+    }
+  }
+
+  async function fetchPositions(){
+    try{
+      const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
+      let res = null;
+      for(const ep of candidates){
+        try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
+      }
+      if(!res) return null;
+      state.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
+      renderPositions();
+      return state.positions;
+    }catch(e){ warn('fetchPositions error', e); return null; }
+  }
+
+  function renderPositions(){
+    try{
+      const el = document.getElementById('positionsList');
+      if(!el) return;
+      el.innerHTML = '';
+      if(!state.positions || !state.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
+      state.positions.forEach(p => {
+        try{
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
+          const symbol = p.symbol || p.s || currentSymbol;
+          const size = p.notional || p.size || 0;
+          const entry = p.entryPrice || p.price || p.avgPrice || 0;
+          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
+          row.innerHTML = `
+            <div style="font-weight:700">${escapeHtml(symbol)}</div>
+            <div style="text-align:right">
+              <div>Size: ${formatNumber(size)}</div>
+              <div>Entry: ${formatNumber(entry)}</div>
+              <div>PnL: ${formatNumber(pl,2)}</div>
+            </div>
+          `;
+          el.appendChild(row);
+        }catch(e){}
+      });
+    }catch(e){}
+  }
+
+  // ====== UI wiring ======
+  function wireTradingUI(){
+    try{
+      const posInput = document.getElementById('input_position_size');
+      const levInput = document.getElementById('input_leverage');
+      if(posInput) posInput.addEventListener('input', renderMarginCalculator);
+      if(levInput) levInput.addEventListener('input', (e) => { currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
+
+      const buyBtn = document.getElementById('btnBuy');
+      const sellBtn = document.getElementById('btnSell');
+      if(buyBtn) buyBtn.addEventListener('click', async () => {
+        const pos = Number(document.getElementById('input_position_size')?.value || 0);
+        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
+        await placeOrder({ side: 'buy', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
+      });
+      if(sellBtn) sellBtn.addEventListener('click', async () => {
+        const pos = Number(document.getElementById('input_position_size')?.value || 0);
+        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
+        await placeOrder({ side: 'sell', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
+      });
+
+      const refreshBtn = document.getElementById('btnRefreshPositions');
+      if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
+
+      const fetchSymBtn = document.getElementById('btnFetchSymbols');
+      if(fetchSymBtn) fetchSymBtn.addEventListener('click', async () => {
+        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
+        for(const ep of endpoints){
+          try{
+            const r = await apiFetch(ep).catch(()=>null);
+            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; renderSymbolsGrid(); break; }
+          }catch(e){}
+        }
+      });
+
+      renderMarginCalculator();
+    }catch(e){ warn('wireTradingUI error', e); }
+  }
+
+  // ====== TradingView fallback ======
+  function provideTradingWidgetFallback(){
+    try{
+      if(typeof window.initTradingWidget === 'function') return;
+      window.initTradingWidget = function(symbol){
+        const cont = document.getElementById('tv_chart_container');
+        if(!cont) return;
+        cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`;
+      };
+    }catch(e){}
+  }
+
+  // ====== Demo prices fallback ======
+  let demoTicker = null;
+  function startDemoPrices(){
+    if(demoTicker) return;
+    demoTicker = setInterval(() => {
+      (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length ? state.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => {
+        const key = s.symbol;
+        const old = (state.symbolPrices[key] && Number(state.symbolPrices[key].price)) || (Math.random()*100);
+        const change = (Math.random() - 0.5) * Math.max(0.0001, Math.abs(old) * 0.002);
+        const next = Number(Math.max(0.00001, old + change).toFixed(6));
+        state.symbolPrices[key] = { price: next, ts: Date.now() };
+      });
+      renderSymbolsGrid();
+      renderMarginCalculator();
+    }, 1200);
+  }
+  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker = null; } }
+
+  // ====== Account helpers (loadAccount) ======
+  async function loadAccount(){
+    try{
+      const candidates = ['/account','/api/account','/wallet','/api/wallet'];
+      let acc = null;
+      for(const ep of candidates){
+        try{ acc = await apiFetch(ep).catch(()=>null); if(acc) break; }catch(e){}
+      }
+      if(!acc) return null;
+      const balance = acc.balance ?? acc.account?.balance ?? acc.data?.balance ?? null;
+      if(balance !== null){
+        const el = document.getElementById('user-equity');
+        if(el) el.textContent = formatNumber(balance,2);
+      }
+      window.__LEONES_ACCOUNT = acc;
+      return acc;
+    }catch(e){ warn('loadAccount error', e); return null; }
+  }
+
+  // ====== openTrade / closeTrade ======
+  async function openTrade(symbol, type, lot, price, sl, tp){
+    try{
+      const payload = { symbol, type, lot, price, sl, tp };
+      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for openTrade');
+    }catch(e){ err('openTrade error', e); throw e; }
+  }
+
+  async function closeTrade(positionId){
+    try{
+      const payload = { positionId };
+      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
+      for(const ep of candidates){
+        try{
+          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
+          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
+        }catch(e){}
+      }
+      throw new Error('No endpoint responded for closeTrade');
+    }catch(e){ err('closeTrade error', e); throw e; }
+  }
+
+  // ====== Margin call (defensivo) ======
+  async function checkMarginCall(){
+    try{
+      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
+      if(!acc) return false;
+      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
+      if(marginLevel !== null && Number(marginLevel) < 50){
+        alert('Margin Call - posiciones cerradas automáticamente');
+        const poses = acc.positions ?? state.positions ?? [];
+        for(const pos of poses){
+          try{
+            const pid = pos._id || pos.id || pos.positionId || pos.position_id;
+            if(pid) await closeTrade(pid).catch(()=>{});
+          }catch(e){}
+        }
+        return true;
+      }
+      return false;
+    }catch(e){ warn('checkMarginCall error', e); return false; }
+  }
+
+  // ====== INIT ======
+  async function initTradingModule(){
+    try{
+      // prevent double init
+      if(window.__LEONES_TRADING_INITED__) return;
+      window.__LEONES_TRADING_INITED__ = true;
+
+      // create containers if missing (full panel markup)
+      if(!document.getElementById('symbolsGrid')){
+        const s = document.createElement('div');
+        s.id = 'symbolsGrid';
+        s.style.cssText = 'padding:8px;max-width:1200px;margin:12px auto';
+        document.body.insertBefore(s, document.body.firstChild);
+      }
+      if(!document.getElementById('tradingPanel')){
+        const panel = document.createElement('div');
+        panel.id = 'tradingPanel';
+        panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)';
+        panel.innerHTML = `
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
+            <div>Precio:<strong id="op-price">-</strong></div>
+            <div>Equity:<strong id="user-equity">--</strong></div>
+            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
+          </div>
+          <hr/>
+          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <label>Posición (USD)</label>
+                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
+                <label style="margin-top:8px">Apalancamiento (x)</label>
+                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
+                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
+                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
+              </div>
+              <div style="background:#080808;padding:8px;border-radius:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div style="font-weight:700">Posiciones</div>
+                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
+                </div>
+                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto;color:var(--text)"></div>
+              </div>
+            </div>
+          </div>
+          <hr/>
+          <div style="display:flex;gap:8px">
+            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
+          </div>
+        `;
+        document.body.appendChild(panel);
+      }
+
+      // connect socket & handlers (if available)
+      ensureSocket();
+
+      // try fetching symbols from backend
+      try{
+        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
+        for(const ep of endpoints){
+          try{
+            const r = await apiFetch(ep).catch(()=>null);
+            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; break; }
+          }catch(e){}
+        }
+      }catch(e){}
+
+      renderSymbolsGrid();
+      wireTradingUI();
+      provideTradingWidgetFallback();
+
+      await fetchPositions().catch(()=>{});
+      await loadAccount().catch(()=>{});
+
+      // fallback to demo prices if no prices received
+      setTimeout(() => {
+        const anyPrice = Object.keys(state.symbolPrices || {}).length;
+        if(!anyPrice) startDemoPrices();
+      }, 2000);
+
+      log('Trading module initialized');
+    }catch(e){
+      err('initTradingModule error', e);
+    }
+  }
+
+  // Boot once on DOMContentLoaded
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTradingModule);
+  } else {
+    // already loaded
+    setTimeout(initTradingModule, 0);
+  }
+
+  // Expose functions
+  window._LEONES_TRADING = window._LEONES_TRADING || {};
+  Object.assign(window._LEONES_TRADING, {
+    selectSymbol,
+    placeOrder,
+    fetchPositions,
+    calculateMargin,
+    openTrade,
+    closeTrade,
+    loadAccount,
+    checkMarginCall
+  });
+
+})(); // EOF
+</script>
+</div>
+
+<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
+
 </body>
 </html>
