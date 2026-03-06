@@ -26,6 +26,7 @@ import verificationRoutes from "./routes/verification.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import positionsRoutes from "./routes/positions.routes.js";
 import tradeRoutes from "./routes/trade.routes.js";
+import accountRoutes from "./routes/account.routes.js"; // agregado
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
@@ -313,6 +314,7 @@ app.use("/api/wallet", walletRoutes);
 // positions + trade routes: montamos en inglés y también alias en español más abajo
 app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
+app.use("/api/account", accountRoutes); // agregado
 
 /* ======================================================
    SAMPLE SYMBOLS / FALLBACK
@@ -534,7 +536,7 @@ app.get("/api/account", async (req, res) => {
 
     let wallet = null;
     try {
-      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
+      wallet = await Wallet.findOne({ user: user._1d }).lean().exec().catch(()=>null);
     } catch (e) { wallet = null; }
     let positions = [];
     try {
