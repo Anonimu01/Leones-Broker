@@ -1,9 +1,12 @@
 // routes/auth.routes.js
+
 import express from "express";
+
 import {
   registerUser,
   loginUser,
-  resendVerification
+  resendVerificationUser,
+  verifyUser
 } from "../controllers/auth.controller.js";
 
 const router = express.Router();
@@ -28,33 +31,51 @@ router.get("/ping", (req, res) => {
 */
 
 const validateRegister = (req, res, next) => {
-  const { name, email, password, address, phone } = req.body;
+
+  const { name, email, password, address, phone } = req.body || {};
 
   if (!name || !email || !password || !address || !phone) {
     return res.status(400).json({
-      error: "Missing fields",
+      ok: false,
+      message: "Missing fields",
       required: ["name", "email", "password", "address", "phone"]
     });
   }
 
-  if (password.length < 6)
-    return res.status(400).json({ error: "Password must be at least 6 chars" });
+  if (password.length < 6) {
+    return res.status(400).json({
+      ok: false,
+      message: "Password must be at least 6 characters"
+    });
+  }
 
   next();
 };
 
 const validateLogin = (req, res, next) => {
-  const { email, password } = req.body;
 
-  if (!email || !password)
-    return res.status(400).json({ error: "Email and password required" });
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({
+      ok: false,
+      message: "Email and password required"
+    });
+  }
 
   next();
 };
 
 const validateEmail = (req, res, next) => {
-  if (!req.body?.email)
-    return res.status(400).json({ error: "Email required" });
+
+  const { email } = req.body || {};
+
+  if (!email) {
+    return res.status(400).json({
+      ok: false,
+      message: "Email required"
+    });
+  }
 
   next();
 };
@@ -69,9 +90,14 @@ router.post(
   validateRegister,
   async (req, res, next) => {
     try {
+
       await registerUser(req, res);
+
     } catch (err) {
+
+      console.error("AUTH REGISTER ROUTE ERROR:", err);
       next(err);
+
     }
   }
 );
@@ -86,9 +112,35 @@ router.post(
   validateLogin,
   async (req, res, next) => {
     try {
+
       await loginUser(req, res);
+
     } catch (err) {
+
+      console.error("AUTH LOGIN ROUTE ERROR:", err);
       next(err);
+
+    }
+  }
+);
+
+/*
+============================
+ VERIFY EMAIL
+============================
+*/
+router.get(
+  "/verify",
+  async (req, res, next) => {
+    try {
+
+      await verifyUser(req, res);
+
+    } catch (err) {
+
+      console.error("AUTH VERIFY ROUTE ERROR:", err);
+      next(err);
+
     }
   }
 );
@@ -103,9 +155,14 @@ router.post(
   validateEmail,
   async (req, res, next) => {
     try {
-      await resendVerification(req, res);
+
+      await resendVerificationUser(req, res);
+
     } catch (err) {
+
+      console.error("AUTH RESEND ROUTE ERROR:", err);
       next(err);
+
     }
   }
 );
