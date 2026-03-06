@@ -13,9 +13,14 @@ const ALLOW_LOGIN_UNVERIFIED =
   (process.env.ALLOW_LOGIN_UNVERIFIED || "false").toLowerCase() === "true";
 
 if (!JWT_SECRET) {
-  console.error("⚠️ JWT_SECRET no está definido en .env");
+  console.error("⚠️ JWT_SECRET no está definido en .env — los tokens no se firmarán correctamente");
 }
 
+/**
+ * sanitizeUser
+ * - elimina campos sensibles
+ * - normaliza _id -> id
+ */
 function sanitizeUser(userDoc) {
   if (!userDoc) return null;
 
@@ -24,18 +29,28 @@ function sanitizeUser(userDoc) {
       ? userDoc.toObject()
       : { ...userDoc };
 
+  // Normalizaciones y limpieza
+  u.id = String(u._id || u.id || "");
+  delete u._id;
+  delete u.__v;
   delete u.password;
   delete u.passwordHash;
   delete u.verifyToken;
   delete u.verifyExpires;
-
   return u;
 }
 
+/**
+ * signToken
+ * - firma token con JWT_SECRET obligatorio
+ */
 function signToken(user) {
+  if (!JWT_SECRET) {
+    throw new Error("JWT_SECRET no configurado en el servidor");
+  }
   return jwt.sign(
     {
-      id: String(user._id),
+      id: String(user._id || user.id),
       email: user.email,
     },
     JWT_SECRET,
@@ -45,7 +60,7 @@ function signToken(user) {
 
 /* ==============================
    REGISTER
-============================== */
+   ============================= */
 
 export async function register(req, res) {
   try {
@@ -59,8 +74,7 @@ export async function register(req, res) {
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    const existing = await User.findOne({ email: normalizedEmail });
-
+    const existing = await User.findOne({ email: normalizedEmail }).exec();
     if (existing) {
       return res
         .status(409)
@@ -71,7 +85,6 @@ export async function register(req, res) {
     const passwordHash = await bcrypt.hash(password, salt);
 
     const verifyToken = crypto.randomBytes(24).toString("hex");
-
     const verifyExpires = new Date(
       Date.now() +
         (Number(process.env.VERIFY_TOKEN_TTL_MS) || 1000 * 60 * 60 * 24)
@@ -92,7 +105,14 @@ export async function register(req, res) {
 
     await newUser.save();
 
-    const token = signToken(newUser);
+    // token de sesión inmediato (si quieres obligar verificación, cambia lógica)
+    let token;
+    try {
+      token = signToken(newUser);
+    } catch (e) {
+      console.error("Could not sign token after register:", e.message || e);
+      token = null;
+    }
 
     const verifyUrl = `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(
       normalizedEmail
@@ -106,26 +126,22 @@ export async function register(req, res) {
     `;
 
     try {
-      await sendEmail(
-        normalizedEmail,
-        "Verifica tu cuenta - Leones Broker",
-        html
-      );
+      await sendEmail(normalizedEmail, "Verifica tu cuenta - Leones Broker", html);
     } catch (err) {
-      console.error("Error enviando email:", err.message);
+      console.error("Error enviando email de verificación:", err && err.message ? err.message : err);
     }
 
     return res.status(201).json({
       ok: true,
       message: "Usuario creado",
       data: {
-        token,
+        token, // puede ser null si signing falló (pero usuario creado)
         user: sanitizeUser(newUser),
       },
     });
   } catch (err) {
-    console.error("REGISTER ERROR:", err);
-    res.status(500).json({
+    console.error("REGISTER ERROR:", err && err.message ? err.message : err);
+    return res.status(500).json({
       ok: false,
       message: "Error creando usuario",
     });
@@ -134,7 +150,7 @@ export async function register(req, res) {
 
 /* ==============================
    LOGIN
-============================== */
+   ============================= */
 
 export async function login(req, res) {
   try {
@@ -148,16 +164,14 @@ export async function login(req, res) {
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    const user = await User.findOne({ email: normalizedEmail });
-
+    const user = await User.findOne({ email: normalizedEmail }).exec();
     if (!user) {
       return res
         .status(401)
         .json({ ok: false, message: "Credenciales inválidas" });
     }
 
-    const hashed = user.password || user.passwordHash;
-
+    const hashed = String(user.password || user.passwordHash || "");
     const match = await bcrypt.compare(password, hashed);
 
     if (!match) {
@@ -173,7 +187,13 @@ export async function login(req, res) {
       });
     }
 
-    const token = signToken(user);
+    let token;
+    try {
+      token = signToken(user);
+    } catch (e) {
+      console.error("Token sign error:", e && e.message ? e.message : e);
+      return res.status(500).json({ ok: false, message: "Error generando token" });
+    }
 
     return res.json({
       ok: true,
@@ -185,9 +205,8 @@ export async function login(req, res) {
       },
     });
   } catch (err) {
-    console.error("LOGIN ERROR:", err);
-
-    res.status(500).json({
+    console.error("LOGIN ERROR:", err && err.message ? err.message : err);
+    return res.status(500).json({
       ok: false,
       message: "Error en login",
     });
@@ -196,19 +215,18 @@ export async function login(req, res) {
 
 /* ==============================
    RESEND VERIFICATION
-============================== */
+   ============================= */
 
 export async function resendVerification(req, res) {
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
     if (!email)
       return res.status(400).json({ ok: false, message: "email requerido" });
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    const user = await User.findOne({ email: normalizedEmail });
-
+    const user = await User.findOne({ email: normalizedEmail }).exec();
     if (!user)
       return res
         .status(404)
@@ -220,11 +238,8 @@ export async function resendVerification(req, res) {
         .json({ ok: false, message: "Cuenta ya verificada" });
 
     const verifyToken = crypto.randomBytes(24).toString("hex");
-
     user.verifyToken = verifyToken;
-
     user.verifyExpires = new Date(Date.now() + 1000 * 60 * 60 * 24);
-
     await user.save();
 
     const verifyUrl = `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(
@@ -237,20 +252,20 @@ export async function resendVerification(req, res) {
       <p><a href="${verifyUrl}">Verificar cuenta</a></p>
     `;
 
-    await sendEmail(
-      normalizedEmail,
-      "Reenviar verificación - Leones Broker",
-      html
-    );
+    try {
+      await sendEmail(normalizedEmail, "Reenviar verificación - Leones Broker", html);
+    } catch (err) {
+      console.error("resendVerification sendEmail error:", err && err.message ? err.message : err);
+      return res.status(500).json({ ok: false, message: "Error enviando email" });
+    }
 
-    res.json({
+    return res.json({
       ok: true,
       message: "Correo enviado",
     });
   } catch (err) {
-    console.error("RESEND ERROR:", err);
-
-    res.status(500).json({
+    console.error("RESEND ERROR:", err && err.message ? err.message : err);
+    return res.status(500).json({
       ok: false,
       message: "Error interno",
     });
@@ -259,21 +274,20 @@ export async function resendVerification(req, res) {
 
 /* ==============================
    VERIFY EMAIL
-============================== */
+   ============================= */
 
 export async function verify(req, res) {
   try {
-    const { token, email } = req.query;
+    const { token, email } = req.query || {};
 
     if (!token || !email)
       return res
         .status(400)
         .json({ ok: false, message: "token y email requeridos" });
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    const user = await User.findOne({ email: normalizedEmail });
-
+    const user = await User.findOne({ email: normalizedEmail }).exec();
     if (!user)
       return res
         .status(404)
@@ -282,7 +296,7 @@ export async function verify(req, res) {
     if (user.verifyToken !== token)
       return res.status(400).json({ ok: false, message: "Token inválido" });
 
-    if (user.verifyExpires < new Date())
+    if (user.verifyExpires && user.verifyExpires < new Date())
       return res.status(400).json({ ok: false, message: "Token expirado" });
 
     user.verified = true;
@@ -291,14 +305,13 @@ export async function verify(req, res) {
 
     await user.save();
 
-    res.json({
+    return res.json({
       ok: true,
       message: "Cuenta verificada",
     });
   } catch (err) {
-    console.error("VERIFY ERROR:", err);
-
-    res.status(500).json({
+    console.error("VERIFY ERROR:", err && err.message ? err.message : err);
+    return res.status(500).json({
       ok: false,
       message: "Error interno",
     });
@@ -307,7 +320,7 @@ export async function verify(req, res) {
 
 /* ==============================
    COMPATIBILITY EXPORTS
-============================== */
+   ============================= */
 
 export const loginUser = login;
 export const registerUser = register;
