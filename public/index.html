@@ -1281,6 +1281,25 @@ if (window.__LEONES_BOOTED__) {
 
   log('[LEONES] unified script loaded (defensive mode ON)');
 }
+
+import { Resend } from 'resend';
+
+const resend = new Resend('re_xxxxxxxxx');
+
+(async function () {
+  const { data, error } = await resend.emails.send({
+    from: 'Acme <onboarding@resend.dev>',
+    to: ['delivered@resend.dev'],
+    subject: 'Hello World',
+    html: '<strong>It works!</strong>',
+  });
+
+  if (error) {
+    return console.error({ error });
+  }
+
+  console.log({ data });
+})();
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
