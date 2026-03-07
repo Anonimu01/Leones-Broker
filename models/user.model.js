@@ -15,6 +15,7 @@ const documentSchema = new mongoose.Schema({
   }
 });
 
+// Main user schema
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -31,12 +32,13 @@ const userSchema = new mongoose.Schema(
       trim: true
     },
 
+    // keep 'password' as the stored hashed password
     password: {
       type: String,
       required: true
     },
 
-    // ⚠️ YA NO OBLIGATORIOS
+    // optional fields
     phone: {
       type: String,
       trim: true,
@@ -61,12 +63,24 @@ const userSchema = new mongoose.Schema(
       default: false
     },
 
-    verificationToken: {
+    // verifyToken is the canonical field used by the controller.
+    // Provide an alias 'verificationToken' so both names work.
+    verifyToken: {
       type: String,
+      default: null,
+      alias: "verificationToken"
+    },
+
+    // expiration date for the verification token
+    verifyExpires: {
+      type: Date,
       default: null
     }
   },
   { timestamps: true }
 );
+
+// Optional: create an index for token lookups (speeds verification queries)
+userSchema.index({ verifyToken: 1 }, { sparse: true });
 
 export default mongoose.model("User", userSchema);
