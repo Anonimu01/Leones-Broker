@@ -1,24 +1,50 @@
 // utils/sendEmail.js
+/**
+ * sendEmail helper
+ * - Intentará Resend HTTP si RESEND_API_KEY está configurado
+ * - Si Resend falla o no está configurado, intentará SMTP (SMTP_* o MAIL_* env vars)
+ * - Si no hay proveedor configurado, hace un envío simulado y devuelve ok:true (no-fatal)
+ *
+ * Notas:
+ * - Maneja 'from' que ya venga en formato "Name <email@dominio>".
+ * - Usa timeouts/ reintentos ligeros.
+ */
+
 import nodemailer from "nodemailer";
 
 const {
+  // Resend
   RESEND_API_KEY,
+
+  // Preferred sender
   SENDER_EMAIL,
+  SENDER_NAME,
+
+  // SMTP (preferred names)
   SMTP_HOST,
   SMTP_PORT,
   SMTP_SECURE,
   SMTP_USER,
   SMTP_PASS,
+
+  // Alternate SMTP names historically used in tu repo
+  MAIL_HOST,
+  MAIL_PORT,
   EMAIL_USER,
   EMAIL_PASS,
+
+  // misc
   BASE_URL,
   NODE_ENV,
 } = process.env;
 
+// DEFAULT SENDER resolution (supports multiple env names)
 const DEFAULT_SENDER =
   SENDER_EMAIL ||
   SMTP_USER ||
   EMAIL_USER ||
+  MAIL_HOST // (rare) keep as fallback
+  ||
   `no-reply@${(BASE_URL || "local").replace(/^https?:\/\//, "")}`;
 
 let transporter = null;
@@ -45,7 +71,7 @@ function normalizeRecipients(to) {
   if (!to) return [];
   if (Array.isArray(to)) return to.map(String);
   if (typeof to === "string") return [to];
-  if (typeof to === "object" && to.email) return [String(to.email)];
+  if (typeof to === "object" && (to.email || to.address)) return [String(to.email || to.address)];
   return [String(to)];
 }
 
@@ -69,7 +95,7 @@ async function sendViaResendHTTP(from, toArr, subject, html, text) {
     to: toArr,
     subject: subject || "(no subject)",
     html: html || "",
-    // Resend accepts 'text' too, but many examples use html only
+    text: text || "",
   };
 
   const resp = await withTimeout(
@@ -96,15 +122,15 @@ async function sendViaResendHTTP(from, toArr, subject, html, text) {
   return json;
 }
 
-/* ---------- SMTP init & send ---------- */
+/* ---------- SMTP init & send (supports SMTP_* and MAIL_* env names) ---------- */
 function initSmtp() {
   if (transporter) return transporter;
 
-  const host = SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
-  const port = Number(SMTP_PORT || 465);
+  const host = SMTP_HOST || MAIL_HOST || "smtp.gmail.com";
+  const port = Number(SMTP_PORT || MAIL_PORT || 465);
   const secure = (String(SMTP_SECURE || "").toLowerCase() === "true") || port === 465;
-  const user = SMTP_USER || EMAIL_USER;
-  const pass = SMTP_PASS || EMAIL_PASS;
+  const user = SMTP_USER || EMAIL_USER || process.env.SMTP_USER;
+  const pass = SMTP_PASS || EMAIL_PASS || process.env.SMTP_PASS;
 
   if (!user || !pass) {
     console.warn("[MAIL] ⚠️ SMTP credenciales no encontradas; SMTP no se inicializará");
@@ -122,12 +148,11 @@ function initSmtp() {
       socketTimeout: 10_000,
     });
 
-    // try to verify but don't block startup
+    // verify but don't block startup
     transporter.verify()
       .then(() => console.log("[MAIL] ✅ SMTP transporter verificado"))
       .catch((err) => {
-        console.error("[MAIL] ❌ SMTP verify failed:", err && err.message ? err.message : err);
-        // leave transporter set so send attempts still try (they'll fail and be logged)
+        console.warn("[MAIL] ❌ SMTP verify failed (will still try sends):", err && err.message ? err.message : err);
       });
 
     return transporter;
@@ -138,12 +163,26 @@ function initSmtp() {
   }
 }
 
-async function sendViaSmtp(from, toArr, subject, html, text) {
+async function sendViaSmtp(fromRaw, toArr, subject, html, text) {
   const tr = transporter || initSmtp();
   if (!tr) throw new Error("SMTP no configurado o fallo al inicializar transporter");
+
+  // If 'fromRaw' already contains <email@domain> or a display name, use it as-is.
+  // Otherwise try to build: "Leones Broker <email@domain>"
+  let fromHeader = fromRaw;
+  const hasAngle = typeof fromRaw === "string" && /<.*@.*>/.test(fromRaw);
+  const hasQuotedName = typeof fromRaw === "string" && /^".+" <.+@.+>$/.test(fromRaw);
+  if (!hasAngle && !hasQuotedName) {
+    // extract only email if DEFAULT_SENDER contains a full form
+    const emailOnlyMatch = String(fromRaw).match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    const emailOnly = emailOnlyMatch ? emailOnlyMatch[1] : String(fromRaw);
+    const name = SENDER_NAME || "Leones Broker";
+    fromHeader = `"${name}" <${emailOnly}>`;
+  }
+
   const info = await withTimeout(
     tr.sendMail({
-      from: `"Leones Broker" <${from}>`,
+      from: fromHeader,
       to: toArr.join(","),
       subject,
       text,
@@ -155,10 +194,11 @@ async function sendViaSmtp(from, toArr, subject, html, text) {
 }
 
 /* ====================================================== */
-/* Exported function - supports both signatures described  */
+/* Exported function - supports signatures:                */
+/*  - sendEmail({ to, subject, html, text, from })         */
+/*  - sendEmail(to, subject, html)                        */
 /* ====================================================== */
 export const sendEmail = async (...args) => {
-  // support sendEmail({ to, subject, html, text, from }) and sendEmail(to, subject, html)
   let payload = {};
   if (args.length === 1 && typeof args[0] === "object") {
     payload = { ...args[0] };
@@ -179,7 +219,7 @@ export const sendEmail = async (...args) => {
   const subject = payload.subject || "Notificación";
   const html = payload.html || payload.body || "";
   const text = payload.text || (html ? String(html).replace(/<[^>]+>/g, "") : "");
-  const from = payload.from || DEFAULT_SENDER;
+  const from = payload.from || SENDER_EMAIL || DEFAULT_SENDER;
 
   // 1) Try Resend (HTTP) if configured
   if (RESEND_API_KEY) {
@@ -196,7 +236,6 @@ export const sendEmail = async (...args) => {
         await sleep(300 * attempt);
       }
     }
-    // if Resend configured but failed, fall through to SMTP fallback
     console.warn("[MAIL] Resend configurado pero falló — intentando fallback SMTP");
   }
 
@@ -221,7 +260,7 @@ export const sendEmail = async (...args) => {
   }
 
   // 3) No provider configured => simulate (non-fatal)
-  console.warn("[MAIL] ⚠️ Ningún proveedor configurado. Envío simulado. (set RESEND_API_KEY or SMTP_* vars)");
+  console.warn("[MAIL] ⚠️ Ningún proveedor configurado. Envío simulado. (set RESEND_API_KEY or SMTP_* / MAIL_* vars)");
   console.log("[MAIL] Simulado → to:", toArr, "subject:", subject, "from:", from);
   return { ok: true, provider: "simulated", simulated: true, to: toArr, subject, from };
 };
