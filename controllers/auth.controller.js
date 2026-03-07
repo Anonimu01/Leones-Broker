@@ -1,4 +1,4 @@
-// controllers/auth.controller.js
+// controllers/auth.controller.js (PARCHE - usa ENFORCE_EMAIL_VERIFICATION y ruta de verify corregida)
 
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -9,27 +9,21 @@ import { sendEmail } from "../utils/sendEmail.js";
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const BASE_URL = (process.env.BASE_URL || "").replace(/\/+$/, "");
-const ALLOW_LOGIN_UNVERIFIED =
-  (process.env.ALLOW_LOGIN_UNVERIFIED || "false").toLowerCase() === "true";
+// ahora usamos ENFORCE_EMAIL_VERIFICATION para decidir si obligamos verificación
+const REQUIRE_EMAIL_VERIFICATION =
+  (process.env.ENFORCE_EMAIL_VERIFICATION || "false").toLowerCase() === "true";
 
 if (!JWT_SECRET) {
   console.error("⚠️ JWT_SECRET no está definido en .env — los tokens no se firmarán correctamente");
 }
 
-/**
- * sanitizeUser
- * - elimina campos sensibles
- * - normaliza _id -> id
- */
 function sanitizeUser(userDoc) {
   if (!userDoc) return null;
-
   const u =
     typeof userDoc.toObject === "function"
       ? userDoc.toObject()
       : { ...userDoc };
 
-  // Normalizaciones y limpieza
   u.id = String(u._id || u.id || "");
   delete u._id;
   delete u.__v;
@@ -40,10 +34,6 @@ function sanitizeUser(userDoc) {
   return u;
 }
 
-/**
- * signToken
- * - firma token con JWT_SECRET obligatorio
- */
 function signToken(user) {
   if (!JWT_SECRET) {
     throw new Error("JWT_SECRET no configurado en el servidor");
@@ -106,7 +96,7 @@ export async function register(req, res) {
     await newUser.save();
 
     // token de sesión inmediato (si quieres obligar verificación, cambia lógica)
-    let token;
+    let token = null;
     try {
       token = signToken(newUser);
     } catch (e) {
@@ -114,7 +104,8 @@ export async function register(req, res) {
       token = null;
     }
 
-    const verifyUrl = `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(
+    // CORREGIDO: la ruta de verificación completa para que el link funcione
+    const verifyUrl = `${BASE_URL}/api/auth/verify?token=${verifyToken}&email=${encodeURIComponent(
       normalizedEmail
     )}`;
 
@@ -180,7 +171,8 @@ export async function login(req, res) {
         .json({ ok: false, message: "Credenciales inválidas" });
     }
 
-    if (user.verified === false && !ALLOW_LOGIN_UNVERIFIED) {
+    // ahora usamos ENFORCE_EMAIL_VERIFICATION (si está true exige verified)
+    if (user.verified === false && REQUIRE_EMAIL_VERIFICATION) {
       return res.status(403).json({
         ok: false,
         message: "Cuenta no verificada. Revisa tu correo.",
@@ -214,8 +206,10 @@ export async function login(req, res) {
 }
 
 /* ==============================
-   RESEND VERIFICATION
-   ============================= */
+   RESEND VERIFICATION & VERIFY
+   ==============================
+   (sin cambios funcionales importantes salvo la ruta usada en el email)
+*/
 
 export async function resendVerification(req, res) {
   try {
@@ -242,7 +236,7 @@ export async function resendVerification(req, res) {
     user.verifyExpires = new Date(Date.now() + 1000 * 60 * 60 * 24);
     await user.save();
 
-    const verifyUrl = `${BASE_URL}/verify?token=${verifyToken}&email=${encodeURIComponent(
+    const verifyUrl = `${BASE_URL}/api/auth/verify?token=${verifyToken}&email=${encodeURIComponent(
       normalizedEmail
     )}`;
 
@@ -271,10 +265,6 @@ export async function resendVerification(req, res) {
     });
   }
 }
-
-/* ==============================
-   VERIFY EMAIL
-   ============================= */
 
 export async function verify(req, res) {
   try {
@@ -317,10 +307,6 @@ export async function verify(req, res) {
     });
   }
 }
-
-/* ==============================
-   COMPATIBILITY EXPORTS
-   ============================= */
 
 export const loginUser = login;
 export const registerUser = register;
