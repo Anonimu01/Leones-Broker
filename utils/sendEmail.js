@@ -1,8 +1,9 @@
 // utils/sendEmail.js
 /**
- * sendEmail helper
- * - Intentará Resend HTTP si RESEND_API_KEY está configurado
- * - Si Resend falla o no está configurado, intentará SMTP (SMTP_* o MAIL_* env vars)
+ * sendEmail helper (versión con Resend SDK + HTTP fallback + SMTP)
+ * - Intenta Resend SDK si RESEND_API_KEY está configurado
+ * - Si SDK falla, intenta Resend via HTTP (node-fetch)
+ * - Si Resend falla o no está configurado, intenta SMTP (SMTP_* o MAIL_* env vars)
  * - Si no hay proveedor configurado, hace un envío simulado y devuelve ok:true (no-fatal)
  *
  * Notas:
@@ -11,6 +12,7 @@
  */
 
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const {
   // Resend
@@ -48,6 +50,7 @@ const DEFAULT_SENDER =
   `no-reply@${(BASE_URL || "local").replace(/^https?:\/\//, "")}`;
 
 let transporter = null;
+let resendClient = null;
 
 /* ---------- helpers ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -85,7 +88,40 @@ async function getFetch() {
   }
 }
 
-/* ---------- Resend via HTTP (no dependency) ---------- */
+/* ---------- Resend SDK (preferred) ---------- */
+function initResendSDK() {
+  if (!RESEND_API_KEY) return null;
+  if (resendClient) return resendClient;
+  try {
+    resendClient = new Resend(RESEND_API_KEY);
+    return resendClient;
+  } catch (err) {
+    resendClient = null;
+    console.warn("[MAIL] Resend SDK init failed:", err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function sendViaResendSDK(from, toArr, subject, html, text) {
+  const client = initResendSDK();
+  if (!client) throw new Error("RESEND_API_KEY no configurado o Resend SDK no disponible");
+
+  // Resend SDK expects an object; it throws on error
+  const payload = {
+    from,
+    to: toArr,
+    subject: subject || "(no subject)",
+    html: html || "",
+    // text optional
+    text: text || "",
+  };
+
+  // SDK call (no fetch response.ok check — SDK throws if fails)
+  const resp = await withTimeout(client.emails.send(payload), 12_000);
+  return resp;
+}
+
+/* ---------- Resend via HTTP (fallback if SDK unavailable) ---------- */
 async function sendViaResendHTTP(from, toArr, subject, html, text) {
   if (!RESEND_API_KEY) throw new Error("RESEND_API_KEY no configurado");
 
@@ -221,22 +257,55 @@ export const sendEmail = async (...args) => {
   const text = payload.text || (html ? String(html).replace(/<[^>]+>/g, "") : "");
   const from = payload.from || SENDER_EMAIL || DEFAULT_SENDER;
 
-  // 1) Try Resend (HTTP) if configured
+  // 1) Try Resend SDK if configured
   if (RESEND_API_KEY) {
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        console.log(`[MAIL] (resend-http) intento ${attempt} →`, toArr);
-        const resp = await sendViaResendHTTP(from, toArr, subject, html, text);
-        console.log("[MAIL] ✅ Enviado via Resend HTTP:", resp?.id || resp);
-        return { ok: true, provider: "resend", id: resp?.id || null, resp };
-      } catch (err) {
-        lastErr = err;
-        console.error(`[MAIL] Resend HTTP fallo (int ${attempt}):`, err && err.message ? err.message : err);
-        await sleep(300 * attempt);
+    // Prefer the official SDK (if init succeeds), fallback to HTTP if SDK fails
+    try {
+      const sdk = initResendSDK();
+      if (sdk) {
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            console.log(`[MAIL] (resend-sdk) intento ${attempt} →`, toArr);
+            const resp = await sendViaResendSDK(from, toArr, subject, html, text);
+            console.log("[MAIL] ✅ Enviado via Resend SDK:", resp?.id || resp);
+            return { ok: true, provider: "resend-sdk", id: resp?.id || null, resp };
+          } catch (err) {
+            lastErr = err;
+            console.error(`[MAIL] Resend SDK fallo (int ${attempt}):`, err && err.message ? err.message : err);
+            await sleep(300 * attempt);
+          }
+        }
+        console.warn("[MAIL] Resend SDK configurado pero falló en todos los intentos:", (lastErr && lastErr.message) ? lastErr.message : lastErr);
+        // fallthrough to HTTP fallback or SMTP
+      } else {
+        console.warn("[MAIL] Resend SDK no pudo inicializarse, intentando HTTP fallback");
       }
+    } catch (e) {
+      console.error("[MAIL] Error usando Resend SDK:", e && e.message ? e.message : e);
     }
-    console.warn("[MAIL] Resend configurado pero falló — intentando fallback SMTP");
+
+    // 1b) If SDK failed or couldn't init, try HTTP fallback
+    try {
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          console.log(`[MAIL] (resend-http) intento ${attempt} →`, toArr);
+          const resp = await sendViaResendHTTP(from, toArr, subject, html, text);
+          console.log("[MAIL] ✅ Enviado via Resend HTTP:", resp?.id || resp);
+          return { ok: true, provider: "resend-http", id: resp?.id || null, resp };
+        } catch (err) {
+          lastErr = err;
+          console.error(`[MAIL] Resend HTTP fallo (int ${attempt}):`, err && err.message ? err.message : err);
+          await sleep(300 * attempt);
+        }
+      }
+      console.warn("[MAIL] Resend HTTP fallback falló en todos los intentos:", (lastErr && lastErr.message) ? lastErr.message : lastErr);
+    } catch (e) {
+      console.error("[MAIL] Error en Resend HTTP fallback:", e && e.message ? e.message : e);
+    }
+
+    console.warn("[MAIL] Resend configurado pero no pudo enviar — intentando fallback SMTP");
   }
 
   // 2) Try SMTP if available
