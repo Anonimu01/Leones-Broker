@@ -15,7 +15,6 @@ import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
 
-import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
 import { connectDB } from "./config/db.js";
@@ -39,6 +38,9 @@ import marketRoutesFactory from "./routes/market.routes.js";
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
+
+// Send email helper (centralizado: Resend SDK / HTTP / SMTP fallback)
+import sendEmail from "./utils/sendEmail.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -173,125 +175,12 @@ app.get("/api/health", (req, res) => {
 });
 
 /* ======================================================
-   SEND EMAIL HELPER (Resend API fallback to SMTP)
+   SEND EMAIL HELPER
+   - usamos el helper centralizado en ./utils/sendEmail.js
    ====================================================== */
-
-/**
- * sendViaResend: use global fetch if available, otherwise dynamic-import node-fetch
- */
-async function sendViaResend(from, to, subject, html) {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error("RESEND_API_KEY no configurado");
-
-  const body = {
-    from,
-    to: Array.isArray(to) ? to : [to],
-    subject: subject || "(no subject)",
-    html: html || "",
-  };
-
-  // ensure fetch exists (node 18+ has global fetch; otherwise try node-fetch)
-  let fetchFn = globalThis.fetch;
-  if (!fetchFn) {
-    try {
-      // dynamic import to avoid require issues in ESM
-      const mod = await import("node-fetch");
-      fetchFn = mod.default || mod;
-    } catch (e) {
-      throw new Error("fetch no disponible en el runtime y node-fetch no pudo importarse");
-    }
-  }
-
-  const resp = await fetchFn("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => null);
-    const err = new Error(`Resend error ${resp.status}: ${txt || resp.statusText}`);
-    err.status = resp.status;
-    err.body = txt;
-    throw err;
-  }
-
-  const json = await resp.json().catch(() => ({}));
-  return json;
-}
-
-let smtpTransporter = null;
-async function getSmtpTransporter() {
-  if (smtpTransporter) return smtpTransporter;
-
-  const host = process.env.MAIL_HOST;
-  const port = process.env.MAIL_PORT ? Number(process.env.MAIL_PORT) : 465;
-  const user = process.env.EMAIL_USER || process.env.SMTP_USER;
-  const pass = process.env.EMAIL_PASS || process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    throw new Error("SMTP no configurado (MAIL_HOST / EMAIL_USER / EMAIL_PASS faltantes)");
-  }
-
-  smtpTransporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465, // true for 465, false for other ports
-    auth: { user, pass },
-  });
-
-  try {
-    await smtpTransporter.verify();
-    console.log("SMTP transporter verificado");
-  } catch (e) {
-    console.warn("Warn: SMTP verify falló:", e && e.message ? e.message : e);
-  }
-
-  return smtpTransporter;
-}
-
-async function sendViaSmtp(from, to, subject, html) {
-  const transporter = await getSmtpTransporter();
-  const info = await transporter.sendMail({
-    from,
-    to,
-    subject,
-    html,
-  });
-  return info;
-}
-
-async function sendEmail(to, subject, html, opts = {}) {
-  // determine 'from' in this priority:
-  // 1) opts.from
-  // 2) SENDER_EMAIL
-  // 3) EMAIL_USER
-  // 4) fallback no-reply@BASE_URL
-  const from = opts.from || process.env.SENDER_EMAIL || process.env.EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/^https?:\/\//, "") || "localhost"}`;
-
-  if (process.env.RESEND_API_KEY) {
-    try {
-      const r = await sendViaResend(from, to, subject, html);
-      return { ok: true, provider: "resend", result: r };
-    } catch (e) {
-      console.error("Resend send failed:", e && e.message ? e.message : e);
-    }
-  }
-
-  try {
-    const info = await sendViaSmtp(from, to, subject, html);
-    return { ok: true, provider: "smtp", result: info };
-  } catch (e) {
-    console.error("SMTP send failed:", e && e.message ? e.message : e);
-    return { ok: false, error: e && e.message ? e.message : String(e) };
-  }
-}
-
 app.locals.sendEmail = sendEmail;
 
+/* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
   if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
@@ -300,8 +189,9 @@ app.post("/api/_send_test_email", async (req, res) => {
   const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
 
   try {
-    const r = await sendEmail(to, subject, html);
-    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result });
+    // El helper acepta sendEmail(to, subject, html) o sendEmail({ to, subject, html })
+    const r = await sendEmail({ to, subject, html });
+    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
