@@ -228,7 +228,7 @@ async function getSmtpTransporter() {
   if (smtpTransporter) return smtpTransporter;
 
   const host = process.env.MAIL_HOST;
-  const port = Number(process.env.MAIL_PORT) || (process.env.MAIL_PORT ? Number(process.env.MAIL_PORT) : 465);
+  const port = process.env.MAIL_PORT ? Number(process.env.MAIL_PORT) : 465;
   const user = process.env.EMAIL_USER || process.env.SMTP_USER;
   const pass = process.env.EMAIL_PASS || process.env.SMTP_PASS;
 
@@ -265,6 +265,11 @@ async function sendViaSmtp(from, to, subject, html) {
 }
 
 async function sendEmail(to, subject, html, opts = {}) {
+  // determine 'from' in this priority:
+  // 1) opts.from
+  // 2) SENDER_EMAIL
+  // 3) EMAIL_USER
+  // 4) fallback no-reply@BASE_URL
   const from = opts.from || process.env.SENDER_EMAIL || process.env.EMAIL_USER || `no-reply@${process.env.BASE_URL?.replace(/^https?:\/\//, "") || "localhost"}`;
 
   if (process.env.RESEND_API_KEY) {
@@ -536,7 +541,7 @@ app.get("/api/account", async (req, res) => {
 
     let wallet = null;
     try {
-      wallet = await Wallet.findOne({ user: user._1d }).lean().exec().catch(()=>null);
+      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
     } catch (e) { wallet = null; }
     let positions = [];
     try {
