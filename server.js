@@ -260,23 +260,38 @@ try {
   if (!process.env.POLYGON_API_KEY) {
     console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse");
   } else {
-    polygonSocket = new PolygonSocket({
-      apiKey: process.env.POLYGON_API_KEY,
-      onPrice: (data) => priceHandler.handle(data),
-      onOpen: () => console.log("PolygonSocket abierto"),
-      onClose: () => console.log("PolygonSocket cerrado"),
-      onError: (err) => console.error("PolygonSocket error:", err),
-    });
-
     try {
-      polygonSocket.connect();
-      console.log("🔌 Intentando conectar PolygonSocket...");
+      polygonSocket = new PolygonSocket({
+        apiKey: process.env.POLYGON_API_KEY,
+        onPrice: (data) => priceHandler.handle(data),
+        onOpen: () => console.log("PolygonSocket abierto"),
+        onClose: () => console.log("PolygonSocket cerrado"),
+        onError: (err) => console.error("PolygonSocket error:", err),
+      });
+
+      // safe connect (catch synchronous and async errors)
+      try {
+        const maybe = polygonSocket.connect();
+        if (maybe && typeof maybe.then === "function") {
+          maybe.catch((err) => {
+            console.warn("PolygonSocket.connect() rejected:", err);
+            // make sure we don't leave polygonSocket in a broken state
+            polygonSocket = null;
+          });
+        }
+        console.log("🔌 Intentando conectar PolygonSocket...");
+      } catch (err) {
+        console.error("Error iniciando PolygonSocket.connect():", err);
+        polygonSocket = null;
+      }
     } catch (err) {
-      console.error("Error iniciando PolygonSocket.connect():", err);
+      console.error("Error inicializando PolygonSocket instance:", err);
+      polygonSocket = null;
     }
   }
 } catch (err) {
   console.error("Error inicializando PolygonSocket:", err);
+  polygonSocket = null;
 }
 
 /* ======================================================
@@ -610,6 +625,21 @@ const server = httpServer.listen(PORT, () => {
    ====================================================== */
 let shuttingDown = false;
 
+const safeClosePolygonSocket = async () => {
+  if (!polygonSocket) return;
+  try {
+    // call close and handle both sync throw and promise rejection
+    const maybe = polygonSocket.close();
+    if (maybe && typeof maybe.then === "function") {
+      await maybe.catch((err) => {
+        console.warn("polygonSocket.close() rejected:", err);
+      });
+    }
+  } catch (e) {
+    console.warn("polygonSocket.close() threw:", e);
+  }
+};
+
 const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -631,23 +661,29 @@ const gracefulShutdown = async (signal) => {
     });
 
     try {
-      if (polygonSocket && typeof polygonSocket.close === "function") {
-        polygonSocket.close();
-      }
+      await safeClosePolygonSocket();
     } catch (e) {
-      console.warn("Error cerrando polygonSocket:", e);
+      console.warn("Error cerrando polygonSocket (await):", e);
     }
 
     try {
       if (typeof global?.stopRiskWatcher === "function") {
-        global.stopRiskWatcher();
+        try {
+          global.stopRiskWatcher();
+        } catch (e) {
+          console.warn("stopRiskWatcher threw:", e);
+        }
       }
     } catch (e) {
       console.warn("Error deteniendo risk watcher:", e);
     }
 
-    await mongoose.disconnect();
-    console.log("Mongo cerrado");
+    try {
+      await mongoose.disconnect();
+      console.log("Mongo cerrado");
+    } catch (e) {
+      console.warn("Error desconectando Mongo:", e);
+    }
 
     clearTimeout(timeout);
     process.exit(0);
@@ -662,11 +698,13 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("unhandledRejection", (r) => {
   console.error("UnhandledRejection:", r);
-  gracefulShutdown("unhandledRejection");
+  // intentamos cerrar ordenadamente pero también logueamos el error para debugging
+  gracefulShutdown("unhandledRejection").catch(()=>{});
 });
 process.on("uncaughtException", (e) => {
   console.error("UncaughtException:", e);
-  gracefulShutdown("uncaughtException");
+  // intentamos cerrar ordenadamente pero también logueamos el error para debugging
+  gracefulShutdown("uncaughtException").catch(()=>{});
 });
 
 export default app;
