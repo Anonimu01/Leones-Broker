@@ -1728,24 +1728,6 @@ if (window.__LEONES_BOOTED__) {
 
   log('[LEONES] unified script loaded (defensive mode ON)');
 }
-
-  // email verification
-
-const mailResult = await sendEmail({
-  to: user.email,
-  subject: "Verifica tu cuenta",
-  html: `
-    <h2>Verifica tu cuenta</h2>
-    <p>Haz clic aquí para activar tu cuenta:</p>
-    <a href="${verificationLink}">${verificationLink}</a>
-  `,
-});
-
-console.log("Resultado email:", mailResult);
-
-if (!mailResult.ok) {
-  console.error("No se pudo enviar el correo de verificación");
-}
 </script>
 
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
