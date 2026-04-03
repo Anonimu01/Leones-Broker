@@ -219,19 +219,39 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
 /* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
-  if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
+  if (!to)
+    return res.status(400).json({
+      ok: false,
+      message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
+    });
 
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+  const html =
+    req.body.html ||
+    `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
 
   try {
     // El helper acepta sendEmail(to, subject, html) o sendEmail({ to, subject, html })
     const r = await sendEmail({ to, subject, html });
-    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
-    return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
+    if (r.ok)
+      return res.json({
+        ok: true,
+        message: "Correo enviado",
+        provider: r.provider,
+        result: r.result || r.info || r.resp,
+      });
+    return res.status(500).json({
+      ok: false,
+      message: "No se pudo enviar correo",
+      error: r.error,
+    });
   } catch (err) {
     console.error("test email error:", err);
-    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno enviando correo",
+      error: err && err.message ? err.message : String(err),
+    });
   }
 });
 
@@ -456,7 +476,7 @@ async function getUserFromBearer(req) {
     }
     const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
-    const user = await User.findById(userId).lean().exec().catch(()=>null);
+    const user = await User.findById(userId).lean().exec().catch(() => null);
     return user || null;
   } catch (e) {
     return null;
@@ -482,12 +502,16 @@ app.get("/api/account", async (req, res) => {
 
     let wallet = null;
     try {
-      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
-    } catch (e) { wallet = null; }
+      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(() => null);
+    } catch (e) {
+      wallet = null;
+    }
     let positions = [];
     try {
-      positions = await Position.find({ user: user._id }).lean().exec().catch(()=>[]);
-    } catch (e) { positions = []; }
+      positions = await Position.find({ user: user._id }).lean().exec().catch(() => []);
+    } catch (e) {
+      positions = [];
+    }
 
     const account = {
       balance: wallet?.balance ?? user.balance ?? 0,
@@ -518,8 +542,10 @@ app.get("/api/wallet", async (req, res) => {
 
     let wallet = null;
     try {
-      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(()=>null);
-    } catch (e) { wallet = null; }
+      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(() => null);
+    } catch (e) {
+      wallet = null;
+    }
 
     if (wallet) return res.json(wallet);
     return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
@@ -569,6 +595,53 @@ if (!staticDirName) {
 }
 
 const staticPath = path.join(__dirname, staticDirName);
+
+/* ======================================================
+   AUTH GUARD JS (evita HTML en vez de JS y protege público/privado)
+   ====================================================== */
+app.get("/js/authGuard.js", (req, res) => {
+  const guardJs = `
+(function () {
+  "use strict";
+
+  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  const TOKEN_KEY = "token";
+  const PRIVATE_PAGE = "/dashboard.html";
+  const PUBLIC_PAGES = ["/", "/index.html", "/login.html", "/register.html"];
+
+  function getToken() {
+    try {
+      const t1 = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("BROKER_TOKEN");
+      if (t1) return t1;
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const sess = JSON.parse(raw);
+        if (sess && sess.token) return sess.token;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  const token = getToken();
+  const path = window.location.pathname || "/";
+
+  const isPublic = PUBLIC_PAGES.includes(path) || path === "/";
+  const isPrivate = !isPublic;
+
+  if (token && isPublic) {
+    window.location.replace(PRIVATE_PAGE);
+    return;
+  }
+
+  if (!token && isPrivate && path !== PRIVATE_PAGE) {
+    window.location.replace("/");
+    return;
+  }
+})();
+`;
+
+  res.type("application/javascript; charset=utf-8").status(200).send(guardJs);
+});
 
 /* ======================================================
    JS STUBS middleware (evita MIME error / ReferenceError)
@@ -735,12 +808,12 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("unhandledRejection", (r) => {
   console.error("UnhandledRejection:", r);
   // intentamos cerrar ordenadamente pero también logueamos el error para debugging
-  gracefulShutdown("unhandledRejection").catch(()=>{});
+  gracefulShutdown("unhandledRejection").catch(() => {});
 });
 process.on("uncaughtException", (e) => {
   console.error("UncaughtException:", e);
   // intentamos cerrar ordenadamente pero también logueamos el error para debugging
-  gracefulShutdown("uncaughtException").catch(()=>{});
+  gracefulShutdown("uncaughtException").catch(() => {});
 });
 
 export default app;
