@@ -180,6 +180,42 @@ app.get("/api/health", (req, res) => {
    ====================================================== */
 app.locals.sendEmail = sendEmail;
 
+app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
+  try {
+    const to = user?.email || user?.address || user;
+    if (!to) {
+      return { ok: false, error: "missing_recipient" };
+    }
+    if (!verificationLink) {
+      return { ok: false, error: "missing_verification_link" };
+    }
+
+    const name = user?.name || "usuario";
+
+    return await sendEmail({
+      to,
+      subject: "Verifica tu cuenta - Leones Broker",
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
+          <h2>Hola ${name}, verifica tu cuenta</h2>
+          <p>Haz clic en el botón de abajo para activar tu cuenta:</p>
+          <p>
+            <a href="${verificationLink}"
+               style="display:inline-block;background:#d4af37;color:#000;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">
+              Verificar cuenta
+            </a>
+          </p>
+          <p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+          <p>${verificationLink}</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    console.error("[MAIL] sendVerificationEmail error:", err?.message || err);
+    return { ok: false, error: err?.message || String(err) };
+  }
+};
+
 /* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
