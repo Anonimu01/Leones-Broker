@@ -2743,6 +2743,25 @@ if (window.__LEONES_BOOTED__) {
 <script src="/js/authGuard.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/trading.js"></script>
+
+<!-- 🔥 ESTE SCRIPT VA AQUÍ -->
+<script>
+(function () {
+  const token = localStorage.getItem("token");
+
+  const publicSection = document.getElementById("publicSection");
+  const privateSection = document.getElementById("privateSection");
+
+  if (token) {
+    if (publicSection) publicSection.style.display = "none";
+    if (privateSection) privateSection.style.display = "block";
+  } else {
+    if (publicSection) publicSection.style.display = "block";
+    if (privateSection) privateSection.style.display = "none";
+  }
+})();
+</script>
+  
   
 </body>
 </html>
