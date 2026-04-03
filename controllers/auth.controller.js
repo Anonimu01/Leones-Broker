@@ -4,11 +4,12 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import User from "../models/user.model.js";
-import { sendEmail } from "../utils/sendEmail.js";
+import sendEmail from "../utils/sendEmail.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
-const BASE_URL = (process.env.BASE_URL || "").replace(/\/+$/, "");
+const BASE_URL_RAW = process.env.BASE_URL || process.env.CLIENT_URL || "";
+const BASE_URL = (BASE_URL_RAW || "https://leones-broker.onrender.com").replace(/\/+$/, "");
 const REQUIRE_EMAIL_VERIFICATION =
   (process.env.ENFORCE_EMAIL_VERIFICATION || "false").toLowerCase() === "true";
 
@@ -18,6 +19,7 @@ const REQUIRE_EMAIL_VERIFICATION =
 console.log("[ENV DEBUG] JWT_SECRET present?:", !!process.env.JWT_SECRET);
 console.log("[ENV DEBUG] ENFORCE_EMAIL_VERIFICATION:", process.env.ENFORCE_EMAIL_VERIFICATION);
 console.log("[ENV DEBUG] BASE_URL:", process.env.BASE_URL ? "(set)" : "(not set)");
+console.log("[ENV DEBUG] CLIENT_URL:", process.env.CLIENT_URL ? "(set)" : "(not set)");
 
 if (!JWT_SECRET) {
   console.error("⚠️ JWT_SECRET no está definido en .env — los tokens no se firmarán correctamente");
@@ -29,6 +31,7 @@ if (!JWT_SECRET) {
 
 function sanitizeUser(userDoc) {
   if (!userDoc) return null;
+
   const u =
     typeof userDoc.toObject === "function"
       ? userDoc.toObject()
@@ -37,9 +40,11 @@ function sanitizeUser(userDoc) {
   u.id = String(u._id || u.id || "");
   delete u._id;
   delete u.__v;
+
   // remove password fields
   delete u.password;
   delete u.passwordHash;
+
   // remove verification token fields (todas las variantes)
   delete u.verifyToken;
   delete u.verificationToken;
@@ -47,14 +52,19 @@ function sanitizeUser(userDoc) {
   delete u.verification_token;
   delete u.verifyExpires;
   delete u.verify_expires;
+
   return u;
 }
 
 function signToken(user) {
   if (!JWT_SECRET) {
-    console.error("[JWT ERROR] JWT_SECRET no configurado. process.env keys:", Object.keys(process.env).filter(k => k.includes("JWT") || k.includes("SECRET")));
+    console.error(
+      "[JWT ERROR] JWT_SECRET no configurado. process.env keys:",
+      Object.keys(process.env).filter((k) => k.includes("JWT") || k.includes("SECRET"))
+    );
     throw new Error("JWT_SECRET no configurado en el servidor");
   }
+
   try {
     return jwt.sign(
       {
@@ -70,6 +80,41 @@ function signToken(user) {
   }
 }
 
+function buildVerifyUrl(token, email) {
+  return `${BASE_URL}/api/auth/verify?token=${encodeURIComponent(token)}&email=${encodeURIComponent(
+    String(email).trim().toLowerCase()
+  )}`;
+}
+
+async function sendVerificationMail({ to, name, token, subject }) {
+  const verifyUrl = buildVerifyUrl(token, to);
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
+      <p>Hola ${name || "usuario"},</p>
+      <p>Gracias por registrarte en Leones Broker.</p>
+      <p>Haz clic aquí para verificar tu cuenta:</p>
+      <p>
+        <a href="${verifyUrl}"
+           style="display:inline-block;background:#d4af37;color:#000;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">
+          Verificar cuenta
+        </a>
+      </p>
+      <p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+      <p>${verifyUrl}</p>
+    </div>
+  `;
+
+  try {
+    const result = await sendEmail(to, subject, html);
+    console.log("[MAIL] verification result:", result);
+    return result;
+  } catch (err) {
+    console.error("[MAIL] verification send error:", err && err.message ? err.message : err);
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 /* ==============================
    REGISTER
    ============================== */
@@ -79,18 +124,20 @@ export async function register(req, res) {
     const { name, email, password, phone, address } = req.body || {};
 
     if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "name, email y password requeridos" });
+      return res.status(400).json({
+        ok: false,
+        message: "name, email y password requeridos",
+      });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const existing = await User.findOne({ email: normalizedEmail }).exec();
     if (existing) {
-      return res
-        .status(409)
-        .json({ ok: false, message: "El correo ya está registrado" });
+      return res.status(409).json({
+        ok: false,
+        message: "El correo ya está registrado",
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -98,8 +145,7 @@ export async function register(req, res) {
 
     const verifyToken = crypto.randomBytes(24).toString("hex");
     const verifyExpires = new Date(
-      Date.now() +
-        (Number(process.env.VERIFY_TOKEN_TTL_MS) || 1000 * 60 * 60 * 24)
+      Date.now() + (Number(process.env.VERIFY_TOKEN_TTL_MS) || 1000 * 60 * 60 * 24)
     );
 
     const newUser = new User({
@@ -110,7 +156,6 @@ export async function register(req, res) {
       phone: phone || "",
       address: address || "",
       verified: false,
-      // canonical fields used by controller
       verifyToken,
       verifyExpires,
       createdAt: new Date(),
@@ -118,7 +163,6 @@ export async function register(req, res) {
 
     await newUser.save();
 
-    // token de sesión inmediato (si quieres obligar verificación, cambia lógica)
     let token = null;
     try {
       token = signToken(newUser);
@@ -127,29 +171,22 @@ export async function register(req, res) {
       token = null;
     }
 
-    // ruta de verificación: apunta a /api/auth/verify para que el link funcione
-    const verifyUrl = `${BASE_URL}/api/auth/verify?token=${verifyToken}&email=${encodeURIComponent(
-      normalizedEmail
-    )}`;
+    // Enviar correo de verificación
+    const mailResult = await sendVerificationMail({
+      to: normalizedEmail,
+      name: newUser.name,
+      token: verifyToken,
+      subject: "Verifica tu cuenta - Leones Broker",
+    });
 
-    const html = `
-      <p>Hola ${newUser.name},</p>
-      <p>Gracias por registrarte en Leones Broker.</p>
-      <p>Haz clic aquí para verificar tu cuenta:</p>
-      <p><a href="${verifyUrl}">Verificar cuenta</a></p>
-    `;
-
-    try {
-      // sendEmail soporta sendEmail(to, subject, html) y sendEmail({..})
-      const mailResult = await sendEmail(normalizedEmail, "Verifica tu cuenta - Leones Broker", html);
-      console.log("[MAIL] register: sendEmail result:", mailResult);
-    } catch (err) {
-      console.error("Error enviando email de verificación:", err && err.message ? err.message : err);
+    if (!mailResult?.ok) {
+      console.error("No se pudo enviar el correo de verificación");
     }
 
     return res.status(201).json({
       ok: true,
       message: "Usuario creado",
+      verificationEmailSent: !!mailResult?.ok,
       data: {
         token, // puede ser null si signing falló (pero usuario creado)
         user: sanitizeUser(newUser),
@@ -173,27 +210,30 @@ export async function login(req, res) {
     const { email, password } = req.body || {};
 
     if (!email || !password) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "email y password requeridos" });
+      return res.status(400).json({
+        ok: false,
+        message: "email y password requeridos",
+      });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const user = await User.findOne({ email: normalizedEmail }).exec();
     if (!user) {
-      return res
-        .status(401)
-        .json({ ok: false, message: "Credenciales inválidas" });
+      return res.status(401).json({
+        ok: false,
+        message: "Credenciales inválidas",
+      });
     }
 
     const hashed = String(user.password || user.passwordHash || "");
     const match = await bcrypt.compare(password, hashed);
 
     if (!match) {
-      return res
-        .status(401)
-        .json({ ok: false, message: "Credenciales inválidas" });
+      return res.status(401).json({
+        ok: false,
+        message: "Credenciales inválidas",
+      });
     }
 
     // bloqueo por verificación si está activado en env
@@ -240,43 +280,47 @@ export async function resendVerification(req, res) {
   try {
     const { email } = req.body || {};
 
-    if (!email)
-      return res.status(400).json({ ok: false, message: "email requerido" });
+    if (!email) {
+      return res.status(400).json({
+        ok: false,
+        message: "email requerido",
+      });
+    }
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const user = await User.findOne({ email: normalizedEmail }).exec();
-    if (!user)
-      return res
-        .status(404)
-        .json({ ok: false, message: "Usuario no encontrado" });
+    if (!user) {
+      return res.status(404).json({
+        ok: false,
+        message: "Usuario no encontrado",
+      });
+    }
 
-    if (user.verified)
-      return res
-        .status(400)
-        .json({ ok: false, message: "Cuenta ya verificada" });
+    if (user.verified) {
+      return res.status(400).json({
+        ok: false,
+        message: "Cuenta ya verificada",
+      });
+    }
 
     const verifyToken = crypto.randomBytes(24).toString("hex");
     user.verifyToken = verifyToken;
     user.verifyExpires = new Date(Date.now() + 1000 * 60 * 60 * 24);
     await user.save();
 
-    const verifyUrl = `${BASE_URL}/api/auth/verify?token=${verifyToken}&email=${encodeURIComponent(
-      normalizedEmail
-    )}`;
+    const mailResult = await sendVerificationMail({
+      to: normalizedEmail,
+      name: user.name,
+      token: verifyToken,
+      subject: "Reenviar verificación - Leones Broker",
+    });
 
-    const html = `
-      <p>Hola ${user.name}</p>
-      <p>Haz clic para verificar tu cuenta:</p>
-      <p><a href="${verifyUrl}">Verificar cuenta</a></p>
-    `;
-
-    try {
-      const mailResult = await sendEmail(normalizedEmail, "Reenviar verificación - Leones Broker", html);
-      console.log("[MAIL] resendVerification: sendEmail result:", mailResult);
-    } catch (err) {
-      console.error("resendVerification sendEmail error:", err && err.message ? err.message : err);
-      return res.status(500).json({ ok: false, message: "Error enviando email" });
+    if (!mailResult?.ok) {
+      return res.status(500).json({
+        ok: false,
+        message: "Error enviando email",
+      });
     }
 
     return res.json({
@@ -300,34 +344,53 @@ export async function verify(req, res) {
   try {
     const { token, email } = req.query || {};
 
-    if (!token || !email)
-      return res
-        .status(400)
-        .json({ ok: false, message: "token y email requeridos" });
+    if (!token || !email) {
+      return res.status(400).json({
+        ok: false,
+        message: "token y email requeridos",
+      });
+    }
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
     const user = await User.findOne({ email: normalizedEmail }).exec();
-    if (!user)
-      return res
-        .status(404)
-        .json({ ok: false, message: "Usuario no encontrado" });
+    if (!user) {
+      return res.status(404).json({
+        ok: false,
+        message: "Usuario no encontrado",
+      });
+    }
 
     // fallback: acepta verifyToken o verificationToken (y variantes)
-    const actualToken = user.verifyToken || user.verificationToken || user.verify_token || user.verification_token || null;
+    const actualToken =
+      user.verifyToken ||
+      user.verificationToken ||
+      user.verify_token ||
+      user.verification_token ||
+      null;
 
-    if (actualToken !== token)
-      return res.status(400).json({ ok: false, message: "Token inválido" });
+    if (actualToken !== token) {
+      return res.status(400).json({
+        ok: false,
+        message: "Token inválido",
+      });
+    }
 
     const expires = user.verifyExpires || user.verify_expires || null;
-    if (expires && expires < new Date())
-      return res.status(400).json({ ok: false, message: "Token expirado" });
+    if (expires && expires < new Date()) {
+      return res.status(400).json({
+        ok: false,
+        message: "Token expirado",
+      });
+    }
 
     user.verified = true;
     user.verifyToken = undefined;
     user.verifyExpires = undefined;
-    // also clear other potential fields
+
     if (user.verificationToken) user.verificationToken = undefined;
+    if (user.verify_token) user.verify_token = undefined;
+    if (user.verification_token) user.verification_token = undefined;
     if (user.verify_expires) user.verify_expires = undefined;
 
     await user.save();
