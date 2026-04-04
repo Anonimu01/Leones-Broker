@@ -463,13 +463,13 @@
 
 
 <script>
-/* Unified script — versión actualizada y defensiva
-   - Guarda token de forma consistente
-   - apiFetch usa token desde token | BROKER_TOKEN | SESSION_KEY
-   - window.fetch agrega Authorization para /api/* si hay token
-   - Socket.IO conecta con token antes de autenticarse
-   - Evita inicializaciones dobles
-   - Evita llamadas a /api/* si no hay token
+/* LEONES / BROKER FRONT — JS #1
+   - Sesión privada limpia
+   - Sin demo prices
+   - Mercados en 5 tipos
+   - TradingView embebido
+   - Botones Buy/Sell conectados al backend
+   - Preparado para que el JS #2 maneje la parte restante sin duplicar lógica
 */
 
 if (window.__LEONES_BOOTED__) {
@@ -492,12 +492,16 @@ if (window.__LEONES_BOOTED__) {
   const warn = (...a) => { try { console.warn('[LEONES]', ...a); } catch (e) {} };
   const error = (...a) => { try { console.error('[LEONES]', ...a); } catch (e) {} };
 
-  function safeParseJSON(s, fallback = null) { try { return JSON.parse(s); } catch (e) { return fallback; } }
+  function safeParseJSON(s, fallback = null) {
+    try { return JSON.parse(s); } catch (e) { return fallback; }
+  }
+
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, m => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[m]));
   }
+
   function formatNumber(n, d = 6) {
     const num = Number(n);
     if (!isFinite(num)) return '--';
@@ -573,7 +577,7 @@ if (window.__LEONES_BOOTED__) {
   }
 
   /* ===========================
-     apiFetch / apiPost
+     API helpers
   =========================== */
   async function apiFetch(path, opts = {}) {
     const token = getSavedToken();
@@ -647,12 +651,25 @@ if (window.__LEONES_BOOTED__) {
   NS.apiFetch = apiFetch;
   NS.apiPost = apiPost;
 
-  /* ==============================
-     SESSION / PRIVATE VIEW SWITCH
-     ============================== */
-
+  /* ===========================
+     Session / private view
+  =========================== */
   const TOKEN_KEY = "token";
   const BROKER_TOKEN_KEY = "BROKER_TOKEN";
+
+  function safeDisplayName(user = {}) {
+    if (!user || typeof user !== 'object') return 'Usuario';
+    if (user.displayName) return String(user.displayName);
+    if (user.fullName) return String(user.fullName);
+    if (user.name) return String(user.name);
+
+    const email = user.email ? String(user.email) : '';
+    if (!email.includes('@')) return 'Cuenta';
+    const [local, domain] = email.split('@');
+    if (local.length <= 2) return local[0] + '*' + '@' + domain;
+    const maskedLocal = local[0] + local.slice(1, 2).replace(/./g, '*') + local.slice(-1);
+    return maskedLocal + '@' + domain;
+  }
 
   function restorePublicHeader() {
     try {
@@ -705,7 +722,7 @@ if (window.__LEONES_BOOTED__) {
         profileBtn.style.gap = "10px";
 
         const nameEl = document.createElement("div");
-        nameEl.textContent = safeUser.name || "Usuario";
+        nameEl.textContent = safeDisplayName(safeUser);
         nameEl.style.color = "var(--gold)";
         nameEl.style.fontWeight = "700";
 
@@ -720,46 +737,25 @@ if (window.__LEONES_BOOTED__) {
       }
 
       const nameSpan = document.getElementById("private-name-full");
-      if (nameSpan) nameSpan.textContent = safeUser.name || "Usuario";
+      if (nameSpan) nameSpan.textContent = safeDisplayName(safeUser);
 
       const emailSpan = document.getElementById("private-email-full");
       if (emailSpan) emailSpan.textContent = safeUser.email || "";
 
       const bal = document.getElementById("priv_balance_full");
-      if (bal) {
-        bal.textContent =
-          "RD$" +
-          (Math.floor(Math.random() * 50000) + 1000).toLocaleString("es-DO");
-      }
+      if (bal) bal.textContent = "RD$" + (Number(safeUser.balance || 0)).toLocaleString("es-DO");
 
       const eq = document.getElementById("priv_equity_full");
-      if (eq) {
-        eq.textContent =
-          "RD$" +
-          (Math.floor(Math.random() * 40000) + 500).toLocaleString("es-DO");
-      }
+      if (eq) eq.textContent = "RD$" + (Number(safeUser.equity || safeUser.balance || 0)).toLocaleString("es-DO");
 
       const pnl = document.getElementById("priv_pnl_full");
-      if (pnl) {
-        pnl.textContent =
-          "RD$" +
-          (Math.floor(Math.random() * 20000) - 5000).toLocaleString("es-DO");
-      }
+      if (pnl) pnl.textContent = "RD$" + (Number(safeUser.pnl || 0)).toLocaleString("es-DO");
 
-      const menuItems = Array.from(
-        document.querySelectorAll("#privateArea_full .menu-item")
-      );
-
+      const menuItems = Array.from(document.querySelectorAll("#privateArea_full .menu-item"));
       function activateSection(sectionId) {
-        menuItems.forEach((mi) =>
-          mi.classList.toggle("active", mi.dataset.section === sectionId)
-        );
+        menuItems.forEach((mi) => mi.classList.toggle("active", mi.dataset.section === sectionId));
       }
-
-      menuItems.forEach((mi) =>
-        mi.addEventListener("click", () => activateSection(mi.dataset.section))
-      );
-
+      menuItems.forEach((mi) => mi.addEventListener("click", () => activateSection(mi.dataset.section)));
       if (menuItems.length) activateSection("dashboard");
 
       const leftLogout = document.getElementById("btnLogoutLeft_full");
@@ -776,9 +772,7 @@ if (window.__LEONES_BOOTED__) {
 
   function performLogoutFull() {
     try {
-      localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(BROKER_TOKEN_KEY);
+      clearSession();
 
       const privateWrapper = document.getElementById("privateArea_full");
       if (privateWrapper) privateWrapper.style.display = "none";
@@ -805,6 +799,8 @@ if (window.__LEONES_BOOTED__) {
           if (btn) btn.click();
         };
       }
+
+      safeDisconnectSocket();
     } catch (e) {
       console.error("performLogoutFull error", e);
     }
@@ -816,7 +812,7 @@ if (window.__LEONES_BOOTED__) {
       const raw = localStorage.getItem(SESSION_KEY);
 
       if (token && raw) {
-        const user = JSON.parse(raw);
+        const user = safeParseJSON(raw, {});
         showPrivateFull(user);
         if (typeof initSocket === "function") initSocket(true);
         if (typeof loadAccount === "function") loadAccount().catch(() => {});
@@ -845,59 +841,6 @@ if (window.__LEONES_BOOTED__) {
   window.addEventListener("load", initSessionView);
 
   /* ===========================
-     Safe fetch monkey-patch
-  =========================== */
-  (function installSafeFetch() {
-    try {
-      if (window.__LEONES_FETCH_PATCHED__) return;
-      window.__LEONES_FETCH_PATCHED__ = true;
-
-      const _origFetch = window.fetch.bind(window);
-
-      window.fetch = async function (input, init) {
-        try {
-          const token = getSavedToken();
-          if (!token) return _origFetch(input, init);
-
-          let url = '';
-          if (input instanceof Request) {
-            url = input.url || '';
-          } else {
-            url = String(input || '');
-          }
-
-          const normalized = url.startsWith('http')
-            ? url
-            : (url.startsWith('/') ? location.origin + url : location.origin + '/' + url);
-
-          const sameOrigin = normalized.startsWith(location.origin);
-          const touchesApi = normalized.includes('/api/');
-
-          if (sameOrigin && touchesApi) {
-            if (input instanceof Request) {
-              const newReq = new Request(input, {
-                headers: mergeHeaders(input.headers, token)
-              });
-              return _origFetch(newReq);
-            }
-
-            init = init || {};
-            init.headers = mergeHeaders(init.headers, token);
-          }
-        } catch (e) {
-          console.warn('[LEONES] fetch patch error', e);
-        }
-
-        return _origFetch(input, init);
-      };
-
-      log('[LEONES] window.fetch patched to auto-add Authorization for /api/ calls when token present');
-    } catch (e) {
-      console.warn('[LEONES] could not patch fetch', e);
-    }
-  })();
-
-  /* ===========================
      Socket
   =========================== */
   function initSocket(forceReconnect = false) {
@@ -912,12 +855,8 @@ if (window.__LEONES_BOOTED__) {
         const existing = window.__LEONES_SOCKET__.socket;
         try {
           existing.auth = { token };
-          if (existing.connected && typeof existing.disconnect === 'function') {
-            existing.disconnect();
-          }
-          if (typeof existing.connect === 'function') {
-            existing.connect();
-          }
+          if (existing.connected && typeof existing.disconnect === 'function') existing.disconnect();
+          if (typeof existing.connect === 'function') existing.connect();
         } catch (e) {}
         log('Socket already initialized');
         return existing;
@@ -1015,7 +954,6 @@ if (window.__LEONES_BOOTED__) {
     try {
       clearSession();
       safeDisconnectSocket();
-      stopDemoPrices();
       restorePublicHeader();
       dispatchEvent(new CustomEvent('leones:loggedOut'));
     } catch (e) {
@@ -1028,18 +966,8 @@ if (window.__LEONES_BOOTED__) {
   NS.logout = logout;
 
   /* ===========================
-     Header / modal / session helpers
+     Header / modal helpers
   =========================== */
-  function safeDisplayName(user = {}) {
-    if (user && user.alias) return user.alias;
-    const email = user && user.email ? String(user.email) : '';
-    if (!email.includes('@')) return 'Cuenta';
-    const [local, domain] = email.split('@');
-    if (local.length <= 2) return local[0] + '*' + '@' + domain;
-    const maskedLocal = local[0] + local.slice(1, 2).replace(/./g, '*') + local.slice(-1);
-    return maskedLocal + '@' + domain;
-  }
-
   function showPrivateHeader(user = {}) {
     try {
       const header = document.getElementById('headerActions');
@@ -1133,16 +1061,8 @@ if (window.__LEONES_BOOTED__) {
 
       if (s && token) {
         const u = safeParseJSON(s, {});
-        showPrivateFull(u);
-        initSocket(true);
-        if (typeof loadAccount === "function") {
-          loadAccount().catch(() => {});
-        }
-        try {
-          if (window.loadPositions && typeof window.loadPositions === "function") {
-            window.loadPositions();
-          }
-        } catch (e) {}
+        showPrivateHeader(u);
+        initSocket();
       } else {
         restorePublicHeader();
       }
@@ -1211,11 +1131,9 @@ if (window.__LEONES_BOOTED__) {
             loadAccount().catch(() => {});
           }
 
-          try {
-            if (window.loadPositions && typeof window.loadPositions === "function") {
-              window.loadPositions();
-            }
-          } catch (e) {}
+          if (typeof loadMarketCatalog === "function") {
+            loadMarketCatalog().catch(() => {});
+          }
 
           dispatchEvent(new CustomEvent('leones:loggedIn', { detail: user }));
         } catch (e) {
@@ -1262,191 +1180,183 @@ if (window.__LEONES_BOOTED__) {
   }, true);
 
   /* ===========================
-     Account / Trading modules
+     Mercados (5 tipos)
   =========================== */
-
-  let account = {
-    balance: 0,
-    equity: 0,
-    marginUsed: 0,
-    freeMargin: 0,
-    marginLevel: 0,
-    leverage: 100,
-    currency: "USD",
-    positions: []
+  const MARKET_CATALOG = {
+    Forex: [
+      { symbol: 'EURUSD', tvSymbol: 'FX:EURUSD', label: 'EUR/USD', market: 'Forex', leverage: '1:500', spread: '0.1-1.2 pips', hours: '24/5', contract: '100,000', volatility: 'Media' },
+      { symbol: 'GBPUSD', tvSymbol: 'FX:GBPUSD', label: 'GBP/USD', market: 'Forex', leverage: '1:500', spread: '0.2-1.5 pips', hours: '24/5', contract: '100,000', volatility: 'Media-Alta' },
+      { symbol: 'USDJPY', tvSymbol: 'FX:USDJPY', label: 'USD/JPY', market: 'Forex', leverage: '1:500', spread: '0.1-1.3 pips', hours: '24/5', contract: '100,000', volatility: 'Media' },
+      { symbol: 'USDCHF', tvSymbol: 'FX:USDCHF', label: 'USD/CHF', market: 'Forex', leverage: '1:500', spread: '0.2-1.4 pips', hours: '24/5', contract: '100,000', volatility: 'Media' },
+      { symbol: 'AUDUSD', tvSymbol: 'FX:AUDUSD', label: 'AUD/USD', market: 'Forex', leverage: '1:500', spread: '0.2-1.6 pips', hours: '24/5', contract: '100,000', volatility: 'Media' }
+    ],
+    Crypto: [
+      { symbol: 'BTCUSDT', tvSymbol: 'BINANCE:BTCUSDT', label: 'BTC/USDT', market: 'Crypto', leverage: '1:100', spread: 'Variable', hours: '24/7', contract: '1 BTC', volatility: 'Alta' },
+      { symbol: 'ETHUSDT', tvSymbol: 'BINANCE:ETHUSDT', label: 'ETH/USDT', market: 'Crypto', leverage: '1:100', spread: 'Variable', hours: '24/7', contract: '1 ETH', volatility: 'Alta' },
+      { symbol: 'BNBUSDT', tvSymbol: 'BINANCE:BNBUSDT', label: 'BNB/USDT', market: 'Crypto', leverage: '1:100', spread: 'Variable', hours: '24/7', contract: '1 BNB', volatility: 'Alta' },
+      { symbol: 'SOLUSDT', tvSymbol: 'BINANCE:SOLUSDT', label: 'SOL/USDT', market: 'Crypto', leverage: '1:100', spread: 'Variable', hours: '24/7', contract: '1 SOL', volatility: 'Alta' },
+      { symbol: 'XRPUSDT', tvSymbol: 'BINANCE:XRPUSDT', label: 'XRP/USDT', market: 'Crypto', leverage: '1:100', spread: 'Variable', hours: '24/7', contract: '1 XRP', volatility: 'Alta' }
+    ],
+    Indices: [
+      { symbol: 'US500', tvSymbol: 'OANDA:SPX500USD', label: 'S&P 500', market: 'Indices', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '1 CFD', volatility: 'Media' },
+      { symbol: 'NAS100', tvSymbol: 'OANDA:NAS100USD', label: 'NASDAQ 100', market: 'Indices', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '1 CFD', volatility: 'Alta' },
+      { symbol: 'US30', tvSymbol: 'OANDA:US30USD', label: 'Dow Jones', market: 'Indices', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '1 CFD', volatility: 'Media' },
+      { symbol: 'GER40', tvSymbol: 'OANDA:DE40EUR', label: 'DAX 40', market: 'Indices', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '1 CFD', volatility: 'Media' }
+    ],
+    Commodities: [
+      { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD', label: 'Oro (XAU/USD)', market: 'Commodities', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '100 oz', volatility: 'Media' },
+      { symbol: 'XAGUSD', tvSymbol: 'OANDA:XAGUSD', label: 'Plata (XAG/USD)', market: 'Commodities', leverage: '1:200', spread: 'Variable', hours: '24/5', contract: '5,000 oz', volatility: 'Media' },
+      { symbol: 'USOIL', tvSymbol: 'TVC:USOIL', label: 'Petróleo WTI', market: 'Commodities', leverage: '1:100', spread: 'Variable', hours: '24/5', contract: '1,000 bbl', volatility: 'Alta' },
+      { symbol: 'NATGAS', tvSymbol: 'TVC:NATGAS', label: 'Gas Natural', market: 'Commodities', leverage: '1:100', spread: 'Variable', hours: '24/5', contract: '10,000 MMBtu', volatility: 'Alta' }
+    ],
+    Stocks: [
+      { symbol: 'AAPL', tvSymbol: 'NASDAQ:AAPL', label: 'Apple', market: 'Stocks', leverage: '1:20', spread: 'Variable', hours: 'NYSE/NASDAQ', contract: '1 Share', volatility: 'Media' },
+      { symbol: 'TSLA', tvSymbol: 'NASDAQ:TSLA', label: 'Tesla', market: 'Stocks', leverage: '1:20', spread: 'Variable', hours: 'NYSE/NASDAQ', contract: '1 Share', volatility: 'Alta' },
+      { symbol: 'AMZN', tvSymbol: 'NASDAQ:AMZN', label: 'Amazon', market: 'Stocks', leverage: '1:20', spread: 'Variable', hours: 'NYSE/NASDAQ', contract: '1 Share', volatility: 'Media' },
+      { symbol: 'MSFT', tvSymbol: 'NASDAQ:MSFT', label: 'Microsoft', market: 'Stocks', leverage: '1:20', spread: 'Variable', hours: 'NYSE/NASDAQ', contract: '1 Share', volatility: 'Media' },
+      { symbol: 'NVDA', tvSymbol: 'NASDAQ:NVDA', label: 'NVIDIA', market: 'Stocks', leverage: '1:20', spread: 'Variable', hours: 'NYSE/NASDAQ', contract: '1 Share', volatility: 'Alta' }
+    ]
   };
 
-  function calculateFloatingPnL() {
-    let total = 0;
-    (account.positions || []).forEach(pos => { total += Number(pos.pnl || 0); });
-    return total;
+  const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Commodities', 'Stocks'];
+
+  function flattenCatalog() {
+    return MARKET_ORDER.flatMap(m => (MARKET_CATALOG[m] || []).map(x => ({ ...x })));
   }
 
-  function calculateAccountMargin(lotSize, price) {
-    const contractSize = 100000;
-    const margin = (Number(lotSize) * contractSize * Number(price)) / (account.leverage || 1);
-    return margin;
-  }
+  /* ===========================
+     TradingView
+  =========================== */
+  let chartWidget = null;
+  let currentSymbol = (flattenCatalog()[0] && flattenCatalog()[0].symbol) || 'BTCUSDT';
 
-  function updateMarginMetrics() {
-    account.equity = Number(account.balance || 0) + Number(calculateFloatingPnL());
-    account.freeMargin = Number(account.equity) - Number(account.marginUsed || 0);
-    account.marginLevel = account.marginUsed > 0 ? (account.equity / account.marginUsed) * 100 : 0;
-  }
-
-  function updateAccountUI() {
+  function initTradingView(symbolMeta) {
     try {
-      const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-      setText('balanceEl', (account.balance || 0).toLocaleString());
-      setText('equityEl', (account.equity || 0).toLocaleString());
-      setText('marginUsedEl', (account.marginUsed || 0).toLocaleString());
-      setText('freeMarginEl', (account.freeMargin || 0).toLocaleString());
-      setText('marginLevelEl', account.marginLevel ? (Math.round(account.marginLevel * 100) / 100 + '%') : '0%');
+      const containerId = 'tradingview_chart';
+      let cont = document.getElementById(containerId);
+      if (!cont) {
+        cont = document.createElement('div');
+        cont.id = containerId;
+        cont.style.cssText = 'min-height:420px;background:#060606;border-radius:12px;overflow:hidden';
+        const target = document.getElementById('tv_chart_container') || document.body;
+        target.innerHTML = '';
+        target.appendChild(cont);
+      }
 
-      const listEl = document.getElementById('positionsList');
-      if (listEl) {
-        const rows = (account.positions || []).map(p =>
-          `<div class="pos-row">${escapeHtml(p.symbol || '')} ${(p.side || '').toUpperCase()} ${p.lots || 0} lots PnL:${p.pnl || 0}</div>`
-        );
-        listEl.innerHTML = rows.join('');
+      const tvSymbol = symbolMeta && symbolMeta.tvSymbol ? symbolMeta.tvSymbol : (symbolMeta && symbolMeta.symbol ? symbolMeta.symbol : currentSymbol);
+      if (window.TradingView && typeof window.TradingView.widget === 'function') {
+        cont.innerHTML = '';
+        chartWidget = new TradingView.widget({
+          autosize: true,
+          symbol: tvSymbol,
+          interval: '5',
+          timezone: 'Etc/UTC',
+          theme: 'dark',
+          style: '1',
+          locale: 'es',
+          enable_publishing: false,
+          allow_symbol_change: true,
+          container_id: containerId,
+          hide_side_toolbar: false,
+          withdateranges: true,
+          save_image: false
+        });
+      } else {
+        cont.innerHTML = `<div style="padding:16px;color:var(--muted)">TradingView no está cargado todavía. El símbolo actual es ${escapeHtml(tvSymbol)}.</div>`;
       }
     } catch (e) {
-      warn('updateAccountUI error', e);
+      warn('initTradingView', e);
     }
   }
 
-  async function loadAccount() {
-    try {
-      if (!getSavedToken()) return null;
-      const data = await apiFetch('/account').catch(() => null);
-      if (!data) return null;
-
-      if (data.account) {
-        account = data.account;
-      } else if (typeof data === 'object') {
-        account.balance = Number(data.balance ?? data.bal ?? account.balance);
-        account.leverage = Number(data.leverage ?? account.leverage);
-        account.positions = Array.isArray(data.positions) ? data.positions : account.positions;
-        account.marginUsed = Number(data.marginUsed ?? data.used ?? account.marginUsed);
-      }
-
-      updateMarginMetrics();
-      updateAccountUI();
-      window.__LEONES_ACCOUNT = account;
-      return account;
-    } catch (e) {
-      console.error('Error cargando cuenta:', e);
-      return null;
-    }
+  function ensureTradingWidgetFallback() {
+    if (typeof window.initTradingWidget === 'function') return;
+    window.initTradingWidget = function (symbol) {
+      const meta = findSymbolMeta(symbol);
+      initTradingView(meta || { symbol });
+    };
   }
 
-  NS.loadAccount = loadAccount;
-  NS.updateAccountUI = updateAccountUI;
-  NS.calculateAccountMargin = calculateAccountMargin;
-
-  /* Trading - symbols / positions */
+  /* ===========================
+     Mercado / símbolos
+  =========================== */
   window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
   const T = window.__LEONES_TRADING__;
 
-  T.ALL_SYMBOLS = T.ALL_SYMBOLS || [
-    { symbol: 'BINANCE:BTCUSDT', label: 'BTC/USDT', market: 'Crypto' },
-    { symbol: 'BINANCE:ETHUSDT', label: 'ETH/USDT', market: 'Crypto' },
-    { symbol: 'NASDAQ:AAPL', label: 'AAPL', market: 'Stocks' }
-  ];
+  T.ALL_SYMBOLS = T.ALL_SYMBOLS || flattenCatalog();
   T.symbolPrices = T.symbolPrices || {};
   T.positions = T.positions || [];
   T.orderBooks = T.orderBooks || {};
+  T.marketFilter = T.marketFilter || 'All';
 
-  let tradingSocket = null;
-  let demoTicker = null;
-  let currentSymbol = (T.ALL_SYMBOLS && T.ALL_SYMBOLS[0] && T.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
-  let currentLeverage = 10;
-  let currentEntryPrice = null;
+  function findSymbolMeta(symbol) {
+    const all = flattenCatalog();
+    const s = String(symbol || '').replace(/^.*:/, '').toUpperCase();
+    return all.find(x =>
+      String(x.symbol).toUpperCase() === s ||
+      String(x.tvSymbol).toUpperCase() === s ||
+      String(x.symbol).toUpperCase() === String(symbol || '').toUpperCase() ||
+      String(x.tvSymbol).toUpperCase() === String(symbol || '').toUpperCase()
+    ) || null;
+  }
 
-  function ensureTradingSocket() {
+  function setMarketFilter(market) {
+    T.marketFilter = market || 'All';
+    renderSymbolsGrid();
+  }
+
+  async function loadMarketCatalog() {
     try {
-      if (!getSavedToken()) {
-        startDemoPrices();
-        return null;
-      }
+      const endpoints = [
+        '/market/list',
+        '/market/symbols',
+        '/api/market/list',
+        '/api/market/symbols',
+        '/symbols',
+        '/api/symbols'
+      ];
 
-      if (tradingSocket && tradingSocket.connected) return tradingSocket;
-
-      tradingSocket = (NS.initSocket && typeof NS.initSocket === 'function') ? NS.initSocket() : initSocket();
-      if (!tradingSocket) {
-        startDemoPrices();
-        return null;
-      }
-
-      if (tradingSocket.__leones_trading_attached) return tradingSocket;
-      tradingSocket.__leones_trading_attached = true;
-
-      tradingSocket.on('prices_snapshot', snap => {
+      for (const ep of endpoints) {
         try {
-          if (!snap) return;
-          if (Array.isArray(snap)) {
-            snap.forEach(it => {
-              if (it && it.symbol) T.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() };
-            });
-          } else if (typeof snap === 'object') {
-            Object.keys(snap).forEach(k => {
-              const it = snap[k];
-              T.symbolPrices[k] = (it && typeof it === 'object')
-                ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() }
-                : { price: snap[k], ts: Date.now() };
-            });
+          const r = await apiFetch(ep).catch(() => null);
+          if (!r) continue;
+
+          if (Array.isArray(r) && r.length) {
+            const normalized = r.map(x => ({
+              symbol: x.symbol || x.code || x.ticker || x.s || '',
+              tvSymbol: x.tvSymbol || x.tradingView || x.symbol || x.code || '',
+              label: x.label || x.name || x.symbol || x.code || x.ticker || '',
+              market: x.market || x.type || 'Market',
+              leverage: x.leverage || x.maxLeverage || 'N/A',
+              spread: x.spread || x.spreadInfo || 'Variable',
+              hours: x.hours || x.session || '24/7',
+              contract: x.contract || x.contractSize || 'N/A',
+              volatility: x.volatility || 'N/A'
+            })).filter(x => x.symbol);
+
+            if (normalized.length) {
+              const grouped = {};
+              normalized.forEach(x => {
+                const m = x.market || 'Market';
+                grouped[m] = grouped[m] || [];
+                grouped[m].push(x);
+              });
+              Object.keys(grouped).forEach(k => {
+                MARKET_CATALOG[k] = grouped[k];
+              });
+              T.ALL_SYMBOLS = flattenCatalog();
+              return T.ALL_SYMBOLS;
+            }
           }
-          renderSymbolsGrid();
-        } catch (e) {
-          warn('prices_snapshot', e);
-        }
-      });
-
-      tradingSocket.on('price', p => {
-        try {
-          const symbol = p?.symbol || p?.s || p?.t;
-          if (!symbol) return;
-          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
-          T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
-          updatePriceInUI(symbol, price);
-        } catch (e) {
-          warn('price event', e);
-        }
-      });
-
-      tradingSocket.on('symbols_update', symbols => {
-        try {
-          if (!symbols) return;
-          if (Array.isArray(symbols)) T.ALL_SYMBOLS = symbols;
-          else T.ALL_SYMBOLS = Object.keys(symbols).map(k => ({
-            symbol: k,
-            label: symbols[k].label || k,
-            market: symbols[k].market || 'Crypto'
-          }));
-          renderSymbolsGrid();
-        } catch (e) {
-          warn('symbols_update handler', e);
-        }
-      });
-
-      tradingSocket.on('orderbook', ob => {
-        try {
-          if (!ob || !ob.symbol) return;
-          T.orderBooks = T.orderBooks || {};
-          T.orderBooks[ob.symbol] = ob;
-          const bidsEl = document.getElementById('ob-bids');
-          if (bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
         } catch (e) {}
-      });
+      }
 
-      tradingSocket.on('connect_error', e => warn('trading socket connect_error', e));
-      tradingSocket.on('connect', () => stopDemoPrices());
-
-      return tradingSocket;
+      T.ALL_SYMBOLS = flattenCatalog();
+      return T.ALL_SYMBOLS;
     } catch (e) {
-      warn('ensureTradingSocket', e);
-      startDemoPrices();
-      return null;
+      warn('loadMarketCatalog error', e);
+      T.ALL_SYMBOLS = flattenCatalog();
+      return T.ALL_SYMBOLS;
     }
   }
 
@@ -1454,36 +1364,77 @@ if (window.__LEONES_BOOTED__) {
     const c = document.getElementById('symbolsGrid');
     if (!c) return null;
     c.style.display = 'grid';
-    c.style.gridTemplateColumns = 'repeat(auto-fill,minmax(220px,1fr))';
-    c.style.gap = '8px';
+    c.style.gridTemplateColumns = 'repeat(auto-fill,minmax(240px,1fr))';
+    c.style.gap = '10px';
     return c;
+  }
+
+  function renderMarketTabs() {
+    let tabs = document.getElementById('marketTabs');
+    if (!tabs) {
+      tabs = document.createElement('div');
+      tabs.id = 'marketTabs';
+      tabs.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;max-width:1200px;margin:12px auto 0;';
+      const anchor = document.getElementById('symbolsGrid') || document.body.firstChild;
+      if (anchor && anchor.parentNode) {
+        anchor.parentNode.insertBefore(tabs, anchor);
+      } else {
+        document.body.insertBefore(tabs, document.body.firstChild);
+      }
+    }
+
+    const markets = ['All', ...MARKET_ORDER];
+    tabs.innerHTML = markets.map(m => `
+      <button class="btn ${T.marketFilter === m ? 'glow' : 'ghost'}" data-market="${escapeHtml(m)}">${escapeHtml(m)}</button>
+    `).join('');
+
+    tabs.querySelectorAll('button[data-market]').forEach(btn => {
+      btn.addEventListener('click', () => setMarketFilter(btn.dataset.market));
+    });
   }
 
   function renderSymbolsGrid() {
     const container = buildSymbolsContainer();
     if (!container) return;
+
+    renderMarketTabs();
+
     container.innerHTML = '';
-    const list = (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length) ? T.ALL_SYMBOLS : [];
+    const all = flattenCatalog();
+    const list = T.marketFilter === 'All'
+      ? all
+      : all.filter(x => x.market === T.marketFilter);
+
     list.forEach(s => {
       try {
         const card = document.createElement('div');
         card.className = 'symbol-card';
-        card.style.cssText = 'background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
-        const priceObj = T.symbolPrices[s.symbol];
+        card.style.cssText = 'background:linear-gradient(180deg,#070707,#0c0c0c);padding:12px;border-radius:14px;border:1px solid rgba(255,255,255,0.04);cursor:pointer;min-height:160px;';
+
+        const priceObj = T.symbolPrices[s.symbol] || T.symbolPrices[s.tvSymbol] || null;
         const price = priceObj ? priceObj.price : null;
 
         card.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
             <div>
-              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || 'Unknown')} · ${escapeHtml(s.symbol)}</div>
+              <div style="font-weight:900;color:var(--gold);font-size:15px">${escapeHtml(s.label || s.symbol)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || '')}</div>
             </div>
             <div style="text-align:right">
-              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
+              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:800;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : '—'}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:6px">Último</div>
             </div>
           </div>
+
+          <div style="margin-top:10px;color:var(--text);font-size:12px;line-height:1.45">
+            <div><strong>Leverage:</strong> ${escapeHtml(s.leverage || 'N/A')}</div>
+            <div><strong>Spread:</strong> ${escapeHtml(s.spread || 'Variable')}</div>
+            <div><strong>Horario:</strong> ${escapeHtml(s.hours || 'N/A')}</div>
+            <div><strong>Contrato:</strong> ${escapeHtml(s.contract || 'N/A')}</div>
+            <div><strong>Volatilidad:</strong> ${escapeHtml(s.volatility || 'N/A')}</div>
+          </div>
         `;
+
         card.addEventListener('click', () => selectSymbol(s.symbol));
         container.appendChild(card);
       } catch (e) {}
@@ -1491,29 +1442,32 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function selectSymbol(symbol) {
-    currentSymbol = symbol;
+    currentSymbol = String(symbol || '').replace(/^.*:/, '');
+    const meta = findSymbolMeta(symbol) || findSymbolMeta(currentSymbol) || { symbol: currentSymbol, tvSymbol: currentSymbol, label: currentSymbol, market: '' };
+
     const ts = document.getElementById('tradingSymbol');
-    if (ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
+    if (ts) ts.innerText = meta.label || currentSymbol;
+
     if (typeof window.initTradingWidget === 'function') {
       try { window.initTradingWidget(symbol); } catch (e) {}
+    } else {
+      initTradingView(meta);
     }
-    const priceObj = T.symbolPrices[symbol];
-    if (priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
+
+    const priceObj = T.symbolPrices[meta.symbol] || T.symbolPrices[meta.tvSymbol];
+    if (priceObj && priceObj.price) updatePriceInUI(meta.symbol, priceObj.price);
+
     try {
       const s = ensureTradingSocket();
-      if (s && s.emit) s.emit('request_orderbook', { symbol });
+      if (s && s.emit) s.emit('request_orderbook', { symbol: meta.symbol, tvSymbol: meta.tvSymbol });
     } catch (e) {}
   }
 
   function updatePriceInUI(symbol, price) {
     try {
       document.querySelectorAll(`[data-symbol="${symbol}"]`).forEach(el => el.textContent = formatNumber(price));
-      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
-      if ((symbol || '').split(':').pop() && tsText.includes((symbol || '').split(':').pop())) {
-        const opPrice = document.getElementById('op-price');
-        if (opPrice) opPrice.textContent = formatNumber(price);
-      }
-      if (!currentEntryPrice) currentEntryPrice = price;
+      const opPrice = document.getElementById('op-price');
+      if (opPrice) opPrice.textContent = formatNumber(price);
       renderMarginCalculator();
     } catch (e) {}
   }
@@ -1545,14 +1499,14 @@ if (window.__LEONES_BOOTED__) {
     try {
       const marginEl = document.getElementById('marginCalc');
       if (!marginEl) return;
-      const priceObj = T.symbolPrices[currentSymbol];
-      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
+      const priceObj = T.symbolPrices[currentSymbol] || null;
+      const marketPrice = priceObj ? Number(priceObj.price) : 0;
       const posSize = Number(document.getElementById('input_position_size')?.value || 0);
-      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
+      const lev = Number(document.getElementById('input_leverage')?.value || 1);
       const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
 
       marginEl.innerHTML = `
-        <div>Simulación — ${escapeHtml((currentSymbol || '').split(':').pop() || currentSymbol)}</div>
+        <div>Simulación — ${escapeHtml((currentSymbol || '').toUpperCase())}</div>
         <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
         <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
         <div>Qty aprox.: <strong>${formatNumber(res.qty, 8)}</strong></div>
@@ -1564,6 +1518,9 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  /* ===========================
+     Orden / cuenta
+  =========================== */
   async function placeOrder({ side = 'buy', positionSize = 0, leverage = 1, type = 'market', price = null } = {}) {
     try {
       if (!getSavedToken()) {
@@ -1649,102 +1606,153 @@ if (window.__LEONES_BOOTED__) {
     } catch (e) {}
   }
 
+  async function loadAccount() {
+    try {
+      if (!getSavedToken()) return null;
+      const data = await apiFetch('/account').catch(() => null);
+      if (!data) return null;
+
+      const account = data.account || data;
+      const balance = Number(account.balance ?? account.bal ?? 0);
+      const equity = Number(account.equity ?? balance);
+      const pnl = Number(account.pnl ?? 0);
+
+      const balanceEl = document.getElementById('balanceEl');
+      if (balanceEl) balanceEl.textContent = balance.toLocaleString();
+
+      const equityEl = document.getElementById('equityEl');
+      if (equityEl) equityEl.textContent = equity.toLocaleString();
+
+      const pnlEl = document.getElementById('pnlEl');
+      if (pnlEl) pnlEl.textContent = pnl.toLocaleString();
+
+      window.__LEONES_ACCOUNT = account;
+      return account;
+    } catch (e) {
+      console.error('Error cargando cuenta:', e);
+      return null;
+    }
+  }
+
+  NS.loadAccount = loadAccount;
+  NS.calculateMargin = calculateMargin;
+  NS.fetchPositions = fetchPositions;
+
+  /* ===========================
+     Trading socket
+  =========================== */
+  let tradingSocket = null;
+
+  function ensureTradingSocket() {
+    try {
+      const token = getSavedToken();
+      if (!token) return null;
+
+      if (tradingSocket && tradingSocket.connected) return tradingSocket;
+
+      if (typeof io !== 'function') {
+        warn('socket.io client missing');
+        return null;
+      }
+
+      tradingSocket = io(WS_BASE, {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        withCredentials: true,
+        auth: { token },
+        autoConnect: true
+      });
+
+      window.__LEONES_SOCKET__ = { socket: tradingSocket };
+
+      tradingSocket.on('connect', () => log('socket connected', tradingSocket.id));
+      tradingSocket.on('disconnect', (r) => log('socket disconnected', r));
+      tradingSocket.on('connect_error', (err) => warn('socket connect_error', err));
+
+      tradingSocket.on('prices_snapshot', snap => {
+        try {
+          if (!snap) return;
+          const list = Array.isArray(snap) ? snap : Object.values(snap);
+          list.forEach(it => {
+            const symbol = it.symbol || it.s || it.t || it.code || '';
+            const price = it.price ?? it.p ?? it.v ?? it.value ?? it.last ?? null;
+            if (!symbol || price === null || price === undefined) return;
+            T.symbolPrices[symbol] = { price, ts: it.ts ?? Date.now() };
+            updatePriceInUI(symbol, price);
+          });
+        } catch (e) {
+          warn('prices_snapshot', e);
+        }
+      });
+
+      tradingSocket.on('price', p => {
+        try {
+          const symbol = p?.symbol || p?.s || p?.t || p?.code;
+          if (!symbol) return;
+          const price = p.price ?? p.p ?? p.v ?? p.value ?? p.last ?? p;
+          T.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
+          updatePriceInUI(symbol, price);
+        } catch (e) {
+          warn('price event', e);
+        }
+      });
+
+      tradingSocket.on('symbols_update', symbols => {
+        try {
+          if (!symbols) return;
+          if (Array.isArray(symbols)) {
+            T.ALL_SYMBOLS = symbols.map(x => ({
+              symbol: x.symbol || x.code || '',
+              tvSymbol: x.tvSymbol || x.symbol || x.code || '',
+              label: x.label || x.name || x.symbol || x.code || '',
+              market: x.market || 'Market',
+              leverage: x.leverage || 'N/A',
+              spread: x.spread || 'Variable',
+              hours: x.hours || 'N/A',
+              contract: x.contract || 'N/A',
+              volatility: x.volatility || 'N/A'
+            })).filter(x => x.symbol);
+          }
+          renderSymbolsGrid();
+        } catch (e) {
+          warn('symbols_update handler', e);
+        }
+      });
+
+      tradingSocket.on('orderbook', ob => {
+        try {
+          if (!ob || !ob.symbol) return;
+          T.orderBooks = T.orderBooks || {};
+          T.orderBooks[ob.symbol] = ob;
+          const bidsEl = document.getElementById('ob-bids');
+          if (bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
+        } catch (e) {}
+      });
+
+      return tradingSocket;
+    } catch (e) {
+      warn('ensureTradingSocket', e);
+      return null;
+    }
+  }
+
+  NS.initSocket = initSocket;
+  NS.ensureTradingSocket = ensureTradingSocket;
+
+  /* ===========================
+     TradingView fallback
+  =========================== */
   function provideTradingWidgetFallback() {
     if (typeof window.initTradingWidget === 'function') return;
     window.initTradingWidget = function (symbol) {
-      const cont = document.getElementById('tv_chart_container');
-      if (!cont) return;
-      cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol || '').split(':').pop() || symbol)} (widget no disponible)</div>`;
+      const meta = findSymbolMeta(symbol);
+      initTradingView(meta || { symbol });
     };
   }
 
-  function startDemoPrices() {
-    if (demoTicker) return;
-    demoTicker = setInterval(() => {
-      (T.ALL_SYMBOLS && T.ALL_SYMBOLS.length ? T.ALL_SYMBOLS : [{ symbol: 'BINANCE:BTCUSDT' }]).forEach(s => {
-        const k = s.symbol;
-        const old = (T.symbolPrices[k] && Number(T.symbolPrices[k].price)) || (Math.random() * 100);
-        const change = (Math.random() - 0.5) * Math.max(0.0001, Math.abs(old) * 0.002);
-        const next = Number(Math.max(0.00001, old + change).toFixed(6));
-        T.symbolPrices[k] = { price: next, ts: Date.now() };
-      });
-      renderSymbolsGrid();
-      renderMarginCalculator();
-    }, 1200);
-  }
-
-  function stopDemoPrices() {
-    if (demoTicker) {
-      clearInterval(demoTicker);
-      demoTicker = null;
-    }
-  }
-
-  async function openTrade(symbol, type, lot, price, sl, tp) {
-    try {
-      const payload = { symbol, type, lot, price, sl, tp };
-      const candidates = ['/trade/open', '/api/trade/open', '/trade/place', '/api/trade/place'];
-      for (const ep of candidates) {
-        try {
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(() => null);
-          if (res) {
-            await loadAccount().catch(() => {});
-            await fetchPositions().catch(() => {});
-            return res;
-          }
-        } catch (e) {}
-      }
-      throw new Error('No endpoint responded for openTrade');
-    } catch (e) {
-      error('openTrade', e);
-      throw e;
-    }
-  }
-
-  async function closeTrade(positionId) {
-    try {
-      const payload = { positionId };
-      const candidates = ['/trade/close', '/api/trade/close', '/trade/closePosition', '/api/trade/closePosition'];
-      for (const ep of candidates) {
-        try {
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(() => null);
-          if (res) {
-            await loadAccount().catch(() => {});
-            await fetchPositions().catch(() => {});
-            return res;
-          }
-        } catch (e) {}
-      }
-      throw new Error('No endpoint responded for closeTrade');
-    } catch (e) {
-      error('closeTrade', e);
-      throw e;
-    }
-  }
-
-  async function checkMarginCall() {
-    try {
-      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(() => null);
-      if (!acc) return false;
-      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
-      if (marginLevel !== null && Number(marginLevel) < 50) {
-        alert('Margin Call - posiciones cerradas automáticamente');
-        const poses = acc.positions ?? T.positions ?? [];
-        for (const pos of poses) {
-          try {
-            const pid = pos._id || pos.id || pos.positionId || pos.position_id;
-            if (pid) await closeTrade(pid).catch(() => {});
-          } catch (e) {}
-        }
-        return true;
-      }
-      return false;
-    } catch (e) {
-      warn('checkMarginCall', e);
-      return false;
-    }
-  }
-
+  /* ===========================
+     Init trading UI
+  =========================== */
   async function initTradingModule() {
     try {
       if (window.__LEONES_TRADING_INITED__) {
@@ -1764,6 +1772,7 @@ if (window.__LEONES_BOOTED__) {
         const panel = document.createElement('div');
         panel.id = 'tradingPanel';
         panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px';
+
         panel.innerHTML = `
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
             <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
@@ -1773,7 +1782,7 @@ if (window.__LEONES_BOOTED__) {
           </div>
           <hr/>
           <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
-            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
+            <div id="tv_chart_container" style="min-height:420px;background:#060606;border-radius:8px;padding:8px"></div>
             <div style="display:flex;flex-direction:column;gap:8px">
               <div style="background:#080808;padding:8px;border-radius:8px">
                 <label>Posición (USD)</label>
@@ -1804,45 +1813,37 @@ if (window.__LEONES_BOOTED__) {
         document.body.appendChild(panel);
       }
 
-      if (getSavedToken()) ensureTradingSocket();
-
-      try {
-        const endpoints = ['/market/list', '/market/symbols', '/api/market/list', '/api/symbols', '/symbols'];
-        for (const ep of endpoints) {
-          try {
-            const r = await apiFetch(ep).catch(() => null);
-            if (Array.isArray(r) && r.length) {
-              T.ALL_SYMBOLS = r;
-              break;
-            }
-          } catch (e) {}
-        }
-      } catch (e) {}
-
+      await loadMarketCatalog();
       renderSymbolsGrid();
+      provideTradingWidgetFallback();
+
+      if (getSavedToken()) {
+        ensureTradingSocket();
+        await loadAccount().catch(() => {});
+        await fetchPositions().catch(() => {});
+      } else {
+        restorePublicHeader();
+      }
 
       try {
         const posInput = document.getElementById('input_position_size');
         const levInput = document.getElementById('input_leverage');
 
         if (posInput) posInput.addEventListener('input', renderMarginCalculator);
-        if (levInput) levInput.addEventListener('input', (e) => {
-          currentLeverage = Number(e.target.value) || currentLeverage;
-          renderMarginCalculator();
-        });
+        if (levInput) levInput.addEventListener('input', renderMarginCalculator);
 
         const buyBtn = document.getElementById('btnBuy');
         const sellBtn = document.getElementById('btnSell');
 
         if (buyBtn) buyBtn.addEventListener('click', async () => {
           const pos = Number(document.getElementById('input_position_size')?.value || 0);
-          const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
+          const lev = Number(document.getElementById('input_leverage')?.value || 1);
           await placeOrder({ side: 'buy', positionSize: pos, leverage: lev, type: 'market' }).catch(() => {});
         });
 
         if (sellBtn) sellBtn.addEventListener('click', async () => {
           const pos = Number(document.getElementById('input_position_size')?.value || 0);
-          const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
+          const lev = Number(document.getElementById('input_leverage')?.value || 1);
           await placeOrder({ side: 'sell', positionSize: pos, leverage: lev, type: 'market' }).catch(() => {});
         });
 
@@ -1851,17 +1852,8 @@ if (window.__LEONES_BOOTED__) {
 
         const fetchSymBtn = document.getElementById('btnFetchSymbols');
         if (fetchSymBtn) fetchSymBtn.addEventListener('click', async () => {
-          const eps = ['/market/list', '/market/symbols', '/api/market/list', '/api/symbols', '/symbols'];
-          for (const ep of eps) {
-            try {
-              const r = await apiFetch(ep).catch(() => null);
-              if (Array.isArray(r) && r.length) {
-                T.ALL_SYMBOLS = r;
-                renderSymbolsGrid();
-                break;
-              }
-            } catch (e) {}
-          }
+          await loadMarketCatalog();
+          renderSymbolsGrid();
         });
 
         renderMarginCalculator();
@@ -1869,45 +1861,30 @@ if (window.__LEONES_BOOTED__) {
         warn('wireTradingUI', e);
       }
 
-      provideTradingWidgetFallback();
-
-      if (getSavedToken()) {
-        await fetchPositions().catch(() => {});
-        await loadAccount().catch(() => {});
-      } else {
-        restorePublicHeader();
+      const first = flattenCatalog()[0];
+      if (first) {
+        currentSymbol = first.symbol;
+        initTradingView(first);
       }
-
-      setTimeout(() => {
-        const anyPrice = Object.keys(T.symbolPrices || {}).length;
-        if (!anyPrice) startDemoPrices();
-      }, 2000);
 
     } catch (e) {
       error('initTradingModule', e);
     }
   }
 
-  window.loadPositions = window.loadPositions || (async function () {
-    try {
-      if (window.__LEONES_TRADING__ && typeof window.__LEONES_TRADING__.fetchPositions === 'function') {
-        return await window.__LEONES_TRADING__.fetchPositions();
-      }
-      if (typeof fetchPositions === 'function') return await fetchPositions();
-    } catch (e) {
-      console.warn('loadPositions alias error', e);
-    }
-  });
+  function loadPositionsAlias() {
+    return fetchPositions();
+  }
 
+  window.loadPositions = window.loadPositions || loadPositionsAlias;
   window._LEONES_TRADING = window._LEONES_TRADING || {};
   window._LEONES_TRADING.selectSymbol = selectSymbol;
   window._LEONES_TRADING.placeOrder = placeOrder;
   window._LEONES_TRADING.fetchPositions = fetchPositions;
   window._LEONES_TRADING.calculateMargin = calculateMargin;
-  window._LEONES_TRADING.openTrade = openTrade;
-  window._LEONES_TRADING.closeTrade = closeTrade;
   window._LEONES_TRADING.loadAccount = loadAccount;
-  window._LEONES_TRADING.checkMarginCall = checkMarginCall;
+  window._LEONES_TRADING.loadMarketCatalog = loadMarketCatalog;
+  window._LEONES_TRADING.setMarketFilter = setMarketFilter;
 
   document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -1930,20 +1907,14 @@ if (window.__LEONES_BOOTED__) {
       } catch (e) {}
 
       initTradingModule().catch(() => {});
-
-      if (getSavedToken()) {
-        loadAccount().catch(() => {});
-        try { (window.loadPositions && typeof window.loadPositions === 'function') && window.loadPositions(); } catch (e) {}
-      }
     } catch (e) {
       console.error('Unified script init error', e);
     }
   });
 
-  log('[LEONES] unified script loaded (defensive mode ON)');
+  log('[LEONES] JS #1 loaded without demo mode');
 }
 </script>
-
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
@@ -2344,638 +2315,501 @@ if (window.__LEONES_BOOTED__) {
 
 <script>
 /**
- * trading.js — trading UI (corregido y completo)
- *
- * Instrucciones:
- * - Incluye /socket.io/socket.io.js antes de este script.
- * - Usa localStorage 'token' o 'BROKER_TOKEN' para autenticación.
- * - Este módulo es defensivo: evita inicializaciones dobles y soporta fallbacks demo.
+ * trading.ext.js — complemento real para broker UI
+ * - No crea demo
+ * - No repite sesión ni login
+ * - No repite catálogo base ni lógica de órdenes
+ * - Solo consume backend real y mejora UI
+ * - Muestra confirmación bonita de cuenta verificada
  */
 (function () {
   "use strict";
 
-  // ====== CONFIG / GLOBALS ======
-  const API_BASE = window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
-  const SOCKET_BASE = window.SOCKET_BASE || window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
-  window.SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+  if (window.__LEONES_BROKER_EXT2__) {
+    console.warn("[BROKER-EXT2] already loaded, skipping.");
+    return;
+  }
+  window.__LEONES_BROKER_EXT2__ = true;
 
-  // Ensure global namespace exists
-  window._LEONES = window._LEONES || {};
-  const NS = window._LEONES;
+  const NS = window._LEONES = window._LEONES || {};
+  const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
-  // Module state (exposed globally)
-  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-  const state = window.__LEONES_TRADING__;
-  state.ALL_SYMBOLS = state.ALL_SYMBOLS || [];
-  state.symbolPrices = state.symbolPrices || {};
-  state.positions = state.positions || [];
-  state.orderBooks = state.orderBooks || {};
+  const API_BASE = window.API_BASE || window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 
-  // Local socket ref
-  let socket = null;
+  const log = (...a) => { try { console.log("[BROKER-EXT2]", ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn("[BROKER-EXT2]", ...a); } catch (e) {} };
+  const escapeHtml = (s) => String(s || "").replace(/[&<>"']/g, m => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[m]));
 
-  // ====== UTILS ======
-  function log(...a){ try{ console.log('[TRADING]', ...a); }catch(e){} }
-  function warn(...a){ try{ console.warn('[TRADING]', ...a); }catch(e){} }
-  function err(...a){ try{ console.error('[TRADING]', ...a); }catch(e){} }
-
-  function formatNumber(n, digits = 6){
-    const num = Number(n);
-    if(!isFinite(num)) return '--';
-    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined,{maximumFractionDigits:1});
-    return num.toLocaleString(undefined,{maximumFractionDigits:digits});
+  function safeParseJSON(v, fallback = null) {
+    try { return JSON.parse(v); } catch (e) { return fallback; }
   }
 
-  function escapeHtml(s){
-    return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});
-  }
-
-  // ====== apiFetch fallback (robusto) ======
-  async function apiFetchFallback(path, opts = {}) {
+  function getToken() {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-      // normalize url
-      let url = '';
-      path = String(path || '');
-      if(path.startsWith('http://') || path.startsWith('https://')) url = path;
-      else {
-        const baseNoApi = String(API_BASE).replace(/\/api\/?$/,'');
-        if(path.startsWith('/')) url = baseNoApi + path;
-        else url = (API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE) + (path.startsWith('/') ? path : ('/' + path));
-      }
-
-      const headers = (opts.headers && typeof opts.headers === 'object') ? {...opts.headers} : {};
-      if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
-        headers['Content-Type'] = 'application/json';
-      }
-      if(token && !headers['Authorization'] && !headers['authorization']){
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-
-      const fetchOpts = {
-        method: opts.method || 'GET',
-        credentials: 'include',
-        ...opts,
-        headers
-      };
-
-      const res = await fetch(url, fetchOpts);
-      if(res.status === 204) return {};
-      const text = await res.text().catch(()=>null);
-      let data = null;
-      if(text){
-        try { data = JSON.parse(text); } catch(e) { data = text; }
-      }
-      if(res.ok) return data;
-      const error = new Error('HTTP ' + res.status);
-      error.status = res.status;
-      error.body = data;
-      throw error;
-    } catch(e){
-      throw e;
-    }
-  }
-
-  // choose central apiFetch (prefer existing app-provided)
-  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
-
-  // initSocket fallback (if app provides one use it)
-  const initSocket = NS.initSocket || (() => (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) ? window.__LEONES_SOCKET__.socket : null);
-
-  // ====== SOCKET wiring (defensivo) ======
-  function ensureSocket(){
-    try {
-      if(socket && socket.connected) return socket;
-
-      socket = initSocket();
-      if(!socket){
-        warn('socket not available — realtime disabled');
-        return null;
-      }
-
-      if(socket.__leones_trading_attached) return socket;
-      socket.__leones_trading_attached = true;
-
-      socket.on('prices_snapshot', snap => {
-        try{
-          if(!snap) return;
-          if(Array.isArray(snap)){
-            snap.forEach(it => { if(it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
-          } else if(typeof snap === 'object'){
-            Object.keys(snap).forEach(k => {
-              const it = snap[k];
-              state.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
-            });
-          }
-          renderSymbolsGrid();
-        }catch(e){ warn('prices_snapshot handler', e); }
-      });
-
-      socket.on('price', p => {
-        try{
-          const symbol = p?.symbol || p?.s || p?.t;
-          if(!symbol) return;
-          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
-          state.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
-          updatePriceInUI(symbol, price);
-        }catch(e){ warn('price event error', e); }
-      });
-
-      socket.on('symbols_update', symbols => {
-        try{
-          if(!symbols) return;
-          if(Array.isArray(symbols)) state.ALL_SYMBOLS = symbols;
-          else state.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
-          renderSymbolsGrid();
-        }catch(e){ warn('symbols_update handler', e); }
-      });
-
-      socket.on('orderbook', ob => {
-        try{
-          if(!ob || !ob.symbol) return;
-          state.orderBooks = state.orderBooks || {};
-          state.orderBooks[ob.symbol] = ob;
-          const bidsEl = document.getElementById('ob-bids');
-          if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
-        }catch(e){}
-      });
-
-      socket.on('connect_error', e => { warn('socket connect_error', e); });
-
-      socket.on('disconnect', (r) => { log('socket disconnected', r); });
-
-      return socket;
-    } catch(e){
-      warn('ensureSocket error', e);
+      return localStorage.getItem("token") || localStorage.getItem("BROKER_TOKEN") || (safeParseJSON(localStorage.getItem(SESSION_KEY), null)?.token || null);
+    } catch (e) {
       return null;
     }
   }
 
-  // ====== SYMBOLS GRID ======
-  function buildSymbolsContainer(){
-    const container = document.getElementById('symbolsGrid');
-    if(!container) return null;
-    container.style.display = 'grid';
-    container.style.gridTemplateColumns = 'repeat(auto-fill,minmax(220px,1fr))';
-    container.style.gap = '8px';
-    return container;
+  function getUser() {
+    try {
+      return safeParseJSON(localStorage.getItem(SESSION_KEY), null) || {};
+    } catch (e) {
+      return {};
+    }
   }
 
-  function renderSymbolsGrid(){
-    const container = buildSymbolsContainer();
-    if(!container) return;
-    container.innerHTML = '';
-    const list = (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length) ? state.ALL_SYMBOLS : [
-      { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-      { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-      { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
-    ];
+  function normalizeSymbolRow(x) {
+    if (!x || typeof x !== "object") return null;
+    const symbol = String(x.symbol || x.code || x.ticker || x.s || x.tvSymbol || "").trim();
+    if (!symbol) return null;
 
-    list.forEach(s => {
-      try{
-        const card = document.createElement('div');
-        card.className = 'symbol-card';
-        card.style.cssText = 'background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
-        const priceObj = state.symbolPrices[s.symbol];
-        const price = priceObj ? priceObj.price : null;
-        card.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || "Unknown")} · ${escapeHtml(s.symbol)}</div>
-            </div>
-            <div style="text-align:right">
-              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : "—"}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-            </div>
-          </div>
-        `;
-        card.addEventListener('click', () => selectSymbol(s.symbol));
-        container.appendChild(card);
-      }catch(e){}
+    return {
+      symbol,
+      tvSymbol: String(x.tvSymbol || x.tradingView || x.tv || x.symbol || x.code || symbol).trim(),
+      label: String(x.label || x.name || x.title || x.symbol || x.code || x.ticker || symbol).trim(),
+      market: String(x.market || x.type || x.assetClass || "Market").trim(),
+      leverage: String(x.leverage || x.maxLeverage || x.margin || "N/A").trim(),
+      spread: String(x.spread || x.spreadInfo || x.fees || "Variable").trim(),
+      hours: String(x.hours || x.session || x.tradingHours || "N/A").trim(),
+      contract: String(x.contract || x.contractSize || x.unit || "N/A").trim(),
+      volatility: String(x.volatility || x.risk || "N/A").trim()
+    };
+  }
+
+  function uniqueBySymbol(list) {
+    const map = new Map();
+    (list || []).forEach(item => {
+      const n = normalizeSymbolRow(item);
+      if (!n) return;
+      const key = n.symbol.toUpperCase();
+      if (!map.has(key)) map.set(key, n);
+    });
+    return Array.from(map.values());
+  }
+
+  async function apiFetch(path, opts = {}) {
+    if (typeof NS.apiFetch === "function") return NS.apiFetch(path, opts);
+    const token = getToken();
+
+    let url = "";
+    if (typeof path === "string" && (path.startsWith("http://") || path.startsWith("https://"))) {
+      url = path;
+    } else {
+      let p = String(path || "").trim();
+      if (!p.startsWith("/")) p = "/" + p;
+      const base = String(API_BASE || "").replace(/\/+$/, "");
+      if (base.endsWith("/api") && p.startsWith("/api")) p = p.replace(/^\/api/, "");
+      url = base + p;
+    }
+
+    const headers = opts.headers instanceof Headers
+      ? Object.fromEntries(opts.headers.entries())
+      : (opts.headers && typeof opts.headers === "object" ? { ...opts.headers } : {});
+
+    if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"] && !headers["content-type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (token && !headers["Authorization"] && !headers["authorization"]) {
+      headers["Authorization"] = "Bearer " + token;
+    }
+
+    const res = await fetch(url, { credentials: "include", ...opts, headers });
+    const txt = await res.text().catch(() => null);
+    let data = null;
+    try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
+
+    if (!res.ok) {
+      const err = new Error((data && (data.message || data.msg || data.error)) || ("HTTP " + res.status));
+      err.status = res.status;
+      err.body = data;
+      throw err;
+    }
+    return data;
+  }
+
+  function ensureTradingViewScript() {
+    if (window.TradingView && typeof window.TradingView.widget === "function") return Promise.resolve(true);
+    if (document.querySelector('script[data-leones-tv="1"]')) return Promise.resolve(true);
+
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://s3.tradingview.com/tv.js";
+      s.async = true;
+      s.dataset.leonesTv = "1";
+      s.onload = () => resolve(true);
+      s.onerror = () => reject(new Error("No se pudo cargar TradingView"));
+      document.head.appendChild(s);
     });
   }
 
-  // ====== TRADING PANEL & HELPERS ======
-  let currentSymbol = (state.ALL_SYMBOLS && state.ALL_SYMBOLS[0] && state.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
-  let currentLeverage = 10;
-  let currentEntryPrice = null;
-
-  function selectSymbol(symbol){
-    currentSymbol = symbol;
-    const ts = document.getElementById('tradingSymbol');
-    if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
-    if(typeof window.initTradingWidget === 'function') try { window.initTradingWidget(symbol); } catch(e){}
-    const priceObj = state.symbolPrices[symbol];
-    if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
-    try { if(socket && socket.emit) socket.emit('request_orderbook', { symbol }); } catch(e){}
+  function ensurePanelMessage(message, type = "info") {
+    const el = document.getElementById("brokerExtMessage");
+    if (!el) return;
+    el.style.display = "block";
+    el.style.padding = "12px";
+    el.style.borderRadius = "12px";
+    el.style.margin = "10px 0 0";
+    el.style.textAlign = "center";
+    el.style.fontWeight = "700";
+    el.style.letterSpacing = "0.2px";
+    el.style.border = "1px solid rgba(255,255,255,.06)";
+    el.style.background =
+      type === "success" ? "rgba(0, 180, 90, 0.12)" :
+      type === "error" ? "rgba(220, 60, 60, 0.12)" :
+      "rgba(255,255,255,0.04)";
+    el.textContent = message;
   }
 
-  function updatePriceInUI(symbol, price){
-    try{
-      const els = document.querySelectorAll(`[data-symbol="${symbol}"]`);
-      els.forEach(el => { el.textContent = formatNumber(price); });
+  function buildVerifiedOverlay() {
+    let overlay = document.getElementById("accountVerifiedOverlay");
+    if (overlay) return overlay;
 
-      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
-      if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
-        const opPrice = document.getElementById('op-price');
-        if(opPrice) opPrice.textContent = formatNumber(price);
-      }
+    overlay = document.createElement("div");
+    overlay.id = "accountVerifiedOverlay";
+    overlay.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "display:none",
+      "align-items:center",
+      "justify-content:center",
+      "background:rgba(0,0,0,.72)",
+      "z-index:999999"
+    ].join(";");
 
-      if(!currentEntryPrice) currentEntryPrice = price;
-      renderMarginCalculator();
-    }catch(e){}
-  }
+    overlay.innerHTML = `
+      <div style="
+        width:min(720px,92vw);
+        background:linear-gradient(180deg,#0f0f12,#070707);
+        border:1px solid rgba(255,255,255,.08);
+        border-radius:24px;
+        padding:32px 22px;
+        text-align:center;
+        box-shadow:0 18px 60px rgba(0,0,0,.55);
+        color:#fff;
+      ">
+        <div style="font-size:44px;line-height:1;font-weight:900;margin-bottom:14px;color:#f8d66d;">
+          Cuenta confirmada
+        </div>
+        <div style="font-size:20px;line-height:1.5;font-weight:700;margin-bottom:10px;">
+          Tu cuenta ha sido confirmada con éxito
+        </div>
+        <div style="font-size:15px;line-height:1.7;opacity:.92;margin-bottom:22px;">
+          Ya puedes iniciar sesión y entrar a tu área privada.
+        </div>
+        <button id="goLoginFromVerified" class="btn glow" style="
+          min-width:220px;
+          padding:14px 22px;
+          font-size:16px;
+          font-weight:800;
+          border-radius:999px;
+          cursor:pointer;
+        ">
+          Iniciar sesión
+        </button>
+      </div>
+    `;
 
-  function updateOrderBookUI(ob){
-    try{
-      const bidsEl = document.getElementById('ob-bids');
-      const asksEl = document.getElementById('ob-asks');
-      if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b => `${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-      if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a => `${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-    }catch(e){}
-  }
+    document.body.appendChild(overlay);
 
-  // ====== Margin math ======
-  function calculateMargin({ positionSize = 0, leverage = 1, entryPrice = 0 } = {}) {
-    const pos = Number(positionSize) || 0;
-    const lev = Number(leverage) || 1;
-    const ep = Number(entryPrice) || 0;
-    const notional = pos;
-    const requiredMargin = lev > 0 ? (pos / lev) : pos;
-    const qty = ep > 0 ? pos / ep : 0;
-    return { requiredMargin, notional, qty };
-  }
+    const btn = overlay.querySelector("#goLoginFromVerified");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        overlay.style.display = "none";
+        try {
+          const loginBtn = document.getElementById("loginBtn");
+          if (loginBtn) {
+            loginBtn.click();
+            return;
+          }
+        } catch (e) {}
 
-  function renderMarginCalculator(){
-    try{
-      const marginEl = document.getElementById('marginCalc');
-      if(!marginEl) return;
-      const priceObj = state.symbolPrices[currentSymbol];
-      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
-      const posSize = Number(document.getElementById('input_position_size')?.value || 0);
-      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
-      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
-      marginEl.innerHTML = `
-        <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop() || currentSymbol)}</div>
-        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
-        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
-        <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
-        <div>Apalancamiento: <strong>${lev}x</strong></div>
-        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
-      `;
-    }catch(e){ warn('renderMarginCalculator', e); }
-  }
-
-  // ====== Orders & Positions ======
-  async function placeOrder({ side = 'buy', positionSize = 0, leverage = 1, type = 'market', price = null } = {}) {
-    try {
-      const payload = {
-        symbol: currentSymbol,
-        side,
-        type,
-        notional: Number(positionSize) || 0,
-        leverage: Number(leverage) || 1,
-        price: (price !== null && price !== undefined) ? Number(price) : undefined
-      };
-      const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
-      let res = null;
-      for(const ep of candidates){
-        try{
-          res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
-          if(res) break;
-        }catch(e){}
-      }
-      alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
-      await fetchPositions().catch(()=>{});
-      return res;
-    } catch (e) {
-      warn('placeOrder error', e);
-      alert(e?.body?.message || e.message || 'Error enviando orden');
-      throw e;
+        try {
+          window.dispatchEvent(new CustomEvent("leones:openLogin"));
+        } catch (e) {}
+      });
     }
+
+    return overlay;
   }
 
-  async function fetchPositions(){
-    try{
-      const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
-      let res = null;
-      for(const ep of candidates){
-        try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
-      }
-      if(!res) return null;
-      state.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
-      renderPositions();
-      return state.positions;
-    }catch(e){ warn('fetchPositions error', e); return null; }
+  function showVerifiedSuccess() {
+    const overlay = buildVerifiedOverlay();
+    overlay.style.display = "flex";
   }
 
-  function renderPositions(){
-    try{
-      const el = document.getElementById('positionsList');
-      if(!el) return;
-      el.innerHTML = '';
-      if(!state.positions || !state.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
-      state.positions.forEach(p => {
-        try{
-          const row = document.createElement('div');
-          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
-          const symbol = p.symbol || p.s || currentSymbol;
-          const size = p.notional || p.size || 0;
-          const entry = p.entryPrice || p.price || p.avgPrice || 0;
-          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
-          row.innerHTML = `
-            <div style="font-weight:700">${escapeHtml(symbol)}</div>
-            <div style="text-align:right">
-              <div>Size: ${formatNumber(size)}</div>
-              <div>Entry: ${formatNumber(entry)}</div>
-              <div>PnL: ${formatNumber(pl,2)}</div>
-            </div>
-          `;
-          el.appendChild(row);
-        }catch(e){}
-      });
-    }catch(e){}
-  }
+  async function loadRealMarkets() {
+    const endpoints = [
+      "/market/list",
+      "/market/symbols",
+      "/symbols",
+      "/api/market/list",
+      "/api/market/symbols",
+      "/api/symbols"
+    ];
 
-  // ====== UI wiring ======
-  function wireTradingUI(){
-    try{
-      const posInput = document.getElementById('input_position_size');
-      const levInput = document.getElementById('input_leverage');
-      if(posInput) posInput.addEventListener('input', renderMarginCalculator);
-      if(levInput) levInput.addEventListener('input', (e) => { currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
+    let merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        if (!res) continue;
 
-      const buyBtn = document.getElementById('btnBuy');
-      const sellBtn = document.getElementById('btnSell');
-      if(buyBtn) buyBtn.addEventListener('click', async () => {
-        const pos = Number(document.getElementById('input_position_size')?.value || 0);
-        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
-        await placeOrder({ side: 'buy', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
-      });
-      if(sellBtn) sellBtn.addEventListener('click', async () => {
-        const pos = Number(document.getElementById('input_position_size')?.value || 0);
-        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
-        await placeOrder({ side: 'sell', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
-      });
-
-      const refreshBtn = document.getElementById('btnRefreshPositions');
-      if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
-
-      const fetchSymBtn = document.getElementById('btnFetchSymbols');
-      if(fetchSymBtn) fetchSymBtn.addEventListener('click', async () => {
-        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
-        for(const ep of endpoints){
-          try{
-            const r = await apiFetch(ep).catch(()=>null);
-            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; renderSymbolsGrid(); break; }
-          }catch(e){}
+        if (Array.isArray(res)) {
+          merged = merged.concat(res);
+        } else if (Array.isArray(res.data)) {
+          merged = merged.concat(res.data);
+        } else if (Array.isArray(res.symbols)) {
+          merged = merged.concat(res.symbols);
         }
-      });
+      } catch (e) {}
+    }
 
-      renderMarginCalculator();
-    }catch(e){ warn('wireTradingUI error', e); }
+    const normalized = uniqueBySymbol(merged);
+    if (normalized.length) {
+      TR.ALL_SYMBOLS = normalized;
+      window.__LEONES_MARKETS__ = normalized;
+      return normalized;
+    }
+
+    TR.ALL_SYMBOLS = TR.ALL_SYMBOLS || [];
+    return TR.ALL_SYMBOLS;
   }
 
-  // ====== TradingView fallback ======
-  function provideTradingWidgetFallback(){
-    try{
-      if(typeof window.initTradingWidget === 'function') return;
-      window.initTradingWidget = function(symbol){
-        const cont = document.getElementById('tv_chart_container');
-        if(!cont) return;
-        cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`;
-      };
-    }catch(e){}
-  }
+  function renderMarketSummary() {
+    const host = document.getElementById("marketSummaryPanel");
+    if (!host) return;
 
-  // ====== Demo prices fallback ======
-  let demoTicker = null;
-  function startDemoPrices(){
-    if(demoTicker) return;
-    demoTicker = setInterval(() => {
-      (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length ? state.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => {
-        const key = s.symbol;
-        const old = (state.symbolPrices[key] && Number(state.symbolPrices[key].price)) || (Math.random()*100);
-        const change = (Math.random() - 0.5) * Math.max(0.0001, Math.abs(old) * 0.002);
-        const next = Number(Math.max(0.00001, old + change).toFixed(6));
-        state.symbolPrices[key] = { price: next, ts: Date.now() };
-      });
-      renderSymbolsGrid();
-      renderMarginCalculator();
-    }, 1200);
-  }
-  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker = null; } }
-
-  // ====== Account helpers (loadAccount) ======
-  async function loadAccount(){
-    try{
-      const candidates = ['/account','/api/account','/wallet','/api/wallet'];
-      let acc = null;
-      for(const ep of candidates){
-        try{ acc = await apiFetch(ep).catch(()=>null); if(acc) break; }catch(e){}
-      }
-      if(!acc) return null;
-      const balance = acc.balance ?? acc.account?.balance ?? acc.data?.balance ?? null;
-      if(balance !== null){
-        const el = document.getElementById('user-equity');
-        if(el) el.textContent = formatNumber(balance,2);
-      }
-      window.__LEONES_ACCOUNT = acc;
+    const list = Array.isArray(TR.ALL_SYMBOLS) ? TR.ALL_SYMBOLS : [];
+    const byMarket = list.reduce((acc, item) => {
+      const k = item.market || "Market";
+      acc[k] = (acc[k] || 0) + 1;
       return acc;
-    }catch(e){ warn('loadAccount error', e); return null; }
+    }, {});
+
+    const rows = Object.keys(byMarket).sort().map(k => `
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        <span>${escapeHtml(k)}</span>
+        <strong>${byMarket[k]}</strong>
+      </div>
+    `).join("");
+
+    host.innerHTML = `
+      <div style="font-weight:900;font-size:18px;margin-bottom:10px;">Mercados cargados</div>
+      ${rows || '<div style="opacity:.75">No hay símbolos cargados desde el backend.</div>'}
+    `;
   }
 
-  // ====== openTrade / closeTrade ======
-  async function openTrade(symbol, type, lot, price, sl, tp){
-    try{
-      const payload = { symbol, type, lot, price, sl, tp };
-      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
-      for(const ep of candidates){
-        try{
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
-          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-        }catch(e){}
-      }
-      throw new Error('No endpoint responded for openTrade');
-    }catch(e){ err('openTrade error', e); throw e; }
+  function renderSelectedSymbolInfo(symbol) {
+    const host = document.getElementById("symbolDetailsPanel");
+    if (!host) return;
+
+    const item = (TR.ALL_SYMBOLS || []).find(x =>
+      String(x.symbol).toUpperCase() === String(symbol || "").toUpperCase() ||
+      String(x.tvSymbol).toUpperCase() === String(symbol || "").toUpperCase()
+    );
+
+    if (!item) {
+      host.innerHTML = `<div style="opacity:.75">Selecciona un símbolo para ver sus características.</div>`;
+      return;
+    }
+
+    host.innerHTML = `
+      <div style="font-weight:900;font-size:18px;margin-bottom:10px;">${escapeHtml(item.label)}</div>
+      <div style="display:grid;gap:8px;font-size:14px;line-height:1.5">
+        <div><strong>Símbolo:</strong> ${escapeHtml(item.symbol)}</div>
+        <div><strong>TradingView:</strong> ${escapeHtml(item.tvSymbol)}</div>
+        <div><strong>Mercado:</strong> ${escapeHtml(item.market)}</div>
+        <div><strong>Apalancamiento:</strong> ${escapeHtml(item.leverage)}</div>
+        <div><strong>Spread:</strong> ${escapeHtml(item.spread)}</div>
+        <div><strong>Horario:</strong> ${escapeHtml(item.hours)}</div>
+        <div><strong>Contrato:</strong> ${escapeHtml(item.contract)}</div>
+        <div><strong>Volatilidad:</strong> ${escapeHtml(item.volatility)}</div>
+      </div>
+    `;
   }
 
-  async function closeTrade(positionId){
-    try{
-      const payload = { positionId };
-      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
-      for(const ep of candidates){
-        try{
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
-          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-        }catch(e){}
-      }
-      throw new Error('No endpoint responded for closeTrade');
-    }catch(e){ err('closeTrade error', e); throw e; }
-  }
+  function attachBrokerActionButtons() {
+    try {
+      const buyBtn = document.getElementById("btnBuy");
+      const sellBtn = document.getElementById("btnSell");
+      const refreshBtn = document.getElementById("btnRefreshPositions");
+      const fetchSymBtn = document.getElementById("btnFetchSymbols");
 
-  // ====== Margin call (defensivo) ======
-  async function checkMarginCall(){
-    try{
-      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
-      if(!acc) return false;
-      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
-      if(marginLevel !== null && Number(marginLevel) < 50){
-        alert('Margin Call - posiciones cerradas automáticamente');
-        const poses = acc.positions ?? state.positions ?? [];
-        for(const pos of poses){
-          try{
-            const pid = pos._id || pos.id || pos.positionId || pos.position_id;
-            if(pid) await closeTrade(pid).catch(()=>{});
-          }catch(e){}
-        }
-        return true;
-      }
-      return false;
-    }catch(e){ warn('checkMarginCall error', e); return false; }
-  }
+      if (buyBtn && !buyBtn.__leones_ext2_bound) {
+        buyBtn.__leones_ext2_bound = true;
+        buyBtn.addEventListener("click", async () => {
+          const api = window._LEONES_TRADING || {};
+          if (typeof api.placeOrder !== "function") return ensurePanelMessage("El motor de órdenes no está listo.", "error");
 
-  // ====== INIT ======
-  async function initTradingModule(){
-    try{
-      // prevent double init
-      if(window.__LEONES_TRADING_INITED__) return;
-      window.__LEONES_TRADING_INITED__ = true;
+          const pos = Number(document.getElementById("input_position_size")?.value || 0);
+          const lev = Number(document.getElementById("input_leverage")?.value || 1);
 
-      // create containers if missing (full panel markup)
-      if(!document.getElementById('symbolsGrid')){
-        const s = document.createElement('div');
-        s.id = 'symbolsGrid';
-        s.style.cssText = 'padding:8px;max-width:1200px;margin:12px auto';
-        document.body.insertBefore(s, document.body.firstChild);
-      }
-      if(!document.getElementById('tradingPanel')){
-        const panel = document.createElement('div');
-        panel.id = 'tradingPanel';
-        panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)';
-        panel.innerHTML = `
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
-            <div>Precio:<strong id="op-price">-</strong></div>
-            <div>Equity:<strong id="user-equity">--</strong></div>
-            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
-          </div>
-          <hr/>
-          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
-            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <div style="background:#080808;padding:8px;border-radius:8px">
-                <label>Posición (USD)</label>
-                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
-                <label style="margin-top:8px">Apalancamiento (x)</label>
-                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
-                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
-              </div>
-              <div style="display:flex;gap:8px">
-                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
-                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
-              </div>
-              <div style="background:#080808;padding:8px;border-radius:8px">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                  <div style="font-weight:700">Posiciones</div>
-                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
-                </div>
-                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto;color:var(--text)"></div>
-              </div>
-            </div>
-          </div>
-          <hr/>
-          <div style="display:flex;gap:8px">
-            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
-            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
-          </div>
-        `;
-        document.body.appendChild(panel);
+          try {
+            await api.placeOrder({ side: "buy", positionSize: pos, leverage: lev, type: "market" });
+          } catch (e) {
+            ensurePanelMessage(e?.message || "Error enviando compra", "error");
+          }
+        });
       }
 
-      // connect socket & handlers (if available)
-      ensureSocket();
+      if (sellBtn && !sellBtn.__leones_ext2_bound) {
+        sellBtn.__leones_ext2_bound = true;
+        sellBtn.addEventListener("click", async () => {
+          const api = window._LEONES_TRADING || {};
+          if (typeof api.placeOrder !== "function") return ensurePanelMessage("El motor de órdenes no está listo.", "error");
 
-      // try fetching symbols from backend
-      try{
-        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
-        for(const ep of endpoints){
-          try{
-            const r = await apiFetch(ep).catch(()=>null);
-            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; break; }
-          }catch(e){}
-        }
-      }catch(e){}
+          const pos = Number(document.getElementById("input_position_size")?.value || 0);
+          const lev = Number(document.getElementById("input_leverage")?.value || 1);
 
-      renderSymbolsGrid();
-      wireTradingUI();
-      provideTradingWidgetFallback();
+          try {
+            await api.placeOrder({ side: "sell", positionSize: pos, leverage: lev, type: "market" });
+          } catch (e) {
+            ensurePanelMessage(e?.message || "Error enviando venta", "error");
+          }
+        });
+      }
 
-      await fetchPositions().catch(()=>{});
-      await loadAccount().catch(()=>{});
+      if (refreshBtn && !refreshBtn.__leones_ext2_bound) {
+        refreshBtn.__leones_ext2_bound = true;
+        refreshBtn.addEventListener("click", async () => {
+          const api = window._LEONES_TRADING || {};
+          try {
+            if (typeof api.fetchPositions === "function") await api.fetchPositions();
+            if (typeof api.loadAccount === "function") await api.loadAccount();
+          } catch (e) {}
+        });
+      }
 
-      // fallback to demo prices if no prices received
-      setTimeout(() => {
-        const anyPrice = Object.keys(state.symbolPrices || {}).length;
-        if(!anyPrice) startDemoPrices();
-      }, 2000);
-
-      log('Trading module initialized');
-    }catch(e){
-      err('initTradingModule error', e);
+      if (fetchSymBtn && !fetchSymBtn.__leones_ext2_bound) {
+        fetchSymBtn.__leones_ext2_bound = true;
+        fetchSymBtn.addEventListener("click", async () => {
+          await loadRealMarkets();
+          renderMarketSummary();
+        });
+      }
+    } catch (e) {
+      warn("attachBrokerActionButtons", e);
     }
   }
 
-  // Boot once on DOMContentLoaded
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initTradingModule);
-  } else {
-    // already loaded
-    setTimeout(initTradingModule, 0);
+  function enhanceSymbolClicks() {
+    try {
+      document.addEventListener("click", function (ev) {
+        const card = ev.target.closest && ev.target.closest(".symbol-card");
+        if (!card) return;
+
+        const text = (card.textContent || "").trim();
+        const all = TR.ALL_SYMBOLS || [];
+        const found = all.find(x => text.includes(x.label) || text.includes(x.symbol) || text.includes(x.tvSymbol));
+        if (found) renderSelectedSymbolInfo(found.symbol);
+      }, true);
+    } catch (e) {}
   }
 
-  // Expose functions
-  window._LEONES_TRADING = window._LEONES_TRADING || {};
-  Object.assign(window._LEONES_TRADING, {
-    selectSymbol,
-    placeOrder,
-    fetchPositions,
-    calculateMargin,
-    openTrade,
-    closeTrade,
-    loadAccount,
-    checkMarginCall
+  function injectHelperPanels() {
+    const host = document.getElementById("privateArea_full") || document.body;
+    if (!document.getElementById("brokerExtMessage")) {
+      const msg = document.createElement("div");
+      msg.id = "brokerExtMessage";
+      msg.style.display = "none";
+      host.prepend(msg);
+    }
+
+    if (!document.getElementById("marketSummaryPanel")) {
+      const box = document.createElement("div");
+      box.id = "marketSummaryPanel";
+      box.style.cssText = "max-width:1200px;margin:12px auto;padding:14px;border-radius:14px;background:#0b0b0b;color:#fff;";
+      host.prepend(box);
+    }
+
+    if (!document.getElementById("symbolDetailsPanel")) {
+      const box = document.createElement("div");
+      box.id = "symbolDetailsPanel";
+      box.style.cssText = "max-width:1200px;margin:12px auto 0;padding:14px;border-radius:14px;background:#0b0b0b;color:#fff;";
+      host.prepend(box);
+    }
+  }
+
+  function checkVerifiedFromUrl() {
+    const qs = new URLSearchParams(location.search);
+    const verified = qs.get("verified") || qs.get("confirmed") || qs.get("account_verified");
+    if (verified === "1" || String(verified).toLowerCase() === "true" || verified === "yes") {
+      showVerifiedSuccess();
+    }
+  }
+
+  async function initExt2() {
+    try {
+      injectHelperPanels();
+      attachBrokerActionButtons();
+      enhanceSymbolClicks();
+      checkVerifiedFromUrl();
+
+      const token = getToken();
+      if (token) {
+        try {
+          await loadRealMarkets();
+          renderMarketSummary();
+        } catch (e) {
+          warn("loadRealMarkets failed", e);
+          renderMarketSummary();
+        }
+      } else {
+        renderMarketSummary();
+      }
+
+      if (window.TradingView && typeof window.TradingView.widget === "function") {
+        const first = (TR.ALL_SYMBOLS || [])[0];
+        if (first && typeof window.initTradingWidget === "function") {
+          try { window.initTradingWidget(first.symbol); } catch (e) {}
+        }
+      } else {
+        try {
+          await ensureTradingViewScript();
+          const first = (TR.ALL_SYMBOLS || [])[0];
+          if (first && typeof window.initTradingWidget === "function") {
+            try { window.initTradingWidget(first.symbol); } catch (e) {}
+          }
+        } catch (e) {
+          warn("TradingView not loaded", e);
+        }
+      }
+
+      setTimeout(() => {
+        attachBrokerActionButtons();
+        renderMarketSummary();
+        const current = (TR.ALL_SYMBOLS || [])[0];
+        if (current) renderSelectedSymbolInfo(current.symbol);
+      }, 300);
+    } catch (e) {
+      console.error("[BROKER-EXT2] init error", e);
+    }
+  }
+
+  window._LEONES_BROKER_EXT = window._LEONES_BROKER_EXT || {};
+  Object.assign(window._LEONES_BROKER_EXT, {
+    showVerifiedSuccess,
+    loadRealMarkets,
+    renderMarketSummary,
+    renderSelectedSymbolInfo
   });
 
-})(); // EOF
-</script>
-</div>
-
-<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
-
-<script src="/js/authGuard.js"></script>
-<script src="/socket.io/socket.io.js"></script>
-<script src="/js/trading.js"></script>
-
-<!-- 🔥 ESTE SCRIPT VA AQUÍ -->
-<script>
-(function () {
-  const token = localStorage.getItem("token");
-
-  const publicSection = document.getElementById("publicSection");
-  const privateSection = document.getElementById("privateSection");
-
-  if (token) {
-    if (publicSection) publicSection.style.display = "none";
-    if (privateSection) privateSection.style.display = "block";
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initExt2);
   } else {
-    if (publicSection) publicSection.style.display = "block";
-    if (privateSection) privateSection.style.display = "none";
+    initExt2();
   }
+
 })();
 </script>
-  
   
 </body>
 </html>
