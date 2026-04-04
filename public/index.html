@@ -2194,13 +2194,44 @@ if (window.__LEONES_BOOTED__) {
 
   log('[LEONES] JS #1 loaded without demo mode');
 }
+
+//codigo de un solo uso
+
+window.__APP_STATE__ = {
+  initialized: false,
+  isAuthenticated: false
+};
+
+function showPublic() {
+  const pub = document.getElementById("publicArea");
+  const priv = document.getElementById("privateArea_full");
+
+  if (pub) pub.style.display = "block";
+  if (priv) priv.style.display = "none";
+}
+
+function showPrivate() {
+  const pub = document.getElementById("publicArea");
+  const priv = document.getElementById("privateArea_full");
+
+  if (pub) pub.style.display = "none";
+  if (priv) priv.style.display = "block";
+}
+
+
 </script>
 
-<!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
-<!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
-<!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
-<!-- ================= PARTE PRIVADA COMPLETA (REAL, SIN DEMO) ================= -->
+
+/* ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= 
+
+Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. 
+
+ESTILOS EXCLUSIVOS (PARTE PRIVADA) 
+
+================= PARTE PRIVADA COMPLETA (REAL, SIN DEMO) ================= */
+
+
 
 <style>
   :root{
