@@ -679,6 +679,240 @@ if (window.__LEONES_BOOTED__) {
     }
   })();
 
+
+//este codigo magico
+
+   /* ==============================
+   SESSION / PRIVATE VIEW SWITCH
+   ============================== */
+
+
+const TOKEN_KEY = "token";
+const BROKER_TOKEN_KEY = "BROKER_TOKEN";
+
+function getSavedToken() {
+  try {
+    const t1 = localStorage.getItem(TOKEN_KEY);
+    const t2 = localStorage.getItem(BROKER_TOKEN_KEY);
+    if (t1) return t1;
+    if (t2) return t2;
+
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const sess = JSON.parse(raw);
+      if (sess && sess.token) return sess.token;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function saveSession(user = {}) {
+  try {
+    const token = user.token || getSavedToken();
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(BROKER_TOKEN_KEY, token);
+    }
+
+    const sess = {
+      ...user,
+      token: token || user.token || null,
+    };
+
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+  } catch (e) {
+    console.error("saveSession error", e);
+  }
+}
+
+function restorePublicHeader() {
+  try {
+    const headerActions = document.getElementById("headerActions");
+    if (!headerActions) return;
+
+    headerActions.innerHTML = "";
+
+    const openBtn = document.createElement("button");
+    openBtn.className = "btn glow open-register";
+    openBtn.id = "openAccountBtn";
+    openBtn.textContent = "Abrir Cuenta";
+
+    const loginBtn = document.createElement("button");
+    loginBtn.className = "btn ghost glow open-login";
+    loginBtn.id = "loginBtn";
+    loginBtn.textContent = "Iniciar Sesión";
+
+    headerActions.appendChild(openBtn);
+    headerActions.appendChild(loginBtn);
+
+    if (typeof attachGlobalOpenButtons === "function") {
+      attachGlobalOpenButtons();
+    }
+  } catch (e) {
+    console.error("restorePublicHeader error", e);
+  }
+}
+
+function showPrivateFull(user = {}) {
+  try {
+    saveSession(user);
+
+    const publicMain = document.getElementById("publicMain");
+    const publicFooter = document.getElementById("publicFooter");
+    const privateWrapper = document.getElementById("privateArea_full");
+
+    if (publicMain) publicMain.style.display = "none";
+    if (publicFooter) publicFooter.style.display = "none";
+    if (privateWrapper) privateWrapper.style.display = "flex";
+
+    const headerActions = document.getElementById("headerActions");
+    if (headerActions) {
+      headerActions.innerHTML = "";
+
+      const profileBtn = document.createElement("div");
+      profileBtn.style.display = "flex";
+      profileBtn.style.alignItems = "center";
+      profileBtn.style.gap = "10px";
+
+      const nameEl = document.createElement("div");
+      nameEl.textContent = user.name || "Usuario";
+      nameEl.style.color = "var(--gold)";
+      nameEl.style.fontWeight = "700";
+
+      const logoutBtn = document.createElement("button");
+      logoutBtn.className = "btn ghost";
+      logoutBtn.textContent = "Cerrar sesión";
+      logoutBtn.addEventListener("click", performLogoutFull);
+
+      profileBtn.appendChild(nameEl);
+      profileBtn.appendChild(logoutBtn);
+      headerActions.appendChild(profileBtn);
+    }
+
+    const nameSpan = document.getElementById("private-name-full");
+    if (nameSpan) nameSpan.textContent = user.name || "Usuario";
+
+    const emailSpan = document.getElementById("private-email-full");
+    if (emailSpan) emailSpan.textContent = user.email || "";
+
+    const bal = document.getElementById("priv_balance_full");
+    if (bal) {
+      bal.textContent =
+        "RD$" +
+        (Math.floor(Math.random() * 50000) + 1000).toLocaleString("es-DO");
+    }
+
+    const eq = document.getElementById("priv_equity_full");
+    if (eq) {
+      eq.textContent =
+        "RD$" +
+        (Math.floor(Math.random() * 40000) + 500).toLocaleString("es-DO");
+    }
+
+    const pnl = document.getElementById("priv_pnl_full");
+    if (pnl) {
+      pnl.textContent =
+        "RD$" +
+        (Math.floor(Math.random() * 20000) - 5000).toLocaleString("es-DO");
+    }
+
+    const menuItems = Array.from(
+      document.querySelectorAll("#privateArea_full .menu-item")
+    );
+
+    function activateSection(sectionId) {
+      menuItems.forEach((mi) =>
+        mi.classList.toggle("active", mi.dataset.section === sectionId)
+      );
+    }
+
+    menuItems.forEach((mi) =>
+      mi.addEventListener("click", () => activateSection(mi.dataset.section))
+    );
+
+    if (menuItems.length) activateSection("dashboard");
+
+    const leftLogout = document.getElementById("btnLogoutLeft_full");
+    if (leftLogout) leftLogout.onclick = performLogoutFull;
+
+    const topLogout = document.getElementById("logoutTop_full");
+    if (topLogout) topLogout.onclick = performLogoutFull;
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    console.error("showPrivateFull error", e);
+  }
+}
+
+function performLogoutFull() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(BROKER_TOKEN_KEY);
+
+    const privateWrapper = document.getElementById("privateArea_full");
+    if (privateWrapper) privateWrapper.style.display = "none";
+
+    const publicMain = document.getElementById("publicMain");
+    const publicFooter = document.getElementById("publicFooter");
+    if (publicMain) publicMain.style.display = "";
+    if (publicFooter) publicFooter.style.display = "";
+
+    restorePublicHeader();
+
+    const ctaAbrir = document.getElementById("ctaAbrir");
+    if (ctaAbrir) {
+      ctaAbrir.onclick = () => {
+        const btn = document.getElementById("openAccountBtn");
+        if (btn) btn.click();
+      };
+    }
+
+    const ctaLogin = document.getElementById("ctaLogin");
+    if (ctaLogin) {
+      ctaLogin.onclick = () => {
+        const btn = document.getElementById("loginBtn");
+        if (btn) btn.click();
+      };
+    }
+  } catch (e) {
+    console.error("performLogoutFull error", e);
+  }
+}
+
+function initSessionView() {
+  try {
+    const token = getSavedToken();
+    const raw = localStorage.getItem(SESSION_KEY);
+
+    if (token && raw) {
+      const user = JSON.parse(raw);
+      showPrivateFull(user);
+    } else {
+      restorePublicHeader();
+
+      const publicMain = document.getElementById("publicMain");
+      const publicFooter = document.getElementById("publicFooter");
+      const privateWrapper = document.getElementById("privateArea_full");
+
+      if (publicMain) publicMain.style.display = "";
+      if (publicFooter) publicFooter.style.display = "";
+      if (privateWrapper) privateWrapper.style.display = "none";
+    }
+  } catch (e) {
+    console.error("initSessionView error", e);
+    restorePublicHeader();
+  }
+}
+
+window.addEventListener("load", initSessionView);
+
+
+  //codigo magico aqui arriba no abajo arriba
+
+
+  
+
   /* ===========================
      Socket
   =========================== */
