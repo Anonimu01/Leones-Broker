@@ -2609,612 +2609,558 @@ function showPrivate() {
 
 <script>
 /**
- * trading.js — trading UI (corregido y completo)
- *
- * Instrucciones:
- * - Incluye /socket.io/socket.io.js antes de este script.
- * - Usa localStorage 'token' o 'BROKER_TOKEN' para autenticación.
- * - Este módulo es defensivo: evita inicializaciones dobles y soporta fallbacks demo.
+ * trading.ext2.real.js — complemento real para broker UI
+ * - No repite login / sesión / cierre de sesión
+ * - No crea catálogo demo
+ * - No simula símbolos
+ * - Consume símbolos reales del backend o del estado cargado por JS #1
+ * - Muestra watchlist([tradingview.com](https://www.tradingview.com/widget-docs/widgets/charts/?utm_source=chatgpt.com))ir con JS #1 sin duplicar lógica
  */
 (function () {
   "use strict";
 
-  // ====== CONFIG / GLOBALS ======
-  const API_BASE = window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
-  const SOCKET_BASE = window.SOCKET_BASE || window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
-  window.SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+  if (window.__LEONES_BROKER_EXT2_REAL__) {
+    console.warn("[BROKER-EXT2-REAL] already loaded, skipping.");
+    return;
+  }
+  window.__LEONES_BROKER_EXT2_REAL__ = true;
 
-  // Ensure global namespace exists
-  window._LEONES = window._LEONES || {};
-  const NS = window._LEONES;
+  const NS = window._LEONES = window._LEONES || {};
+  const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
-  // Module state (exposed globally)
-  window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-  const state = window.__LEONES_TRADING__;
-  state.ALL_SYMBOLS = state.ALL_SYMBOLS || [];
-  state.symbolPrices = state.symbolPrices || {};
-  state.positions = state.positions || [];
-  state.orderBooks = state.orderBooks || {};
+  const API_BASE = window.API_BASE || window.API || (location.hostname === "localhost" ? "http://localhost:3000/api" : "/api");
+  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+  const HOST_ID = "privateArea_full";
 
-  // Local socket ref
-  let socket = null;
+  const log = (...a) => { try { console.log("[BROKER-EXT2-REAL]", ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn("[BROKER-EXT2-REAL]", ...a); } catch (e) {} };
 
-  // ====== UTILS ======
-  function log(...a){ try{ console.log('[TRADING]', ...a); }catch(e){} }
-  function warn(...a){ try{ console.warn('[TRADING]', ...a); }catch(e){} }
-  function err(...a){ try{ console.error('[TRADING]', ...a); }catch(e){} }
+  const escapeHtml = (s) => String(s || "").replace(/[&<>\"']/g, m => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[m]));
 
-  function formatNumber(n, digits = 6){
-    const num = Number(n);
-    if(!isFinite(num)) return '--';
-    if(Math.abs(num) >= 1000) return num.toLocaleString(undefined,{maximumFractionDigits:1});
-    return num.toLocaleString(undefined,{maximumFractionDigits:digits});
+  function safeParseJSON(v, fallback = null) {
+    try { return JSON.parse(v); } catch (e) { return fallback; }
   }
 
-  function escapeHtml(s){
-    return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});
-  }
-
-  // ====== apiFetch fallback (robusto) ======
-  async function apiFetchFallback(path, opts = {}) {
+  function getToken() {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-      // normalize url
-      let url = '';
-      path = String(path || '');
-      if(path.startsWith('http://') || path.startsWith('https://')) url = path;
-      else {
-        const baseNoApi = String(API_BASE).replace(/\/api\/?$/,'');
-        if(path.startsWith('/')) url = baseNoApi + path;
-        else url = (API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE) + (path.startsWith('/') ? path : ('/' + path));
-      }
-
-      const headers = (opts.headers && typeof opts.headers === 'object') ? {...opts.headers} : {};
-      if(opts.body && !(opts.body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']){
-        headers['Content-Type'] = 'application/json';
-      }
-      if(token && !headers['Authorization'] && !headers['authorization']){
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-
-      const fetchOpts = {
-        method: opts.method || 'GET',
-        credentials: 'include',
-        ...opts,
-        headers
-      };
-
-      const res = await fetch(url, fetchOpts);
-      if(res.status === 204) return {};
-      const text = await res.text().catch(()=>null);
-      let data = null;
-      if(text){
-        try { data = JSON.parse(text); } catch(e) { data = text; }
-      }
-      if(res.ok) return data;
-      const error = new Error('HTTP ' + res.status);
-      error.status = res.status;
-      error.body = data;
-      throw error;
-    } catch(e){
-      throw e;
-    }
-  }
-
-  // choose central apiFetch (prefer existing app-provided)
-  const apiFetch = NS.apiFetch || window.apiFetch || apiFetchFallback;
-
-  // initSocket fallback (if app provides one use it)
-  const initSocket = NS.initSocket || (() => (window.__LEONES_SOCKET__ && window.__LEONES_SOCKET__.socket) ? window.__LEONES_SOCKET__.socket : null);
-
-  // ====== SOCKET wiring (defensivo) ======
-  function ensureSocket(){
-    try {
-      if(socket && socket.connected) return socket;
-
-      socket = initSocket();
-      if(!socket){
-        warn('socket not available — realtime disabled');
-        return null;
-      }
-
-      if(socket.__leones_trading_attached) return socket;
-      socket.__leones_trading_attached = true;
-
-      socket.on('prices_snapshot', snap => {
-        try{
-          if(!snap) return;
-          if(Array.isArray(snap)){
-            snap.forEach(it => { if(it && it.symbol) state.symbolPrices[it.symbol] = { price: it.price ?? it.p ?? it.v ?? it.value, ts: it.ts ?? Date.now() }; });
-          } else if(typeof snap === 'object'){
-            Object.keys(snap).forEach(k => {
-              const it = snap[k];
-              state.symbolPrices[k] = (it && typeof it === 'object') ? { price: it.price ?? it.p ?? it.v ?? it, ts: it.ts ?? Date.now() } : { price: snap[k], ts: Date.now() };
-            });
-          }
-          renderSymbolsGrid();
-        }catch(e){ warn('prices_snapshot handler', e); }
-      });
-
-      socket.on('price', p => {
-        try{
-          const symbol = p?.symbol || p?.s || p?.t;
-          if(!symbol) return;
-          const price = p.price ?? p.p ?? p.v ?? p.value ?? p;
-          state.symbolPrices[symbol] = { price, ts: p.ts ?? Date.now() };
-          updatePriceInUI(symbol, price);
-        }catch(e){ warn('price event error', e); }
-      });
-
-      socket.on('symbols_update', symbols => {
-        try{
-          if(!symbols) return;
-          if(Array.isArray(symbols)) state.ALL_SYMBOLS = symbols;
-          else state.ALL_SYMBOLS = Object.keys(symbols).map(k => ({ symbol: k, label: symbols[k].label || k, market: symbols[k].market || 'Crypto' }));
-          renderSymbolsGrid();
-        }catch(e){ warn('symbols_update handler', e); }
-      });
-
-      socket.on('orderbook', ob => {
-        try{
-          if(!ob || !ob.symbol) return;
-          state.orderBooks = state.orderBooks || {};
-          state.orderBooks[ob.symbol] = ob;
-          const bidsEl = document.getElementById('ob-bids');
-          if(bidsEl && bidsEl.dataset && bidsEl.dataset.symbol === ob.symbol) updateOrderBookUI(ob);
-        }catch(e){}
-      });
-
-      socket.on('connect_error', e => { warn('socket connect_error', e); });
-
-      socket.on('disconnect', (r) => { log('socket disconnected', r); });
-
-      return socket;
-    } catch(e){
-      warn('ensureSocket error', e);
+      return localStorage.getItem("token") || localStorage.getItem("BROKER_TOKEN") || (safeParseJSON(localStorage.getItem(SESSION_KEY), null)?.token || null);
+    } catch (e) {
       return null;
     }
   }
 
-  // ====== SYMBOLS GRID ======
-  function buildSymbolsContainer(){
-    const container = document.getElementById('symbolsGrid');
-    if(!container) return null;
-    container.style.display = 'grid';
-    container.style.gridTemplateColumns = 'repeat(auto-fill,minmax(220px,1fr))';
-    container.style.gap = '8px';
-    return container;
+  function getUser() {
+    try {
+      return safeParseJSON(localStorage.getItem(SESSION_KEY), null) || {};
+    } catch (e) {
+      return {};
+    }
   }
 
-  function renderSymbolsGrid(){
-    const container = buildSymbolsContainer();
-    if(!container) return;
-    container.innerHTML = '';
-    const list = (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length) ? state.ALL_SYMBOLS : [
-      { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-      { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-      { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" }
-    ];
+  function hasSession() {
+    return Boolean(getToken());
+  }
 
-    list.forEach(s => {
-      try{
-        const card = document.createElement('div');
-        card.className = 'symbol-card';
-        card.style.cssText = 'background:linear-gradient(180deg,#070707,#0c0c0c);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);cursor:pointer';
-        const priceObj = state.symbolPrices[s.symbol];
-        const price = priceObj ? priceObj.price : null;
-        card.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-weight:800;color:var(--gold)">${escapeHtml(s.label || s.symbol)}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:4px">${escapeHtml(s.market || "Unknown")} · ${escapeHtml(s.symbol)}</div>
-            </div>
-            <div style="text-align:right">
-              <div class="symbol-price" data-symbol="${escapeHtml(s.symbol)}" style="font-weight:700;color:var(--text);font-size:14px">${price !== null ? formatNumber(price) : "—"}</div>
-              <div style="color:var(--muted);font-size:12px;margin-top:6px">Últ</div>
-            </div>
-          </div>
-        `;
-        card.addEventListener('click', () => selectSymbol(s.symbol));
-        container.appendChild(card);
-      }catch(e){}
+  function normalizeSymbolRow(x) {
+    if (!x || typeof x !== "object") return null;
+    const symbol = String(x.symbol || x.code || x.ticker || x.s || x.tvSymbol || "").trim();
+    if (!symbol) return null;
+
+    return {
+      symbol,
+      tvSymbol: String(x.tvSymbol || x.tradingView || x.tv || x.symbol || x.code || symbol).trim(),
+      label: String(x.label || x.name || x.title || x.symbol || x.code || x.ticker || symbol).trim(),
+      market: String(x.market || x.type || x.assetClass || "Market").trim(),
+      leverage: String(x.leverage || x.maxLeverage || x.margin || "N/A").trim(),
+      spread: String(x.spread || x.spreadInfo || x.fees || "Variable").trim(),
+      hours: String(x.hours || x.session || x.tradingHours || "N/A").trim(),
+      contract: String(x.contract || x.contractSize || x.unit || "N/A").trim(),
+      volatility: String(x.volatility || x.risk || "N/A").trim()
+    };
+  }
+
+  function uniqueBySymbol(list) {
+    const map = new Map();
+    (list || []).forEach(item => {
+      const n = normalizeSymbolRow(item);
+      if (!n) return;
+      const key = n.symbol.toUpperCase();
+      if (!map.has(key)) map.set(key, n);
+    });
+    return Array.from(map.values());
+  }
+
+  async function apiFetch(path, opts = {}) {
+    if (typeof NS.apiFetch === "function") return NS.apiFetch(path, opts);
+
+    const token = getToken();
+    let url = "";
+    if (typeof path === "string" && (path.startsWith("http://") || path.startsWith("https://"))) {
+      url = path;
+    } else {
+      let p = String(path || "").trim();
+      if (!p.startsWith("/")) p = "/" + p;
+      const base = String(API_BASE || "").replace(/\/+$/, "");
+      if (base.endsWith("/api") && p.startsWith("/api")) p = p.replace(/^\/api/, "");
+      url = base + p;
+    }
+
+    const headers = opts.headers instanceof Headers
+      ? Object.fromEntries(opts.headers.entries())
+      : (opts.headers && typeof opts.headers === "object" ? { ...opts.headers } : {});
+
+    if (opts.body && !(opts.body instanceof FormData) && !headers["Content-Type"] && !headers["content-type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (token && !headers["Authorization"] && !headers["authorization"]) {
+      headers["Authorization"] = "Bearer " + token;
+    }
+
+    const res = await fetch(url, { credentials: "include", ...opts, headers });
+    const txt = await res.text().catch(() => null);
+    let data = null;
+    try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
+
+    if (!res.ok) {
+      const err = new Error((data && (data.message || data.msg || data.error)) || ("HTTP " + res.status));
+      err.status = res.status;
+      err.body = data;
+      throw err;
+    }
+    return data;
+  }
+
+  function ensureTradingViewScript() {
+    if (window.TradingView && typeof window.TradingView.widget === "function") return Promise.resolve(true);
+    if (document.querySelector('script[data-leones-tv="1"]')) return Promise.resolve(true);
+
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://s3.tradingview.com/tv.js";
+      s.async = true;
+      s.dataset.leonesTv = "1";
+      s.onload = () => resolve(true);
+      s.onerror = () => reject(new Error("No se pudo cargar TradingView"));
+      document.head.appendChild(s);
     });
   }
 
-  // ====== TRADING PANEL & HELPERS ======
-  let currentSymbol = (state.ALL_SYMBOLS && state.ALL_SYMBOLS[0] && state.ALL_SYMBOLS[0].symbol) || 'BINANCE:BTCUSDT';
-  let currentLeverage = 10;
-  let currentEntryPrice = null;
-
-  function selectSymbol(symbol){
-    currentSymbol = symbol;
-    const ts = document.getElementById('tradingSymbol');
-    if(ts) ts.innerText = (symbol && symbol.split(':').pop()) || symbol;
-    if(typeof window.initTradingWidget === 'function') try { window.initTradingWidget(symbol); } catch(e){}
-    const priceObj = state.symbolPrices[symbol];
-    if(priceObj && priceObj.price) updatePriceInUI(symbol, priceObj.price);
-    try { if(socket && socket.emit) socket.emit('request_orderbook', { symbol }); } catch(e){}
+  function ensurePanelMessage(message, type = "info") {
+    const el = document.getElementById("brokerExtMessage");
+    if (!el) return;
+    el.style.display = "block";
+    el.style.padding = "12px";
+    el.style.borderRadius = "12px";
+    el.style.margin = "10px 0 0";
+    el.style.textAlign = "center";
+    el.style.fontWeight = "700";
+    el.style.letterSpacing = "0.2px";
+    el.style.border = "1px solid rgba(255,255,255,.06)";
+    el.style.background =
+      type === "success" ? "rgba(0, 180, 90, 0.12)" :
+      type === "error" ? "rgba(220, 60, 60, 0.12)" :
+      "rgba(255,255,255,0.04)";
+    el.textContent = message;
   }
 
-  function updatePriceInUI(symbol, price){
-    try{
-      const els = document.querySelectorAll(`[data-symbol="${symbol}"]`);
-      els.forEach(el => { el.textContent = formatNumber(price); });
+  function ensureHost() {
+    let host = document.getElementById(HOST_ID);
+    if (host) return host;
 
-      const tsText = document.getElementById('tradingSymbol')?.innerText || '';
-      if((symbol||'').split(':').pop() && tsText.includes((symbol||'').split(':').pop())){
-        const opPrice = document.getElementById('op-price');
-        if(opPrice) opPrice.textContent = formatNumber(price);
-      }
-
-      if(!currentEntryPrice) currentEntryPrice = price;
-      renderMarginCalculator();
-    }catch(e){}
+    host = document.createElement("div");
+    host.id = HOST_ID;
+    host.style.display = "none";
+    document.body.appendChild(host);
+    return host;
   }
 
-  function updateOrderBookUI(ob){
-    try{
-      const bidsEl = document.getElementById('ob-bids');
-      const asksEl = document.getElementById('ob-asks');
-      if(bidsEl) bidsEl.innerHTML = (ob.bids && ob.bids.length) ? ob.bids.slice(0,8).map(b => `${Number(b[0]).toFixed(6)} • ${b[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-      if(asksEl) asksEl.innerHTML = (ob.asks && ob.asks.length) ? ob.asks.slice(0,8).map(a => `${Number(a[0]).toFixed(6)} • ${a[1]}`).join('<br/>') : '<div class="muted-small">—</div>';
-    }catch(e){}
+  function getSymbolSource() {
+    const fromState = Array.isArray(TR.ALL_SYMBOLS) ? TR.ALL_SYMBOLS : [];
+    if (fromState.length) return uniqueBySymbol(fromState);
+    const fromWindow = Array.isArray(window.__LEONES_MARKETS__) ? window.__LEONES_MARKETS__ : [];
+    if (fromWindow.length) return uniqueBySymbol(fromWindow);
+    return [];
   }
 
-  // ====== Margin math ======
-  function calculateMargin({ positionSize = 0, leverage = 1, entryPrice = 0 } = {}) {
-    const pos = Number(positionSize) || 0;
-    const lev = Number(leverage) || 1;
-    const ep = Number(entryPrice) || 0;
-    const notional = pos;
-    const requiredMargin = lev > 0 ? (pos / lev) : pos;
-    const qty = ep > 0 ? pos / ep : 0;
-    return { requiredMargin, notional, qty };
+  async function loadRealMarkets() {
+    const endpoints = [
+      "/market/list",
+      "/market/symbols",
+      "/symbols",
+      "/api/market/list",
+      "/api/market/symbols",
+      "/api/symbols"
+    ];
+
+    let merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        if (!res) continue;
+
+        if (Array.isArray(res)) merged = merged.concat(res);
+        else if (Array.isArray(res.data)) merged = merged.concat(res.data);
+        else if (Array.isArray(res.symbols)) merged = merged.concat(res.symbols);
+      } catch (e) {}
+    }
+
+    const normalized = uniqueBySymbol(merged);
+    if (normalized.length) {
+      TR.ALL_SYMBOLS = normalized;
+      window.__LEONES_MARKETS__ = normalized;
+      return normalized;
+    }
+
+    const fallback = getSymbolSource();
+    TR.ALL_SYMBOLS = fallback;
+    return fallback;
   }
 
-  function renderMarginCalculator(){
-    try{
-      const marginEl = document.getElementById('marginCalc');
-      if(!marginEl) return;
-      const priceObj = state.symbolPrices[currentSymbol];
-      const marketPrice = priceObj ? Number(priceObj.price) : Number(currentEntryPrice) || 0;
-      const posSize = Number(document.getElementById('input_position_size')?.value || 0);
-      const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage || 1);
-      const res = calculateMargin({ positionSize: posSize, leverage: lev, entryPrice: marketPrice });
-      marginEl.innerHTML = `
-        <div>Simulación — ${escapeHtml((currentSymbol||'').split(':').pop() || currentSymbol)}</div>
-        <div>Precio (mkt): <strong>${formatNumber(marketPrice)}</strong></div>
-        <div>Posición (notional): <strong>${formatNumber(res.notional)}</strong></div>
-        <div>Qty aprox.: <strong>${formatNumber(res.qty,8)}</strong></div>
-        <div>Apalancamiento: <strong>${lev}x</strong></div>
-        <div>Margen requerido: <strong>${formatNumber(res.requiredMargin,2)}</strong></div>
+  function getActiveSymbol() {
+    const current = TR.activeSymbol || window.__LEONES_TRADING__?.activeSymbol || null;
+    if (current) return current;
+    const list = getSymbolSource();
+    return list[0] || null;
+  }
+
+  function showVerifiedBadgeInline() {
+    const el = document.getElementById("brokerExtMessage");
+    if (!el) return;
+    const user = getUser();
+    const name = user?.name || user?.fullName || user?.displayName || user?.email || "Cliente";
+    el.style.display = "block";
+    el.style.padding = "12px";
+    el.style.borderRadius = "12px";
+    el.style.margin = "10px 0 0";
+    el.style.textAlign = "center";
+    el.style.fontWeight = "700";
+    el.style.border = "1px solid rgba(255,255,255,.08)";
+    el.style.background = "rgba(255,255,255,0.04)";
+    el.innerHTML = `Cuenta verificada para <strong>${escapeHtml(name)}</strong>`;
+  }
+
+  function renderMarketSummary() {
+    const host = document.getElementById("marketSummaryPanel");
+    if (!host) return;
+
+    const list = getSymbolSource();
+    if (!list.length) {
+      host.innerHTML = `
+        <div style="font-weight:900;font-size:18px;margin-bottom:10px;">Mercados cargados</div>
+        <div style="opacity:.8">No hay símbolos reales disponibles todavía.</div>
       `;
-    }catch(e){ warn('renderMarginCalculator', e); }
-  }
-
-  // ====== Orders & Positions ======
-  async function placeOrder({ side = 'buy', positionSize = 0, leverage = 1, type = 'market', price = null } = {}) {
-    try {
-      const payload = {
-        symbol: currentSymbol,
-        side,
-        type,
-        notional: Number(positionSize) || 0,
-        leverage: Number(leverage) || 1,
-        price: (price !== null && price !== undefined) ? Number(price) : undefined
-      };
-      const candidates = ['/trade/place','/api/trade/place','/orders','/api/orders'];
-      let res = null;
-      for(const ep of candidates){
-        try{
-          res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
-          if(res) break;
-        }catch(e){}
-      }
-      alert('Orden enviada: ' + (res && (res.message || res.result) ? (res.message || res.result) : 'OK'));
-      await fetchPositions().catch(()=>{});
-      return res;
-    } catch (e) {
-      warn('placeOrder error', e);
-      alert(e?.body?.message || e.message || 'Error enviando orden');
-      throw e;
+      return;
     }
-  }
 
-  async function fetchPositions(){
-    try{
-      const candidates = ['/positions','/api/positions','/trade/positions','/api/trade/positions'];
-      let res = null;
-      for(const ep of candidates){
-        try{ res = await apiFetch(ep).catch(()=>null); if(res) break; }catch(e){}
-      }
-      if(!res) return null;
-      state.positions = Array.isArray(res) ? res : (res.positions || res.data || []);
-      renderPositions();
-      return state.positions;
-    }catch(e){ warn('fetchPositions error', e); return null; }
-  }
-
-  function renderPositions(){
-    try{
-      const el = document.getElementById('positionsList');
-      if(!el) return;
-      el.innerHTML = '';
-      if(!state.positions || !state.positions.length){ el.innerHTML = '<div class="muted-small">— sin posiciones —</div>'; return; }
-      state.positions.forEach(p => {
-        try{
-          const row = document.createElement('div');
-          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)';
-          const symbol = p.symbol || p.s || currentSymbol;
-          const size = p.notional || p.size || 0;
-          const entry = p.entryPrice || p.price || p.avgPrice || 0;
-          const pl = p.unrealizedPnl ?? p.pnl ?? 0;
-          row.innerHTML = `
-            <div style="font-weight:700">${escapeHtml(symbol)}</div>
-            <div style="text-align:right">
-              <div>Size: ${formatNumber(size)}</div>
-              <div>Entry: ${formatNumber(entry)}</div>
-              <div>PnL: ${formatNumber(pl,2)}</div>
-            </div>
-          `;
-          el.appendChild(row);
-        }catch(e){}
-      });
-    }catch(e){}
-  }
-
-  // ====== UI wiring ======
-  function wireTradingUI(){
-    try{
-      const posInput = document.getElementById('input_position_size');
-      const levInput = document.getElementById('input_leverage');
-      if(posInput) posInput.addEventListener('input', renderMarginCalculator);
-      if(levInput) levInput.addEventListener('input', (e) => { currentLeverage = Number(e.target.value) || currentLeverage; renderMarginCalculator(); });
-
-      const buyBtn = document.getElementById('btnBuy');
-      const sellBtn = document.getElementById('btnSell');
-      if(buyBtn) buyBtn.addEventListener('click', async () => {
-        const pos = Number(document.getElementById('input_position_size')?.value || 0);
-        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
-        await placeOrder({ side: 'buy', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
-      });
-      if(sellBtn) sellBtn.addEventListener('click', async () => {
-        const pos = Number(document.getElementById('input_position_size')?.value || 0);
-        const lev = Number(document.getElementById('input_leverage')?.value || currentLeverage);
-        await placeOrder({ side: 'sell', positionSize: pos, leverage: lev, type: 'market' }).catch(()=>{});
-      });
-
-      const refreshBtn = document.getElementById('btnRefreshPositions');
-      if(refreshBtn) refreshBtn.addEventListener('click', () => fetchPositions().catch(()=>{}));
-
-      const fetchSymBtn = document.getElementById('btnFetchSymbols');
-      if(fetchSymBtn) fetchSymBtn.addEventListener('click', async () => {
-        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
-        for(const ep of endpoints){
-          try{
-            const r = await apiFetch(ep).catch(()=>null);
-            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; renderSymbolsGrid(); break; }
-          }catch(e){}
-        }
-      });
-
-      renderMarginCalculator();
-    }catch(e){ warn('wireTradingUI error', e); }
-  }
-
-  // ====== TradingView fallback ======
-  function provideTradingWidgetFallback(){
-    try{
-      if(typeof window.initTradingWidget === 'function') return;
-      window.initTradingWidget = function(symbol){
-        const cont = document.getElementById('tv_chart_container');
-        if(!cont) return;
-        cont.innerHTML = `<div style="padding:12px;color:var(--muted)">Gráfico: ${escapeHtml((symbol||'').split(':').pop()||symbol)} (widget no disponible)</div>`;
-      };
-    }catch(e){}
-  }
-
-  // ====== Demo prices fallback ======
-  let demoTicker = null;
-  function startDemoPrices(){
-    if(demoTicker) return;
-    demoTicker = setInterval(() => {
-      (state.ALL_SYMBOLS && state.ALL_SYMBOLS.length ? state.ALL_SYMBOLS : [{symbol:'BINANCE:BTCUSDT'}]).forEach(s => {
-        const key = s.symbol;
-        const old = (state.symbolPrices[key] && Number(state.symbolPrices[key].price)) || (Math.random()*100);
-        const change = (Math.random() - 0.5) * Math.max(0.0001, Math.abs(old) * 0.002);
-        const next = Number(Math.max(0.00001, old + change).toFixed(6));
-        state.symbolPrices[key] = { price: next, ts: Date.now() };
-      });
-      renderSymbolsGrid();
-      renderMarginCalculator();
-    }, 1200);
-  }
-  function stopDemoPrices(){ if(demoTicker){ clearInterval(demoTicker); demoTicker = null; } }
-
-  // ====== Account helpers (loadAccount) ======
-  async function loadAccount(){
-    try{
-      const candidates = ['/account','/api/account','/wallet','/api/wallet'];
-      let acc = null;
-      for(const ep of candidates){
-        try{ acc = await apiFetch(ep).catch(()=>null); if(acc) break; }catch(e){}
-      }
-      if(!acc) return null;
-      const balance = acc.balance ?? acc.account?.balance ?? acc.data?.balance ?? null;
-      if(balance !== null){
-        const el = document.getElementById('user-equity');
-        if(el) el.textContent = formatNumber(balance,2);
-      }
-      window.__LEONES_ACCOUNT = acc;
+    const byMarket = list.reduce((acc, item) => {
+      const k = item.market || "Market";
+      acc[k] = (acc[k] || 0) + 1;
       return acc;
-    }catch(e){ warn('loadAccount error', e); return null; }
+    }, {});
+
+    const rows = Object.keys(byMarket).sort().map(k => `
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        <span>${escapeHtml(k)}</span>
+        <strong>${byMarket[k]}</strong>
+      </div>
+    `).join("");
+
+    host.innerHTML = `
+      <div style="font-weight:900;font-size:18px;margin-bottom:10px;">Mercados cargados</div>
+      ${rows}
+    `;
   }
 
-  // ====== openTrade / closeTrade ======
-  async function openTrade(symbol, type, lot, price, sl, tp){
-    try{
-      const payload = { symbol, type, lot, price, sl, tp };
-      const candidates = ['/trade/open','/api/trade/open','/trade/place','/api/trade/place'];
-      for(const ep of candidates){
-        try{
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
-          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-        }catch(e){}
-      }
-      throw new Error('No endpoint responded for openTrade');
-    }catch(e){ err('openTrade error', e); throw e; }
-  }
+  function renderSelectedSymbolInfo(symbol) {
+    const host = document.getElementById("symbolDetailsPanel");
+    if (!host) return;
 
-  async function closeTrade(positionId){
-    try{
-      const payload = { positionId };
-      const candidates = ['/trade/close','/api/trade/close','/trade/closePosition','/api/trade/closePosition'];
-      for(const ep of candidates){
-        try{
-          const res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) }).catch(()=>null);
-          if(res){ await loadAccount().catch(()=>{}); await fetchPositions().catch(()=>{}); return res; }
-        }catch(e){}
-      }
-      throw new Error('No endpoint responded for closeTrade');
-    }catch(e){ err('closeTrade error', e); throw e; }
-  }
+    const list = getSymbolSource();
+    const item = list.find(x =>
+      String(x.symbol).toUpperCase() === String(symbol || "").toUpperCase() ||
+      String(x.tvSymbol).toUpperCase() === String(symbol || "").toUpperCase()
+    );
 
-  // ====== Margin call (defensivo) ======
-  async function checkMarginCall(){
-    try{
-      const acc = window.__LEONES_ACCOUNT || await loadAccount().catch(()=>null);
-      if(!acc) return false;
-      const marginLevel = acc.marginLevel ?? acc.margin?.level ?? acc.marginLevelPercent ?? null;
-      if(marginLevel !== null && Number(marginLevel) < 50){
-        alert('Margin Call - posiciones cerradas automáticamente');
-        const poses = acc.positions ?? state.positions ?? [];
-        for(const pos of poses){
-          try{
-            const pid = pos._id || pos.id || pos.positionId || pos.position_id;
-            if(pid) await closeTrade(pid).catch(()=>{});
-          }catch(e){}
+    if (!item) {
+      host.innerHTML = `<div style="opacity:.75">Selecciona un símbolo real para ver sus características.</div>`;
+      return;
+    }
+
+    host.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:900;font-size:18px;margin-bottom:6px;">${escapeHtml(item.label)}</div>
+          <div style="opacity:.8;font-size:13px">${escapeHtml(item.market)}</div>
+        </div>
+        <button id="openTVForSymbol" class="btn glow" style="min-width:180px">Abrir en TradingView</button>
+      </div>
+      <div style="display:grid;gap:8px;font-size:14px;line-height:1.5;margin-top:12px">
+        <div><strong>Símbolo:</strong> ${escapeHtml(item.symbol)}</div>
+        <div><strong>TradingView:</strong> ${escapeHtml(item.tvSymbol)}</div>
+        <div><strong>Apalancamiento:</strong> ${escapeHtml(item.leverage)}</div>
+        <div><strong>Spread:</strong> ${escapeHtml(item.spread)}</div>
+        <div><strong>Horario:</strong> ${escapeHtml(item.hours)}</div>
+        <div><strong>Contrato:</strong> ${escapeHtml(item.contract)}</div>
+        <div><strong>Volatilidad:</strong> ${escapeHtml(item.volatility)}</div>
+      </div>
+    `;
+
+    const btn = host.querySelector("#openTVForSymbol");
+    if (btn) {
+      btn.addEventListener("click", async () => {
+        try {
+          await openTradingView(item);
+        } catch (e) {
+          ensurePanelMessage(e?.message || "No se pudo abrir TradingView", "error");
         }
-        return true;
-      }
-      return false;
-    }catch(e){ warn('checkMarginCall error', e); return false; }
-  }
-
-  // ====== INIT ======
-  async function initTradingModule(){
-    try{
-      // prevent double init
-      if(window.__LEONES_TRADING_INITED__) return;
-      window.__LEONES_TRADING_INITED__ = true;
-
-      // create containers if missing (full panel markup)
-      if(!document.getElementById('symbolsGrid')){
-        const s = document.createElement('div');
-        s.id = 'symbolsGrid';
-        s.style.cssText = 'padding:8px;max-width:1200px;margin:12px auto';
-        document.body.insertBefore(s, document.body.firstChild);
-      }
-      if(!document.getElementById('tradingPanel')){
-        const panel = document.createElement('div');
-        panel.id = 'tradingPanel';
-        panel.style.cssText = 'max-width:1200px;margin:12px auto;background:#0b0b0b;padding:12px;border-radius:10px;color:var(--text)';
-        panel.innerHTML = `
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-            <div style="font-weight:800;font-size:18px" id="tradingSymbol">-</div>
-            <div>Precio:<strong id="op-price">-</strong></div>
-            <div>Equity:<strong id="user-equity">--</strong></div>
-            <div><button id="btnFetchSymbols" class="btn">Actualizar Símbolos</button></div>
-          </div>
-          <hr/>
-          <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
-            <div id="tv_chart_container" style="min-height:260px;background:#060606;border-radius:8px;padding:8px"></div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <div style="background:#080808;padding:8px;border-radius:8px">
-                <label>Posición (USD)</label>
-                <input id="input_position_size" type="number" placeholder="100.00" style="width:100%;margin-top:6px" />
-                <label style="margin-top:8px">Apalancamiento (x)</label>
-                <input id="input_leverage" type="number" min="1" max="100" step="1" value="10" style="width:100%;margin-top:6px" />
-                <div id="marginCalc" style="margin-top:8px;color:var(--muted)"></div>
-              </div>
-              <div style="display:flex;gap:8px">
-                <button id="btnBuy" class="btn glow" style="flex:1">COMPRAR</button>
-                <button id="btnSell" class="btn ghost" style="flex:1">VENDER</button>
-              </div>
-              <div style="background:#080808;padding:8px;border-radius:8px">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                  <div style="font-weight:700">Posiciones</div>
-                  <button id="btnRefreshPositions" class="btn ghost">Actualizar</button>
-                </div>
-                <div id="positionsList" style="margin-top:8px;max-height:180px;overflow:auto;color:var(--text)"></div>
-              </div>
-            </div>
-          </div>
-          <hr/>
-          <div style="display:flex;gap:8px">
-            <div id="ob-bids" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
-            <div id="ob-asks" data-symbol="" style="flex:1;background:#060606;padding:8px;border-radius:8px;min-height:80px"></div>
-          </div>
-        `;
-        document.body.appendChild(panel);
-      }
-
-      // connect socket & handlers (if available)
-      ensureSocket();
-
-      // try fetching symbols from backend
-      try{
-        const endpoints = ['/market/list','/market/symbols','/api/market/list','/api/symbols','/symbols'];
-        for(const ep of endpoints){
-          try{
-            const r = await apiFetch(ep).catch(()=>null);
-            if(Array.isArray(r) && r.length){ state.ALL_SYMBOLS = r; break; }
-          }catch(e){}
-        }
-      }catch(e){}
-
-      renderSymbolsGrid();
-      wireTradingUI();
-      provideTradingWidgetFallback();
-
-      await fetchPositions().catch(()=>{});
-      await loadAccount().catch(()=>{});
-
-      // fallback to demo prices if no prices received
-      setTimeout(() => {
-        const anyPrice = Object.keys(state.symbolPrices || {}).length;
-        if(!anyPrice) startDemoPrices();
-      }, 2000);
-
-      log('Trading module initialized');
-    }catch(e){
-      err('initTradingModule error', e);
+      });
     }
   }
 
-  // Boot once on DOMContentLoaded
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initTradingModule);
-  } else {
-    // already loaded
-    setTimeout(initTradingModule, 0);
+  function renderSymbolsList() {
+    const host = document.getElementById("symbolsListPanel");
+    if (!host) return;
+
+    const list = getSymbolSource();
+    if (!list.length) {
+      host.innerHTML = `<div style="opacity:.75">Aún no hay símbolos reales en el backend.</div>`;
+      return;
+    }
+
+    host.innerHTML = list.map(item => `
+      <button class="tv-sym-row" data-symbol="${escapeHtml(item.symbol)}" data-tv-symbol="${escapeHtml(item.tvSymbol)}" style="width:100%;display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03);color:#fff;cursor:pointer;text-align:left;">
+        <span>
+          <strong>${escapeHtml(item.label)}</strong>
+          <span style="display:block;opacity:.75;font-size:12px;margin-top:3px">${escapeHtml(item.market)}</span>
+        </span>
+        <span style="opacity:.8;font-size:12px">${escapeHtml(item.symbol)}</span>
+      </button>
+    `).join("");
+
+    host.querySelectorAll(".tv-sym-row").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const symbol = btn.dataset.symbol || "";
+        const tvSymbol = btn.dataset.tvSymbol || symbol;
+        const meta = list.find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) || null;
+        if (meta) {
+          TR.activeSymbol = meta.symbol;
+          TR.activeMeta = meta;
+          renderSelectedSymbolInfo(meta.symbol);
+          try {
+            await openTradingView(meta);
+          } catch (e) {
+            ensurePanelMessage(e?.message || "No se pudo abrir TradingView", "error");
+          }
+        } else {
+          ensurePanelMessage("No se encontró el símbolo real seleccionado.", "error");
+        }
+      });
+    });
   }
 
-  // Expose functions
-  window._LEONES_TRADING = window._LEONES_TRADING || {};
-  Object.assign(window._LEONES_TRADING, {
-    selectSymbol,
-    placeOrder,
-    fetchPositions,
-    calculateMargin,
-    openTrade,
-    closeTrade,
-    loadAccount,
-    checkMarginCall
+  async function openTradingView(meta) {
+    const item = meta && typeof meta === "object" ? meta : null;
+    const list = getSymbolSource();
+    const resolved = item || list[0] || null;
+    if (!resolved) throw new Error("No hay símbolos reales para mostrar en TradingView");
+
+    await ensureTradingViewScript();
+
+    const container = document.getElementById("tv_chart_container") || document.getElementById("tradingview_chart");
+    if (!container) throw new Error("No existe el contenedor de TradingView");
+
+    container.innerHTML = "";
+    const symbol = String(resolved.tvSymbol || resolved.symbol || "").trim();
+    if (!symbol) throw new Error("El símbolo real no es válido");
+
+    if (typeof window.initTradingWidget === "function") {
+      window.initTradingWidget(symbol);
+      return symbol;
+    }
+
+    if (!window.TradingView || typeof window.TradingView.widget !== "function") {
+      throw new Error("TradingView no está disponible");
+    }
+
+    new TradingView.widget({
+      autosize: true,
+      symbol,
+      interval: "5",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "es",
+      enable_publishing: false,
+      allow_symbol_change: true,
+      container_id: container.id,
+      hide_side_toolbar: false,
+      withdateranges: true,
+      save_image: false
+    });
+
+    return symbol;
+  }
+
+  function wireExistingTradingButtons() {
+    try {
+      const refreshBtn = document.getElementById("btnFetchSymbols");
+      const buyBtn = document.getElementById("btnBuy");
+      const sellBtn = document.getElementById("btnSell");
+      const symbolsGrid = document.getElementById("symbolsGrid");
+
+      if (refreshBtn && !refreshBtn.__leones_ext2_bound) {
+        refreshBtn.__leones_ext2_bound = true;
+        refreshBtn.addEventListener("click", async () => {
+          await bootRealUI();
+        });
+      }
+
+      if (buyBtn && !buyBtn.__leones_ext2_bound) {
+        buyBtn.__leones_ext2_bound = true;
+        buyBtn.addEventListener("click", () => {
+          ensurePanelMessage("La orden real la ejecuta el JS #1 y el backend.", "info");
+        });
+      }
+
+      if (sellBtn && !sellBtn.__leones_ext2_bound) {
+        sellBtn.__leones_ext2_bound = true;
+        sellBtn.addEventListener("click", () => {
+          ensurePanelMessage("La orden real la ejecuta el JS #1 y el backend.", "info");
+        });
+      }
+
+      if (symbolsGrid && !symbolsGrid.__leones_ext2_bound) {
+        symbolsGrid.__leones_ext2_bound = true;
+        symbolsGrid.addEventListener("click", async (ev) => {
+          const card = ev.target.closest && ev.target.closest(".symbol-card");
+          if (!card) return;
+          const text = (card.textContent || "").trim();
+          const list = getSymbolSource();
+          const found = list.find(x => text.includes(x.label) || text.includes(x.symbol) || text.includes(x.tvSymbol));
+          if (!found) return;
+          TR.activeSymbol = found.symbol;
+          TR.activeMeta = found;
+          renderSelectedSymbolInfo(found.symbol);
+          await openTradingView(found).catch(e => ensurePanelMessage(e?.message || "No se pudo abrir TradingView", "error"));
+        }, true);
+      }
+    } catch (e) {
+      warn("wireExistingTradingButtons", e);
+    }
+  }
+
+  function buildPanels() {
+    const host = ensureHost();
+    host.style.display = "block";
+
+    if (!document.getElementById("brokerExtMessage")) {
+      const msg = document.createElement("div");
+      msg.id = "brokerExtMessage";
+      msg.style.display = "none";
+      msg.style.maxWidth = "1200px";
+      msg.style.margin = "0 auto";
+      host.prepend(msg);
+    }
+
+    if (!document.getElementById("marketSummaryPanel")) {
+      const box = document.createElement("div");
+      box.id = "marketSummaryPanel";
+      box.style.cssText = "max-width:1200px;margin:12px auto;padding:14px;border-radius:14px;background:#0b0b0b;color:#fff;";
+      host.prepend(box);
+    }
+
+    if (!document.getElementById("symbolDetailsPanel")) {
+      const box = document.createElement("div");
+      box.id = "symbolDetailsPanel";
+      box.style.cssText = "max-width:1200px;margin:12px auto 0;padding:14px;border-radius:14px;background:#0b0b0b;color:#fff;";
+      host.prepend(box);
+    }
+
+    if (!document.getElementById("symbolsListPanel")) {
+      const box = document.createElement("div");
+      box.id = "symbolsListPanel";
+      box.style.cssText = "max-width:1200px;margin:12px auto 0;padding:14px;border-radius:14px;background:#0b0b0b;color:#fff;display:grid;gap:8px;";
+      host.prepend(box);
+    }
+  }
+
+  async function bootRealUI() {
+    try {
+      buildPanels();
+      wireExistingTradingButtons();
+      showVerifiedBadgeInline();
+
+      const live = await loadRealMarkets();
+      renderMarketSummary();
+      renderSymbolsList();
+
+      if (live && live.length) {
+        const active = TR.activeMeta || live[0];
+        TR.activeSymbol = active.symbol;
+        TR.activeMeta = active;
+        renderSelectedSymbolInfo(active.symbol);
+        await openTradingView(active);
+      } else {
+        ensurePanelMessage("No hay símbolos reales cargados desde el backend.", "error");
+      }
+    } catch (e) {
+      console.error("[BROKER-EXT2-REAL] boot error", e);
+      ensurePanelMessage(e?.message || "Error inicializando la vista real", "error");
+    }
+  }
+
+  async function refreshFromBackend() {
+    const live = await loadRealMarkets();
+    renderMarketSummary();
+    renderSymbolsList();
+    return live;
+  }
+
+  function observePrivateArea() {
+    try {
+      const target = document.getElementById(HOST_ID) || document.body;
+      const mo = new MutationObserver(() => {
+        try {
+          wireExistingTradingButtons();
+          renderMarketSummary();
+          renderSymbolsList();
+          const active = TR.activeMeta || getActiveSymbol();
+          if (active && active.symbol) renderSelectedSymbolInfo(active.symbol);
+        } catch (e) {}
+      });
+      mo.observe(target, { childList: true, subtree: true });
+    } catch (e) {}
+  }
+
+  window._LEONES_BROKER_EXT = window._LEONES_BROKER_EXT || {};
+  Object.assign(window._LEONES_BROKER_EXT, {
+    bootRealUI,
+    refreshFromBackend,
+    renderSelectedSymbolInfo,
+    renderSymbolsList,
+    renderMarketSummary,
+    openTradingView,
+    loadRealMarkets
   });
 
-})(); // EOF
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      bootRealUI();
+      observePrivateArea();
+    });
+  } else {
+    bootRealUI();
+    observePrivateArea();
+  }
+})();
 </script>
+
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
