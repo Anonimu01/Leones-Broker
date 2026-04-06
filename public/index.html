@@ -2043,7 +2043,8 @@ if (window.__LEONES_BOOTED__) {
     activeSymbol: null,
     marketFilter: 'All',
     lastChartSymbol: null,
-    pollTimer: null
+    pollTimer: null,
+    menuOpen: true
   };
 
   const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
@@ -2183,6 +2184,8 @@ if (window.__LEONES_BOOTED__) {
     };
   }
 
+  const LOGICAL_SYMBOLS = DEFAULT_SYMBOLS.slice();
+
   function normalizeSymbolRow(x) {
     if (!x || typeof x !== 'object') return null;
     const symbol = String(x.symbol || x.code || x.ticker || x.s || x.tvSymbol || '').trim().toUpperCase();
@@ -2312,6 +2315,7 @@ if (window.__LEONES_BOOTED__) {
 
   function injectUiStyles() {
     if (document.getElementById('leones-ext2-style')) return;
+
     const style = document.createElement('style');
     style.id = 'leones-ext2-style';
     style.textContent = `
@@ -2322,6 +2326,7 @@ if (window.__LEONES_BOOTED__) {
         padding:12px 12px 18px;
         display:block;
       }
+
       #${ROOT_ID} .btn{ touch-action: manipulation; }
       #${ROOT_ID} #brokerColumns{
         display:grid;
@@ -2336,13 +2341,21 @@ if (window.__LEONES_BOOTED__) {
         border-radius:12px;
         overflow:hidden;
       }
+
       .leones-menu-toggle-fixed{
         z-index:10050 !important;
       }
+
       .leones-private-menu-target{
-        transition: transform .22s ease, opacity .22s ease, visibility .22s ease;
-        will-change: transform;
+        transition: width .22s ease, transform .22s ease, opacity .22s ease, visibility .22s ease;
+        will-change: transform, width;
       }
+
+      .leones-flash{
+        transform: scale(0.98);
+        filter: brightness(1.12);
+      }
+
       @media (max-width: 980px){
         #${ROOT_ID} #brokerColumns{
           grid-template-columns:1fr;
@@ -2352,6 +2365,7 @@ if (window.__LEONES_BOOTED__) {
           height:58vh;
         }
       }
+
       @media (max-width: 900px){
         .leones-menu-toggle-fixed{
           position: fixed !important;
@@ -2360,17 +2374,26 @@ if (window.__LEONES_BOOTED__) {
           min-width:44px !important;
           min-height:44px !important;
         }
+
         body.leones-menu-open .leones-private-menu-target{
           transform: translateX(0) !important;
           opacity: 1 !important;
           pointer-events: auto !important;
           visibility: visible !important;
         }
+
         body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible{
-          transform: translateX(-105%) !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
-          visibility: hidden !important;
+          width: 62px !important;
+          min-width: 62px !important;
+          max-width: 62px !important;
+          overflow: hidden !important;
+        }
+
+        body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible .menu-item,
+        body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible .sidebar-header > div,
+        body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible .sidebar-header #btnLogoutLeft_full,
+        body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible .sidebar-header .menu-btn:not(#sidebarToggle){
+          display:none !important;
         }
       }
     `;
@@ -2434,7 +2457,27 @@ if (window.__LEONES_BOOTED__) {
     return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
 
+  function getMenuToggleButtons() {
+    return Array.from(document.querySelectorAll([
+      '[data-menu-toggle]',
+      '#menuBtn',
+      '#menuToggle',
+      '#sidebarToggle',
+      '#sidebarToggleSide',
+      '.menu-toggle',
+      '.nav-toggle',
+      '.burger-btn',
+      '.burger',
+      'button[aria-controls]'
+    ].join(','))).filter(btn => {
+      const txt = (btn.textContent || '').trim().toLowerCase();
+      const id = String(btn.id || '').toLowerCase();
+      return btn.dataset.menuToggle !== undefined || /menu|☰|≡|burger|nav/.test(txt) || /menu|toggle|sidebar/.test(id) || btn.getAttribute('aria-controls');
+    });
+  }
+
   function setMenuPanelState(open) {
+    state.menuOpen = !!open;
     document.body.classList.toggle('leones-menu-open', !!open);
 
     const panels = Array.from(document.querySelectorAll(
@@ -2447,25 +2490,25 @@ if (window.__LEONES_BOOTED__) {
 
       if (window.matchMedia('(max-width: 900px)').matches) {
         panel.style.position = 'fixed';
-        panel.style.top = '0';
+        panel.style.top = '64px';
         panel.style.left = '0';
         panel.style.bottom = '0';
-        panel.style.width = 'min(84vw, 320px)';
-        panel.style.maxWidth = '320px';
-        panel.style.height = '100dvh';
+        panel.style.width = open ? '220px' : '62px';
+        panel.style.maxWidth = open ? '220px' : '62px';
+        panel.style.height = 'calc(100dvh - 64px)';
         panel.style.overflow = 'auto';
         panel.style.zIndex = '9998';
         if (!panel.style.backgroundColor) panel.style.backgroundColor = '#0b0b0b';
-        panel.style.transform = open ? 'translateX(0)' : 'translateX(-105%)';
-        panel.style.visibility = open ? 'visible' : 'hidden';
-        panel.style.pointerEvents = open ? 'auto' : 'none';
+        panel.style.transform = 'none';
+        panel.style.visibility = 'visible';
+        panel.style.pointerEvents = 'auto';
       } else {
         panel.style.position = '';
         panel.style.top = '';
         panel.style.left = '';
         panel.style.bottom = '';
-        panel.style.width = '';
-        panel.style.maxWidth = '';
+        panel.style.width = open ? '' : '62px';
+        panel.style.maxWidth = open ? '' : '62px';
         panel.style.height = '';
         panel.style.overflow = '';
         panel.style.zIndex = '';
@@ -2482,24 +2525,6 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  function getMenuToggleButtons() {
-    return Array.from(document.querySelectorAll([
-      '[data-menu-toggle]',
-      '#menuBtn',
-      '#menuToggle',
-      '#sidebarToggle',
-      '.menu-toggle',
-      '.nav-toggle',
-      '.burger-btn',
-      '.burger',
-      'button[aria-controls]'
-    ].join(','))).filter(btn => {
-      const txt = (btn.textContent || '').trim().toLowerCase();
-      const id = String(btn.id || '').toLowerCase();
-      return btn.dataset.menuToggle !== undefined || /menu|☰|≡|burger|nav/.test(txt) || /menu|toggle|sidebar/.test(id) || btn.getAttribute('aria-controls');
-    });
-  }
-
   function bindMenuToggle() {
     if (window.__LEONES_MENU_TOGGLE_BOUND__) return;
     window.__LEONES_MENU_TOGGLE_BOUND__ = true;
@@ -2512,13 +2537,11 @@ if (window.__LEONES_BOOTED__) {
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        const open = document.body.classList.contains('leones-menu-open');
-        setMenuPanelState(!open);
+        setMenuPanelState(!state.menuOpen);
       }, true);
     };
 
     const scan = () => getMenuToggleButtons().forEach(attach);
-
     scan();
 
     const mo = new MutationObserver(() => scan());
@@ -2545,149 +2568,10 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  function ensureShell(root) {
-    if (!root) return;
-    if (root.dataset.leonesShellBuilt === '1') return;
-    root.dataset.leonesShellBuilt = '1';
-    root.innerHTML = '';
-
-    const message = document.createElement('div');
-    message.id = 'brokerExtMessage';
-    message.style.cssText = 'display:none;margin-bottom:12px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);font-weight:700;text-align:center;color:#fff;';
-    root.appendChild(message);
-
-    const summary = document.createElement('section');
-    summary.id = 'brokerSummaryPanel';
-    summary.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;margin:12px 0;color:#fff;';
-    summary.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Panel de trading</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Mercados, gráfico y órdenes en vivo</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span id="brokerUserBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
-          <span id="brokerLeverageBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Leverage: --</span>
-          <span id="brokerBalanceBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Balance: --</span>
-        </div>
-      </div>
-    `;
-    root.appendChild(summary);
-
-    const columns = document.createElement('div');
-    columns.id = 'brokerColumns';
-
-    const left = document.createElement('div');
-    left.style.cssText = 'display:grid;gap:12px;';
-
-    const symbols = document.createElement('section');
-    symbols.id = 'brokerSymbolsPanel';
-    symbols.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    symbols.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Mercados y símbolos</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Lista real desde el proveedor de datos</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn ghost" data-action="refresh-all">Actualizar</button>
-          <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
-          <button class="btn ghost" data-action="refresh-quotes">Precios</button>
-        </div>
-      </div>
-      <div id="brokerMarketTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
-      <div id="brokerSymbolsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"></div>
-    `;
-    left.appendChild(symbols);
-
-    const chart = document.createElement('section');
-    chart.id = 'brokerChartPanel';
-    chart.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    chart.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Gráfico real</div>
-          <div id="brokerActiveSymbol" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
-        </div>
-        <button class="btn glow" data-action="open-chart">Abrir gráfico</button>
-      </div>
-      <div id="tv_chart_container"></div>
-    `;
-    left.appendChild(chart);
-
-    const right = document.createElement('div');
-    right.style.cssText = 'display:grid;gap:12px;';
-
-    const ticket = document.createElement('section');
-    ticket.id = 'brokerTicketPanel';
-    ticket.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    ticket.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
-      <div style="display:grid;gap:10px;">
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
-          <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-        </label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Leverage admin</div>
-            <div id="brokerLeverageValue" style="font-weight:800;">--</div>
-          </div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Margen requerido</div>
-            <div id="brokerMarginValue" style="font-weight:800;">--</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
-          <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
-        </div>
-      </div>
-    `;
-    right.appendChild(ticket);
-
-    const account = document.createElement('section');
-    account.id = 'brokerAccountPanel';
-    account.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    account.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Cuenta</div>
-        <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
-      </div>
-      <div style="display:grid;gap:8px;">
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountName">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmail">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Balance</span><strong id="brokerAccountBalance">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquity">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnl">--</strong></div>
-      </div>
-    `;
-    right.appendChild(account);
-
-    const positions = document.createElement('section');
-    positions.id = 'brokerPositionsPanel';
-    positions.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    positions.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Posiciones</div>
-        <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
-      </div>
-      <div id="brokerPositionsList" style="display:grid;gap:8px;"></div>
-    `;
-    right.appendChild(positions);
-
-    const details = document.createElement('section');
-    details.id = 'brokerSymbolDetailsPanel';
-    details.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    details.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
-      <div id="brokerSymbolDetails" style="display:grid;gap:8px;">--</div>
-    `;
-    right.appendChild(details);
-
-    columns.appendChild(left);
-    columns.appendChild(right);
-    root.appendChild(columns);
+  function flash(el) {
+    if (!el) return;
+    el.classList.add('leones-flash');
+    window.setTimeout(() => el.classList.remove('leones-flash'), 160);
   }
 
   function setMessage(text, type = 'info') {
@@ -2708,74 +2592,45 @@ if (window.__LEONES_BOOTED__) {
     el.textContent = '';
   }
 
-  async function loadRealMarkets() {
-    const endpoints = ['/market/symbols', '/market/list', '/market/polygon/symbols', '/symbols', '/api/market/symbols', '/api/market/list', '/api/market/polygon/symbols', '/api/symbols'];
+  function setHeaderName(user = {}) {
+    const saved = getUser();
+    const name =
+      user.name ||
+      user.fullName ||
+      user.displayName ||
+      user.alias ||
+      saved.name ||
+      saved.fullName ||
+      saved.displayName ||
+      saved.alias ||
+      saved.email ||
+      'Usuario';
 
-    const merged = [];
-    for (const ep of endpoints) {
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
-      } catch (e) {}
-    }
+    const welcome = document.getElementById('privateWelcomeName');
+    if (welcome) welcome.textContent = name;
 
-    const backendRows = uniqueBySymbol(merged);
-    const map = new Map();
+    const headerName = document.getElementById('privateHeaderName');
+    if (headerName) headerName.textContent = name;
 
-    DEFAULT_SYMBOLS.forEach(item => {
-      map.set(String(item.symbol).toUpperCase(), item);
-    });
-
-    backendRows.forEach(item => {
-      const key = String(item.symbol).toUpperCase();
-      map.set(key, {
-        ...(map.get(key) || {}),
-        ...item,
-        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
-        source: item.source || 'proveedor'
-      });
-    });
-
-    const all = Array.from(map.values()).sort((a, b) => {
-      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
-      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
-      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
-      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
-    });
-
-    state.markets = all;
-    TR.ALL_SYMBOLS = all;
-    window.__LEONES_MARKETS__ = all;
-    return all;
+    const userBadge = document.querySelector('#headerActions [data-leones-user-name]');
+    if (userBadge) userBadge.textContent = name;
   }
 
-  async function loadRealQuotes() {
-    const endpoints = ['/market/quotes', '/market/latest', '/market/polygon/quotes', '/quotes', '/api/market/quotes', '/api/market/latest', '/api/market/polygon/quotes', '/api/quotes'];
+  function updateTopStats(account = {}) {
+    const balance = account.balance ?? account.bal ?? account.walletBalance ?? account.deposit ?? account.funds ?? null;
+    const equity = account.equity ?? account.totalEquity ?? balance ?? null;
+    const pnl = account.pnl ?? account.profitLoss ?? account.unrealizedPnl ?? null;
 
-    const merged = [];
-    for (const ep of endpoints) {
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
-      } catch (e) {}
-    }
+    setText('balanceTotal', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
+    setText('cashAvail', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
+    setText('pnlTotal', pnl !== null && pnl !== undefined ? formatMoney(pnl) : '--');
+    setText('bal-usdt-top', balance !== null && balance !== undefined ? formatMoney(balance, '$') : '--');
+    setText('bal-usdt', balance !== null && balance !== undefined ? formatMoney(balance, '$') : '--');
 
-    const normalized = mergeQuotes(merged);
-    state.quotes = normalized;
-
-    TR.symbolPrices = TR.symbolPrices || {};
-    normalized.forEach(q => {
-      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
-    });
-
-    return normalized;
-  }
-
-  function extractAccountSource(payload = {}) {
-    if (!payload || typeof payload !== 'object') return {};
-    return payload.account || payload.data?.account || payload.data || payload.user || payload;
+    setText('brokerBalanceBadge', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
+    setText('brokerAccountBalance', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
+    setText('brokerAccountEquity', equity !== null && equity !== undefined ? formatMoney(equity) : '--');
+    setText('brokerAccountPnl', pnl !== null && pnl !== undefined ? formatMoney(pnl) : '--');
   }
 
   function syncAccountView(account = {}) {
@@ -2785,20 +2640,14 @@ if (window.__LEONES_BOOTED__) {
     const user = getUser();
     const name = safeAccount.name || safeAccount.fullName || safeAccount.displayName || safeAccount.alias || user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente';
     const email = safeAccount.email || user.email || '--';
-    const balance = safeAccount.balance ?? safeAccount.bal ?? safeAccount.walletBalance ?? safeAccount.deposit ?? safeAccount.funds ?? null;
-    const equity = safeAccount.equity ?? safeAccount.totalEquity ?? balance ?? null;
-    const pnl = safeAccount.pnl ?? safeAccount.profitLoss ?? safeAccount.unrealizedPnl ?? null;
     const lev = effectiveLeverage(getActiveSymbolMeta());
 
+    setHeaderName({ name });
     setText('brokerUserBadge', name);
-    setText('brokerBalanceBadge', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
     setText('brokerLeverageBadge', lev ? `Leverage: 1:${lev}` : 'Leverage: --');
-
     setText('brokerAccountName', name);
     setText('brokerAccountEmail', email);
-    setText('brokerAccountBalance', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
-    setText('brokerAccountEquity', equity !== null && equity !== undefined ? formatMoney(equity) : '--');
-    setText('brokerAccountPnl', pnl !== null && pnl !== undefined ? formatMoney(pnl) : '--');
+    updateTopStats(safeAccount);
 
     if (typeof window.applyAccountToUI === 'function') {
       try { window.applyAccountToUI(safeAccount); } catch (e) {}
@@ -2948,6 +2797,7 @@ if (window.__LEONES_BOOTED__) {
         renderSymbolsGrid();
         const meta = getActiveSymbolMeta();
         if (meta) renderSymbolDetails(meta);
+        updateLiveTicker();
       };
 
       const ingestSymbols = (payload) => {
@@ -2999,6 +2849,7 @@ if (window.__LEONES_BOOTED__) {
 
       ['order_filled', 'order_opened', 'order_closed', 'trade_opened', 'trade_closed']
         .forEach(evt => socket.on(evt, () => requestBackendRefresh().catch(() => {})));
+
     } catch (e) {
       warn('bindSocketListeners', e);
     }
@@ -3027,6 +2878,33 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function emitAck(socket, event, payload, timeout = 7000) {
+    return new Promise((resolve, reject) => {
+      if (!socket || typeof socket.emit !== 'function') return reject(new Error('Socket no disponible'));
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        reject(new Error('Tiempo de espera agotado'));
+      }, timeout);
+
+      try {
+        socket.emit(event, payload, (resp) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(resp);
+        });
+      } catch (e) {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          reject(e);
+        }
+      }
+    });
+  }
+
   async function closePosition(position = {}) {
     const pid = position?.id || position?._id || position?.positionId || position?.tradeId || null;
     const symbol = position?.symbol || state.activeSymbol || TR.activeSymbol || null;
@@ -3042,13 +2920,23 @@ if (window.__LEONES_BOOTED__) {
       } catch (e) {}
     }
 
+    if (!res) {
+      const socket = window.__LEONES_SOCKET__?.socket || null;
+      if (socket) {
+        try {
+          res = await emitAck(socket, 'close_position', payload);
+        } catch (e) {}
+      }
+    }
+
     await requestBackendRefresh().catch(() => {});
     return res;
   }
 
-  async function placeOrder(side) {
+  async function submitOrder(side) {
     const meta = getActiveSymbolMeta();
-    const size = Number(document.getElementById('brokerOrderSize')?.value || 0);
+    const sizeInput = document.getElementById('brokerOrderSize');
+    const size = Number(sizeInput?.value || 0);
     const lev = effectiveLeverage(meta) || 1;
 
     if (!meta) throw new Error('Selecciona un símbolo antes de operar');
@@ -3070,20 +2958,21 @@ if (window.__LEONES_BOOTED__) {
       type: 'market'
     };
 
-    if (typeof NS.placeOrder === 'function') {
-      const res = await NS.placeOrder({
-        side,
-        positionSize: size,
-        leverage: lev,
-        type: 'market'
-      });
+    const btn = document.querySelector(`[data-action="${side}"]`);
+    flash(btn);
+    setMessage(side === 'buy' ? 'Enviando compra...' : 'Enviando venta...', 'info');
+
+    if (typeof NS.placeOrder === 'function' && NS.placeOrder !== submitOrder) {
+      const res = await NS.placeOrder(payload);
       await requestBackendRefresh().catch(() => {});
+      setMessage('Orden enviada', 'success');
       return res;
     }
 
     if (typeof window.placeBrokerOrder === 'function') {
       const res = await window.placeBrokerOrder(payload);
       await requestBackendRefresh().catch(() => {});
+      setMessage('Orden enviada', 'success');
       return res;
     }
 
@@ -3096,8 +2985,19 @@ if (window.__LEONES_BOOTED__) {
       } catch (e) {}
     }
 
+    if (!res) {
+      const socket = window.__LEONES_SOCKET__?.socket || null;
+      if (socket) {
+        try {
+          res = await emitAck(socket, 'place_order', payload);
+        } catch (e) {}
+      }
+    }
+
     if (!res) throw new Error('No se pudo enviar la orden');
+
     await requestBackendRefresh().catch(() => {});
+    setMessage('Orden enviada', 'success');
     return res;
   }
 
@@ -3105,6 +3005,11 @@ if (window.__LEONES_BOOTED__) {
     const host = document.getElementById('brokerPositionsList');
     if (!host) return;
     const list = Array.isArray(state.positions) ? state.positions : [];
+
+    const countEl = document.getElementById('pos-count');
+    const countTop = document.getElementById('pos-count-top');
+    if (countEl) countEl.textContent = String(list.length);
+    if (countTop) countTop.textContent = String(list.length);
 
     if (!list.length) {
       host.innerHTML = '<div style="opacity:.75;">— sin posiciones —</div>';
@@ -3191,12 +3096,84 @@ if (window.__LEONES_BOOTED__) {
     return getSymbols();
   }
 
+  async function loadRealMarkets() {
+    const endpoints = [
+      '/market/symbols', '/market/list', '/market/polygon/symbols', '/symbols',
+      '/api/market/symbols', '/api/market/list', '/api/market/polygon/symbols', '/api/symbols',
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const backendRows = uniqueBySymbol(merged);
+    const map = new Map();
+
+    DEFAULT_SYMBOLS.forEach(item => {
+      map.set(String(item.symbol).toUpperCase(), item);
+    });
+
+    backendRows.forEach(item => {
+      const key = String(item.symbol).toUpperCase();
+      map.set(key, {
+        ...(map.get(key) || {}),
+        ...item,
+        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
+        source: item.source || 'proveedor'
+      });
+    });
+
+    const all = Array.from(map.values()).sort((a, b) => {
+      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
+      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
+      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
+      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
+    });
+
+    state.markets = all;
+    TR.ALL_SYMBOLS = all;
+    window.__LEONES_MARKETS__ = all;
+    return all;
+  }
+
+  async function loadRealQuotes() {
+    const endpoints = [
+      '/market/quotes', '/market/latest', '/market/polygon/quotes', '/quotes',
+      '/api/market/quotes', '/api/market/latest', '/api/market/polygon/quotes', '/api/quotes',
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const normalized = mergeQuotes(merged);
+    state.quotes = normalized;
+
+    TR.symbolPrices = TR.symbolPrices || {};
+    normalized.forEach(q => {
+      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+    });
+
+    return normalized;
+  }
+
   async function requestBackendRefresh() {
     try {
       await Promise.allSettled([loadMarketsAndQuotes(), loadAccount(), loadPositions()]);
       const meta = getActiveSymbolMeta();
       if (meta) requestRealtimeForSymbol(meta);
       renderMargin();
+      updateLiveTicker();
     } catch (e) {
       warn('requestBackendRefresh', e);
     }
@@ -3213,6 +3190,7 @@ if (window.__LEONES_BOOTED__) {
     if (!resolved) throw new Error('No hay símbolos reales para graficar');
 
     await ensureTradingViewScript();
+    await nextFrame();
 
     const container = document.getElementById('tv_chart_container');
     if (!container) throw new Error('No existe el contenedor del gráfico');
@@ -3253,6 +3231,7 @@ if (window.__LEONES_BOOTED__) {
     });
 
     state.lastChartSymbol = symbol;
+    window.setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
     return symbol;
   }
 
@@ -3273,6 +3252,62 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function showPanel(panelId, opts = {}) {
+    const root = getPrivateHost();
+    if (!root) return;
+
+    const panels = Array.from(root.querySelectorAll('.panel'));
+    panels.forEach(p => {
+      p.style.display = 'none';
+    });
+
+    const target = document.getElementById(panelId);
+    if (target) target.style.display = 'block';
+
+    const menuItems = Array.from(document.querySelectorAll('#privateArea_full .menu-item[data-target], #privateArea_full .menu-item[data-private-section]'));
+    const footerItems = Array.from(document.querySelectorAll('#privateArea_full .fnav-item[data-target], #privateArea_full .fnav-item[data-private-section]'));
+
+    menuItems.forEach(item => {
+      const tgt = item.getAttribute('data-target') || item.getAttribute('data-private-section');
+      item.classList.toggle('active', tgt === panelId);
+    });
+
+    footerItems.forEach(item => {
+      const tgt = item.getAttribute('data-target') || item.getAttribute('data-private-section');
+      item.classList.toggle('active', tgt === panelId);
+    });
+
+    if (opts.flash !== false && target) flash(target);
+
+    if (window.innerWidth < 900) {
+      setMenuPanelState(false);
+    }
+
+    if (panelId === 'tradingPanel') {
+      const meta = getActiveSymbolMeta();
+      if (meta) {
+        selectSymbol(meta, { openChart: true });
+      } else {
+        openCurrentChart().catch(() => {});
+      }
+    }
+
+    if (panelId === 'marketsPanel') {
+      renderMarketTabs();
+      renderSymbolsGrid();
+      updateLiveTicker();
+    }
+
+    if (panelId === 'positionsPanel') {
+      loadPositions().catch(() => {});
+    }
+
+    if (panelId === 'dashboardPanel') {
+      loadAccount().catch(() => {});
+      updateLiveTicker();
+    }
+  }
+
   function attachPrivateMenuDelegation() {
     try {
       if (window.__LEONES_PRIVATE_MENU_BRIDGE__) return;
@@ -3280,16 +3315,15 @@ if (window.__LEONES_BOOTED__) {
 
       document.addEventListener('click', function (ev) {
         try {
-          const target = ev.target.closest && ev.target.closest('#privateArea_full .menu-item, #privateArea_full [data-private-section]');
+          const target = ev.target.closest && ev.target.closest('#privateArea_full .menu-item, #privateArea_full [data-private-section], #privateArea_full .fnav-item');
           if (!target) return;
 
-          const sectionId = String(target.dataset.section || target.dataset.privateSection || target.id || '').trim();
+          const sectionId = String(target.dataset.section || target.dataset.privateSection || target.dataset.target || target.id || '').trim();
           if (!sectionId) return;
 
           ev.preventDefault && ev.preventDefault();
-          if (typeof window.switchPrivateSection === 'function') {
-            window.switchPrivateSection(sectionId);
-          }
+          showPanel(sectionId);
+
         } catch (e) {}
       }, true);
     } catch (e) {
@@ -3303,6 +3337,10 @@ if (window.__LEONES_BOOTED__) {
 
     root.addEventListener('click', async (ev) => {
       try {
+        const target = ev.target.closest && ev.target.closest('button,div');
+
+        if (target) flash(target);
+
         const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
         if (marketBtn && marketBtn.dataset.market !== undefined) {
           ev.preventDefault();
@@ -3317,7 +3355,10 @@ if (window.__LEONES_BOOTED__) {
           ev.preventDefault();
           const symbol = symbolCard.dataset.symbol || '';
           const meta = symbolMap().get(String(symbol).toUpperCase()) || getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) || null;
-          if (meta) selectSymbol(meta, { openChart: true });
+          if (meta) {
+            selectSymbol(meta, { openChart: true });
+            showPanel('tradingPanel', { flash: true });
+          }
           return;
         }
 
@@ -3327,6 +3368,8 @@ if (window.__LEONES_BOOTED__) {
           const pid = closeBtn.dataset.closePosition;
           const sym = closeBtn.dataset.symbol;
           const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
+          flash(closeBtn);
+          setMessage('Cerrando posición...', 'info');
           await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
           await requestBackendRefresh().catch(() => {});
           return;
@@ -3339,32 +3382,37 @@ if (window.__LEONES_BOOTED__) {
 
         if (action === 'buy') {
           ev.preventDefault();
-          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
+          flash(actionTarget);
+          await submitOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
           await requestBackendRefresh().catch(() => {});
           return;
         }
 
         if (action === 'sell') {
           ev.preventDefault();
-          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
+          flash(actionTarget);
+          await submitOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
           await requestBackendRefresh().catch(() => {});
           return;
         }
 
         if (action === 'open-chart') {
           ev.preventDefault();
+          flash(actionTarget);
           await openCurrentChart().catch(e => setMessage(e?.message || 'No se pudo abrir el gráfico', 'error'));
           return;
         }
 
         if (action === 'refresh-all') {
           ev.preventDefault();
+          flash(actionTarget);
           await requestBackendRefresh();
           return;
         }
 
         if (action === 'refresh-symbols') {
           ev.preventDefault();
+          flash(actionTarget);
           await loadRealMarkets();
           renderMarketTabs();
           renderSymbolsGrid();
@@ -3375,8 +3423,10 @@ if (window.__LEONES_BOOTED__) {
 
         if (action === 'refresh-quotes') {
           ev.preventDefault();
+          flash(actionTarget);
           await loadRealQuotes();
           renderSymbolsGrid();
+          updateLiveTicker();
           const meta = getActiveSymbolMeta();
           if (meta) renderSymbolDetails(meta);
           return;
@@ -3384,15 +3434,18 @@ if (window.__LEONES_BOOTED__) {
 
         if (action === 'refresh-account') {
           ev.preventDefault();
+          flash(actionTarget);
           await loadAccount();
           return;
         }
 
         if (action === 'refresh-positions') {
           ev.preventDefault();
+          flash(actionTarget);
           await loadPositions();
           return;
         }
+
       } catch (e) {
         warn('wireRootDelegation click', e);
       }
@@ -3407,6 +3460,29 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
+  function updateLiveTicker() {
+    const meta = getActiveSymbolMeta();
+    const q = meta ? currentQuote(meta.symbol) : null;
+    const price = q?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
+
+    const opSymbol = document.getElementById('op-symbol');
+    const opExchange = document.getElementById('op-exchange');
+    const opPrice = document.getElementById('op-price');
+    const tradingSymbol = document.getElementById('tradingSymbol');
+    const tradingSub = document.getElementById('trading-sub');
+    const ws = document.getElementById('ws-status');
+
+    if (meta) {
+      if (opSymbol) opSymbol.textContent = meta.label || meta.symbol;
+      if (opExchange) opExchange.textContent = `Market: ${normalizeMarketName(meta.market)}`;
+      if (tradingSymbol) tradingSymbol.textContent = meta.label || meta.symbol;
+      if (tradingSub) tradingSub.textContent = `Market: ${normalizeMarketName(meta.market)}`;
+    }
+
+    if (opPrice) opPrice.textContent = price !== null && price !== undefined ? formatNumber(price) : '—';
+    if (ws) ws.textContent = isLoggedIn() ? 'conectado' : 'desconectado';
+  }
+
   function startAutoRefresh() {
     if (state.pollTimer) return;
     state.pollTimer = setInterval(() => {
@@ -3416,6 +3492,7 @@ if (window.__LEONES_BOOTED__) {
         loadPositions().catch(() => {});
         loadRealQuotes().then(() => {
           renderSymbolsGrid();
+          updateLiveTicker();
           const meta = getActiveSymbolMeta();
           if (meta) renderSymbolDetails(meta);
         }).catch(() => {});
@@ -3430,9 +3507,17 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  function updatePrivateHeaderName(user = {}) {
-    const headerName = document.querySelector('#headerActions [data-leones-user-name]');
-    if (headerName) headerName.textContent = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cuenta');
+  function resetTradingState() {
+    state.started = false;
+    state.markets = [];
+    state.quotes = [];
+    state.positions = [];
+    state.account = null;
+    state.activeSymbol = null;
+    state.marketFilter = 'All';
+    state.lastChartSymbol = null;
+    stopAutoRefresh();
+    document.body.classList.remove('leones-menu-open');
   }
 
   async function initTradingUI(context = {}) {
@@ -3440,6 +3525,7 @@ if (window.__LEONES_BOOTED__) {
 
     injectUiStyles();
     bindMenuToggle();
+    setMenuPanelState(true);
 
     const root = ensureRoot();
     if (!root) return null;
@@ -3455,8 +3541,9 @@ if (window.__LEONES_BOOTED__) {
 
     if (context && context.user && typeof context.user === 'object') {
       state.account = { ...(state.account || {}), ...context.user };
-      updatePrivateHeaderName(context.user);
       syncAccountView(context.user);
+    } else if (getUser()) {
+      setHeaderName(getUser());
     }
 
     await ensureSocket();
@@ -3475,6 +3562,7 @@ if (window.__LEONES_BOOTED__) {
       TR.activeMeta = meta;
 
       renderSymbolDetails(meta);
+      updateLiveTicker();
 
       if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
         await openTradingView(meta).catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
@@ -3486,19 +3574,6 @@ if (window.__LEONES_BOOTED__) {
     }
 
     return true;
-  }
-
-  function resetTradingState() {
-    state.started = false;
-    state.markets = [];
-    state.quotes = [];
-    state.positions = [];
-    state.account = null;
-    state.activeSymbol = null;
-    state.marketFilter = 'All';
-    state.lastChartSymbol = null;
-    stopAutoRefresh();
-    document.body.classList.remove('leones-menu-open');
   }
 
   function attachLoginEventBridge() {
@@ -3519,6 +3594,7 @@ if (window.__LEONES_BOOTED__) {
     window.refreshBrokerUI = requestBackendRefresh;
     window.openBrokerTradingView = openTradingView;
     window.selectBrokerSymbol = selectSymbol;
+    window.switchPrivateSection = showPanel;
     window.__LEONES_BROKER_EXT2 = {
       initTradingUI,
       refreshBrokerUI: requestBackendRefresh,
@@ -3529,9 +3605,10 @@ if (window.__LEONES_BOOTED__) {
       loadRealQuotes,
       loadAccount,
       loadPositions,
-      placeOrder,
+      submitOrder,
       closePosition,
-      requestBackendRefresh
+      requestBackendRefresh,
+      showPanel
     };
   }
 
@@ -3547,15 +3624,64 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  if (document.readyState !== 'loading') {
-    bootIfLoggedIn();
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      injectUiStyles();
-      bindMenuToggle();
-      bootIfLoggedIn();
+  document.addEventListener('DOMContentLoaded', () => {
+    injectUiStyles();
+    bindMenuToggle();
+
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+      sidebar.classList.add('leones-private-menu-target', 'leones-mobile-collapsible');
+    }
+
+    const footerItems = Array.from(document.querySelectorAll('.fnav-item'));
+    footerItems.forEach(item => {
+      item.addEventListener('click', () => {
+        flash(item);
+      });
     });
-  }
+
+    const menuItems = Array.from(document.querySelectorAll('.menu-item'));
+    menuItems.forEach(item => {
+      item.addEventListener('click', () => flash(item));
+    });
+
+    const infoBtn = document.getElementById('btnInfo');
+    const infoModal = document.getElementById('infoModal');
+    if (infoBtn && infoModal) {
+      infoBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        flash(infoBtn);
+        infoModal.style.display = 'flex';
+      });
+    }
+    if (infoModal) {
+      const close = infoModal.querySelector('button');
+      if (close) {
+        close.addEventListener('click', () => {
+          infoModal.style.display = 'none';
+        });
+      }
+      infoModal.addEventListener('click', (ev) => {
+        if (ev.target === infoModal) infoModal.style.display = 'none';
+      });
+    }
+
+    const logoutTop = document.getElementById('btnLogoutTop');
+    const logoutLeft = document.getElementById('btnLogoutLeft_full');
+    if (logoutTop) logoutTop.addEventListener('click', () => flash(logoutTop));
+    if (logoutLeft) logoutLeft.addEventListener('click', () => flash(logoutLeft));
+
+    const forms = Array.from(document.querySelectorAll('#verificationPanel form, #depositPanel form, #withdrawPanel form'));
+    forms.forEach(form => {
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        flash(form.querySelector('button[type="submit"]') || form);
+        setMessage('Solicitud enviada', 'success');
+      });
+    });
+
+    bootIfLoggedIn();
+  });
 
   window.addEventListener('load', () => {
     try {
@@ -3568,73 +3694,6 @@ if (window.__LEONES_BOOTED__) {
   log('EXT2 real loaded');
 })();
 </script>
-
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  const sidebar = document.getElementById("sidebar");
-  const toggleBtn = document.getElementById("sidebarToggle");
-
-  // 🔹 FIX 1: Botón menú (solo uno, funcional)
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("hidden");
-    });
-  }
-
-  // 🔹 FIX 2: Navegación sidebar
-  const menuItems = document.querySelectorAll(".menu-item");
-  const panels = document.querySelectorAll(".panel");
-
-  menuItems.forEach(item => {
-    item.addEventListener("click", () => {
-      const target = item.getAttribute("data-target");
-
-      // activar menú
-      menuItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      // mostrar panel correcto
-      panels.forEach(p => p.style.display = "none");
-      const panel = document.getElementById(target);
-      if (panel) panel.style.display = "block";
-
-      // cerrar sidebar en móvil
-      if (window.innerWidth < 1000) {
-        sidebar.classList.add("hidden");
-      }
-    });
-  });
-
-  // 🔹 FIX 3: Footer (botones de abajo)
-  const footerItems = document.querySelectorAll(".fnav-item");
-
-  footerItems.forEach(item => {
-    item.addEventListener("click", () => {
-      const target = item.getAttribute("data-target");
-
-      // activar footer
-      footerItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      // mostrar panel
-      panels.forEach(p => p.style.display = "none");
-      const panel = document.getElementById(target);
-      if (panel) panel.style.display = "block";
-
-      // sincronizar sidebar activo
-      menuItems.forEach(i => {
-        i.classList.toggle("active", i.getAttribute("data-target") === target);
-      });
-    });
-  });
-
-  // 🔹 FIX 4: Mostrar dashboard por defecto
-  document.getElementById("dashboardPanel").style.display = "block";
-
-});
-</script>
-
 
 
 
