@@ -1939,6 +1939,7 @@ if (window.__LEONES_BOOTED__) {
 
 <!-- antes de este script -->
 
+
 <script>
 /**
  * trading.ext2.real.js — JS #2 unificado y ajustado
@@ -3574,150 +3575,68 @@ document.addEventListener("DOMContentLoaded", () => {
   const sidebar = document.getElementById("sidebar");
   const toggleBtn = document.getElementById("sidebarToggle");
 
-  const menuItems = document.querySelectorAll(".menu-item");
-  const panels = document.querySelectorAll(".panel");
-  const footerItems = document.querySelectorAll(".fnav-item");
-
-  // ================================
-  // 🔹 FIX 1: MENÚ FIJO + TOGGLE
-  // ================================
-  if (sidebar) {
-    sidebar.style.position = "fixed";
-    sidebar.style.top = "0";
-    sidebar.style.left = "0";
-    sidebar.style.height = "100%";
-    sidebar.style.zIndex = "999";
-  }
-
-  if (toggleBtn && sidebar) {
-    toggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+  // 🔹 FIX 1: Botón menú (solo uno, funcional)
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
     });
   }
 
-  // Cerrar sidebar al hacer click fuera (móvil)
-  document.addEventListener("click", (e) => {
-    if (
-      window.innerWidth < 1000 &&
-      sidebar &&
-      !sidebar.contains(e.target) &&
-      !toggleBtn.contains(e.target)
-    ) {
-      sidebar.classList.add("hidden");
-    }
-  });
+  // 🔹 FIX 2: Navegación sidebar
+  const menuItems = document.querySelectorAll(".menu-item");
+  const panels = document.querySelectorAll(".panel");
 
-  // ================================
-  // 🔹 FUNCIÓN GLOBAL PARA CAMBIAR PANEL
-  // ================================
-  function showPanel(target) {
-    if (!target) return;
-
-    panels.forEach(p => p.style.display = "none");
-
-    const panel = document.getElementById(target);
-    if (panel) {
-      panel.style.display = "block";
-    }
-  }
-
-  // ================================
-  // 🔹 FIX 2: BOTONES SIDEBAR
-  // ================================
   menuItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
 
-      // Activar menú visual
+      // activar menú
       menuItems.forEach(i => i.classList.remove("active"));
       item.classList.add("active");
 
-      showPanel(target);
+      // mostrar panel correcto
+      panels.forEach(p => p.style.display = "none");
+      const panel = document.getElementById(target);
+      if (panel) panel.style.display = "block";
 
-      // Cerrar en móvil
-      if (window.innerWidth < 1000 && sidebar) {
+      // cerrar sidebar en móvil
+      if (window.innerWidth < 1000) {
         sidebar.classList.add("hidden");
       }
     });
   });
 
-  // ================================
-  // 🔹 FIX 3: BOTONES FOOTER
-  // ================================
+  // 🔹 FIX 3: Footer (botones de abajo)
+  const footerItems = document.querySelectorAll(".fnav-item");
+
   footerItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
 
+      // activar footer
       footerItems.forEach(i => i.classList.remove("active"));
       item.classList.add("active");
 
-      showPanel(target);
+      // mostrar panel
+      panels.forEach(p => p.style.display = "none");
+      const panel = document.getElementById(target);
+      if (panel) panel.style.display = "block";
 
-      // Sincronizar sidebar
+      // sincronizar sidebar activo
       menuItems.forEach(i => {
         i.classList.toggle("active", i.getAttribute("data-target") === target);
       });
     });
   });
 
-  // ================================
-  // 🔹 FIX 4: BOTONES GENERALES (CLICK GLOBAL)
-  // ================================
-  document.querySelectorAll("[data-action]").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-
-      const action = btn.getAttribute("data-action");
-
-      switch(action) {
-        case "open-panel":
-          const target = btn.getAttribute("data-target");
-          showPanel(target);
-          break;
-
-        case "toggle-sidebar":
-          if (sidebar) sidebar.classList.toggle("hidden");
-          break;
-
-        default:
-          console.log("Acción no definida:", action);
-      }
-    });
-  });
-
-  // ================================
-  // 🔹 FIX 5: RESPONSIVE AJUSTE
-  // ================================
-  function handleResize() {
-    if (window.innerWidth >= 1000) {
-      if (sidebar) sidebar.classList.remove("hidden");
-    } else {
-      if (sidebar) sidebar.classList.add("hidden");
-    }
-  }
-
-  window.addEventListener("resize", handleResize);
-  handleResize();
-
-  // ================================
-  // 🔹 FIX 6: PANEL POR DEFECTO SEGURO
-  // ================================
-  const defaultPanel = document.getElementById("dashboardPanel");
-  if (defaultPanel) {
-    panels.forEach(p => p.style.display = "none");
-    defaultPanel.style.display = "block";
-  }
-
-  // ================================
-  // 🔹 FIX 7: PROTECCIÓN GLOBAL (NO ROMPER UI)
-  // ================================
-  window.addEventListener("error", (e) => {
-    console.warn("Error detectado y evitado:", e.message);
-  });
+  // 🔹 FIX 4: Mostrar dashboard por defecto
+  document.getElementById("dashboardPanel").style.display = "block";
 
 });
 </script>
+
+
+
 
 </div>
 
