@@ -3571,67 +3571,298 @@ if (window.__LEONES_BOOTED__) {
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-
   const sidebar = document.getElementById("sidebar");
   const toggleBtn = document.getElementById("sidebarToggle");
+  const menuItems = Array.from(document.querySelectorAll(".menu-item"));
+  const footerItems = Array.from(document.querySelectorAll(".fnav-item"));
+  const panels = Array.from(document.querySelectorAll(".panel"));
 
-  // 🔹 FIX 1: Botón menú (solo uno, funcional)
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("hidden");
+  const safeCall = async (fn, ...args) => {
+    try {
+      if (typeof fn === "function") return await fn(...args);
+    } catch (e) {}
+    return null;
+  };
+
+  const getGlobal = (path) => {
+    try {
+      return path.split(".").reduce((acc, key) => (acc ? acc[key] : null), window);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const rootExt2 = () => window.__LEONES_BROKER_EXT2 || window.__LEONES_TRADING__ || {};
+
+  function setFixedMenuButton() {
+    if (!toggleBtn) return;
+
+    toggleBtn.style.position = "fixed";
+    toggleBtn.style.top = "14px";
+    toggleBtn.style.right = "14px";
+    toggleBtn.style.zIndex = "10050";
+    toggleBtn.style.minWidth = "46px";
+    toggleBtn.style.minHeight = "46px";
+    toggleBtn.style.borderRadius = "14px";
+
+    if (sidebar) {
+      sidebar.style.position = "fixed";
+      sidebar.style.top = "0";
+      sidebar.style.left = "0";
+      sidebar.style.height = "100vh";
+      sidebar.style.zIndex = "9998";
+      sidebar.style.overflowY = "auto";
+    }
+  }
+
+  function closeMenu() {
+    if (sidebar) sidebar.classList.add("hidden");
+    document.body.classList.remove("leones-menu-open");
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
+  }
+
+  function openMenu() {
+    if (sidebar) sidebar.classList.remove("hidden");
+    document.body.classList.add("leones-menu-open");
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
+  }
+
+  function toggleMenu() {
+    if (!sidebar) return;
+    if (sidebar.classList.contains("hidden")) openMenu();
+    else closeMenu();
+  }
+
+  function hideAllPanels() {
+    panels.forEach((p) => (p.style.display = "none"));
+  }
+
+  function findPanel(target) {
+    if (!target) return null;
+
+    const aliases = {
+      mercado: ["marketPanel", "mercadoPanel", "overviewPanel", "brokerSymbolsPanel"],
+      market: ["marketPanel", "mercadoPanel", "overviewPanel", "brokerSymbolsPanel"],
+      posiciones: ["positionsPanel", "brokerPositionsPanel"],
+      positions: ["positionsPanel", "brokerPositionsPanel"],
+      trading: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
+      chart: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
+      grafico: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
+    };
+
+    const direct = document.getElementById(target);
+    if (direct) return direct;
+
+    const key = String(target).trim().toLowerCase();
+    const list = aliases[key] || [];
+    for (const id of list) {
+      const el = document.getElementById(id);
+      if (el) return el;
+    }
+
+    return null;
+  }
+
+  function setActiveItems(target) {
+    menuItems.forEach((i) => i.classList.toggle("active", String(i.getAttribute("data-target") || "").trim() === String(target).trim()));
+    footerItems.forEach((i) => i.classList.toggle("active", String(i.getAttribute("data-target") || "").trim() === String(target).trim()));
+  }
+
+  function showPanel(target) {
+    hideAllPanels();
+    const panel = findPanel(target);
+
+    if (panel) {
+      panel.style.display = "block";
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      return panel;
+    }
+
+    const fallback = document.getElementById("dashboardPanel");
+    if (fallback) fallback.style.display = "block";
+    return fallback;
+  }
+
+  async function refreshMarketArea() {
+    const ext2 = rootExt2();
+    await safeCall(ext2.loadMarketsAndQuotes);
+    await safeCall(ext2.refreshBrokerUI);
+    await safeCall(ext2.loadRealMarkets);
+    await safeCall(ext2.loadRealQuotes);
+    const area = document.getElementById("brokerSymbolsPanel") || document.getElementById("brokerMarketTabs") || document.getElementById("brokerSymbolsGrid");
+    if (area) area.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function refreshPositionsArea() {
+    const ext2 = rootExt2();
+    await safeCall(ext2.loadPositions);
+    await safeCall(ext2.refreshBrokerUI);
+    const area = document.getElementById("brokerPositionsPanel") || document.getElementById("brokerPositionsList");
+    if (area) area.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function openTradingArea() {
+    const ext2 = rootExt2();
+
+    const openFn =
+      window.openBrokerTradingView ||
+      ext2.openTradingView ||
+      window.openTradingView ||
+      null;
+
+    const panel = document.getElementById("brokerChartPanel") || document.getElementById("tv_chart_container");
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (typeof openFn === "function") {
+      await safeCall(openFn);
+      return;
+    }
+
+    const container = document.getElementById("tv_chart_container");
+    if (!container) return;
+
+    if (container.dataset.chartReady === "1") return;
+    container.dataset.chartReady = "1";
+
+    try {
+      if (!window.TradingView || typeof window.TradingView.widget !== "function") {
+        const s = document.createElement("script");
+        s.src = "https://s3.tradingview.com/tv.js";
+        s.async = true;
+        s.onload = () => {
+          try {
+            new TradingView.widget({
+              autosize: true,
+              symbol: "BINANCE:BTCUSDT",
+              interval: "5",
+              timezone: "Etc/UTC",
+              theme: "dark",
+              style: "1",
+              locale: "es",
+              enable_publishing: false,
+              allow_symbol_change: true,
+              container_id: "tv_chart_container",
+              hide_side_toolbar: false,
+              withdateranges: true,
+              save_image: false
+            });
+          } catch (e) {}
+        };
+        document.head.appendChild(s);
+        return;
+      }
+
+      new TradingView.widget({
+        autosize: true,
+        symbol: "BINANCE:BTCUSDT",
+        interval: "5",
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "es",
+        enable_publishing: false,
+        allow_symbol_change: true,
+        container_id: "tv_chart_container",
+        hide_side_toolbar: false,
+        withdateranges: true,
+        save_image: false
+      });
+    } catch (e) {}
+  }
+
+  async function handleTarget(target, source) {
+    const t = String(target || "").trim().toLowerCase();
+
+    setActiveItems(target);
+    showPanel(target);
+
+    if (source === "menu") closeMenu();
+
+    if (t === "mercado" || t === "market" || t.includes("market") || t.includes("mercado")) {
+      await refreshMarketArea();
+    }
+
+    if (t === "posiciones" || t === "positions" || t.includes("position")) {
+      await refreshPositionsArea();
+    }
+
+    if (t === "trading" || t === "chart" || t.includes("trade") || t.includes("graf") || t.includes("chart")) {
+      await openTradingArea();
+    }
+  }
+
+  if (sidebar) {
+    setFixedMenuButton();
+
+    if (window.innerWidth < 1000) sidebar.classList.add("hidden");
+    else sidebar.classList.remove("hidden");
+  }
+
+  if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMenu();
     });
   }
 
-  // 🔹 FIX 2: Navegación sidebar
-  const menuItems = document.querySelectorAll(".menu-item");
-  const panels = document.querySelectorAll(".panel");
-
-  menuItems.forEach(item => {
-    item.addEventListener("click", () => {
+  menuItems.forEach((item) => {
+    item.addEventListener("click", async (e) => {
+      e.preventDefault();
       const target = item.getAttribute("data-target");
-
-      // activar menú
-      menuItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      // mostrar panel correcto
-      panels.forEach(p => p.style.display = "none");
-      const panel = document.getElementById(target);
-      if (panel) panel.style.display = "block";
-
-      // cerrar sidebar en móvil
-      if (window.innerWidth < 1000) {
-        sidebar.classList.add("hidden");
-      }
+      await handleTarget(target, "menu");
     });
   });
 
-  // 🔹 FIX 3: Footer (botones de abajo)
-  const footerItems = document.querySelectorAll(".fnav-item");
-
-  footerItems.forEach(item => {
-    item.addEventListener("click", () => {
+  footerItems.forEach((item) => {
+    item.addEventListener("click", async (e) => {
+      e.preventDefault();
       const target = item.getAttribute("data-target");
-
-      // activar footer
-      footerItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      // mostrar panel
-      panels.forEach(p => p.style.display = "none");
-      const panel = document.getElementById(target);
-      if (panel) panel.style.display = "block";
-
-      // sincronizar sidebar activo
-      menuItems.forEach(i => {
-        i.classList.toggle("active", i.getAttribute("data-target") === target);
-      });
+      await handleTarget(target, "footer");
     });
   });
 
-  // 🔹 FIX 4: Mostrar dashboard por defecto
-  document.getElementById("dashboardPanel").style.display = "block";
+  document.addEventListener("click", (e) => {
+    if (!sidebar || !toggleBtn) return;
+    if (window.innerWidth >= 1000) return;
 
+    const insideSidebar = sidebar.contains(e.target);
+    const insideBtn = toggleBtn.contains(e.target);
+
+    if (!insideSidebar && !insideBtn && !sidebar.classList.contains("hidden")) {
+      closeMenu();
+    }
+  });
+
+  function bindResponsive() {
+    setFixedMenuButton();
+    if (!sidebar) return;
+
+    if (window.innerWidth < 1000) {
+      sidebar.classList.add("hidden");
+    } else {
+      sidebar.classList.remove("hidden");
+    }
+  }
+
+  window.addEventListener("resize", bindResponsive);
+
+  const dashboard = document.getElementById("dashboardPanel");
+  if (dashboard) {
+    hideAllPanels();
+    dashboard.style.display = "block";
+  } else if (panels.length) {
+    hideAllPanels();
+    panels[0].style.display = "block";
+  }
+
+  bindResponsive();
+
+  const ext2 = rootExt2();
+  safeCall(ext2.loadMarketsAndQuotes);
+  safeCall(ext2.loadPositions);
+  safeCall(ext2.refreshBrokerUI);
+  openTradingArea();
 });
 </script>
 
