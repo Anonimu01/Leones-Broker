@@ -3577,26 +3577,62 @@ document.addEventListener("DOMContentLoaded", () => {
   const footerItems = Array.from(document.querySelectorAll(".fnav-item"));
   const panels = Array.from(document.querySelectorAll(".panel"));
 
-  const safeCall = async (fn, ...args) => {
-    try {
-      if (typeof fn === "function") return await fn(...args);
-    } catch (e) {}
-    return null;
+  const ext = window.__LEONES_BROKER_EXT2 || window.__LEONES_TRADING__ || {};
+
+  const TARGET_MAP = {
+    inicio: ["dashboardPanel", "homePanel", "mainPanel"],
+    trading: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
+    posiciones: ["positionsPanel", "brokerPositionsPanel", "brokerPositionsList"],
+    mercados: ["marketPanel", "overviewPanel", "brokerSymbolsPanel", "brokerSymbolsGrid"],
+    activos: ["assetsPanel", "brokerAssetsPanel", "brokerSymbolsPanel", "brokerSymbolsGrid"]
   };
 
-  const getGlobal = (path) => {
-    try {
-      return path.split(".").reduce((acc, key) => (acc ? acc[key] : null), window);
-    } catch (e) {
-      return null;
-    }
-  };
+  function injectStyles() {
+    if (document.getElementById("leones-ui-fix-style")) return;
 
-  const rootExt2 = () => window.__LEONES_BROKER_EXT2 || window.__LEONES_TRADING__ || {};
+    const style = document.createElement("style");
+    style.id = "leones-ui-fix-style";
+    style.textContent = `
+      #sidebarToggle{
+        position: fixed !important;
+        top: 14px !important;
+        right: 14px !important;
+        z-index: 10050 !important;
+        min-width: 46px !important;
+        min-height: 46px !important;
+        border-radius: 14px !important;
+      }
 
-  function setFixedMenuButton() {
+      #sidebar{
+        z-index: 9999 !important;
+        transition: transform .22s ease, opacity .22s ease, visibility .22s ease;
+      }
+
+      #sidebar.hidden{
+        transform: translateX(-105%);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      @media (min-width: 1000px){
+        #sidebar.hidden{
+          transform: none;
+          opacity: 1;
+          visibility: visible;
+          pointer-events: auto;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function isMobile() {
+    return window.innerWidth < 1000;
+  }
+
+  function setToggleButtonFixed() {
     if (!toggleBtn) return;
-
     toggleBtn.style.position = "fixed";
     toggleBtn.style.top = "14px";
     toggleBtn.style.right = "14px";
@@ -3604,27 +3640,20 @@ document.addEventListener("DOMContentLoaded", () => {
     toggleBtn.style.minWidth = "46px";
     toggleBtn.style.minHeight = "46px";
     toggleBtn.style.borderRadius = "14px";
-
-    if (sidebar) {
-      sidebar.style.position = "fixed";
-      sidebar.style.top = "0";
-      sidebar.style.left = "0";
-      sidebar.style.height = "100vh";
-      sidebar.style.zIndex = "9998";
-      sidebar.style.overflowY = "auto";
-    }
-  }
-
-  function closeMenu() {
-    if (sidebar) sidebar.classList.add("hidden");
-    document.body.classList.remove("leones-menu-open");
-    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
   }
 
   function openMenu() {
-    if (sidebar) sidebar.classList.remove("hidden");
+    if (!sidebar) return;
+    sidebar.classList.remove("hidden");
     document.body.classList.add("leones-menu-open");
     if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
+  }
+
+  function closeMenu() {
+    if (!sidebar) return;
+    sidebar.classList.add("hidden");
+    document.body.classList.remove("leones-menu-open");
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
   }
 
   function toggleMenu() {
@@ -3633,29 +3662,29 @@ document.addEventListener("DOMContentLoaded", () => {
     else closeMenu();
   }
 
-  function hideAllPanels() {
-    panels.forEach((p) => (p.style.display = "none"));
+  function normalizeText(v) {
+    return String(v || "").trim().toLowerCase();
   }
 
-  function findPanel(target) {
-    if (!target) return null;
+  function getTargetFromItem(item) {
+    const dataTarget = item.getAttribute("data-target");
+    if (dataTarget) return normalizeText(dataTarget);
 
-    const aliases = {
-      mercado: ["marketPanel", "mercadoPanel", "overviewPanel", "brokerSymbolsPanel"],
-      market: ["marketPanel", "mercadoPanel", "overviewPanel", "brokerSymbolsPanel"],
-      posiciones: ["positionsPanel", "brokerPositionsPanel"],
-      positions: ["positionsPanel", "brokerPositionsPanel"],
-      trading: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
-      chart: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
-      grafico: ["tradingPanel", "brokerChartPanel", "tv_chart_container"],
-    };
+    const text = normalizeText(item.textContent);
+    if (text.includes("inicio")) return "inicio";
+    if (text.includes("trading")) return "trading";
+    if (text.includes("posic")) return "posiciones";
+    if (text.includes("mercad")) return "mercados";
+    if (text.includes("activos")) return "activos";
 
-    const direct = document.getElementById(target);
-    if (direct) return direct;
+    return normalizeText(dataTarget || text);
+  }
 
-    const key = String(target).trim().toLowerCase();
-    const list = aliases[key] || [];
-    for (const id of list) {
+  function getPanelByTarget(target) {
+    const key = normalizeText(target);
+    const ids = TARGET_MAP[key] || [target];
+
+    for (const id of ids) {
       const el = document.getElementById(id);
       if (el) return el;
     }
@@ -3663,142 +3692,199 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
-  function setActiveItems(target) {
-    menuItems.forEach((i) => i.classList.toggle("active", String(i.getAttribute("data-target") || "").trim() === String(target).trim()));
-    footerItems.forEach((i) => i.classList.toggle("active", String(i.getAttribute("data-target") || "").trim() === String(target).trim()));
+  function hideAllPanels() {
+    panels.forEach(p => (p.style.display = "none"));
   }
 
   function showPanel(target) {
     hideAllPanels();
-    const panel = findPanel(target);
 
+    const panel = getPanelByTarget(target);
     if (panel) {
       panel.style.display = "block";
       panel.scrollIntoView({ behavior: "smooth", block: "start" });
       return panel;
     }
 
-    const fallback = document.getElementById("dashboardPanel");
-    if (fallback) fallback.style.display = "block";
-    return fallback;
+    const dashboard = document.getElementById("dashboardPanel");
+    if (dashboard) {
+      dashboard.style.display = "block";
+      return dashboard;
+    }
+
+    return null;
   }
 
-  async function refreshMarketArea() {
-    const ext2 = rootExt2();
-    await safeCall(ext2.loadMarketsAndQuotes);
-    await safeCall(ext2.refreshBrokerUI);
-    await safeCall(ext2.loadRealMarkets);
-    await safeCall(ext2.loadRealQuotes);
-    const area = document.getElementById("brokerSymbolsPanel") || document.getElementById("brokerMarketTabs") || document.getElementById("brokerSymbolsGrid");
-    if (area) area.scrollIntoView({ behavior: "smooth", block: "start" });
+  function setActive(target) {
+    const t = normalizeText(target);
+
+    menuItems.forEach(item => {
+      item.classList.toggle("active", normalizeText(getTargetFromItem(item)) === t);
+    });
+
+    footerItems.forEach(item => {
+      item.classList.toggle("active", normalizeText(getTargetFromItem(item)) === t);
+    });
   }
 
-  async function refreshPositionsArea() {
-    const ext2 = rootExt2();
-    await safeCall(ext2.loadPositions);
-    await safeCall(ext2.refreshBrokerUI);
-    const area = document.getElementById("brokerPositionsPanel") || document.getElementById("brokerPositionsList");
-    if (area) area.scrollIntoView({ behavior: "smooth", block: "start" });
+  function getPanelByAnyId(ids) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) return el;
+    }
+    return null;
   }
 
-  async function openTradingArea() {
-    const ext2 = rootExt2();
+  function refreshMarkets() {
+    try {
+      if (typeof ext.loadMarketsAndQuotes === "function") ext.loadMarketsAndQuotes();
+      if (typeof ext.refreshBrokerUI === "function") ext.refreshBrokerUI();
+      if (typeof ext.loadRealMarkets === "function") ext.loadRealMarkets();
+      if (typeof ext.loadRealQuotes === "function") ext.loadRealQuotes();
+    } catch (e) {}
 
-    const openFn =
-      window.openBrokerTradingView ||
-      ext2.openTradingView ||
-      window.openTradingView ||
-      null;
+    const panel = getPanelByAnyId([
+      "marketPanel",
+      "overviewPanel",
+      "brokerSymbolsPanel",
+      "brokerSymbolsGrid"
+    ]);
 
-    const panel = document.getElementById("brokerChartPanel") || document.getElementById("tv_chart_container");
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function refreshPositions() {
+    try {
+      if (typeof ext.loadPositions === "function") ext.loadPositions();
+      if (typeof ext.refreshBrokerUI === "function") ext.refreshBrokerUI();
+    } catch (e) {}
+
+    const panel = getPanelByAnyId([
+      "positionsPanel",
+      "brokerPositionsPanel",
+      "brokerPositionsList"
+    ]);
+
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function openTradingChart() {
+    const panel = getPanelByAnyId([
+      "tradingPanel",
+      "brokerChartPanel",
+      "tv_chart_container"
+    ]);
+
     if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    if (typeof openFn === "function") {
-      await safeCall(openFn);
-      return;
-    }
+    try {
+      if (typeof ext.openTradingView === "function") {
+        ext.openTradingView();
+        return;
+      }
+      if (typeof window.openBrokerTradingView === "function") {
+        window.openBrokerTradingView();
+        return;
+      }
+    } catch (e) {}
 
     const container = document.getElementById("tv_chart_container");
     if (!container) return;
 
-    if (container.dataset.chartReady === "1") return;
-    container.dataset.chartReady = "1";
-
     try {
-      if (!window.TradingView || typeof window.TradingView.widget !== "function") {
+      if (container.dataset.chartLoaded === "1") return;
+      container.dataset.chartLoaded = "1";
+
+      const buildWidget = () => {
+        if (!window.TradingView || typeof window.TradingView.widget !== "function") return;
+
+        container.innerHTML = "";
+        new TradingView.widget({
+          autosize: true,
+          symbol: "BINANCE:BTCUSDT",
+          interval: "5",
+          timezone: "Etc/UTC",
+          theme: "dark",
+          style: "1",
+          locale: "es",
+          enable_publishing: false,
+          allow_symbol_change: true,
+          container_id: "tv_chart_container",
+          hide_side_toolbar: false,
+          withdateranges: true,
+          save_image: false
+        });
+      };
+
+      if (!window.TradingView) {
         const s = document.createElement("script");
         s.src = "https://s3.tradingview.com/tv.js";
         s.async = true;
-        s.onload = () => {
-          try {
-            new TradingView.widget({
-              autosize: true,
-              symbol: "BINANCE:BTCUSDT",
-              interval: "5",
-              timezone: "Etc/UTC",
-              theme: "dark",
-              style: "1",
-              locale: "es",
-              enable_publishing: false,
-              allow_symbol_change: true,
-              container_id: "tv_chart_container",
-              hide_side_toolbar: false,
-              withdateranges: true,
-              save_image: false
-            });
-          } catch (e) {}
-        };
+        s.onload = buildWidget;
         document.head.appendChild(s);
-        return;
+      } else {
+        buildWidget();
       }
-
-      new TradingView.widget({
-        autosize: true,
-        symbol: "BINANCE:BTCUSDT",
-        interval: "5",
-        timezone: "Etc/UTC",
-        theme: "dark",
-        style: "1",
-        locale: "es",
-        enable_publishing: false,
-        allow_symbol_change: true,
-        container_id: "tv_chart_container",
-        hide_side_toolbar: false,
-        withdateranges: true,
-        save_image: false
-      });
     } catch (e) {}
   }
 
-  async function handleTarget(target, source) {
-    const t = String(target || "").trim().toLowerCase();
+  function openAssets() {
+    const panel = getPanelByAnyId([
+      "assetsPanel",
+      "brokerAssetsPanel",
+      "brokerSymbolsPanel",
+      "brokerSymbolsGrid"
+    ]);
 
-    setActiveItems(target);
-    showPanel(target);
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    if (source === "menu") closeMenu();
+    try {
+      if (typeof ext.loadMarketsAndQuotes === "function") ext.loadMarketsAndQuotes();
+      if (typeof ext.refreshBrokerUI === "function") ext.refreshBrokerUI();
+    } catch (e) {}
+  }
 
-    if (t === "mercado" || t === "market" || t.includes("market") || t.includes("mercado")) {
-      await refreshMarketArea();
+  function handleButton(target, source = "menu") {
+    const t = normalizeText(target);
+
+    setActive(t);
+    showPanel(t);
+
+    if (t === "inicio") {
+      const dashboard = document.getElementById("dashboardPanel");
+      if (dashboard) dashboard.style.display = "block";
     }
 
-    if (t === "posiciones" || t === "positions" || t.includes("position")) {
-      await refreshPositionsArea();
+    if (t === "mercados") {
+      refreshMarkets();
     }
 
-    if (t === "trading" || t === "chart" || t.includes("trade") || t.includes("graf") || t.includes("chart")) {
-      await openTradingArea();
+    if (t === "posiciones") {
+      refreshPositions();
+    }
+
+    if (t === "trading") {
+      openTradingChart();
+    }
+
+    if (t === "activos") {
+      openAssets();
+    }
+
+    if (isMobile() && source === "menu") {
+      closeMenu();
     }
   }
 
-  if (sidebar) {
-    setFixedMenuButton();
+  injectStyles();
+  setToggleButtonFixed();
 
-    if (window.innerWidth < 1000) sidebar.classList.add("hidden");
+  if (sidebar) {
+    if (isMobile()) closeMenu();
     else sidebar.classList.remove("hidden");
   }
 
-  if (toggleBtn && sidebar) {
+  if (toggleBtn) {
     toggleBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -3806,66 +3892,59 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  menuItems.forEach((item) => {
-    item.addEventListener("click", async (e) => {
+  menuItems.forEach(item => {
+    item.addEventListener("click", (e) => {
       e.preventDefault();
-      const target = item.getAttribute("data-target");
-      await handleTarget(target, "menu");
+      const target = getTargetFromItem(item);
+      handleButton(target, "menu");
     });
   });
 
-  footerItems.forEach((item) => {
-    item.addEventListener("click", async (e) => {
+  footerItems.forEach(item => {
+    item.addEventListener("click", (e) => {
       e.preventDefault();
-      const target = item.getAttribute("data-target");
-      await handleTarget(target, "footer");
+      const target = getTargetFromItem(item);
+      handleButton(target, "footer");
     });
   });
 
   document.addEventListener("click", (e) => {
     if (!sidebar || !toggleBtn) return;
-    if (window.innerWidth >= 1000) return;
+    if (!isMobile()) return;
 
-    const insideSidebar = sidebar.contains(e.target);
-    const insideBtn = toggleBtn.contains(e.target);
+    const clickedToggle = toggleBtn.contains(e.target);
+    const clickedSidebar = sidebar.contains(e.target);
 
-    if (!insideSidebar && !insideBtn && !sidebar.classList.contains("hidden")) {
+    if (!clickedToggle && !clickedSidebar && !sidebar.classList.contains("hidden")) {
       closeMenu();
     }
   });
 
-  function bindResponsive() {
-    setFixedMenuButton();
-    if (!sidebar) return;
+  window.addEventListener("resize", () => {
+    setToggleButtonFixed();
 
-    if (window.innerWidth < 1000) {
-      sidebar.classList.add("hidden");
+    if (isMobile()) {
+      closeMenu();
     } else {
-      sidebar.classList.remove("hidden");
+      if (sidebar) sidebar.classList.remove("hidden");
     }
-  }
-
-  window.addEventListener("resize", bindResponsive);
+  });
 
   const dashboard = document.getElementById("dashboardPanel");
   if (dashboard) {
     hideAllPanels();
     dashboard.style.display = "block";
-  } else if (panels.length) {
-    hideAllPanels();
-    panels[0].style.display = "block";
+    setActive("inicio");
   }
 
-  bindResponsive();
+  const startTarget =
+    getTargetFromItem(menuItems.find(i => i.classList.contains("active")) || {}) ||
+    getTargetFromItem(footerItems.find(i => i.classList.contains("active")) || {}) ||
+    "inicio";
 
-  const ext2 = rootExt2();
-  safeCall(ext2.loadMarketsAndQuotes);
-  safeCall(ext2.loadPositions);
-  safeCall(ext2.refreshBrokerUI);
-  openTradingArea();
+  handleButton(startTarget, "menu");
 });
 </script>
-
 
 
 
