@@ -1,12 +1,17 @@
+<script>
 (function () {
   "use strict";
 
-  console.log("[LEONES] trading.js loaded");
+  if (window.__LEONES_TRADING_JS3_LOADED__) {
+    console.warn("[LEONES] trading.js ya estaba cargado, se omite.");
+    return;
+  }
+  window.__LEONES_TRADING_JS3_LOADED__ = true;
+
+  console.log("[LEONES] trading.js loaded (bridge mode)");
 
   const API = window.API || "/api";
   const SOCKET_URL = window.SOCKET_URL || location.origin;
-
-  let socket = null;
 
   function getToken() {
     try {
@@ -16,144 +21,64 @@
     }
   }
 
-  const token = getToken();
+  function hasSession() {
+    return !!getToken();
+  }
 
-  /* ===============================
-     SOCKET.IO CONNECTION
-  =============================== */
-  function initSocket() {
+  function safeCall(fn, ...args) {
     try {
-      socket = io(SOCKET_URL, {
-        auth: { token },
-        transports: ["websocket"],
-      });
-
-      socket.on("connect", () => {
-        console.log("📡 Conectado al socket:", socket.id);
-        socket.emit("request_symbols");
-        socket.emit("request_prices_snapshot");
-      });
-
-      socket.on("disconnect", () => {
-        console.log("❌ Socket desconectado");
-      });
-
-      socket.on("prices_snapshot", (data) => {
-        console.log("💰 Snapshot precios:", data);
-        updatePrices(data);
-      });
-
-      socket.on("symbols_update", (symbols) => {
-        console.log("📊 Símbolos:", symbols);
-        renderSymbols(symbols);
-      });
-
+      if (typeof fn === "function") return fn(...args);
     } catch (e) {
-      console.warn("Socket error:", e);
+      console.warn("[LEONES] safeCall error:", e);
     }
+    return null;
   }
 
-  /* ===============================
-     FETCH ACCOUNT
-  =============================== */
-  async function loadAccount() {
-    try {
-      const res = await fetch(`${API}/account`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) throw new Error("No autorizado");
-
-      const data = await res.json();
-      console.log("👤 Account:", data);
-
-      renderAccount(data.account);
-
-    } catch (e) {
-      console.warn("Error cargando cuenta:", e.message);
-    }
+  function refreshFromMainUI() {
+    safeCall(window.refreshBrokerUI);
+    safeCall(window.startBrokerUI);
+    safeCall(window.loadAccount);
+    safeCall(window.fetchPositions);
   }
 
-  /* ===============================
-     FETCH POSITIONS
-  =============================== */
-  async function loadPositions() {
-    try {
-      const res = await fetch(`${API}/positions`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+  function bindEvents() {
+    if (window.__LEONES_TRADING_JS3_EVENTS__) return;
+    window.__LEONES_TRADING_JS3_EVENTS__ = true;
 
-      if (!res.ok) return;
+    window.addEventListener("leones:loggedIn", () => {
+      refreshFromMainUI();
+    });
 
-      const data = await res.json();
-      console.log("📦 Posiciones:", data);
+    window.addEventListener("leones:loggedOut", () => {
+      const balanceEl = document.getElementById("balance");
+      if (balanceEl) balanceEl.textContent = "--";
 
-      renderPositions(data);
+      const positionsEl = document.getElementById("positions");
+      if (positionsEl) positionsEl.innerHTML = "";
 
-    } catch (e) {
-      console.warn("Error posiciones:", e);
-    }
-  }
-
-  /* ===============================
-     RENDER FUNCTIONS (SEGURAS)
-  =============================== */
-  function renderAccount(account) {
-    if (!account) return;
-
-    const el = document.getElementById("balance");
-    if (el) el.textContent = account.balance ?? 0;
-  }
-
-  function renderPositions(positions) {
-    const container = document.getElementById("positions");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    (positions || []).forEach((p) => {
-      const div = document.createElement("div");
-      div.textContent = `${p.symbol} | ${p.size} | ${p.price}`;
-      container.appendChild(div);
+      const symbolsEl = document.getElementById("symbols");
+      if (symbolsEl) symbolsEl.innerHTML = "";
     });
   }
 
-  function renderSymbols(symbols) {
-    const container = document.getElementById("symbols");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    (symbols || []).forEach((s) => {
-      const div = document.createElement("div");
-      div.textContent = s.label || s.symbol;
-      container.appendChild(div);
-    });
-  }
-
-  function updatePrices(prices) {
-    // puedes mejorar esto luego para UI
-    console.log("🔄 Actualizando precios...");
-  }
-
-  /* ===============================
-     INIT
-  =============================== */
   function init() {
-    if (!token) {
+    bindEvents();
+
+    if (!hasSession()) {
       console.warn("⚠️ No hay token, modo público");
       return;
     }
 
-    initSocket();
-    loadAccount();
-    loadPositions();
+    refreshFromMainUI();
   }
 
   document.addEventListener("DOMContentLoaded", init);
 
+  window.__LEONES_TRADING_BRIDGE__ = {
+    refreshFromMainUI,
+    hasSession,
+    API,
+    SOCKET_URL
+  };
 })();
+</script>
