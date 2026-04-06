@@ -1578,117 +1578,51 @@ if (window.__LEONES_BOOTED__) {
 
   .header{
     display:flex;align-items:center;justify-content:space-between;
-    padding:12px 16px;
-    background:linear-gradient(90deg,#0b0b0b,#111);
-    border-bottom:1px solid var(--line);
-    position:fixed;top:0;left:0;right:0;z-index:9990;height:64px
+    padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);
+    border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:9990;height:64px
   }
   .header-left{display:flex;align-items:center;gap:12px;min-width:0}
   .menu-toggle{
-    background:transparent;
-    border:1px solid rgba(255,255,255,0.04);
-    padding:8px 10px;
-    border-radius:8px;
-    color:var(--gold);
-    cursor:pointer;
-    min-width:42px;
-    min-height:42px;
-    line-height:1;
-    font-size:18px;
+    background:transparent;border:1px solid rgba(255,255,255,0.04);
+    padding:8px 10px;border-radius:8px;color:var(--gold);cursor:pointer;
+    min-width:42px;min-height:42px;line-height:1;font-size:18px
   }
   .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px;white-space:nowrap}
   .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
-  .avatar{
-    width:40px;height:40px;border-radius:8px;background:#111;
-    display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700
-  }
+  .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
 
   .main-wrap{padding-top:80px;max-width:none;width:auto;margin:0 2%;}
-  .layout{
-    display:grid;
-    grid-template-columns:260px 1fr;
-    gap:18px;
-    padding:18px 12px 120px;
-    min-height:calc(100vh - 120px)
-  }
-
+  .layout{display:grid;grid-template-columns:260px 1fr; gap:18px;padding:18px 12px 120px;min-height:calc(100vh - 120px)}
   .sidebar{
     background:linear-gradient(180deg,#0c0c0c,#0b0b0b);
-    border-radius:12px;
-    padding:12px;
-    border:1px solid var(--line);
-    overflow:auto;
-    transition:transform .22s ease, opacity .22s ease, visibility .22s ease;
-    max-height:calc(100vh - 140px);
-    position:relative;
+    border-radius:12px;padding:12px;border:1px solid var(--line);
+    overflow:auto;transition:transform .22s ease;
+    max-height:calc(100vh - 140px);position:relative;
   }
   .sidebar.hidden{transform:translateX(-110%)}
-  .sidebar-header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    margin-bottom:8px;
-    gap:10px
-  }
+  .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:10px}
   .sidebar .menu-btn{
-    background:transparent;
-    border:1px solid rgba(255,255,255,0.04);
-    padding:8px 10px;
-    border-radius:8px;
-    color:var(--gold);
-    cursor:pointer
+    background:transparent;border:1px solid rgba(255,255,255,0.04);
+    padding:8px 10px;border-radius:8px;color:var(--gold);cursor:pointer
   }
   .menu-item{
-    padding:12px 14px;
-    border-radius:8px;
-    color:var(--muted);
-    display:flex;
-    align-items:center;
-    gap:10px;
-    cursor:pointer;
-    margin-bottom:8px;
-    font-weight:700;
-    font-size:14px;
-    border:none;
-    background:transparent;
-    width:100%;
-    text-align:left;
+    padding:12px 14px;border-radius:8px;color:var(--muted);
+    display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;
+    font-weight:700;font-size:14px;border:none;background:transparent;width:100%;text-align:left
   }
   .menu-item.active{
     background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));
-    color:var(--gold);
-    box-shadow:inset 0 0 0 1px rgba(212,175,55,0.04);
+    color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);
   }
 
-  .panel{
-    background:linear-gradient(180deg,#0b0b0b,#0c0c0c);
-    border-radius:12px;
-    padding:18px;
-    border:1px solid var(--line);
-    height:100%;
-    overflow:auto;
-    box-shadow:0 12px 40px rgba(0,0,0,0.6)
-  }
+  .panel{background:linear-gradient(180deg,#0b0b0b,#0c0c0c);border-radius:12px;padding:18px;border:1px solid var(--line);height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6)}
   .title{font-size:20px;color:var(--text);margin-bottom:12px;font-weight:800}
-  .cards{
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-    gap:12px;margin-bottom:14px
-  }
-  .card{
-    background:linear-gradient(180deg,#0f0f0f,#0d0d0d);
-    border-radius:10px;padding:14px;border:1px solid rgba(212,175,55,0.06)
-  }
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:14px;border:1px solid rgba(212,175,55,0.06)}
   .card .value{font-weight:800;color:var(--gold);font-size:18px}
   .muted{color:var(--muted);font-size:13px}
 
-  .table-box{
-    background:linear-gradient(180deg,#0f0f0f,#0d0d0d);
-    border-radius:10px;
-    padding:12px;
-    border:1px solid var(--line);
-    overflow:auto
-  }
+  .table-box{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);border-radius:10px;padding:12px;border:1px solid var(--line);overflow:auto}
   table{width:100%;border-collapse:collapse;color:var(--text);font-size:13px}
   th{text-align:left;padding:10px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line)}
   td{padding:10px;border-bottom:1px dashed rgba(255,255,255,0.02)}
@@ -1697,104 +1631,29 @@ if (window.__LEONES_BOOTED__) {
 
   .symbols-top{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
   .cat-tabs{display:flex;gap:8px;flex-wrap:wrap}
-  .cat-tab{
-    padding:6px 10px;
-    border-radius:8px;
-    border:1px solid var(--line);
-    background:transparent;
-    color:var(--muted);
-    cursor:pointer;
-    font-weight:700
-  }
+  .cat-tab{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
   .cat-tab.active{background:rgba(212,175,55,0.06);color:var(--gold)}
-  .search-input{
-    flex:1;
-    min-width:200px;
-    padding:8px;
-    border-radius:8px;
-    border:1px solid var(--line);
-    background:#0b0b0b;
-    color:var(--text)
-  }
-  .symbols-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-    gap:10px;
-    margin-top:10px
-  }
-  .symbol-card{
-    padding:12px;
-    border-radius:8px;
-    border:1px solid rgba(255,255,255,0.02);
-    background:linear-gradient(180deg,#0f0f0f,#0d0d0d);
-    cursor:pointer
-  }
+  .search-input{flex:1;min-width:200px;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0b0b0b;color:var(--text)}
+  .symbols-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px}
+  .symbol-card{padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg,#0f0f0f,#0d0d0d);cursor:pointer}
   .symbol-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.5);border-color:rgba(212,175,55,0.08)}
 
   .chart-area{display:flex;flex-direction:column;min-height:420px}
-  #tv_chart_container{
-    width:100%;
-    flex:1;
-    min-height:420px;
-    height:420px;
-    border-radius:8px;
-    overflow:hidden;
-    background:#000;
-    border:1px solid rgba(255,255,255,0.03)
-  }
-
+  #tv_chart_container{width:100%;flex:1;min-height:420px;height:420px;border-radius:8px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.03)}
   .order-book-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-  .ob-col{
-    background:transparent;
-    padding:8px;
-    border-radius:8px;
-    border:1px solid rgba(255,255,255,0.02)
-  }
+  .ob-col{background:transparent;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
   .ob-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:var(--muted)}
 
   .trade-panel{display:grid;grid-template-columns:1fr 320px;gap:12px;margin-top:12px}
   .trade-box{background:#0b0b0b;border-radius:8px;border:1px solid var(--line);padding:12px}
   .form-row{display:flex;gap:8px;margin-bottom:8px}
-  .form-input,.form-select{
-    background:#0b0b0b;
-    border:1px solid var(--line);
-    color:var(--text);
-    padding:8px;
-    border-radius:6px;
-    width:100%
-  }
+  .form-input,.form-select{background:#0b0b0b;border:1px solid var(--line);color:var(--text);padding:8px;border-radius:6px;width:100%}
 
-  .btn-primary{
-    background:var(--gold);
-    color:#07100a;
-    border:none;
-    padding:10px 14px;
-    border-radius:8px;
-    font-weight:800;
-    cursor:pointer;
-    box-shadow:0 6px 20px rgba(201,161,46,0.12)
-  }
-  .btn-secondary{
-    background:transparent;
-    color:var(--gold);
-    border:1px solid rgba(212,175,55,0.18);
-    padding:10px 14px;
-    border-radius:8px;
-    cursor:pointer;
-    font-weight:700
-  }
+  .btn-primary{background:var(--gold);color:#07100a;border:none;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer;box-shadow:0 6px 20px rgba(201,161,46,0.12)}
+  .btn-secondary{background:transparent;color:var(--gold);border:1px solid rgba(212,175,55,0.18);padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:700}
 
   .positions-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-  .pos-card{
-    background:linear-gradient(180deg,#0f0f0f,#0d0d0d);
-    padding:10px;
-    border-radius:8px;
-    border:1px solid var(--line);
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    cursor:pointer
-  }
+  .pos-card{background:linear-gradient(180deg,#0f0f0f,#0d0d0d);padding:10px;border-radius:8px;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
   .pos-card:hover{box-shadow:0 8px 20px rgba(0,0,0,0.4)}
 
   .panel input[type="text"], .panel input[type="number"], .panel input[type="email"], .panel input[type="file"], .panel textarea, .panel select,
@@ -1812,14 +1671,8 @@ if (window.__LEONES_BOOTED__) {
   }
 
   .footer-nav{
-    position:fixed;
-    left:0;right:0;bottom:0;
-    background:linear-gradient(90deg,#0b0b0b,#0c0c0c);
-    border-top:1px solid var(--line);
-    display:flex;
-    justify-content:space-around;
-    padding:10px 0;
-    z-index:9991
+    position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);
+    border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:9991
   }
   .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer;background:transparent;border:none}
   .fnav-item.active{color:var(--gold);font-weight:800}
@@ -1829,33 +1682,22 @@ if (window.__LEONES_BOOTED__) {
   .kbd {background:#0b0b0b;border:1px solid var(--line);padding:4px 6px;border-radius:6px;font-weight:700;color:var(--muted);font-size:12px}
 
   @media(max-width:1000px){
-    .layout{
-      grid-template-columns:1fr;
-      padding:88px 12px 140px;
-      min-height:auto
-    }
+    .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
     #tv_chart_container{min-height:300px;height:58vh}
     .trade-panel{grid-template-columns:1fr}
     .sidebar{
-      position:fixed;
-      left:0;
-      top:64px;
-      bottom:0;
-      width:220px;
-      z-index:9992;
-      transform:translateX(-110%);
+      position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:9992;
+      transform:translateX(-110%)
     }
     .sidebar.hidden{transform:translateX(-120%)}
-    body.leones-menu-open .sidebar{
-      transform:translateX(0)
-    }
+    body.leones-menu-open .sidebar{transform:translateX(0)}
   }
 </style>
 
 <div id="privateArea_full" style="display:none;">
   <header class="header">
     <div class="header-left">
-      <button id="sidebarToggle" class="menu-toggle leones-menu-toggle-fixed" aria-controls="sidebar" aria-expanded="false" title="Abrir/Cerrar menú">☰</button>
+      <button id="sidebarToggle" class="menu-toggle" aria-controls="sidebar" aria-expanded="false" title="Abrir/Cerrar menú">☰</button>
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
@@ -1867,7 +1709,7 @@ if (window.__LEONES_BOOTED__) {
         <div style="font-size:12px;color:var(--muted)">Bienvenido</div>
       </div>
       <div class="avatar" id="privateAvatar">U</div>
-      <button class="btn-primary" id="logoutTop_full" style="padding:8px 10px;margin-left:8px">Salir</button>
+      <button class="btn-primary" id="btnLogoutTop" style="padding:8px 10px;margin-left:8px">Salir</button>
     </div>
   </header>
 
@@ -2118,7 +1960,6 @@ if (window.__LEONES_BOOTED__) {
     </div>
   </div>
 </div>
-
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
