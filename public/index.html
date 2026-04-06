@@ -3599,6 +3599,29 @@ document.addEventListener("DOMContentLoaded", () => {
     if (panel) {
       panel.style.display = "block";
     }
+
+    // 🔥 🔥 🔥 SINCRONIZACIÓN REAL 🔥 🔥 🔥
+
+    // 👉 MERCADOS (usa lo que ya tienes en overview / JS2)
+    if (targetId === "marketPanel" || targetId === "overviewPanel") {
+      if (typeof loadMarketsAndQuotes === "function") {
+        loadMarketsAndQuotes();
+      }
+    }
+
+    // 👉 POSICIONES
+    if (targetId === "positionsPanel") {
+      if (typeof loadPositions === "function") {
+        loadPositions();
+      }
+    }
+
+    // 👉 TRADING (gráfico)
+    if (targetId === "tradingPanel") {
+      if (typeof openTradingView === "function") {
+        openTradingView();
+      }
+    }
   }
 
   // 🔥 SIDEBAR
@@ -3640,7 +3663,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 });
 </script>
-
 
 
 </div>
