@@ -1576,13 +1576,9 @@ if (window.__LEONES_BOOTED__) {
     line-height:1.35; font-size:14px; overflow:auto;
   }
 
-  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:9990;height:64px}
+  .header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(90deg,#0b0b0b,#111);border-bottom:1px solid var(--line);position:fixed;top:0;left:0;right:0;z-index:50;height:64px}
   .header-left{display:flex;align-items:center;gap:12px}
-  .menu-toggle{
-    background:transparent;border:1px solid rgba(255,255,255,0.04);
-    padding:8px;border-radius:8px;color:var(--gold);cursor:pointer;
-    width:42px;height:42px;display:flex;align-items:center;justify-content:center;
-  }
+  .menu-toggle{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
   .logo{font-weight:800;color:var(--gold);font-size:18px;letter-spacing:0.6px}
   .user{display:flex;gap:12px;align-items:center;color:var(--muted)}
   .avatar{width:40px;height:40px;border-radius:8px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700}
@@ -1593,10 +1589,7 @@ if (window.__LEONES_BOOTED__) {
   .sidebar.hidden{transform:translateX(-110%)}
   .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .sidebar .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
-  .menu-item{
-    padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px;
-    width:100%;text-align:left;background:transparent;border:none;
-  }
+  .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
   .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
 
   .panel{background:linear-gradient(180deg,#0b0b0b,#0c0c0c);border-radius:12px;padding:18px;border:1px solid var(--line);height:100%;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,0.6)}
@@ -1654,8 +1647,8 @@ if (window.__LEONES_BOOTED__) {
     outline: 3px solid rgba(212,175,55,0.12);
   }
 
-  .footer-nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:9991}
-  .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer;background:transparent;border:none}
+  .footer-nav{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(90deg,#0b0b0b,#0c0c0c);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 0;z-index:60}
+  .fnav-item{color:var(--muted);font-size:12px;text-align:center;cursor:pointer}
   .fnav-item.active{color:var(--gold);font-weight:800}
   .fnav-item i{display:block;font-size:18px;margin-bottom:4px}
 
@@ -1663,7 +1656,7 @@ if (window.__LEONES_BOOTED__) {
     .layout{grid-template-columns:1fr;padding:88px 12px 140px;min-height:auto}
     #tv_chart_container{min-height:300px}
     .trade-panel{grid-template-columns:1fr}
-    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:9992}
+    .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
     .sidebar.hidden{transform:translateX(-120%)}
   }
 
@@ -1674,7 +1667,6 @@ if (window.__LEONES_BOOTED__) {
 <div id="privateArea_full" style="display:none;">
   <header class="header">
     <div class="header-left">
-      <button id="sidebarToggle" class="menu-toggle" title="Abrir/Cerrar menú" aria-controls="sidebar" aria-expanded="false">☰</button>
       <div class="logo">BrokerPro <span style="font-weight:500;color:var(--muted);font-size:12px;margin-left:8px">— Profesional</span></div>
     </div>
 
@@ -1695,15 +1687,15 @@ if (window.__LEONES_BOOTED__) {
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div style="font-weight:800;color:var(--gold)">Menú</div>
-          <button id="sidebarToggleSide" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
         </div>
 
-        <div class="menu-item active" data-target="dashboardPanel" data-private-section="dashboardPanel"><i class="fa-solid fa-house"></i> Overview</div>
-        <div class="menu-item" data-target="tradingPanel" data-private-section="tradingPanel"><i class="fa-solid fa-chart-line"></i> Trading</div>
-        <div class="menu-item" data-target="historyPanel" data-private-section="historyPanel"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
-        <div class="menu-item" data-target="verificationPanel" data-private-section="verificationPanel"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
-        <div class="menu-item" data-target="depositPanel" data-private-section="depositPanel"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
-        <div class="menu-item" data-target="withdrawPanel" data-private-section="withdrawPanel"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
+        <div class="menu-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i> Overview</div>
+        <div class="menu-item" data-target="tradingPanel"><i class="fa-solid fa-chart-line"></i> Trading</div>
+        <div class="menu-item" data-target="historyPanel"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+        <div class="menu-item" data-target="verificationPanel"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
+        <div class="menu-item" data-target="depositPanel"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        <div class="menu-item" data-target="withdrawPanel"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
 
         <div style="height:8px"></div>
         <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
@@ -1920,11 +1912,11 @@ if (window.__LEONES_BOOTED__) {
   </div>
 
   <nav class="footer-nav">
-    <div class="fnav-item active" data-target="dashboardPanel" data-private-section="dashboardPanel"><i class="fa-solid fa-house"></i>Inicio</div>
-    <div class="fnav-item" data-target="tradingPanel" data-private-section="tradingPanel"><i class="fa-solid fa-chart-line"></i>Trading</div>
-    <div class="fnav-item" data-target="positionsPanel" data-private-section="positionsPanel"><i class="fa-solid fa-layer-group"></i>Posiciones</div>
-    <div class="fnav-item" data-target="marketsPanel" data-private-section="marketsPanel"><i class="fa-solid fa-chart-simple"></i>Mercados</div>
-    <div class="fnav-item" data-target="activosPanel" data-private-section="activosPanel"><i class="fa-solid fa-wallet"></i>Activos</div>
+    <div class="fnav-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i>Inicio</div>
+    <div class="fnav-item" data-target="tradingPanel"><i class="fa-solid fa-chart-line"></i>Trading</div>
+    <div class="fnav-item" data-target="positionsPanel"><i class="fa-solid fa-layer-group"></i>Posiciones</div>
+    <div class="fnav-item" data-target="marketsPanel"><i class="fa-solid fa-chart-simple"></i>Mercados</div>
+    <div class="fnav-item" data-target="activosPanel"><i class="fa-solid fa-wallet"></i>Activos</div>
   </nav>
 
   <div id="infoModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:120">
@@ -1933,10 +1925,12 @@ if (window.__LEONES_BOOTED__) {
         <strong style="color:var(--gold)">BrokerPro — Info</strong>
         <button style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer">&times;</button>
       </div>
-      <div style="color:var(--muted)">Tu cuenta se actualiza con datos reales cuando el sistema devuelve saldo, posiciones y transacciones.</div>
+      <div style="color:var(--muted)">Tu cuenta se actualiza con datos reales cuando el backend devuelve saldo, posiciones y transacciones.</div>
     </div>
   </div>
 </div>
+
+
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
@@ -3575,15 +3569,6 @@ if (window.__LEONES_BOOTED__) {
 })();
 </script>
 
-
-</div>
-
-<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
-<script src="/js/authGuard.js"></script>
-<script src="/socket.io/socket.io.js"></script>
-<script src="/js/trading.js"></script>
-
-<!-- 🔥 ESTE SCRIPT VA AQUÍ -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -3649,6 +3634,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
 });
 </script>
+
+
+
+
+</div>
+
+<!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
+<script src="/js/authGuard.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/trading.js"></script>
+
+<!-- 🔥 ESTE SCRIPT VA AQUÍ -->
+<script>
+(function () {
+  const token = localStorage.getItem("token");
+
+  const publicSection = document.getElementById("publicSection");
+  const privateSection = document.getElementById("privateSection");
+
+  if (token) {
+    if (publicSection) publicSection.style.display = "none";
+    if (privateSection) privateSection.style.display = "block";
+  } else {
+    if (publicSection) publicSection.style.display = "block";
+    if (privateSection) privateSection.style.display = "none";
+  }
+})();
+</script>
+
 
 
 </body>
