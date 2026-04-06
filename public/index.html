@@ -3584,7 +3584,71 @@ if (window.__LEONES_BOOTED__) {
 <script src="/js/trading.js"></script>
 
 <!-- 🔥 ESTE SCRIPT VA AQUÍ -->
+<script>
+document.addEventListener("DOMContentLoaded", () => {
 
+  const sidebar = document.getElementById("sidebar");
+  const toggleBtn = document.getElementById("sidebarToggle");
+
+  // 🔹 FIX 1: Botón menú (solo uno, funcional)
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("hidden");
+    });
+  }
+
+  // 🔹 FIX 2: Navegación sidebar
+  const menuItems = document.querySelectorAll(".menu-item");
+  const panels = document.querySelectorAll(".panel");
+
+  menuItems.forEach(item => {
+    item.addEventListener("click", () => {
+      const target = item.getAttribute("data-target");
+
+      // activar menú
+      menuItems.forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
+
+      // mostrar panel correcto
+      panels.forEach(p => p.style.display = "none");
+      const panel = document.getElementById(target);
+      if (panel) panel.style.display = "block";
+
+      // cerrar sidebar en móvil
+      if (window.innerWidth < 1000) {
+        sidebar.classList.add("hidden");
+      }
+    });
+  });
+
+  // 🔹 FIX 3: Footer (botones de abajo)
+  const footerItems = document.querySelectorAll(".fnav-item");
+
+  footerItems.forEach(item => {
+    item.addEventListener("click", () => {
+      const target = item.getAttribute("data-target");
+
+      // activar footer
+      footerItems.forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
+
+      // mostrar panel
+      panels.forEach(p => p.style.display = "none");
+      const panel = document.getElementById(target);
+      if (panel) panel.style.display = "block";
+
+      // sincronizar sidebar activo
+      menuItems.forEach(i => {
+        i.classList.toggle("active", i.getAttribute("data-target") === target);
+      });
+    });
+  });
+
+  // 🔹 FIX 4: Mostrar dashboard por defecto
+  document.getElementById("dashboardPanel").style.display = "block";
+
+});
+</script>
 
 
 </body>
