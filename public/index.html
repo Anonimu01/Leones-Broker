@@ -1952,7 +1952,12 @@ if (window.__LEONES_BOOTED__) {
   const NS = window._LEONES = window._LEONES || {};
   const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
-  const API_BASE = String(window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')).replace(/\/+$/, '');
+  const API_BASE = String(
+    window.API_BASE ||
+    window.API ||
+    (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
+  ).replace(/\/+$/, '');
+
   const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
   const ROOT_ID = 'broker-ext2-root';
 
@@ -1997,7 +2002,8 @@ if (window.__LEONES_BOOTED__) {
     BTCUSDT: 'BINANCE:BTCUSDT', ETHUSDT: 'BINANCE:ETHUSDT', BNBUSDT: 'BINANCE:BNBUSDT',
     SOLUSDT: 'BINANCE:SOLUSDT', XRPUSDT: 'BINANCE:XRPUSDT', ADAUSDT: 'BINANCE:ADAUSDT',
     DOGEUSDT: 'BINANCE:DOGEUSDT', DOTUSDT: 'BINANCE:DOTUSDT', LTCUSDT: 'BINANCE:LTCUSDT',
-    LINKUSDT: 'BINANCE:LINKUSDT', BCHUSDT: 'BINANCE:BCHUSDT',
+    LINKUSDT: 'BINANCE:LINKUSDT', BCHUSDT: 'BINANCE:BCHUSDT', AVAXUSDT: 'BINANCE:AVAXUSDT',
+    TRXUSDT: 'BINANCE:TRXUSDT', TONUSDT: 'BINANCE:TONUSDT', SHIBUSDT: 'BINANCE:SHIBUSDT',
 
     AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', AMZN: 'NASDAQ:AMZN', TSLA: 'NASDAQ:TSLA',
     NVDA: 'NASDAQ:NVDA', META: 'NASDAQ:META', GOOGL: 'NASDAQ:GOOGL', NFLX: 'NASDAQ:NFLX',
@@ -2019,7 +2025,12 @@ if (window.__LEONES_BOOTED__) {
 
   const DEFAULT_SYMBOLS = Object.entries(FALLBACK_SEEDS).flatMap(([market, items]) => items.map(sym => ({
     symbol: sym,
-    tvSymbol: TV_HINTS[sym] || (market === 'Crypto' ? `BINANCE:${sym}` : market === 'Stocks' ? `NASDAQ:${sym}` : market === 'Indices' || market === 'Commodities' ? `TVC:${sym}` : `OANDA:${sym}`),
+    tvSymbol: TV_HINTS[sym] || (
+      market === 'Crypto' ? `BINANCE:${sym}` :
+      market === 'Stocks' ? `NASDAQ:${sym}` :
+      market === 'Indices' || market === 'Commodities' ? `TVC:${sym}` :
+      `OANDA:${sym}`
+    ),
     label: SYMBOL_LABELS[sym] || sym,
     market,
     leverage: 'N/A',
@@ -2039,6 +2050,7 @@ if (window.__LEONES_BOOTED__) {
     positions: [],
     activeSymbol: null,
     marketFilter: 'All',
+    marketSearch: '',
     lastChartSymbol: null,
     pollTimer: null
   };
@@ -2176,23 +2188,6 @@ if (window.__LEONES_BOOTED__) {
 
   function getMarketIcon(market) {
     return MARKET_ICONS[normalizeMarketName(market)] || '●';
-  }
-
-  function fallbackMeta(symbol, market) {
-    const s = String(symbol || '').trim().toUpperCase();
-    const m = normalizeMarketName(market || inferMarketBySymbol(s));
-    return {
-      symbol: s,
-      tvSymbol: resolveTvSymbol(s, m),
-      label: displayLabel(s),
-      market: m,
-      leverage: 'N/A',
-      spread: 'Variable',
-      hours: (m === 'Forex' || m === 'Crypto') ? '24/5' : 'N/A',
-      contract: 'N/A',
-      volatility: 'N/A',
-      source: 'catálogo'
-    };
   }
 
   function normalizeSymbolRow(x) {
@@ -2457,15 +2452,6 @@ if (window.__LEONES_BOOTED__) {
         font-size:18px;
       }
 
-      .leones-menu-toggle-fixed{
-        z-index:10050 !important;
-      }
-
-      .leones-private-menu-target{
-        transition: transform .22s ease, opacity .22s ease, visibility .22s ease;
-        will-change: transform;
-      }
-
       #${ROOT_ID} input,
       #${ROOT_ID} textarea,
       #${ROOT_ID} select{
@@ -2494,28 +2480,6 @@ if (window.__LEONES_BOOTED__) {
         #${ROOT_ID} #tv_chart_container{
           min-height:360px;
           height:58vh;
-        }
-      }
-
-      @media (max-width: 900px){
-        .leones-menu-toggle-fixed{
-          position: fixed !important;
-          top: 14px !important;
-          right: 14px !important;
-          min-width:44px !important;
-          min-height:44px !important;
-        }
-        body.leones-menu-open .leones-private-menu-target{
-          transform: translateX(0) !important;
-          opacity: 1 !important;
-          pointer-events: auto !important;
-          visibility: visible !important;
-        }
-        body:not(.leones-menu-open) .leones-private-menu-target.leones-mobile-collapsible{
-          transform: translateX(-105%) !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
-          visibility: hidden !important;
         }
       }
     `;
@@ -2572,269 +2536,25 @@ if (window.__LEONES_BOOTED__) {
     const acct = state.account || {};
     const userLev = parseLeverageValue(acct.maxLeverage ?? acct.leverage ?? acct.marginLeverage ?? acct.allowedLeverage);
     const symbolLev = meta ? parseLeverageValue(meta.leverage) : null;
-    return userLev || symbolLev || null;
+    return userLev || symbolLev || 1;
+  }
+
+  function calcOperatingPower(balance = 0, leverage = 1) {
+    const b = Number(balance) || 0;
+    const l = Number(leverage) || 1;
+    return b * l;
   }
 
   function nextFrame() {
     return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
 
-  function getMenuToggleButtons() {
-    return Array.from(document.querySelectorAll([
-      '[data-menu-toggle]',
-      '#menuBtn',
-      '#menuToggle',
-      '#sidebarToggle',
-      .menu-toggle',
-      '.nav-toggle',
-      '.burger-btn',
-      '.burger',
-      'button[aria-controls]'
-    ].join(','))).filter(btn => {
-      const txt = (btn.textContent || '').trim().toLowerCase();
-      const id = String(btn.id || '').toLowerCase();
-      return btn.dataset.menuToggle !== undefined || /menu|☰|≡|burger|nav/.test(txt) || /menu|toggle|sidebar/.test(id) || btn.getAttribute('aria-controls');
-    });
-  }
-
-  function setMenuPanelState(open) {
-    document.body.classList.toggle('leones-menu-open', !!open);
-
-    const panels = Array.from(document.querySelectorAll(
-      '#privateArea_full [data-private-menu], #privateArea_full .private-menu, #privateArea_full .sidebar-menu, #privateArea_full .menu-panel, #privateArea_full .nav-menu, #privateArea_full #privateSidebar, #privateArea_full #privateMenu, #privateArea_full aside'
-    )).filter(el => el.querySelector && el.querySelector('a,button,[data-private-section],.menu-item'));
-
-    panels.forEach(panel => {
-      panel.classList.add('leones-private-menu-target', 'leones-mobile-collapsible');
-      panel.setAttribute('data-leones-menu-panel', '1');
-
-      if (window.matchMedia('(max-width: 900px)').matches) {
-        panel.style.position = 'fixed';
-        panel.style.top = '0';
-        panel.style.left = '0';
-        panel.style.bottom = '0';
-        panel.style.width = 'min(84vw, 320px)';
-        panel.style.maxWidth = '320px';
-        panel.style.height = '100dvh';
-        panel.style.overflow = 'auto';
-        panel.style.zIndex = '9998';
-        if (!panel.style.backgroundColor) panel.style.backgroundColor = '#0b0b0b';
-        panel.style.transform = open ? 'translateX(0)' : 'translateX(-105%)';
-        panel.style.visibility = open ? 'visible' : 'hidden';
-        panel.style.pointerEvents = open ? 'auto' : 'none';
-      } else {
-        panel.style.position = '';
-        panel.style.top = '';
-        panel.style.left = '';
-        panel.style.bottom = '';
-        panel.style.width = '';
-        panel.style.maxWidth = '';
-        panel.style.height = '';
-        panel.style.overflow = '';
-        panel.style.zIndex = '';
-        panel.style.transform = '';
-        panel.style.visibility = '';
-        panel.style.pointerEvents = '';
-      }
-    });
-
-    const buttons = getMenuToggleButtons();
-    buttons.forEach(btn => {
-      btn.classList.add('leones-menu-toggle-fixed');
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-  }
-
-  function bindMenuToggle() {
-    if (window.__LEONES_MENU_TOGGLE_BOUND__) return;
-    window.__LEONES_MENU_TOGGLE_BOUND__ = true;
-
-    const attach = (btn) => {
-      if (!btn || btn.dataset.leonesMenuToggleBound === '1') return;
-      btn.dataset.leonesMenuToggleBound = '1';
-      btn.classList.add('leones-menu-toggle-fixed');
-
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const open = document.body.classList.contains('leones-menu-open');
-        setMenuPanelState(!open);
-      }, true);
-    };
-
-    const scan = () => getMenuToggleButtons().forEach(attach);
-
-    scan();
-
-    const mo = new MutationObserver(() => scan());
-    mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
-
-    document.addEventListener('click', (ev) => {
-      const link = ev.target.closest && ev.target.closest('#privateArea_full a[href^="#"]');
-      if (!link) return;
-      const href = link.getAttribute('href') || '';
-      const id = href.slice(1);
-      if (!id) return;
-      const target = document.getElementById(id);
-      if (target) {
-        ev.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, true);
-
-    window.addEventListener('resize', () => {
-      if (window.matchMedia('(min-width: 901px)').matches) {
-        document.body.classList.remove('leones-menu-open');
-        setMenuPanelState(true);
-      }
-    });
-  }
-
-  function ensureShell(root) {
-    if (!root) return;
-    if (root.dataset.leonesShellBuilt === '1') return;
-    root.dataset.leonesShellBuilt = '1';
-    root.innerHTML = '';
-
-    const message = document.createElement('div');
-    message.id = 'brokerExtMessage';
-    message.style.cssText = 'display:none;margin-bottom:12px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);font-weight:700;text-align:center;color:#fff;';
-    root.appendChild(message);
-
-    const summary = document.createElement('section');
-    summary.id = 'brokerSummaryPanel';
-    summary.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;margin:12px 0;color:#fff;';
-    summary.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Panel de trading</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Mercados, gráfico y órdenes en vivo</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span id="brokerUserBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
-          <span id="brokerLeverageBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Leverage: --</span>
-          <span id="brokerBalanceBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Balance: --</span>
-        </div>
-      </div>
-    `;
-    root.appendChild(summary);
-
-    const columns = document.createElement('div');
-    columns.id = 'brokerColumns';
-
-    const left = document.createElement('div');
-    left.style.cssText = 'display:grid;gap:12px;';
-
-    const symbols = document.createElement('section');
-    symbols.id = 'brokerSymbolsPanel';
-    symbols.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    symbols.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Mercados y símbolos</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Lista real desde el proveedor de datos</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn ghost" data-action="refresh-all">Actualizar</button>
-          <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
-          <button class="btn ghost" data-action="refresh-quotes">Precios</button>
-        </div>
-      </div>
-      <div id="brokerSymbolsScroll">
-        <div id="brokerMarketTabs"></div>
-        <div id="brokerSymbolsGrid"></div>
-      </div>
-    `;
-    left.appendChild(symbols);
-
-    const chart = document.createElement('section');
-    chart.id = 'brokerChartPanel';
-    chart.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    chart.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Gráfico real</div>
-          <div id="brokerActiveSymbol" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
-        </div>
-        <button class="btn glow" data-action="open-chart">Abrir gráfico</button>
-      </div>
-      <div id="tv_chart_container"></div>
-    `;
-    left.appendChild(chart);
-
-    const right = document.createElement('div');
-    right.style.cssText = 'display:grid;gap:12px;';
-
-    const ticket = document.createElement('section');
-    ticket.id = 'brokerTicketPanel';
-    ticket.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    ticket.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
-      <div style="display:grid;gap:10px;">
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
-          <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-        </label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Leverage admin</div>
-            <div id="brokerLeverageValue" style="font-weight:800;">--</div>
-          </div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Margen requerido</div>
-            <div id="brokerMarginValue" style="font-weight:800;">--</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
-          <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
-        </div>
-      </div>
-    `;
-    right.appendChild(ticket);
-
-    const account = document.createElement('section');
-    account.id = 'brokerAccountPanel';
-    account.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    account.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Cuenta</div>
-        <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
-      </div>
-      <div style="display:grid;gap:8px;">
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountName">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmail">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Balance</span><strong id="brokerAccountBalance">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquity">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnl">--</strong></div>
-      </div>
-    `;
-    right.appendChild(account);
-
-    const positions = document.createElement('section');
-    positions.id = 'brokerPositionsPanel';
-    positions.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    positions.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Posiciones</div>
-        <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
-      </div>
-      <div id="brokerPositionsList" style="display:grid;gap:8px;"></div>
-    `;
-    right.appendChild(positions);
-
-    const details = document.createElement('section');
-    details.id = 'brokerSymbolDetailsPanel';
-    details.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    details.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
-      <div id="brokerSymbolDetails" style="display:grid;gap:8px;">--</div>
-    `;
-    right.appendChild(details);
-
-    columns.appendChild(left);
-    columns.appendChild(right);
-    root.appendChild(columns);
+  function flashButton(el) {
+    if (!el) return;
+    try {
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 180);
+    } catch (e) {}
   }
 
   function setMessage(text, type = 'info') {
@@ -2855,101 +2575,54 @@ if (window.__LEONES_BOOTED__) {
     el.textContent = '';
   }
 
-  async function loadRealMarkets() {
-    const endpoints = ['/market/symbols', '/market/list', '/market/polygon/symbols', '/symbols', '/api/market/symbols', '/api/market/list', '/api/market/polygon/symbols', '/api/symbols'];
-
-    const merged = [];
-    for (const ep of endpoints) {
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
-      } catch (e) {}
-    }
-
-    const backendRows = uniqueBySymbol(merged);
-    const map = new Map();
-
-    DEFAULT_SYMBOLS.forEach(item => {
-      map.set(String(item.symbol).toUpperCase(), item);
-    });
-
-    backendRows.forEach(item => {
-      const key = String(item.symbol).toUpperCase();
-      map.set(key, {
-        ...(map.get(key) || {}),
-        ...item,
-        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
-        source: item.source || 'proveedor'
-      });
-    });
-
-    const all = Array.from(map.values()).sort((a, b) => {
-      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
-      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
-      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
-      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
-    });
-
-    state.markets = all;
-    TR.ALL_SYMBOLS = all;
-    window.__LEONES_MARKETS__ = all;
-    return all;
-  }
-
-  async function loadRealQuotes() {
-    const endpoints = ['/market/quotes', '/market/latest', '/market/polygon/quotes', '/quotes', '/api/market/quotes', '/api/market/latest', '/api/market/polygon/quotes', '/api/quotes'];
-
-    const merged = [];
-    for (const ep of endpoints) {
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
-      } catch (e) {}
-    }
-
-    const normalized = mergeQuotes(merged);
-    state.quotes = normalized;
-
-    TR.symbolPrices = TR.symbolPrices || {};
-    normalized.forEach(q => {
-      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
-    });
-
-    return normalized;
-  }
-
   function extractAccountSource(payload = {}) {
     if (!payload || typeof payload !== 'object') return {};
     return payload.account || payload.data?.account || payload.data || payload.user || payload;
+  }
+
+  function getAccountNameSource(account = {}) {
+    const user = getUser();
+    return (
+      account.name ||
+      account.fullName ||
+      account.displayName ||
+      account.alias ||
+      user.name ||
+      user.fullName ||
+      user.displayName ||
+      user.alias ||
+      user.email ||
+      'Cliente'
+    );
   }
 
   function syncAccountView(account = {}) {
     const safeAccount = account && typeof account === 'object' ? account : {};
     state.account = safeAccount;
 
-    const user = getUser();
-    const name = safeAccount.name || safeAccount.fullName || safeAccount.displayName || safeAccount.alias || user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente';
-    const email = safeAccount.email || user.email || '--';
+    const name = getAccountNameSource(safeAccount);
+    const email = safeAccount.email || getUser().email || '--';
     const balance = safeAccount.balance ?? safeAccount.bal ?? safeAccount.walletBalance ?? safeAccount.deposit ?? safeAccount.funds ?? null;
     const equity = safeAccount.equity ?? safeAccount.totalEquity ?? balance ?? null;
     const pnl = safeAccount.pnl ?? safeAccount.profitLoss ?? safeAccount.unrealizedPnl ?? null;
     const lev = effectiveLeverage(getActiveSymbolMeta());
+    const operating = calcOperatingPower(balance || 0, lev || 1);
+    const marginUsed = safeAccount.marginUsed ?? safeAccount.margin ?? safeAccount.usedMargin ?? null;
 
     setText('brokerUserBadge', name);
     setText('brokerBalanceBadge', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
-    setText('brokerLeverageBadge', lev ? `Leverage: 1:${lev}` : 'Leverage: --');
+    setText('brokerLeverageBadge', lev ? `Apalancamiento: 1:${lev}` : 'Apalancamiento: --');
+    setText('brokerOperatingBadge', balance !== null && balance !== undefined ? `Operativo: ${formatMoney(operating)}` : 'Operativo: --');
+    setText('brokerMarginBadge', marginUsed !== null && marginUsed !== undefined ? `Margen: ${formatMoney(marginUsed)}` : 'Margen: --');
 
     setText('brokerAccountName', name);
     setText('brokerAccountEmail', email);
     setText('brokerAccountBalance', balance !== null && balance !== undefined ? formatMoney(balance) : '--');
     setText('brokerAccountEquity', equity !== null && equity !== undefined ? formatMoney(equity) : '--');
     setText('brokerAccountPnl', pnl !== null && pnl !== undefined ? formatMoney(pnl) : '--');
-
-    if (typeof window.applyAccountToUI === 'function') {
-      try { window.applyAccountToUI(safeAccount); } catch (e) {}
-    }
+    setText('brokerAccountLeverage', lev ? `1:${lev}` : '--');
+    setText('brokerAccountOperating', balance !== null && balance !== undefined ? formatMoney(operating) : '--');
+    setText('brokerAccountMargin', marginUsed !== null && marginUsed !== undefined ? formatMoney(marginUsed) : '--');
 
     const welcomeSelectors = [
       '#welcomeUser',
@@ -2964,7 +2637,46 @@ if (window.__LEONES_BOOTED__) {
       });
     });
 
+    if (typeof window.applyAccountToUI === 'function') {
+      try { window.applyAccountToUI(safeAccount); } catch (e) {}
+    }
+
     return safeAccount;
+  }
+
+  function calculateMargin(positionSize = 0, leverage = 1, entryPrice = 0) {
+    const pos = Number(positionSize) || 0;
+    const lev = Number(leverage) || 1;
+    const price = Number(entryPrice) || 0;
+    const requiredMargin = lev > 0 ? (pos / lev) : pos;
+    const qty = price > 0 ? pos / price : 0;
+    return { requiredMargin, qty, notional: pos };
+  }
+
+  function currentQuote(symbol) {
+    return quoteMap().get(String(symbol || '').toUpperCase()) || null;
+  }
+
+  function renderMargin() {
+    const size = Number(document.getElementById('brokerOrderSize')?.value || 0);
+    const meta = getActiveSymbolMeta();
+    const q = meta ? currentQuote(meta.symbol) : null;
+    const price = q?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? 0;
+    const lev = effectiveLeverage(meta) || 1;
+    const balance = Number(state.account?.balance ?? state.account?.bal ?? state.account?.walletBalance ?? state.account?.funds ?? 0);
+    const operatingPower = calcOperatingPower(balance, lev);
+    const res = calculateMargin(size, lev, price);
+
+    const marginEl = document.getElementById('brokerMarginValue');
+    const freeEl = document.getElementById('brokerFreeMarginValue');
+    const oppEl = document.getElementById('brokerOperatingPowerValue');
+
+    if (marginEl) marginEl.textContent = res.requiredMargin ? formatMoney(res.requiredMargin) : '--';
+    if (freeEl) freeEl.textContent = operatingPower ? formatMoney(Math.max(operatingPower - res.requiredMargin, 0)) : '--';
+    if (oppEl) oppEl.textContent = operatingPower ? formatMoney(operatingPower) : '--';
+
+    setText('brokerMarginBadge', res.requiredMargin ? `Margen: ${formatMoney(res.requiredMargin)}` : 'Margen: --');
+    setText('brokerOperatingBadge', operatingPower ? `Operativo: ${formatMoney(operatingPower)}` : 'Operativo: --');
   }
 
   function renderMarketTabs() {
@@ -2973,15 +2685,21 @@ if (window.__LEONES_BOOTED__) {
     const set = new Set(list.map(x => normalizeMarketName(x.market || inferMarketBySymbol(x.symbol))));
     const markets = ['All', ...MARKET_ORDER.filter(m => set.has(m)), ...Array.from(set).filter(m => !MARKET_ORDER.includes(m)).sort()];
 
-    const html = markets.map(m => `<button class="btn ${state.marketFilter === m ? 'glow' : 'ghost'}" data-market="${escapeHtml(m)}">${escapeHtml(m)}</button>`).join('');
+    const counts = new Map();
+    list.forEach(item => {
+      const m = normalizeMarketName(item.market || inferMarketBySymbol(item.symbol));
+      counts.set(m, (counts.get(m) || 0) + 1);
+    });
+
+    const html = markets.map(m => {
+      const label = m === 'All' ? `All (${list.length})` : `${m} (${counts.get(m) || 0})`;
+      return `<button class="btn ${state.marketFilter === m ? 'glow' : 'ghost'}" data-market="${escapeHtml(m)}">${escapeHtml(label)}</button>`;
+    }).join('');
+
     hostIds.forEach(id => {
       const host = document.getElementById(id);
       if (host) host.innerHTML = html;
     });
-  }
-
-  function currentQuote(symbol) {
-    return quoteMap().get(String(symbol || '').toUpperCase()) || null;
   }
 
   function symbolCardHtml(item) {
@@ -2989,6 +2707,7 @@ if (window.__LEONES_BOOTED__) {
     const price = q?.price ?? TR.symbolPrices?.[item.symbol]?.price ?? null;
     const provider = getProviderFromTvSymbol(item.tvSymbol);
     const icon = getMarketIcon(item.market);
+    const market = normalizeMarketName(item.market);
 
     return `
       <button class="broker-symbol-card" data-symbol="${escapeHtml(item.symbol)}" data-tv-symbol="${escapeHtml(item.tvSymbol)}">
@@ -2998,7 +2717,7 @@ if (window.__LEONES_BOOTED__) {
             <div style="min-width:0;">
               <div style="font-weight:900;color:#f0c24b;line-height:1.15;">${escapeHtml(item.label)}</div>
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
-                <span class="market-pill">${escapeHtml(normalizeMarketName(item.market))}</span>
+                <span class="market-pill">${escapeHtml(market)}</span>
                 <span class="provider-pill">${escapeHtml(provider)}</span>
               </div>
               <div style="opacity:.72;font-size:12px;margin-top:6px;">${escapeHtml(item.source || 'catálogo')} · ${escapeHtml(item.tvSymbol || '')}</div>
@@ -3023,7 +2742,21 @@ if (window.__LEONES_BOOTED__) {
   function renderSymbolsGrid() {
     const hostIds = ['brokerSymbolsGrid', 'overviewSymbolsGrid', 'overviewMarketList', 'overviewSymbolsList', 'marketList', 'marketGrid'];
     const list = getSymbols();
-    const filtered = state.marketFilter === 'All' ? list : list.filter(x => normalizeMarketName(x.market) === state.marketFilter);
+
+    const search = String(state.marketSearch || '').trim().toLowerCase();
+    const filtered = list.filter(x => {
+      const market = normalizeMarketName(x.market);
+      const marketOk = state.marketFilter === 'All' || market === state.marketFilter;
+      if (!marketOk) return false;
+      if (!search) return true;
+
+      const provider = getProviderFromTvSymbol(x.tvSymbol);
+      const blob = [
+        x.symbol, x.label, x.tvSymbol, market, provider, x.source, x.spread, x.hours, x.volatility, x.contract
+      ].join(' ').toLowerCase();
+
+      return blob.includes(search);
+    });
 
     const html = !filtered.length
       ? '<div style="opacity:.75">No hay símbolos disponibles.</div>'
@@ -3046,10 +2779,16 @@ if (window.__LEONES_BOOTED__) {
     const q = currentQuote(meta.symbol);
     const price = q?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? null;
     const lev = effectiveLeverage(meta);
+    const provider = getProviderFromTvSymbol(meta.tvSymbol);
+    const market = normalizeMarketName(meta.market);
+    const icon = getMarketIcon(meta.market);
 
     host.innerHTML = `
       <div style="display:grid;gap:8px;">
         <div style="display:flex;justify-content:space-between;gap:10px;"><span>Símbolo</span><strong>${escapeHtml(meta.symbol)}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Descripción</span><strong>${escapeHtml(meta.label || meta.symbol)}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Mercado</span><strong>${escapeHtml(icon + ' ' + market)}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Proveedor</span><strong>${escapeHtml(provider)}</strong></div>
         <div style="display:flex;justify-content:space-between;gap:10px;"><span>TradingView</span><strong>${escapeHtml(meta.tvSymbol || meta.symbol)}</strong></div>
         <div style="display:flex;justify-content:space-between;gap:10px;"><span>Precio</span><strong>${price !== null && price !== undefined ? formatNumber(price) : '--'}</strong></div>
         <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong>${lev ? `1:${lev}` : '--'}</strong></div>
@@ -3067,25 +2806,31 @@ if (window.__LEONES_BOOTED__) {
     renderMargin();
   }
 
-  function calculateMargin(positionSize = 0, leverage = 1, entryPrice = 0) {
-    const pos = Number(positionSize) || 0;
-    const lev = Number(leverage) || 1;
-    const price = Number(entryPrice) || 0;
-    const requiredMargin = lev > 0 ? (pos / lev) : pos;
-    const qty = price > 0 ? pos / price : 0;
-    return { requiredMargin, qty, notional: pos };
+  function ensureSymbolsInOverview() {
+    renderMarketTabs();
+    renderSymbolsGrid();
   }
 
-  function renderMargin() {
-    const size = Number(document.getElementById('brokerOrderSize')?.value || 0);
-    const meta = getActiveSymbolMeta();
-    const q = meta ? currentQuote(meta.symbol) : null;
-    const price = q?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? 0;
-    const lev = effectiveLeverage(meta) || 1;
-    const res = calculateMargin(size, lev, price);
+  function updateBalanceAfterClosedPosition(source = {}) {
+    const pnlRaw =
+      source?.realizedPnl ??
+      source?.pnl ??
+      source?.profitLoss ??
+      source?.data?.realizedPnl ??
+      source?.data?.pnl ??
+      source?.data?.profitLoss ??
+      null;
 
-    const marginEl = document.getElementById('brokerMarginValue');
-    if (marginEl) marginEl.textContent = res.requiredMargin ? formatMoney(res.requiredMargin) : '--';
+    const pnl = Number(pnlRaw);
+    if (!isFinite(pnl) || pnl === 0) return false;
+
+    const current = Number(state.account?.balance ?? state.account?.bal ?? state.account?.walletBalance ?? state.account?.funds ?? NaN);
+    if (!isFinite(current)) return false;
+
+    const nextBalance = current + pnl;
+    state.account = { ...(state.account || {}), balance: nextBalance };
+    syncAccountView(state.account);
+    return true;
   }
 
   async function ensureSocket() {
@@ -3140,8 +2885,7 @@ if (window.__LEONES_BOOTED__) {
         state.markets = Array.from(map.values());
         TR.ALL_SYMBOLS = state.markets;
         window.__LEONES_MARKETS__ = state.markets;
-        renderMarketTabs();
-        renderSymbolsGrid();
+        ensureSymbolsInOverview();
         const meta = getActiveSymbolMeta();
         if (meta) renderSymbolDetails(meta);
       };
@@ -3173,7 +2917,10 @@ if (window.__LEONES_BOOTED__) {
         .forEach(evt => socket.on(evt, () => loadPositions().catch(() => {})));
 
       ['order_filled', 'order_opened', 'order_closed', 'trade_opened', 'trade_closed']
-        .forEach(evt => socket.on(evt, () => requestBackendRefresh().catch(() => {})));
+        .forEach(evt => socket.on(evt, (payload) => {
+          updateBalanceAfterClosedPosition(payload);
+          requestBackendRefresh().catch(() => {});
+        }));
     } catch (e) {
       warn('bindSocketListeners', e);
     }
@@ -3202,12 +2949,24 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function isClosedPosition(p = {}) {
+    const status = String(p.status || p.state || p.positionStatus || '').toLowerCase();
+    return status.includes('close') || status === 'closed' || !!p.closedAt || !!p.closed_at;
+  }
+
   async function closePosition(position = {}) {
     const pid = position?.id || position?._id || position?.positionId || position?.tradeId || null;
     const symbol = position?.symbol || state.activeSymbol || TR.activeSymbol || null;
     const payload = { positionId: pid, symbol };
 
-    const endpoints = ['/positions/close', '/positions/close-position', '/trade/close', '/api/positions/close', '/api/positions/close-position', '/api/trade/close'];
+    const endpoints = [
+      '/positions/close',
+      '/positions/close-position',
+      '/trade/close',
+      '/api/positions/close',
+      '/api/positions/close-position',
+      '/api/trade/close'
+    ];
 
     let res = null;
     for (const ep of endpoints) {
@@ -3216,6 +2975,10 @@ if (window.__LEONES_BOOTED__) {
         if (res) break;
       } catch (e) {}
     }
+
+    const account = extractAccountSource(res || {});
+    if (account && Object.keys(account).length) syncAccountView(account);
+    else updateBalanceAfterClosedPosition(res || position);
 
     await requestBackendRefresh().catch(() => {});
     return res;
@@ -3230,7 +2993,13 @@ if (window.__LEONES_BOOTED__) {
     if (!size || size <= 0) throw new Error('Escribe un monto válido');
 
     const balance = Number(state.account?.balance ?? state.account?.bal ?? state.account?.walletBalance ?? state.account?.funds ?? NaN);
+    const operatingPower = isFinite(balance) ? calcOperatingPower(balance, lev) : NaN;
     const marginInfo = calculateMargin(size, lev, currentQuote(meta.symbol)?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? 0);
+
+    if (isFinite(operatingPower) && operatingPower > 0 && size > operatingPower) {
+      throw new Error('No hay capacidad operativa suficiente para esta operación');
+    }
+
     if (isFinite(balance) && balance > 0 && marginInfo.requiredMargin > balance) {
       throw new Error('Margen insuficiente para esta operación');
     }
@@ -3252,12 +3021,16 @@ if (window.__LEONES_BOOTED__) {
         leverage: lev,
         type: 'market'
       });
+      const account = extractAccountSource(res || {});
+      if (account && Object.keys(account).length) syncAccountView(account);
       await requestBackendRefresh().catch(() => {});
       return res;
     }
 
     if (typeof window.placeBrokerOrder === 'function') {
       const res = await window.placeBrokerOrder(payload);
+      const account = extractAccountSource(res || {});
+      if (account && Object.keys(account).length) syncAccountView(account);
       await requestBackendRefresh().catch(() => {});
       return res;
     }
@@ -3272,6 +3045,10 @@ if (window.__LEONES_BOOTED__) {
     }
 
     if (!res) throw new Error('No se pudo enviar la orden');
+
+    const account = extractAccountSource(res || {});
+    if (account && Object.keys(account).length) syncAccountView(account);
+
     await requestBackendRefresh().catch(() => {});
     return res;
   }
@@ -3293,6 +3070,8 @@ if (window.__LEONES_BOOTED__) {
       const entry = p.entryPrice ?? p.price ?? p.avgPrice ?? null;
       const pnl = p.unrealizedPnl ?? p.pnl ?? p.profitLoss ?? null;
       const pid = p.id || p._id || p.positionId || p.tradeId || idx;
+      const closed = isClosedPosition(p);
+      const status = String(p.status || p.state || p.positionStatus || (closed ? 'closed' : 'open')).toLowerCase();
 
       return `
         <div style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);">
@@ -3300,8 +3079,13 @@ if (window.__LEONES_BOOTED__) {
             <div>
               <div style="font-weight:900;">${escapeHtml(symbol)}</div>
               <div style="opacity:.75;font-size:12px;margin-top:3px;">${escapeHtml(side)}</div>
+              <div style="opacity:.75;font-size:12px;margin-top:2px;">Estado: ${escapeHtml(status)}</div>
             </div>
-            <button class="btn ghost" data-close-position="${escapeHtml(pid)}" data-symbol="${escapeHtml(symbol)}">Cerrar</button>
+            ${
+              !closed
+                ? `<button class="btn ghost" data-close-position="${escapeHtml(pid)}" data-symbol="${escapeHtml(symbol)}">Cerrar</button>`
+                : `<span style="padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px;">Cerrada</span>`
+            }
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;font-size:12px;opacity:.92;">
             <div>Size: ${size === null || size === undefined || size === '' ? '--' : formatNumber(size)}</div>
@@ -3311,6 +3095,89 @@ if (window.__LEONES_BOOTED__) {
         </div>
       `;
     }).join('');
+  }
+
+  async function loadRealMarkets() {
+    const endpoints = [
+      '/market/symbols',
+      '/market/list',
+      '/market/polygon/symbols',
+      '/symbols',
+      '/api/market/symbols',
+      '/api/market/list',
+      '/api/market/polygon/symbols',
+      '/api/symbols'
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const backendRows = uniqueBySymbol(merged);
+    const map = new Map();
+
+    DEFAULT_SYMBOLS.forEach(item => {
+      map.set(String(item.symbol).toUpperCase(), item);
+    });
+
+    backendRows.forEach(item => {
+      const key = String(item.symbol).toUpperCase();
+      map.set(key, {
+        ...(map.get(key) || {}),
+        ...item,
+        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
+        source: item.source || 'proveedor'
+      });
+    });
+
+    const all = Array.from(map.values()).sort((a, b) => {
+      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
+      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
+      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
+      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
+    });
+
+    state.markets = all;
+    TR.ALL_SYMBOLS = all;
+    window.__LEONES_MARKETS__ = all;
+    return all;
+  }
+
+  async function loadRealQuotes() {
+    const endpoints = [
+      '/market/quotes',
+      '/market/latest',
+      '/market/polygon/quotes',
+      '/quotes',
+      '/api/market/quotes',
+      '/api/market/latest',
+      '/api/market/polygon/quotes',
+      '/api/quotes'
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const normalized = mergeQuotes(merged);
+    state.quotes = normalized;
+
+    TR.symbolPrices = TR.symbolPrices || {};
+    normalized.forEach(q => {
+      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+    });
+
+    return normalized;
   }
 
   async function loadAccount() {
@@ -3372,6 +3239,8 @@ if (window.__LEONES_BOOTED__) {
       const meta = getActiveSymbolMeta();
       if (meta) requestRealtimeForSymbol(meta);
       renderMargin();
+      renderPositions();
+      renderSymbolsGrid();
     } catch (e) {
       warn('requestBackendRefresh', e);
     }
@@ -3380,6 +3249,8 @@ if (window.__LEONES_BOOTED__) {
   function openCurrentChart() {
     const meta = getActiveSymbolMeta();
     if (!meta) throw new Error('No hay símbolo activo');
+    const chartPanel = document.getElementById('brokerChartPanel') || document.getElementById('tv_chart_container');
+    if (chartPanel) chartPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return openTradingView(meta);
   }
 
@@ -3448,44 +3319,20 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  function attachPrivateMenuDelegation() {
-    try {
-      if (window.__LEONES_PRIVATE_MENU_BRIDGE__) return;
-      window.__LEONES_PRIVATE_MENU_BRIDGE__ = true;
-
-      document.addEventListener('click', function (ev) {
-        try {
-          const target = ev.target.closest && ev.target.closest('#privateArea_full .menu-item, #privateArea_full [data-private-section]');
-          if (!target) return;
-
-          const sectionId = String(target.dataset.section || target.dataset.privateSection || target.id || '').trim();
-          if (!sectionId) return;
-
-          ev.preventDefault && ev.preventDefault();
-          if (typeof window.switchPrivateSection === 'function') {
-            window.switchPrivateSection(sectionId);
-          }
-        } catch (e) {}
-      }, true);
-    } catch (e) {
-      warn('attachPrivateMenuDelegation', e);
-    }
+  function applySearchValue(value) {
+    state.marketSearch = String(value || '');
+    renderSymbolsGrid();
   }
 
-  function flashButton(el) {
-    if (!el) return;
-    try {
-      el.classList.add('flash');
-      setTimeout(() => el.classList.remove('flash'), 180);
-    } catch (e) {}
-  }
+  function attachGlobalDelegation() {
+    if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
+    window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
 
-  function wireRootDelegation(root) {
-    if (!root || root.dataset.leonesDelegated === '1') return;
-    root.dataset.leonesDelegated = '1';
-
-    root.addEventListener('click', async (ev) => {
+    document.addEventListener('click', async (ev) => {
       try {
+        const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
+        if (!inPrivate) return;
+
         const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
         if (clicked) flashButton(clicked);
 
@@ -3502,7 +3349,11 @@ if (window.__LEONES_BOOTED__) {
         if (symbolCard) {
           ev.preventDefault();
           const symbol = symbolCard.dataset.symbol || '';
-          const meta = symbolMap().get(String(symbol).toUpperCase()) || getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) || null;
+          const meta =
+            symbolMap().get(String(symbol).toUpperCase()) ||
+            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
+            null;
+
           if (meta) selectSymbol(meta, { openChart: true });
           return;
         }
@@ -3580,17 +3431,23 @@ if (window.__LEONES_BOOTED__) {
           return;
         }
       } catch (e) {
-        warn('wireRootDelegation click', e);
+        warn('global click delegation', e);
       }
-    });
+    }, true);
 
-    root.addEventListener('input', (ev) => {
+    document.addEventListener('input', (ev) => {
       try {
-        if (ev.target && ev.target.id === 'brokerOrderSize') {
+        if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
+
+        if (ev.target.id === 'brokerOrderSize') {
           renderMargin();
         }
+
+        if (ev.target.id === 'brokerMarketSearch') {
+          applySearchValue(ev.target.value);
+        }
       } catch (e) {}
-    });
+    }, true);
   }
 
   function startAutoRefresh() {
@@ -3635,30 +3492,261 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
+  function ensureShell(root) {
+    if (!root) return;
+    if (root.dataset.leonesShellBuilt === '1') return;
+    root.dataset.leonesShellBuilt = '1';
+    root.innerHTML = '';
+
+    const message = document.createElement('div');
+    message.id = 'brokerExtMessage';
+    message.style.cssText = 'display:none;margin-bottom:12px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);font-weight:700;text-align:center;color:#fff;';
+    root.appendChild(message);
+
+    const summary = document.createElement('section');
+    summary.id = 'brokerSummaryPanel';
+    summary.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;margin:12px 0;color:#fff;';
+    summary.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+        <div>
+          <div style="font-size:18px;font-weight:900;">Panel de trading</div>
+          <div style="opacity:.75;font-size:13px;margin-top:3px;">Mercados, gráfico y órdenes en vivo</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span id="brokerUserBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
+          <span id="brokerLeverageBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Apalancamiento: --</span>
+          <span id="brokerBalanceBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Saldo: --</span>
+          <span id="brokerOperatingBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Operativo: --</span>
+          <span id="brokerMarginBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Margen: --</span>
+        </div>
+      </div>
+    `;
+    root.appendChild(summary);
+
+    const columns = document.createElement('div');
+    columns.id = 'brokerColumns';
+
+    const left = document.createElement('div');
+    left.style.cssText = 'display:grid;gap:12px;';
+
+    const symbols = document.createElement('section');
+    symbols.id = 'brokerSymbolsPanel';
+    symbols.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    symbols.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <div style="font-size:18px;font-weight:900;">Mercados y símbolos</div>
+          <div style="opacity:.75;font-size:13px;margin-top:3px;">Lista real desde los datos disponibles</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn ghost" data-action="refresh-all">Actualizar</button>
+          <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
+          <button class="btn ghost" data-action="refresh-quotes">Precios</button>
+        </div>
+      </div>
+
+      <label style="display:grid;gap:6px;margin-bottom:12px;">
+        <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
+        <input id="brokerMarketSearch" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
+      </label>
+
+      <div id="brokerSymbolsScroll">
+        <div id="brokerMarketTabs"></div>
+        <div id="brokerSymbolsGrid"></div>
+      </div>
+    `;
+    left.appendChild(symbols);
+
+    const chart = document.createElement('section');
+    chart.id = 'brokerChartPanel';
+    chart.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    chart.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <div style="font-size:18px;font-weight:900;">Gráfico real</div>
+          <div id="brokerActiveSymbol" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
+        </div>
+        <button class="btn glow" data-action="open-chart">Abrir gráfico</button>
+      </div>
+      <div id="tv_chart_container"></div>
+    `;
+    left.appendChild(chart);
+
+    const right = document.createElement('div');
+    right.style.cssText = 'display:grid;gap:12px;';
+
+    const ticket = document.createElement('section');
+    ticket.id = 'brokerTicketPanel';
+    ticket.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    ticket.innerHTML = `
+      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
+      <div style="display:grid;gap:10px;">
+        <label style="display:grid;gap:6px;">
+          <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
+          <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+            <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
+            <div id="brokerLeverageValue" style="font-weight:800;">--</div>
+          </div>
+          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+            <div style="font-size:12px;opacity:.75;">Margen requerido</div>
+            <div id="brokerMarginValue" style="font-weight:800;">--</div>
+          </div>
+          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+            <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
+            <div id="brokerOperatingPowerValue" style="font-weight:800;">--</div>
+          </div>
+          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+            <div style="font-size:12px;opacity:.75;">Margen libre</div>
+            <div id="brokerFreeMarginValue" style="font-weight:800;">--</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
+          <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
+        </div>
+      </div>
+    `;
+    right.appendChild(ticket);
+
+    const account = document.createElement('section');
+    account.id = 'brokerAccountPanel';
+    account.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    account.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="font-size:18px;font-weight:900;">Cuenta</div>
+        <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
+      </div>
+      <div style="display:grid;gap:8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountName">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmail">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalance">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquity">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnl">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverage">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperating">--</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMargin">--</strong></div>
+      </div>
+    `;
+    right.appendChild(account);
+
+    const positions = document.createElement('section');
+    positions.id = 'brokerPositionsPanel';
+    positions.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    positions.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="font-size:18px;font-weight:900;">Posiciones</div>
+        <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
+      </div>
+      <div id="brokerPositionsList" style="display:grid;gap:8px;"></div>
+    `;
+    right.appendChild(positions);
+
+    const details = document.createElement('section');
+    details.id = 'brokerSymbolDetailsPanel';
+    details.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
+    details.innerHTML = `
+      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
+      <div id="brokerSymbolDetails" style="display:grid;gap:8px;">--</div>
+    `;
+    right.appendChild(details);
+
+    columns.appendChild(left);
+    columns.appendChild(right);
+    root.appendChild(columns);
+  }
+
+  function renderAccountNameIntoUI(name) {
+    const selectors = [
+      '#welcomeUser',
+      '.welcomeUser',
+      '[data-leones-user-name]',
+      '[data-user-name]',
+      '[data-welcome-name]'
+    ];
+    selectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        try { el.textContent = name; } catch (e) {}
+      });
+    });
+  }
+
+  function renderSymbolsGrid() {
+    const hostIds = ['brokerSymbolsGrid', 'overviewSymbolsGrid', 'overviewMarketList', 'overviewSymbolsList', 'marketList', 'marketGrid'];
+    const list = getSymbols();
+
+    const search = String(state.marketSearch || '').trim().toLowerCase();
+    const filtered = list.filter(x => {
+      const market = normalizeMarketName(x.market);
+      const marketOk = state.marketFilter === 'All' || market === state.marketFilter;
+      if (!marketOk) return false;
+      if (!search) return true;
+
+      const provider = getProviderFromTvSymbol(x.tvSymbol);
+      const blob = [x.symbol, x.label, x.tvSymbol, market, provider, x.source, x.spread, x.hours, x.volatility, x.contract]
+        .join(' ')
+        .toLowerCase();
+
+      return blob.includes(search);
+    });
+
+    const html = !filtered.length
+      ? '<div style="opacity:.75">No hay símbolos disponibles.</div>'
+      : filtered.map(item => symbolCardHtml(item)).join('');
+
+    hostIds.forEach(id => {
+      const host = document.getElementById(id);
+      if (host) host.innerHTML = html;
+    });
+  }
+
+  function renderSymbolDetailsIntoUI(meta) {
+    renderSymbolDetails(meta);
+  }
+
+  function resetTradingState() {
+    state.started = false;
+    state.markets = [];
+    state.quotes = [];
+    state.positions = [];
+    state.account = null;
+    state.activeSymbol = null;
+    state.marketFilter = 'All';
+    state.marketSearch = '';
+    state.lastChartSymbol = null;
+    stopAutoRefresh();
+    document.body.classList.remove('leones-menu-open');
+  }
+
   async function initTradingUI(context = {}) {
     if (!isLoggedIn()) return null;
 
     injectUiStyles();
-    bindMenuToggle();
 
     const root = ensureRoot();
     if (!root) return null;
 
     if (!state.started) {
       ensureShell(root);
-      wireRootDelegation(root);
       state.started = true;
     }
 
-    attachPrivateMenuDelegation();
     clearMessage();
 
     if (context && context.user && typeof context.user === 'object') {
       state.account = { ...(state.account || {}), ...context.user };
       updatePrivateHeaderName(context.user);
       syncAccountView(context.user);
+    } else {
+      const user = getUser();
+      if (user && Object.keys(user).length) {
+        updatePrivateHeaderName(user);
+      }
     }
 
+    attachGlobalDelegation();
     await ensureSocket();
     bindSocketListeners();
     startAutoRefresh();
@@ -3674,7 +3762,7 @@ if (window.__LEONES_BOOTED__) {
       TR.activeSymbol = meta.symbol;
       TR.activeMeta = meta;
 
-      renderSymbolDetails(meta);
+      renderSymbolDetailsIntoUI(meta);
 
       if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
         await openTradingView(meta).catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
@@ -3686,19 +3774,6 @@ if (window.__LEONES_BOOTED__) {
     }
 
     return true;
-  }
-
-  function resetTradingState() {
-    state.started = false;
-    state.markets = [];
-    state.quotes = [];
-    state.positions = [];
-    state.account = null;
-    state.activeSymbol = null;
-    state.marketFilter = 'All';
-    state.lastChartSymbol = null;
-    stopAutoRefresh();
-    document.body.classList.remove('leones-menu-open');
   }
 
   function attachLoginEventBridge() {
@@ -3752,7 +3827,6 @@ if (window.__LEONES_BOOTED__) {
   } else {
     document.addEventListener('DOMContentLoaded', () => {
       injectUiStyles();
-      bindMenuToggle();
       bootIfLoggedIn();
     });
   }
