@@ -3841,6 +3841,181 @@ if (window.__LEONES_BOOTED__) {
 
   log('EXT2 real loaded');
 })();
+
+  /* =========================
+   🔥 SISTEMA DE MARGEN REAL
+========================= */
+
+let ACCOUNT = {
+  balance: 1000,
+  equity: 1000,
+  usedMargin: 0,
+  freeMargin: 1000,
+  marginLevel: 100
+};
+
+let OPEN_TRADES = [];
+let marginWarningInterval = null;
+let marginAlertVisible = false;
+
+// 🔹 Abrir operación
+function openTrade(symbol, amount, direction, price) {
+  if (amount > ACCOUNT.balance) {
+    alert('Fondos insuficientes');
+    return;
+  }
+
+  ACCOUNT.balance -= amount;
+  ACCOUNT.usedMargin += amount;
+
+  const trade = {
+    id: Date.now(),
+    symbol,
+    amount,
+    direction,
+    openPrice: price,
+    currentPrice: price,
+    profit: 0
+  };
+
+  OPEN_TRADES.push(trade);
+  updateAccountMetrics();
+}
+
+// 🔹 Actualizar precios (esto se llama con tus precios reales)
+function updateTradesPrices(prices) {
+  OPEN_TRADES.forEach(trade => {
+    const newPrice = prices[trade.symbol];
+    if (!newPrice) return;
+
+    trade.currentPrice = newPrice;
+
+    let diff = newPrice - trade.openPrice;
+    if (trade.direction === 'sell') diff *= -1;
+
+    trade.profit = diff * trade.amount * 10; // multiplicador simple
+  });
+
+  updateAccountMetrics();
+}
+
+// 🔹 Métricas
+function updateAccountMetrics() {
+  let totalProfit = OPEN_TRADES.reduce((acc, t) => acc + t.profit, 0);
+
+  ACCOUNT.equity = ACCOUNT.balance + ACCOUNT.usedMargin + totalProfit;
+  ACCOUNT.freeMargin = ACCOUNT.equity - ACCOUNT.usedMargin;
+
+  ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0
+    ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100
+    : 100;
+
+  // 🔥 Liquidación automática
+  if (ACCOUNT.marginLevel <= 20) {
+    closeAllTrades();
+    alert('⚠️ Todas las posiciones fueron cerradas por bajo margen');
+  }
+
+  // 🔥 Advertencia
+  if (ACCOUNT.marginLevel < 100) {
+    startMarginWarning();
+  } else {
+    stopMarginWarning();
+  }
+
+  renderAccountUI();
+}
+
+// 🔹 Cerrar todo
+function closeAllTrades() {
+  let totalProfit = OPEN_TRADES.reduce((acc, t) => acc + t.profit, 0);
+
+  ACCOUNT.balance += ACCOUNT.usedMargin + totalProfit;
+
+  ACCOUNT.usedMargin = 0;
+  OPEN_TRADES = [];
+
+  updateAccountMetrics();
+}
+
+// 🔹 UI (ajústalo a tus elementos existentes)
+function renderAccountUI() {
+  const elBalance = document.getElementById('balance');
+  const elEquity = document.getElementById('equity');
+  const elMargin = document.getElementById('marginLevel');
+
+  if (elBalance) elBalance.innerText = ACCOUNT.balance.toFixed(2);
+  if (elEquity) elEquity.innerText = ACCOUNT.equity.toFixed(2);
+  if (elMargin) elMargin.innerText = ACCOUNT.marginLevel.toFixed(2) + '%';
+}
+
+/* =========================
+   🔔 ALERTA FLOTANTE
+========================= */
+
+function startMarginWarning() {
+  if (marginWarningInterval) return;
+
+  showMarginAlert();
+
+  marginWarningInterval = setInterval(() => {
+    showMarginAlert();
+  }, 300000); // 5 minutos
+}
+
+function stopMarginWarning() {
+  clearInterval(marginWarningInterval);
+  marginWarningInterval = null;
+
+  const alertBox = document.getElementById('marginAlert');
+  if (alertBox) alertBox.remove();
+}
+
+function showMarginAlert() {
+  if (marginAlertVisible) return;
+  marginAlertVisible = true;
+
+  const div = document.createElement('div');
+  div.id = 'marginAlert';
+
+  div.innerHTML = `
+    <div style="
+      position:fixed;
+      bottom:20px;
+      right:20px;
+      background:#111;
+      color:#fff;
+      padding:15px;
+      border-radius:10px;
+      width:260px;
+      z-index:9999;
+      box-shadow:0 0 10px rgba(0,0,0,0.5);
+    ">
+      <div style="text-align:right;cursor:pointer" id="closeMarginAlert">✖</div>
+      <b>⚠️ Margen bajo</b><br>
+      Tu cuenta está en riesgo.<br>
+      Deposita para mantener la salud.<br><br>
+      Mínimo recomendado: <b>$115</b>
+    </div>
+  `;
+
+  document.body.appendChild(div);
+
+  document.getElementById('closeMarginAlert').onclick = () => {
+    div.remove();
+    marginAlertVisible = false;
+  };
+}
+
+/* =========================
+   💰 DEPÓSITO DESDE ADMIN
+========================= */
+
+function adminDeposit(amount) {
+  ACCOUNT.balance += amount;
+  updateAccountMetrics();
+  stopMarginWarning();
+}
 </script>
 
 <script>
