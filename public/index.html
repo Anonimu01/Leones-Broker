@@ -4028,7 +4028,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const footerItems = document.querySelectorAll(".fnav-item");
   const panels = document.querySelectorAll(".panel");
 
-  // ✅ BOTÓN MENÚ FIJO SIEMPRE
+  // ✅ BOTÓN MENÚ
   if (toggleBtn) {
     toggleBtn.style.position = "fixed";
     toggleBtn.style.top = "15px";
@@ -4040,35 +4040,76 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 🔥 FUNCIÓN PARA CAMBIAR PANEL
+  // 🔥 🔥 🔥 FUNCIÓN PRINCIPAL 🔥 🔥 🔥
   function showPanel(targetId) {
+
     panels.forEach(p => p.style.display = "none");
 
     const panel = document.getElementById(targetId);
-    if (panel) {
-      panel.style.display = "block";
-    }
+    if (panel) panel.style.display = "block";
 
-    // 🔥 🔥 🔥 SINCRONIZACIÓN REAL 🔥 🔥 🔥
+    // ===============================
+    // 🔴 SINCRONIZACIÓN REAL TOTAL
+    // ===============================
 
-    // 👉 MERCADOS (usa lo que ya tienes en overview / JS2)
-    if (targetId === "marketPanel" || targetId === "overviewPanel") {
-      if (typeof loadMarketsAndQuotes === "function") {
-        loadMarketsAndQuotes();
+    // 🏠 INICIO (dashboard en vivo)
+    if (targetId === "dashboardPanel") {
+      if (typeof syncAccountView === "function") {
+        syncAccountView();
+      }
+      if (typeof loadAccount === "function") {
+        loadAccount();
+      }
+      if (typeof startAutoRefresh === "function") {
+        startAutoRefresh();
       }
     }
 
-    // 👉 POSICIONES
+    // 📊 MERCADOS (símbolos + precios)
+    if (targetId === "marketPanel") {
+      if (typeof getSymbols === "function" && typeof renderSymbolsGrid === "function") {
+        getSymbols().then(symbols => {
+          renderSymbolsGrid(symbols);
+        });
+      }
+
+      if (typeof loadRealQuotes === "function") {
+        loadRealQuotes();
+      }
+    }
+
+    // 📉 POSICIONES
     if (targetId === "positionsPanel") {
       if (typeof loadPositions === "function") {
         loadPositions();
       }
     }
 
-    // 👉 TRADING (gráfico)
+    // 📈 TRADING (GRÁFICO + ÓRDENES)
     if (targetId === "tradingPanel") {
+
+      // 🔥 ARREGLA EL PROBLEMA DEL SÍMBOLO
       if (typeof openTradingView === "function") {
-        openTradingView();
+        openTradingView("BTCUSDT"); // 👉 CAMBIA DINÁMICAMENTE DESPUÉS
+      }
+
+      if (typeof getActiveSymbolMeta === "function") {
+        getActiveSymbolMeta();
+      }
+
+      if (typeof loadRealQuotes === "function") {
+        loadRealQuotes();
+      }
+    }
+
+    // 💼 ACTIVOS (cuenta completa)
+    if (targetId === "assetsPanel") {
+      if (typeof loadAccount === "function") {
+        loadAccount();
+      }
+
+      if (typeof updateAccountMetrics === "function") {
+        updateAccountMetrics();
       }
     }
   }
@@ -4083,14 +4124,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       showPanel(target);
 
-      // cerrar menú en móvil
       if (window.innerWidth < 1000) {
         sidebar.classList.add("hidden");
       }
     });
   });
 
-  // 🔥 BOTONES DE ABAJO
+  // 🔥 BOTONES DE ABAJO (LO IMPORTANTE)
   footerItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
@@ -4107,7 +4147,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // ✅ PANEL POR DEFECTO (Inicio)
+  // ✅ INICIO POR DEFECTO
   showPanel("dashboardPanel");
 
 });
