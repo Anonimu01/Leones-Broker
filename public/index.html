@@ -4026,89 +4026,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const footerItems = document.querySelectorAll(".fnav-item");
   const panels = document.querySelectorAll(".panel");
 
-  const DEFAULT_SYMBOL = "BTCUSDT";
-  const CURRENCY = "USD";
-  const CURRENCY_SYMBOL = "$";
+  const ext = () => window.__LEONES_BROKER_EXT2 || {};
+  let brokerBooted = false;
 
-  let ACTIVE_SYMBOL = DEFAULT_SYMBOL;
-  let refreshTimers = {
-    account: null,
-    markets: null,
-    positions: null
-  };
-
-  // =========================
-  // UTILIDADES
-  // =========================
-  const byId = (id) => document.getElementById(id);
-
-  function safeCall(fnName, ...args) {
-    try {
-      const fn = window[fnName];
-      if (typeof fn === "function") return fn(...args);
-    } catch (err) {
-      console.error(`[${fnName}]`, err);
-    }
-    return undefined;
-  }
-
-  function formatUSD(value) {
-    const n = Number(value || 0);
-    return `${CURRENCY_SYMBOL}${n.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })}`;
-  }
-
-  function clearPanel() {
-    panels.forEach(p => p.style.display = "none");
-  }
-
-  function showOnly(targetId) {
-    clearPanel();
-    const panel = byId(targetId);
-    if (panel) panel.style.display = "block";
-  }
-
-  function getChartContainer() {
-    return (
-      byId("tv_chart") ||
-      byId("tradingChart") ||
-      byId("chartContainer") ||
-      byId("brokerChart") ||
-      document.querySelector("[data-chart-container]")
-    );
-  }
-
-  function getOrderTypeSelect() {
-    return byId("orderType") || byId("brokerOrderType") || byId("tradeType");
-  }
-
-  function getOrderPriceInput() {
-    return byId("orderPrice") || byId("brokerOrderPrice");
-  }
-
-  function getStopLossInput() {
-    return byId("stopLoss") || byId("brokerStopLoss");
-  }
-
-  function getTakeProfitInput() {
-    return byId("takeProfit") || byId("brokerTakeProfit");
-  }
-
-  function getStopLimitInput() {
-    return byId("stopLimit") || byId("brokerStopLimit");
-  }
-
-  function setCurrencyLabels() {
-    document.querySelectorAll("[data-currency='USD']").forEach(el => {
-      el.textContent = el.textContent.replace(/USDT/g, CURRENCY).replace(/\$/g, CURRENCY_SYMBOL);
-    });
-  }
-
-  // =========================
-  // BOTÓN MENÚ
-  // =========================
   if (toggleBtn) {
     toggleBtn.style.position = "fixed";
     toggleBtn.style.top = "15px";
@@ -4116,291 +4036,78 @@ document.addEventListener("DOMContentLoaded", () => {
     toggleBtn.style.zIndex = "9999";
 
     toggleBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("hidden");
+      if (sidebar) sidebar.classList.toggle("hidden");
     });
   }
 
-  // =========================
-  // ÓRDENES: MARKET / LIMIT / SL / TP / STOP LIMIT
-  // =========================
-  function ensureOrderTypes() {
-    const select = getOrderTypeSelect();
-    if (!select) return;
-
-    const current = select.value || "market";
-    const options = [
-      { value: "market", label: "Market" },
-      { value: "limit", label: "Limit" },
-      { value: "stop_loss", label: "Stop Loss" },
-      { value: "take_profit", label: "Take Profit" },
-      { value: "stop_limit", label: "Stop Limit" }
-    ];
-
-    const existing = new Set(Array.from(select.options).map(o => o.value));
-    options.forEach(opt => {
-      if (!existing.has(opt.value)) {
-        const o = document.createElement("option");
-        o.value = opt.value;
-        o.textContent = opt.label;
-        select.appendChild(o);
-      }
-    });
-
-    select.value = current;
-    updateOrderFields(select.value);
-    select.onchange = () => updateOrderFields(select.value);
+  function showOnlyPanel(targetId) {
+    panels.forEach(p => (p.style.display = "none"));
+    const panel = document.getElementById(targetId);
+    if (panel) panel.style.display = "block";
   }
 
-  function updateOrderFields(type) {
-    const price = getOrderPriceInput();
-    const sl = getStopLossInput();
-    const tp = getTakeProfitInput();
-    const stopLimit = getStopLimitInput();
+  function bootBroker() {
+    if (brokerBooted) return;
+    brokerBooted = true;
 
-    const show = (el, on) => {
-      if (!el) return;
-      const wrap = el.closest(".field, .form-group, .input-group, .control-group") || el.parentElement;
-      if (wrap) wrap.style.display = on ? "" : "none";
-      el.style.display = on ? "" : "none";
-    };
+    const api = ext();
 
-    const t = (type || "market").toLowerCase();
-
-    show(price, t === "limit" || t === "stop_limit");
-    show(sl, t === "stop_loss");
-    show(tp, t === "take_profit");
-    show(stopLimit, t === "stop_limit");
-  }
-
-  // =========================
-  // TRADINGVIEW REAL (BINANCE)
-  // =========================
-  window.openTradingView = function openTradingView(symbol = ACTIVE_SYMBOL) {
-    const container = getChartContainer();
-    if (!container) return;
-
-    const tvSymbol = `BINANCE:${symbol}`;
-
-    container.innerHTML = "";
-
-    if (window.TradingView && typeof TradingView.widget === "function") {
-      new TradingView.widget({
-        container_id: container.id || "tv_chart",
-        autosize: true,
-        symbol: tvSymbol,
-        interval: "5",
-        timezone: "Etc/UTC",
-        theme: "dark",
-        style: "1",
-        locale: "es",
-        toolbar_bg: "#000000",
-        enable_publishing: false,
-        allow_symbol_change: false,
-        hide_top_toolbar: false,
-        save_image: false,
-        studies: ["Volume@tv-basicstudies"]
-      });
-    } else {
-      container.innerHTML = `
-        <div style="padding:16px;color:#fff;">
-          TradingView no está cargado.
-        </div>
-      `;
-    }
-  };
-
-  function selectSymbol(symbol, name) {
-    if (!symbol) return;
-    ACTIVE_SYMBOL = symbol;
-
-    const title = byId("brokerSymbolTitle");
-    const price = byId("brokerSymbolPrice");
-    const meta = byId("brokerSymbolMeta");
-
-    if (title) title.textContent = name || symbol;
-    if (meta) meta.textContent = `Market: BINANCE`;
-
-    safeCall("openTradingView", symbol);
-    window.openTradingView(symbol);
-
-    // refresca precios/órdenes si existe el flujo del JS2
-    safeCall("currentQuote", symbol);
-  }
-
-  window.selectSymbol = selectSymbol;
-  window.ACTIVE_SYMBOL = ACTIVE_SYMBOL;
-
-  // =========================
-  // MERCADOS / PRECIOS / POSICIONES
-  // =========================
-  async function loadMarketsBridge() {
-    // Prioridad: JS2 existente
-    if (typeof window.loadMarketsAndQuotes === "function") {
-      await window.loadMarketsAndQuotes();
-      return;
-    }
-
-    // Fallback backend
-    const grid =
-      byId("marketGrid") ||
-      byId("brokerSymbolsGrid") ||
-      byId("overviewSymbolsGrid") ||
-      byId("marketList") ||
-      byId("overviewMarketList");
-
-    if (!grid) return;
-
-    try {
-      const [symbolsRes, pricesRes] = await Promise.all([
-        fetch("/api/symbols"),
-        fetch("/api/prices")
-      ]);
-
-      const symbols = await symbolsRes.json().catch(() => []);
-      const prices = await pricesRes.json().catch(() => []);
-
-      const live = {};
-      prices.forEach(p => { live[p.symbol] = Number(p.price); });
-      window.LIVE_PRICES = live;
-
-      grid.innerHTML = "";
-
-      symbols.forEach(sym => {
-        const card = document.createElement("div");
-        card.className = "broker-symbol-card";
-        card.dataset.symbol = sym.symbol;
-
-        const p = live[sym.symbol] ?? 0;
-
-        card.innerHTML = `
-          <div class="symbol-icon">◉</div>
-          <div class="symbol-main">
-            <div class="symbol-name">${sym.name || sym.symbol}</div>
-            <div class="symbol-price">${formatUSD(p)}</div>
-            <div class="market-pill">${sym.type || "crypto"}</div>
-          </div>
-        `;
-
-        card.addEventListener("click", () => selectSymbol(sym.symbol, sym.name || sym.symbol));
-        grid.appendChild(card);
-      });
-    } catch (err) {
-      console.error("loadMarketsBridge error:", err);
+    if (typeof api.initTradingUI === "function") {
+      api.initTradingUI().catch?.(() => {});
+    } else if (typeof window.startBrokerUI === "function") {
+      window.startBrokerUI();
     }
   }
 
-  async function loadPositionsBridge() {
-    if (typeof window.loadPositions === "function") {
-      await window.loadPositions();
-      return;
-    }
+  function refreshFor(targetId) {
+    const api = ext();
 
-    const panel =
-      byId("positionsPanel") ||
-      byId("positionsList") ||
-      byId("positionsContainer");
+    bootBroker();
 
-    if (!panel) return;
-
-    const trades = window.TRADES || [];
-    panel.innerHTML = trades.length
-      ? trades.map(t => `
-          <div class="broker-symbol-card">
-            <div class="symbol-main">
-              <div class="symbol-name">${t.symbol}</div>
-              <div class="symbol-price">${t.direction} · ${formatUSD(t.profit || 0)}</div>
-              <div class="market-pill">Open</div>
-            </div>
-          </div>
-        `).join("")
-      : `<div style="padding:12px;color:#bbb;">No hay posiciones abiertas.</div>`;
-  }
-
-  async function loadAccountBridge() {
-    if (typeof window.loadAccount === "function") {
-      await window.loadAccount();
-    }
-    if (typeof window.syncAccountView === "function") {
-      window.syncAccountView();
-    }
-    if (typeof window.updateAccountMetrics === "function") {
-      window.updateAccountMetrics();
-    }
-
-    // Refuerza moneda USD en elementos visibles
-    setCurrencyLabels();
-  }
-
-  function startRealtimeLoops() {
-    if (refreshTimers.markets) clearInterval(refreshTimers.markets);
-    if (refreshTimers.positions) clearInterval(refreshTimers.positions);
-    if (refreshTimers.account) clearInterval(refreshTimers.account);
-
-    refreshTimers.markets = setInterval(() => {
-      loadMarketsBridge();
-      safeCall("loadRealQuotes");
-    }, 3000);
-
-    refreshTimers.positions = setInterval(() => {
-      loadPositionsBridge();
-      safeCall("updateTradesPrices");
-      safeCall("updateAccountMetrics");
-    }, 2500);
-
-    refreshTimers.account = setInterval(() => {
-      loadAccountBridge();
-    }, 5000);
-  }
-
-  // =========================
-  // PANEL CONTROLLER
-  // =========================
-  function showPanel(targetId) {
-    showOnly(targetId);
-
-    // Inicio
     if (targetId === "dashboardPanel") {
-      loadAccountBridge();
-      safeCall("startAutoRefresh");
-      startRealtimeLoops();
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+      if (typeof api.loadAccount === "function") api.loadAccount();
+      return;
     }
 
-    // Mercados
     if (targetId === "marketPanel" || targetId === "overviewPanel") {
-      loadMarketsBridge();
-      safeCall("loadRealQuotes");
-      startRealtimeLoops();
+      if (typeof api.loadMarketsAndQuotes === "function") api.loadMarketsAndQuotes();
+      if (typeof api.loadRealMarkets === "function") api.loadRealMarkets();
+      if (typeof api.loadRealQuotes === "function") api.loadRealQuotes();
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+      return;
     }
 
-    // Posiciones
     if (targetId === "positionsPanel") {
-      loadPositionsBridge();
-      safeCall("updateTradesPrices");
-      startRealtimeLoops();
+      if (typeof api.loadPositions === "function") api.loadPositions();
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+      return;
     }
 
-    // Trading
     if (targetId === "tradingPanel") {
-      ensureOrderTypes();
-      safeCall("getActiveSymbolMeta");
-      window.openTradingView(ACTIVE_SYMBOL);
-      safeCall("loadRealQuotes");
-      startRealtimeLoops();
+      if (typeof api.initTradingUI === "function") {
+        api.initTradingUI().catch?.(() => {});
+      }
+      if (typeof window.openBrokerTradingView === "function") {
+        window.openBrokerTradingView();
+      } else if (typeof api.openTradingView === "function") {
+        api.openTradingView();
+      }
+      if (typeof api.loadRealQuotes === "function") api.loadRealQuotes();
+      return;
     }
 
-    // Activos
     if (targetId === "assetsPanel") {
-      loadAccountBridge();
-      safeCall("updateAccountMetrics");
-      startRealtimeLoops();
+      if (typeof api.loadAccount === "function") api.loadAccount();
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
     }
   }
 
-  window.showPanel = showPanel;
+  function showPanel(targetId) {
+    showOnlyPanel(targetId);
+    refreshFor(targetId);
+  }
 
-  // =========================
-  // CLICK EN BOTONES
-  // =========================
   menuItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
@@ -4410,7 +4117,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       showPanel(target);
 
-      if (window.innerWidth < 1000) {
+      if (window.innerWidth < 1000 && sidebar) {
         sidebar.classList.add("hidden");
       }
     });
@@ -4431,42 +4138,51 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // =========================
-  // CLICK EN SÍMBOLO -> CAMBIA GRÁFICO
-  // =========================
   document.addEventListener("click", (e) => {
-    const card = e.target.closest(".broker-symbol-card[data-symbol], [data-symbol].broker-symbol-card");
-    if (!card) return;
+    const clickedSymbol = e.target.closest(".broker-symbol-card[data-symbol], [data-symbol].broker-symbol-card");
+    if (!clickedSymbol) return;
 
-    const symbol = card.dataset.symbol;
-    const name =
-      card.dataset.name ||
-      card.querySelector(".symbol-name")?.textContent ||
-      symbol;
+    const api = ext();
+    const symbol = clickedSymbol.dataset.symbol;
 
-    if (symbol) {
-      selectSymbol(symbol, name);
-      showPanel("tradingPanel");
+    if (symbol && typeof window.selectBrokerSymbol === "function") {
+      window.selectBrokerSymbol({
+        symbol: symbol,
+        tvSymbol: clickedSymbol.dataset.tvSymbol || symbol,
+        label: clickedSymbol.dataset.label || symbol,
+        market: clickedSymbol.dataset.market || ""
+      });
     }
-  });
 
-  // =========================
-  // ORDENAR SIN DEMO
-  // =========================
-  ensureOrderTypes();
-  setCurrencyLabels();
+    if (typeof api.selectSymbol === "function") {
+      api.selectSymbol(
+        {
+          symbol: symbol,
+          tvSymbol: clickedSymbol.dataset.tvSymbol || symbol,
+          label: clickedSymbol.dataset.label || symbol,
+          market: clickedSymbol.dataset.market || ""
+        },
+        { openChart: true }
+      );
+    }
 
-  // Selección inicial real
+    showPanel("tradingPanel");
+  }, true);
+
+  document.addEventListener("input", (e) => {
+    const api = ext();
+
+    if (e.target && e.target.id === "brokerOrderSize") {
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+    }
+
+    if (e.target && e.target.id === "brokerMarketSearch") {
+      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+    }
+  }, true);
+
+  bootBroker();
   showPanel("dashboardPanel");
-  loadMarketsBridge();
-  loadAccountBridge();
-  window.openTradingView(ACTIVE_SYMBOL);
-  startRealtimeLoops();
-
-  // Mantén el símbolo activo accesible globalmente
-  window.setActiveSymbol = function(symbol, name) {
-    selectSymbol(symbol, name);
-  };
 });
 </script>
 
