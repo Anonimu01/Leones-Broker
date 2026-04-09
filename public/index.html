@@ -4037,7 +4037,6 @@ function adminDeposit(amount) {
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll(".panel");
-
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   function showOnlyPanel(id) {
@@ -4046,11 +4045,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (el) el.style.display = "block";
   }
 
-  // 🔥 ESPERAR JS2
+  // 🔥 ESPERAR QUE JS2 CARGUE
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
+        if (document.getElementById("brokerSymbolsPanel")) {
           clearInterval(i);
           resolve();
         }
@@ -4058,8 +4057,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // 🔥 MOVER TODO CORRECTAMENTE
-  function distribuir() {
+  // 🔥 MOVER SIN BORRAR NADA (CLAVE)
+  function distribuirSinRomper() {
 
     const map = {
       dashboardPanel: ["brokerSummaryPanel"],
@@ -4074,62 +4073,58 @@ document.addEventListener("DOMContentLoaded", async () => {
       const panel = document.getElementById(panelId);
       if (!panel) return;
 
-      panel.innerHTML = "";
-
       ids.forEach(id => {
         const el = document.getElementById(id);
-        if (el) panel.appendChild(el);
+        if (el && !panel.contains(el)) {
+          panel.appendChild(el); // 🔥 SOLO MUEVE, NO BORRA
+        }
       });
 
     });
+  }
 
-    // 🔥 FORZAR RENDER REAL DESPUÉS DE MOVER
+  // 🔥 FORZAR SÍMBOLOS EN MARKET
+  function fixMarket() {
+
     const api = ext();
 
     api.loadRealMarkets?.();
     api.loadRealQuotes?.();
-    api.loadPositions?.();
-    api.loadAccount?.();
 
-    // 🔥 PINTAR SÍMBOLOS SI O SI
     setTimeout(() => {
-      if (window.renderSymbolsGrid) renderSymbolsGrid();
+      if (window.renderSymbolsGrid) {
+        renderSymbolsGrid(); // 🔥 OBLIGAR A PINTAR
+      }
     }, 300);
   }
 
-  // 🔥 FIX GRAFICO FULL
+  // 🔥 GRAFICO FULL (YA CASI LO TENIAS)
   function fixTrading() {
-
     const chart = document.getElementById("brokerChartPanel");
-    const container = document.getElementById("tv_chart_container");
+    const tv = document.getElementById("tv_chart_container");
 
     if (chart) {
       chart.style.width = "100%";
       chart.style.height = "100vh";
-      chart.style.padding = "0";
       chart.style.margin = "0";
-      chart.style.borderRadius = "0";
+      chart.style.padding = "0";
     }
 
-    if (container) {
-      container.style.width = "100%";
-      container.style.height = "100%";
+    if (tv) {
+      tv.style.width = "100%";
+      tv.style.height = "100%";
     }
   }
 
   // 🔥 CAMBIO PANEL
   function showPanel(id) {
+
     showOnlyPanel(id);
 
     const api = ext();
 
     if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        if (window.renderSymbolsGrid) renderSymbolsGrid();
-      }, 200);
+      fixMarket();
     }
 
     if (id === "positionsPanel") {
@@ -4139,7 +4134,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (id === "tradingPanel") {
       api.openTradingView?.();
       api.loadRealQuotes?.();
-
       setTimeout(fixTrading, 200);
     }
 
@@ -4148,7 +4142,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 🔥 CLICK EN SIMBOLO
+  // 🔥 CLICK EN SÍMBOLO
   document.addEventListener("click", (e) => {
 
     const el = e.target.closest("[data-symbol]");
@@ -4174,7 +4168,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await waitForBroker();
 
-  distribuir();
+  distribuirSinRomper(); // 🔥 CLAVE (NO BORRA NADA)
 
   // 🔥 BOTONES
   document.querySelectorAll("[data-target]").forEach(btn => {
