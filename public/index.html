@@ -4036,8 +4036,8 @@ function adminDeposit(amount) {
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
-  const panels = document.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
+  const panels = document.querySelectorAll(".panel");
 
   function showOnlyPanel(id) {
     panels.forEach(p => p.style.display = "none");
@@ -4045,13 +4045,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (el) el.style.display = "block";
   }
 
+  // 🔥 ESPERAR JS2 SIN TOCARLO
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (
-          window.__LEONES_BROKER_EXT2 &&
-          (document.getElementById("brokerSymbolsPanel") || document.getElementById("brokerChartPanel"))
-        ) {
+        if (document.getElementById("brokerSymbolsPanel")) {
           clearInterval(i);
           resolve();
         }
@@ -4059,121 +4057,41 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  function ensureMirrorChart() {
-    const chartPanel = document.getElementById("brokerChartPanel");
-    if (!chartPanel) return;
+  // ✅ CLONAR SÍMBOLOS (NO MOVER)
+  function injectMarketSymbols() {
 
-    let mirror = document.getElementById("tv_chart_container_bottom");
-    if (!mirror) {
-      mirror = document.createElement("div");
-      mirror.id = "tv_chart_container_bottom";
-      mirror.style.width = "100%";
-      mirror.style.height = "40vh";
-      mirror.style.marginTop = "12px";
-      chartPanel.appendChild(mirror);
-    }
+    const original = document.getElementById("brokerSymbolsPanel");
+    const marketPanel = document.getElementById("marketPanel");
 
-    const tvSymbol =
-      window.__LEONES_TRADING__?.activeMeta?.tvSymbol ||
-      window.__LEONES_TRADING__?.activeSymbol ||
-      "BINANCE:BTCUSDT";
+    if (!original || !marketPanel) return;
 
-    if (window.TradingView && typeof TradingView.widget === "function") {
-      mirror.innerHTML = "";
-      new TradingView.widget({
-        autosize: true,
-        symbol: tvSymbol,
-        interval: "5",
-        timezone: "Etc/UTC",
-        theme: "dark",
-        style: "1",
-        locale: "es",
-        enable_publishing: false,
-        allow_symbol_change: true,
-        container_id: mirror.id,
-        hide_side_toolbar: false,
-        withdateranges: true,
-        save_image: false
-      });
-    }
-  }
+    // 🔥 EVITAR DUPLICAR MUCHAS VECES
+    if (marketPanel.querySelector(".market-clone")) return;
 
-  function distribuir() {
-    const map = {
-      dashboardPanel: ["brokerSummaryPanel"],
-      marketPanel: ["brokerSymbolsPanel"],
-      tradingPanel: ["brokerChartPanel", "brokerTicketPanel", "brokerSymbolDetailsPanel"],
-      positionsPanel: ["brokerPositionsPanel"],
-      assetsPanel: ["brokerAccountPanel"]
-    };
+    const clone = original.cloneNode(true);
+    clone.classList.add("market-clone");
 
-    Object.entries(map).forEach(([panelId, ids]) => {
-      const panel = document.getElementById(panelId);
-      if (!panel) return;
+    // 🔥 LIMPIAR SOLO EL PANEL MERCADO (NO EL ORIGINAL)
+    marketPanel.innerHTML = "";
+    marketPanel.appendChild(clone);
 
-      ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (el && !panel.contains(el)) {
-          panel.appendChild(el);
-        }
-      });
-    });
-
-    const api = ext();
-
-    api.loadRealMarkets?.();
-    api.loadRealQuotes?.();
-    api.loadPositions?.();
-    api.loadAccount?.();
-
+    // 🔥 REACTIVAR EVENTOS DE LOS SÍMBOLOS
     setTimeout(() => {
       if (window.renderSymbolsGrid) renderSymbolsGrid();
-    }, 300);
-
-    setTimeout(() => {
-      ensureMirrorChart();
-    }, 500);
+    }, 200);
   }
 
-  function fixTrading() {
-    const chart = document.getElementById("brokerChartPanel");
-    const container = document.getElementById("tv_chart_container");
-    const mirror = document.getElementById("tv_chart_container_bottom");
-
-    if (chart) {
-      chart.style.width = "100%";
-      chart.style.minHeight = "100vh";
-      chart.style.height = "auto";
-      chart.style.padding = "0";
-      chart.style.margin = "0";
-      chart.style.borderRadius = "0";
-      chart.style.overflow = "hidden";
-    }
-
-    if (container) {
-      container.style.width = "100%";
-      container.style.height = "60vh";
-    }
-
-    if (mirror) {
-      mirror.style.width = "100%";
-      mirror.style.height = "35vh";
-      mirror.style.marginTop = "12px";
-    }
-  }
-
+  // 🔥 CAMBIO DE PANEL
   function showPanel(id) {
     showOnlyPanel(id);
 
     const api = ext();
 
     if (id === "marketPanel") {
+      injectMarketSymbols(); // ✅ SOLO ESTO
+
       api.loadRealMarkets?.();
       api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        if (window.renderSymbolsGrid) renderSymbolsGrid();
-      }, 200);
     }
 
     if (id === "positionsPanel") {
@@ -4183,11 +4101,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (id === "tradingPanel") {
       api.openTradingView?.();
       api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-        ensureMirrorChart();
-      }, 200);
     }
 
     if (id === "dashboardPanel") {
@@ -4195,7 +4108,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // 🔥 CLICK EN SÍMBOLO (NO TOCAR)
   document.addEventListener("click", (e) => {
+
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
 
@@ -4209,26 +4124,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, { openChart: true });
 
     showPanel("tradingPanel");
+
   }, true);
 
+  // 🔥 BOTONES
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.addEventListener("click", () => {
-      showPanel(btn.getAttribute("data-target"));
+      showPanel(btn.dataset.target);
     });
   });
 
+  // 🔥 INICIAR JS2 NORMAL (SIN TOCARLO)
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
 
   await waitForBroker();
 
-  distribuir();
+  // 🔥 PANEL INICIAL
   showPanel("dashboardPanel");
 
 });
 </script>
-
   
 </div>
 
