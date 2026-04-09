@@ -4035,261 +4035,158 @@ function adminDeposit(amount) {
 
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
-  const sidebar = document.getElementById("sidebar");
-  const toggleBtn = document.getElementById("sidebarToggle");
-  const menuItems = document.querySelectorAll(".menu-item");
-  const footerItems = document.querySelectorAll(".fnav-item");
+
   const panels = document.querySelectorAll(".panel");
 
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
-  let brokerBooted = false;
-  let brokerDistributed = false;
 
-  const wait = (ms) => new Promise(r => setTimeout(r, ms));
-
-  function showOnlyPanel(targetId) {
-    panels.forEach(p => (p.style.display = "none"));
-    const panel = document.getElementById(targetId);
-    if (panel) panel.style.display = "block";
-  }
-
-  function bootBrokerOnce() {
-    if (brokerBooted) return;
-    brokerBooted = true;
-
-    const api = ext();
-
-    if (typeof window.startBrokerUI === "function") {
-      try {
-        window.startBrokerUI();
-      } catch (e) {}
-      return;
-    }
-
-    if (typeof api.initTradingUI === "function") {
-      try {
-        api.initTradingUI().catch(() => {});
-      } catch (e) {}
-    }
-  }
-
-  async function waitForBrokerBlocks(timeoutMs = 15000) {
-    const start = Date.now();
-    const needed = [
-      "brokerSummaryPanel",
-      "brokerSymbolsPanel",
-      "brokerChartPanel",
-      "brokerTicketPanel",
-      "brokerPositionsPanel",
-      "brokerAccountPanel"
-    ];
-
-    while (Date.now() - start < timeoutMs) {
-      const ready = needed.some(id => document.getElementById(id));
-      if (ready) return true;
-      await wait(200);
-    }
-    return false;
-  }
-
-  function moveBlock(id, targetPanelId) {
+  function showOnlyPanel(id) {
+    panels.forEach(p => p.style.display = "none");
     const el = document.getElementById(id);
-    const target = document.getElementById(targetPanelId);
-    if (!el || !target) return;
-
-    if (!target.contains(el)) {
-      target.appendChild(el);
-    }
+    if (el) el.style.display = "block";
   }
 
-  function distributeUI() {
-    const dashboardPanel = document.getElementById("dashboardPanel");
-    const marketPanel = document.getElementById("marketPanel");
-    const tradingPanel = document.getElementById("tradingPanel");
-    const positionsPanel = document.getElementById("positionsPanel");
-    const assetsPanel = document.getElementById("assetsPanel");
-
-    if (dashboardPanel) dashboardPanel.innerHTML = "";
-    if (marketPanel) marketPanel.innerHTML = "";
-    if (tradingPanel) tradingPanel.innerHTML = "";
-    if (positionsPanel) positionsPanel.innerHTML = "";
-    if (assetsPanel) assetsPanel.innerHTML = "";
-
-    moveBlock("brokerSummaryPanel", "dashboardPanel");
-    moveBlock("brokerSymbolsPanel", "marketPanel");
-    moveBlock("brokerChartPanel", "tradingPanel");
-    moveBlock("brokerTicketPanel", "tradingPanel");
-    moveBlock("brokerPositionsPanel", "positionsPanel");
-    moveBlock("brokerAccountPanel", "assetsPanel");
-    moveBlock("brokerSymbolDetailsPanel", "tradingPanel");
-
-    brokerDistributed = true;
+  // 🔥 ESPERAR JS2
+  function waitForBroker() {
+    return new Promise(resolve => {
+      const i = setInterval(() => {
+        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
+          clearInterval(i);
+          resolve();
+        }
+      }, 200);
+    });
   }
 
-  function applyPanelLayout(targetId) {
-    const target = document.getElementById(targetId);
-    if (!target) return;
+  // 🔥 MOVER TODO CORRECTAMENTE
+  function distribuir() {
 
-    target.style.overflow = "auto";
+    const map = {
+      dashboardPanel: ["brokerSummaryPanel"],
+      marketPanel: ["brokerSymbolsPanel"],
+      tradingPanel: ["brokerChartPanel","brokerTicketPanel","brokerSymbolDetailsPanel"],
+      positionsPanel: ["brokerPositionsPanel"],
+      assetsPanel: ["brokerAccountPanel"]
+    };
 
-    if (targetId === "tradingPanel") {
-      target.style.padding = "0";
-      target.style.margin = "0";
-      target.style.minHeight = "100vh";
-      target.style.height = "100vh";
-      target.style.width = "100%";
-      target.style.overflow = "hidden";
+    Object.entries(map).forEach(([panelId, ids]) => {
 
-      const chartPanel = document.getElementById("brokerChartPanel");
-      const ticketPanel = document.getElementById("brokerTicketPanel");
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
 
-      if (chartPanel) {
-        chartPanel.style.position = "relative";
-        chartPanel.style.width = "100%";
-        chartPanel.style.height = "100vh";
-        chartPanel.style.minHeight = "100vh";
-        chartPanel.style.margin = "0";
-        chartPanel.style.borderRadius = "0";
-        chartPanel.style.padding = "0";
-        chartPanel.style.overflow = "hidden";
-      }
+      panel.innerHTML = "";
 
-      if (ticketPanel) {
-        ticketPanel.style.position = "relative";
-        ticketPanel.style.zIndex = "2";
-      }
-    }
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) panel.appendChild(el);
+      });
 
-    if (targetId === "marketPanel") {
-      target.style.minHeight = "100vh";
-      target.style.paddingBottom = "90px";
-      target.style.overflowY = "auto";
-    }
+    });
 
-    if (targetId === "dashboardPanel" || targetId === "positionsPanel" || targetId === "assetsPanel") {
-      target.style.minHeight = "100vh";
-      target.style.overflowY = "auto";
-    }
-  }
-
-  function refreshFor(targetId) {
+    // 🔥 FORZAR RENDER REAL DESPUÉS DE MOVER
     const api = ext();
 
-    if (targetId === "dashboardPanel") {
-      api.loadAccount?.();
-      api.refreshBrokerUI?.();
-      return;
+    api.loadRealMarkets?.();
+    api.loadRealQuotes?.();
+    api.loadPositions?.();
+    api.loadAccount?.();
+
+    // 🔥 PINTAR SÍMBOLOS SI O SI
+    setTimeout(() => {
+      if (window.renderSymbolsGrid) renderSymbolsGrid();
+    }, 300);
+  }
+
+  // 🔥 FIX GRAFICO FULL
+  function fixTrading() {
+
+    const chart = document.getElementById("brokerChartPanel");
+    const container = document.getElementById("tv_chart_container");
+
+    if (chart) {
+      chart.style.width = "100%";
+      chart.style.height = "100vh";
+      chart.style.padding = "0";
+      chart.style.margin = "0";
+      chart.style.borderRadius = "0";
     }
 
-    if (targetId === "marketPanel") {
+    if (container) {
+      container.style.width = "100%";
+      container.style.height = "100%";
+    }
+  }
+
+  // 🔥 CAMBIO PANEL
+  function showPanel(id) {
+    showOnlyPanel(id);
+
+    const api = ext();
+
+    if (id === "marketPanel") {
       api.loadRealMarkets?.();
       api.loadRealQuotes?.();
-      api.refreshBrokerUI?.();
-      return;
+
+      setTimeout(() => {
+        if (window.renderSymbolsGrid) renderSymbolsGrid();
+      }, 200);
     }
 
-    if (targetId === "positionsPanel") {
+    if (id === "positionsPanel") {
       api.loadPositions?.();
-      api.refreshBrokerUI?.();
-      return;
     }
 
-    if (targetId === "tradingPanel") {
-      api.loadRealQuotes?.();
+    if (id === "tradingPanel") {
       api.openTradingView?.();
-      api.refreshBrokerUI?.();
-      return;
+      api.loadRealQuotes?.();
+
+      setTimeout(fixTrading, 200);
     }
 
-    if (targetId === "assetsPanel") {
+    if (id === "dashboardPanel") {
       api.loadAccount?.();
-      api.refreshBrokerUI?.();
     }
   }
 
-  function showPanel(targetId) {
-    showOnlyPanel(targetId);
-    applyPanelLayout(targetId);
-    refreshFor(targetId);
-  }
-
-  if (toggleBtn) {
-    toggleBtn.style.position = "fixed";
-    toggleBtn.style.top = "15px";
-    toggleBtn.style.left = "15px";
-    toggleBtn.style.zIndex = "9999";
-
-    toggleBtn.addEventListener("click", () => {
-      if (sidebar) sidebar.classList.toggle("hidden");
-    });
-  }
-
-  menuItems.forEach(item => {
-    item.addEventListener("click", () => {
-      const target = item.getAttribute("data-target");
-
-      menuItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      showPanel(target);
-
-      if (window.innerWidth < 1000 && sidebar) {
-        sidebar.classList.add("hidden");
-      }
-    });
-  });
-
-  footerItems.forEach(item => {
-    item.addEventListener("click", () => {
-      const target = item.getAttribute("data-target");
-
-      footerItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      showPanel(target);
-
-      menuItems.forEach(i => {
-        i.classList.toggle("active", i.getAttribute("data-target") === target);
-      });
-    });
-  });
-
+  // 🔥 CLICK EN SIMBOLO
   document.addEventListener("click", (e) => {
+
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
 
     const api = ext();
-    const symbol = el.dataset.symbol;
 
     api.selectSymbol?.({
-      symbol,
-      tvSymbol: el.dataset.tvSymbol || symbol,
-      label: el.dataset.label || symbol,
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
       market: el.dataset.market || ""
     }, { openChart: true });
 
     showPanel("tradingPanel");
+
   }, true);
 
-  document.addEventListener("input", (e) => {
-    const api = ext();
+  // 🔥 INICIAR JS2
+  if (window.startBrokerUI) {
+    await window.startBrokerUI();
+  }
 
-    if (e.target && e.target.id === "brokerOrderSize") {
-      api.refreshBrokerUI?.();
-    }
+  await waitForBroker();
 
-    if (e.target && e.target.id === "brokerMarketSearch") {
-      api.refreshBrokerUI?.();
-    }
-  }, true);
+  distribuir();
 
-  bootBrokerOnce();
-  await waitForBrokerBlocks();
-  if (!brokerDistributed) distributeUI();
+  // 🔥 BOTONES
+  document.querySelectorAll("[data-target]").forEach(btn => {
+    btn.onclick = () => showPanel(btn.dataset.target);
+  });
 
+  // 🔥 PANEL INICIAL
   showPanel("dashboardPanel");
+
 });
 </script>
+
   
 </div>
 
