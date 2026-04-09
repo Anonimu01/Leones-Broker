@@ -4037,6 +4037,7 @@ function adminDeposit(amount) {
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll(".panel");
+
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   function showOnlyPanel(id) {
@@ -4057,7 +4058,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // 🔥 TU MISMA DISTRIBUCIÓN (NO SE TOCA)
+  // 🔥 MOVER TODO CORRECTAMENTE
   function distribuir() {
 
     const map = {
@@ -4082,62 +4083,21 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     });
 
+    // 🔥 FORZAR RENDER REAL DESPUÉS DE MOVER
     const api = ext();
+
     api.loadRealMarkets?.();
     api.loadRealQuotes?.();
     api.loadPositions?.();
     api.loadAccount?.();
 
+    // 🔥 PINTAR SÍMBOLOS SI O SI
     setTimeout(() => {
       if (window.renderSymbolsGrid) renderSymbolsGrid();
     }, 300);
-
-    // ✅ 🔥 AQUI SOLO AÑADIMOS (NO ROMPE NADA)
-    setTimeout(() => {
-      duplicarGraficoAbajo();
-    }, 500);
   }
 
-  // 🔥 NUEVO: DUPLICAR GRAFICO ABAJO (SIN TOCAR EL ORIGINAL)
-  function duplicarGraficoAbajo() {
-
-    const originalChart = document.getElementById("tv_chart_container");
-    const panel = document.getElementById("brokerChartPanel");
-
-    if (!originalChart || !panel) return;
-
-    // evitar duplicar muchas veces
-    if (document.getElementById("tv_chart_container_clone")) return;
-
-    const clone = document.createElement("div");
-    clone.id = "tv_chart_container_clone";
-    clone.style.width = "100%";
-    clone.style.height = "40vh";
-    clone.style.marginTop = "10px";
-
-    panel.appendChild(clone);
-
-    // 🔥 cargar mismo símbolo
-    const symbol =
-      window.__LEONES_TRADING__?.activeMeta?.tvSymbol ||
-      window.__LEONES_TRADING__?.activeSymbol ||
-      "BINANCE:BTCUSDT";
-
-    if (window.TradingView) {
-      new TradingView.widget({
-        autosize: true,
-        symbol: symbol,
-        interval: "5",
-        timezone: "Etc/UTC",
-        theme: "dark",
-        style: "1",
-        locale: "es",
-        container_id: "tv_chart_container_clone"
-      });
-    }
-  }
-
-  // 🔥 FIX GRAFICO FULL (TUYO)
+  // 🔥 FIX GRAFICO FULL
   function fixTrading() {
 
     const chart = document.getElementById("brokerChartPanel");
@@ -4180,10 +4140,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       api.openTradingView?.();
       api.loadRealQuotes?.();
 
-      setTimeout(() => {
-        fixTrading();
-        duplicarGraficoAbajo(); // ✅ SOLO ESTO SE AGREGA
-      }, 200);
+      setTimeout(fixTrading, 200);
     }
 
     if (id === "dashboardPanel") {
@@ -4210,7 +4167,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   }, true);
 
-  // 🔥 INICIAR JS2 (NO SE TOCA)
+  // 🔥 INICIAR JS2
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
