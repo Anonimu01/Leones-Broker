@@ -4228,6 +4228,76 @@ document.addEventListener("DOMContentLoaded", () => {
 </script>
 
 
+  <script>
+document.addEventListener("DOMContentLoaded", async () => {
+
+  const panels = document.querySelectorAll(".panel");
+
+  function showPanel(id) {
+    panels.forEach(p => p.style.display = "none");
+    const el = document.getElementById(id);
+    if (el) el.style.display = "block";
+  }
+
+  // 🔥 ESPERAR QUE JS2 CARGUE COMPLETO
+  function waitForBroker() {
+    return new Promise(resolve => {
+      const check = setInterval(() => {
+        if (document.getElementById("brokerSummaryPanel")) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+
+  // 🔥 MOVER BLOQUES REALES
+  function distribuirUI() {
+
+    const map = {
+      dashboardPanel: ["brokerSummaryPanel"],
+      marketPanel: ["brokerSymbolsPanel"],
+      tradingPanel: ["brokerChartPanel", "brokerTicketPanel"],
+      positionsPanel: ["brokerPositionsPanel"],
+      assetsPanel: ["brokerAccountPanel"]
+    };
+
+    Object.entries(map).forEach(([panelId, ids]) => {
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+
+      panel.innerHTML = "";
+
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) panel.appendChild(el);
+      });
+    });
+  }
+
+  // 🔥 INICIAR JS2 NORMAL
+  if (window.startBrokerUI) {
+    await window.startBrokerUI();
+  }
+
+  // 🔥 ESPERAR Y DISTRIBUIR
+  await waitForBroker();
+  distribuirUI();
+
+  // 🔥 BOTONES
+  document.querySelectorAll("[data-target]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = btn.getAttribute("data-target");
+      showPanel(target);
+    });
+  });
+
+  // 🔥 PANEL INICIAL
+  showPanel("dashboardPanel");
+
+});
+</script>
+
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
