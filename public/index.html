@@ -4035,152 +4035,261 @@ function adminDeposit(amount) {
 
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
+  const sidebar = document.getElementById("sidebar");
+  const toggleBtn = document.getElementById("sidebarToggle");
+  const menuItems = document.querySelectorAll(".menu-item");
+  const footerItems = document.querySelectorAll(".fnav-item");
+  const panels = document.querySelectorAll(".panel");
 
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
+  let brokerBooted = false;
+  let brokerDistributed = false;
 
-  /* =========================
-     🔥 ESPERAR JS2
-  ========================= */
-  function waitForBroker() {
-    return new Promise(resolve => {
-      const check = setInterval(() => {
-        if (document.getElementById("brokerSymbolsPanel")) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 200);
-    });
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+  function showOnlyPanel(targetId) {
+    panels.forEach(p => (p.style.display = "none"));
+    const panel = document.getElementById(targetId);
+    if (panel) panel.style.display = "block";
   }
 
-  /* =========================
-     🔥 NO BORRAR PARTE DE ABAJO
-  ========================= */
-  function preserveBottom() {
-    const bottom = document.querySelector("#brokerPositionsPanel")?.parentElement;
-    if (bottom) {
-      bottom.style.display = "block";
-    }
-  }
+  function bootBrokerOnce() {
+    if (brokerBooted) return;
+    brokerBooted = true;
 
-  /* =========================
-     🔥 MERCADOS → TODOS LOS SÍMBOLOS
-  ========================= */
-  function fixMarketPanel() {
-    const marketPanel = document.getElementById("marketPanel");
-    const symbols = document.getElementById("brokerSymbolsPanel");
-
-    if (!marketPanel || !symbols) return;
-
-    // ❌ NO limpiar todo → solo asegurar que esté dentro
-    if (!marketPanel.contains(symbols)) {
-      marketPanel.appendChild(symbols);
-    }
-
-    symbols.style.display = "block";
-
-    // 🔥 FORZAR CARGA REAL
     const api = ext();
-    api.loadRealMarkets?.();
-    api.loadRealQuotes?.();
-    api.refreshBrokerUI?.();
-  }
 
-  /* =========================
-     🔥 HISTORIAL → DEPÓSITOS
-  ========================= */
-  function fixHistoryPanel() {
-    const historyPanel = document.getElementById("historyPanel");
-    if (!historyPanel) return;
-
-    let box = document.getElementById("depositHistory");
-
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "depositHistory";
-      box.style.padding = "10px";
-      historyPanel.appendChild(box);
-    }
-
-    // 🔥 USA LOCALSTORAGE (ajústalo a tu backend si ya lo tienes)
-    const deposits = JSON.parse(localStorage.getItem("deposits") || "[]");
-
-    if (!deposits.length) {
-      box.innerHTML = "<div style='opacity:.7'>No hay depósitos</div>";
+    if (typeof window.startBrokerUI === "function") {
+      try {
+        window.startBrokerUI();
+      } catch (e) {}
       return;
     }
 
-    box.innerHTML = deposits.map(d => `
-      <div style="
-        background:#111;
-        margin-bottom:8px;
-        padding:10px;
-        border-radius:8px;
-        display:flex;
-        justify-content:space-between;
-      ">
-        <span>Depósito</span>
-        <strong>$${Number(d.amount).toFixed(2)}</strong>
-      </div>
-    `).join("");
-  }
-
-  /* =========================
-     🔥 TRADING FULL WIDTH (YA LO TENÍAS BIEN)
-  ========================= */
-  function fixTrading() {
-    const chart = document.getElementById("tv_chart_container");
-    if (chart) {
-      chart.style.width = "100%";
-      chart.style.height = "calc(100vh - 120px)";
+    if (typeof api.initTradingUI === "function") {
+      try {
+        api.initTradingUI().catch(() => {});
+      } catch (e) {}
     }
   }
 
-  /* =========================
-     🔥 CAMBIO DE PANEL
-  ========================= */
-  function onPanelChange(targetId) {
+  async function waitForBrokerBlocks(timeoutMs = 15000) {
+    const start = Date.now();
+    const needed = [
+      "brokerSummaryPanel",
+      "brokerSymbolsPanel",
+      "brokerChartPanel",
+      "brokerTicketPanel",
+      "brokerPositionsPanel",
+      "brokerAccountPanel"
+    ];
 
-    preserveBottom();
+    while (Date.now() - start < timeoutMs) {
+      const ready = needed.some(id => document.getElementById(id));
+      if (ready) return true;
+      await wait(200);
+    }
+    return false;
+  }
+
+  function moveBlock(id, targetPanelId) {
+    const el = document.getElementById(id);
+    const target = document.getElementById(targetPanelId);
+    if (!el || !target) return;
+
+    if (!target.contains(el)) {
+      target.appendChild(el);
+    }
+  }
+
+  function distributeUI() {
+    const dashboardPanel = document.getElementById("dashboardPanel");
+    const marketPanel = document.getElementById("marketPanel");
+    const tradingPanel = document.getElementById("tradingPanel");
+    const positionsPanel = document.getElementById("positionsPanel");
+    const assetsPanel = document.getElementById("assetsPanel");
+
+    if (dashboardPanel) dashboardPanel.innerHTML = "";
+    if (marketPanel) marketPanel.innerHTML = "";
+    if (tradingPanel) tradingPanel.innerHTML = "";
+    if (positionsPanel) positionsPanel.innerHTML = "";
+    if (assetsPanel) assetsPanel.innerHTML = "";
+
+    moveBlock("brokerSummaryPanel", "dashboardPanel");
+    moveBlock("brokerSymbolsPanel", "marketPanel");
+    moveBlock("brokerChartPanel", "tradingPanel");
+    moveBlock("brokerTicketPanel", "tradingPanel");
+    moveBlock("brokerPositionsPanel", "positionsPanel");
+    moveBlock("brokerAccountPanel", "assetsPanel");
+    moveBlock("brokerSymbolDetailsPanel", "tradingPanel");
+
+    brokerDistributed = true;
+  }
+
+  function applyPanelLayout(targetId) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+
+    target.style.overflow = "auto";
+
+    if (targetId === "tradingPanel") {
+      target.style.padding = "0";
+      target.style.margin = "0";
+      target.style.minHeight = "100vh";
+      target.style.height = "100vh";
+      target.style.width = "100%";
+      target.style.overflow = "hidden";
+
+      const chartPanel = document.getElementById("brokerChartPanel");
+      const ticketPanel = document.getElementById("brokerTicketPanel");
+
+      if (chartPanel) {
+        chartPanel.style.position = "relative";
+        chartPanel.style.width = "100%";
+        chartPanel.style.height = "100vh";
+        chartPanel.style.minHeight = "100vh";
+        chartPanel.style.margin = "0";
+        chartPanel.style.borderRadius = "0";
+        chartPanel.style.padding = "0";
+        chartPanel.style.overflow = "hidden";
+      }
+
+      if (ticketPanel) {
+        ticketPanel.style.position = "relative";
+        ticketPanel.style.zIndex = "2";
+      }
+    }
 
     if (targetId === "marketPanel") {
-      fixMarketPanel();
+      target.style.minHeight = "100vh";
+      target.style.paddingBottom = "90px";
+      target.style.overflowY = "auto";
     }
 
-    if (targetId === "historyPanel") {
-      fixHistoryPanel();
+    if (targetId === "dashboardPanel" || targetId === "positionsPanel" || targetId === "assetsPanel") {
+      target.style.minHeight = "100vh";
+      target.style.overflowY = "auto";
+    }
+  }
+
+  function refreshFor(targetId) {
+    const api = ext();
+
+    if (targetId === "dashboardPanel") {
+      api.loadAccount?.();
+      api.refreshBrokerUI?.();
+      return;
+    }
+
+    if (targetId === "marketPanel") {
+      api.loadRealMarkets?.();
+      api.loadRealQuotes?.();
+      api.refreshBrokerUI?.();
+      return;
+    }
+
+    if (targetId === "positionsPanel") {
+      api.loadPositions?.();
+      api.refreshBrokerUI?.();
+      return;
     }
 
     if (targetId === "tradingPanel") {
-      fixTrading();
+      api.loadRealQuotes?.();
+      api.openTradingView?.();
+      api.refreshBrokerUI?.();
+      return;
+    }
+
+    if (targetId === "assetsPanel") {
+      api.loadAccount?.();
+      api.refreshBrokerUI?.();
     }
   }
 
-  /* =========================
-     🔥 ESCUCHAR BOTONES
-  ========================= */
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const target = btn.getAttribute("data-target");
-      onPanelChange(target);
+  function showPanel(targetId) {
+    showOnlyPanel(targetId);
+    applyPanelLayout(targetId);
+    refreshFor(targetId);
+  }
+
+  if (toggleBtn) {
+    toggleBtn.style.position = "fixed";
+    toggleBtn.style.top = "15px";
+    toggleBtn.style.left = "15px";
+    toggleBtn.style.zIndex = "9999";
+
+    toggleBtn.addEventListener("click", () => {
+      if (sidebar) sidebar.classList.toggle("hidden");
+    });
+  }
+
+  menuItems.forEach(item => {
+    item.addEventListener("click", () => {
+      const target = item.getAttribute("data-target");
+
+      menuItems.forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
+
+      showPanel(target);
+
+      if (window.innerWidth < 1000 && sidebar) {
+        sidebar.classList.add("hidden");
+      }
     });
   });
 
-  /* =========================
-     🔥 INICIO
-  ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
-  }
+  footerItems.forEach(item => {
+    item.addEventListener("click", () => {
+      const target = item.getAttribute("data-target");
 
-  await waitForBroker();
+      footerItems.forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
 
-  // 🔥 ARREGLOS INICIALES
-  preserveBottom();
-  fixMarketPanel();
+      showPanel(target);
 
+      menuItems.forEach(i => {
+        i.classList.toggle("active", i.getAttribute("data-target") === target);
+      });
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
+
+    const api = ext();
+    const symbol = el.dataset.symbol;
+
+    api.selectSymbol?.({
+      symbol,
+      tvSymbol: el.dataset.tvSymbol || symbol,
+      label: el.dataset.label || symbol,
+      market: el.dataset.market || ""
+    }, { openChart: true });
+
+    showPanel("tradingPanel");
+  }, true);
+
+  document.addEventListener("input", (e) => {
+    const api = ext();
+
+    if (e.target && e.target.id === "brokerOrderSize") {
+      api.refreshBrokerUI?.();
+    }
+
+    if (e.target && e.target.id === "brokerMarketSearch") {
+      api.refreshBrokerUI?.();
+    }
+  }, true);
+
+  bootBrokerOnce();
+  await waitForBrokerBlocks();
+  if (!brokerDistributed) distributeUI();
+
+  showPanel("dashboardPanel");
 });
 </script>
-
   
 </div>
 
