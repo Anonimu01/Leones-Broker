@@ -4283,83 +4283,138 @@ if (window.__LEONES_BOOTED__) {
 
   
 <script>
-document.addEventListener("DOMContentLoaded", async () => {
+/* =========================
+   🔥 FIX GLOBAL TRADING PRO
+========================= */
 
-  const panels = document.querySelectorAll(".panel");
+(function(){
+
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
-  /* =========================
-     🔥 BOTONES ACTIVOS DORADO
-  ========================= */
-  function setActiveButton(id) {
-    document.querySelectorAll("[data-target]").forEach(btn => {
-      btn.style.background = "transparent";
-      btn.style.color = "#fff";
-    });
+  let CURRENT_SYMBOL = null;
 
-    const active = document.querySelector(`[data-target="${id}"]`);
-    if (active) {
-      active.style.background = "gold";
-      active.style.color = "#000";
+  /* =========================
+     💾 NO BORRAR MONTO
+  ========================= */
+  function persistAmount() {
+    const input = document.getElementById("brokerOrderSize");
+    if (!input) return;
+
+    // cargar guardado
+    const saved = localStorage.getItem("trade_amount");
+    if (saved) input.value = saved;
+
+    // guardar mientras escribe
+    input.addEventListener("input", () => {
+      localStorage.setItem("trade_amount", input.value);
+    });
+  }
+
+  /* =========================
+     🔥 CAPTURAR SIMBOLO ACTIVO
+  ========================= */
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
+
+    CURRENT_SYMBOL = {
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
+      market: el.dataset.market || ""
+    };
+  }, true);
+
+  /* =========================
+     🚀 ABRIR ORDEN FORZADA
+  ========================= */
+  function forceTrade(direction) {
+
+    const input = document.getElementById("brokerOrderSize");
+    const amount = parseFloat(input?.value || 0);
+
+    if (!amount || amount <= 0) {
+      alert("Coloca un monto válido");
+      return;
+    }
+
+    const api = ext();
+
+    const symbol = CURRENT_SYMBOL || api.activeMeta || {
+      symbol: api.activeSymbol,
+      tvSymbol: api.activeSymbol
+    };
+
+    if (!symbol || !symbol.symbol) {
+      alert("Selecciona un símbolo");
+      return;
+    }
+
+    // 🔥 intentar con backend primero
+    if (api.placeOrder) {
+      api.placeOrder({
+        symbol: symbol.symbol,
+        amount: amount,
+        side: direction
+      }).then(() => {
+        syncPositions();
+      }).catch(() => {
+        // fallback local
+        openTrade(symbol.symbol, amount, direction, 1);
+        syncPositions();
+      });
+
+    } else {
+      openTrade(symbol.symbol, amount, direction, 1);
+      syncPositions();
     }
   }
 
-  function showOnlyPanel(id) {
-    panels.forEach(p => p.style.display = "none");
-    const el = document.getElementById(id);
-    if (el) el.style.display = "block";
-    setActiveButton(id);
+  /* =========================
+     🔁 SINCRONIZAR POSICIONES
+  ========================= */
+  function syncPositions() {
+    const api = ext();
+
+    setTimeout(() => {
+      api.loadPositions?.();
+      api.loadAccount?.();
+    }, 300);
   }
 
   /* =========================
-     🔥 ESPERAR JS2
+     🔥 REEMPLAZAR BOTONES BUY/SELL
   ========================= */
-  function waitForBroker() {
-    return new Promise(resolve => {
-      const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
-          clearInterval(i);
-          resolve();
-        }
-      }, 200);
+  function fixTradingButtons() {
+
+    document.querySelectorAll('[data-action="buy"]').forEach(btn => {
+      btn.onclick = () => forceTrade("buy");
+    });
+
+    document.querySelectorAll('[data-action="sell"]').forEach(btn => {
+      btn.onclick = () => forceTrade("sell");
     });
   }
 
   /* =========================
-     🔥 MERCADO FIJO (NO DESAPARECE)
+     📊 GRAFICO SIEMPRE EN TRADING
   ========================= */
-  function keepMarketAlive() {
-    const target = document.getElementById("marketPanel");
-    const source = document.getElementById("brokerSymbolsPanel");
-    if (!target || !source) return;
+  function ensureChart() {
+    const api = ext();
 
-    // Si ya existe no duplicar
-    if (target.dataset.filled === "1") return;
-    target.dataset.filled = "1";
-
-    const clone = source.cloneNode(true);
-    clone.id = "marketClone";
-
-    target.innerHTML = "";
-    target.appendChild(clone);
-
-    // 🔥 RE-PINTAR CONTENIDO REAL
-    setTimeout(() => {
-      const originalGrid = document.getElementById("brokerSymbolsGrid");
-      const cloneGrid = clone.querySelector("#brokerSymbolsGrid");
-
-      if (originalGrid && cloneGrid) {
-        cloneGrid.innerHTML = originalGrid.innerHTML;
-      }
-    }, 200);
+    if (api.openTradingView) {
+      api.openTradingView().catch(()=>{});
+    }
   }
 
   /* =========================
-     🔥 OBSERVADOR (CLAVE 🔥)
+     🔄 OBSERVAR CAMBIOS (CLAVE)
   ========================= */
-  function observeChanges() {
+  function observeFixes() {
+
     const observer = new MutationObserver(() => {
-      keepMarketAlive();
+      persistAmount();
+      fixTradingButtons();
     });
 
     observer.observe(document.body, {
@@ -4369,121 +4424,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 GRAFICO FULL BIEN
+     🚀 INIT
   ========================= */
-  function fixTrading() {
-    const chart = document.getElementById("brokerChartPanel");
-    const container = document.getElementById("tv_chart_container");
-
-    if (chart) {
-      chart.style.width = "100%";
-      chart.style.height = "calc(100vh - 10px)";
-      chart.style.margin = "0";
-      chart.style.padding = "0";
-      chart.style.borderRadius = "0";
-    }
-
-    if (container) {
-      container.style.width = "100%";
-      container.style.height = "100%";
-    }
+  function initFixes() {
+    persistAmount();
+    fixTradingButtons();
+    ensureChart();
+    observeFixes();
   }
 
-  /* =========================
-     🔥 RESPONSIVE REAL
-  ========================= */
-  function responsiveFix() {
-    const cols = document.getElementById("brokerColumns");
-    if (!cols) return;
+  window.addEventListener("load", initFixes);
 
-    if (window.innerWidth < 768) {
-      cols.style.display = "block";
-    } else {
-      cols.style.display = "grid";
-      cols.style.gridTemplateColumns = "1fr 350px";
-    }
-  }
-
-  window.addEventListener("resize", responsiveFix);
-
-  /* =========================
-     🔥 CAMBIO DE PANEL
-  ========================= */
-  function showPanel(id) {
-
-    showOnlyPanel(id);
-
-    const api = ext();
-
-    if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        window.renderSymbolsGrid?.();
-        keepMarketAlive();
-      }, 300);
-    }
-
-    if (id === "tradingPanel") {
-      api.openTradingView?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-      }, 300);
-    }
-
-    if (id === "positionsPanel") {
-      api.loadPositions?.();
-    }
-
-    if (id === "dashboardPanel") {
-      api.loadAccount?.();
-    }
-  }
-
-  /* =========================
-     🔥 CLICK EN SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
-
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-
-  }, true);
-
-  /* =========================
-     🔥 INIT
-  ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
-  }
-
-  await waitForBroker();
-
-  observeChanges();   // 🔥 CLAVE
-  keepMarketAlive(); // 🔥 CLAVE
-  responsiveFix();
-
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.onclick = () => showPanel(btn.dataset.target);
-  });
-
-  showPanel("dashboardPanel");
-
-});
+})();
 </script>
   
 </div>
