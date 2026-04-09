@@ -1931,6 +1931,17 @@ if (window.__LEONES_BOOTED__) {
 </div>
 
 
+  <div id="dashboardBalanceBox" style="
+  background:#0b0b0b;
+  padding:20px;
+  border-radius:15px;
+  color:#fff;
+  font-size:20px;
+  font-weight:800;
+">
+  Saldo: <span id="dashboardBalance">--</span>
+</div>
+
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
@@ -4029,6 +4040,23 @@ document.addEventListener("DOMContentLoaded", () => {
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
   let brokerBooted = false;
 
+  // 🔥 CONTENEDOR DINÁMICO PARA JS2
+  function mountBrokerInto(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+
+    panel.innerHTML = '';
+
+    const container = document.createElement('div');
+    container.id = 'privateArea_full'; // 🔥 CLAVE PARA JS2
+    panel.appendChild(container);
+
+    if (window.startBrokerUI) {
+      window.startBrokerUI().catch(()=>{});
+    }
+  }
+
+  // 🔥 SIDEBAR
   if (toggleBtn) {
     toggleBtn.style.position = "fixed";
     toggleBtn.style.top = "15px";
@@ -4053,53 +4081,70 @@ document.addEventListener("DOMContentLoaded", () => {
     const api = ext();
 
     if (typeof api.initTradingUI === "function") {
-      api.initTradingUI().catch?.(() => {});
+      api.initTradingUI().catch(()=>{});
     } else if (typeof window.startBrokerUI === "function") {
       window.startBrokerUI();
     }
   }
 
+  // 🔥 SINCRONIZACIÓN REAL POR PANEL
   function refreshFor(targetId) {
     const api = ext();
-
     bootBroker();
 
+    // 🟡 INICIO (saldo real)
     if (targetId === "dashboardPanel") {
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
-      if (typeof api.loadAccount === "function") api.loadAccount();
+      if (typeof api.loadAccount === "function") {
+        api.loadAccount().then(() => {
+          const acc = api.state?.account || {};
+          const el = document.getElementById("dashboardBalance");
+          if (el) {
+            el.textContent = "$" + Number(acc.balance || 0).toLocaleString();
+          }
+        });
+      }
       return;
     }
 
-    if (targetId === "marketPanel" || targetId === "overviewPanel") {
-      if (typeof api.loadMarketsAndQuotes === "function") api.loadMarketsAndQuotes();
-      if (typeof api.loadRealMarkets === "function") api.loadRealMarkets();
-      if (typeof api.loadRealQuotes === "function") api.loadRealQuotes();
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+    // 🔵 MERCADOS → símbolos abajo
+    if (targetId === "marketPanel") {
+      mountBrokerInto("marketPanel");
+
+      setTimeout(() => {
+        api.loadRealMarkets?.();
+        api.loadRealQuotes?.();
+      }, 300);
       return;
     }
 
+    // 🟢 POSICIONES
     if (targetId === "positionsPanel") {
-      if (typeof api.loadPositions === "function") api.loadPositions();
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+      mountBrokerInto("positionsPanel");
+
+      setTimeout(() => {
+        api.loadPositions?.();
+      }, 300);
       return;
     }
 
+    // 🔴 TRADING (gráfico + órdenes)
     if (targetId === "tradingPanel") {
-      if (typeof api.initTradingUI === "function") {
-        api.initTradingUI().catch?.(() => {});
-      }
-      if (typeof window.openBrokerTradingView === "function") {
-        window.openBrokerTradingView();
-      } else if (typeof api.openTradingView === "function") {
-        api.openTradingView();
-      }
-      if (typeof api.loadRealQuotes === "function") api.loadRealQuotes();
+      mountBrokerInto("tradingPanel");
+
+      setTimeout(() => {
+        api.openTradingView?.();
+        api.loadRealQuotes?.();
+      }, 300);
       return;
     }
 
+    // 🟣 ACTIVOS (cuenta completa)
     if (targetId === "assetsPanel") {
-      if (typeof api.loadAccount === "function") api.loadAccount();
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+      mountBrokerInto("assetsPanel");
+
+      setTimeout(() => {
+        api.loadAccount?.();
+      }, 300);
     }
   }
 
@@ -4108,6 +4153,7 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshFor(targetId);
   }
 
+  // 🔥 SIDEBAR CLICK
   menuItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
@@ -4123,6 +4169,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // 🔥 BOTONES DE ABAJO
   footerItems.forEach(item => {
     item.addEventListener("click", () => {
       const target = item.getAttribute("data-target");
@@ -4138,8 +4185,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // 🔥 CLICK EN SÍMBOLOS → abre trading
   document.addEventListener("click", (e) => {
-    const clickedSymbol = e.target.closest(".broker-symbol-card[data-symbol], [data-symbol].broker-symbol-card");
+    const clickedSymbol = e.target.closest("[data-symbol]");
     if (!clickedSymbol) return;
 
     const api = ext();
@@ -4154,33 +4202,33 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    if (typeof api.selectSymbol === "function") {
-      api.selectSymbol(
-        {
-          symbol: symbol,
-          tvSymbol: clickedSymbol.dataset.tvSymbol || symbol,
-          label: clickedSymbol.dataset.label || symbol,
-          market: clickedSymbol.dataset.market || ""
-        },
-        { openChart: true }
-      );
-    }
+    api.selectSymbol?.(
+      {
+        symbol: symbol,
+        tvSymbol: clickedSymbol.dataset.tvSymbol || symbol,
+        label: clickedSymbol.dataset.label || symbol,
+        market: clickedSymbol.dataset.market || ""
+      },
+      { openChart: true }
+    );
 
     showPanel("tradingPanel");
   }, true);
 
+  // 🔥 INPUTS
   document.addEventListener("input", (e) => {
     const api = ext();
 
-    if (e.target && e.target.id === "brokerOrderSize") {
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+    if (e.target?.id === "brokerOrderSize") {
+      api.refreshBrokerUI?.();
     }
 
-    if (e.target && e.target.id === "brokerMarketSearch") {
-      if (typeof api.refreshBrokerUI === "function") api.refreshBrokerUI();
+    if (e.target?.id === "brokerMarketSearch") {
+      api.refreshBrokerUI?.();
     }
   }, true);
 
+  // 🔥 INIT
   bootBroker();
   showPanel("dashboardPanel");
 });
