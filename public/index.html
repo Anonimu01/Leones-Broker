@@ -4036,8 +4036,8 @@ function adminDeposit(amount) {
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
-  const ext = () => window.__LEONES_BROKER_EXT2 || {};
   const panels = document.querySelectorAll(".panel");
+  const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   function showOnlyPanel(id) {
     panels.forEach(p => p.style.display = "none");
@@ -4045,11 +4045,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (el) el.style.display = "block";
   }
 
-  // 🔥 ESPERAR JS2 SIN TOCARLO
+  // 🔥 ESPERAR JS2
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (document.getElementById("brokerSymbolsPanel")) {
+        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
           clearInterval(i);
           resolve();
         }
@@ -4057,41 +4057,119 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // ✅ CLONAR SÍMBOLOS (NO MOVER)
-  function injectMarketSymbols() {
+  // 🔥 TU MISMA DISTRIBUCIÓN (NO SE TOCA)
+  function distribuir() {
 
-    const original = document.getElementById("brokerSymbolsPanel");
-    const marketPanel = document.getElementById("marketPanel");
+    const map = {
+      dashboardPanel: ["brokerSummaryPanel"],
+      marketPanel: ["brokerSymbolsPanel"],
+      tradingPanel: ["brokerChartPanel","brokerTicketPanel","brokerSymbolDetailsPanel"],
+      positionsPanel: ["brokerPositionsPanel"],
+      assetsPanel: ["brokerAccountPanel"]
+    };
 
-    if (!original || !marketPanel) return;
+    Object.entries(map).forEach(([panelId, ids]) => {
 
-    // 🔥 EVITAR DUPLICAR MUCHAS VECES
-    if (marketPanel.querySelector(".market-clone")) return;
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
 
-    const clone = original.cloneNode(true);
-    clone.classList.add("market-clone");
+      panel.innerHTML = "";
 
-    // 🔥 LIMPIAR SOLO EL PANEL MERCADO (NO EL ORIGINAL)
-    marketPanel.innerHTML = "";
-    marketPanel.appendChild(clone);
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) panel.appendChild(el);
+      });
 
-    // 🔥 REACTIVAR EVENTOS DE LOS SÍMBOLOS
+    });
+
+    const api = ext();
+    api.loadRealMarkets?.();
+    api.loadRealQuotes?.();
+    api.loadPositions?.();
+    api.loadAccount?.();
+
     setTimeout(() => {
       if (window.renderSymbolsGrid) renderSymbolsGrid();
-    }, 200);
+    }, 300);
+
+    // ✅ 🔥 AQUI SOLO AÑADIMOS (NO ROMPE NADA)
+    setTimeout(() => {
+      duplicarGraficoAbajo();
+    }, 500);
   }
 
-  // 🔥 CAMBIO DE PANEL
+  // 🔥 NUEVO: DUPLICAR GRAFICO ABAJO (SIN TOCAR EL ORIGINAL)
+  function duplicarGraficoAbajo() {
+
+    const originalChart = document.getElementById("tv_chart_container");
+    const panel = document.getElementById("brokerChartPanel");
+
+    if (!originalChart || !panel) return;
+
+    // evitar duplicar muchas veces
+    if (document.getElementById("tv_chart_container_clone")) return;
+
+    const clone = document.createElement("div");
+    clone.id = "tv_chart_container_clone";
+    clone.style.width = "100%";
+    clone.style.height = "40vh";
+    clone.style.marginTop = "10px";
+
+    panel.appendChild(clone);
+
+    // 🔥 cargar mismo símbolo
+    const symbol =
+      window.__LEONES_TRADING__?.activeMeta?.tvSymbol ||
+      window.__LEONES_TRADING__?.activeSymbol ||
+      "BINANCE:BTCUSDT";
+
+    if (window.TradingView) {
+      new TradingView.widget({
+        autosize: true,
+        symbol: symbol,
+        interval: "5",
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "es",
+        container_id: "tv_chart_container_clone"
+      });
+    }
+  }
+
+  // 🔥 FIX GRAFICO FULL (TUYO)
+  function fixTrading() {
+
+    const chart = document.getElementById("brokerChartPanel");
+    const container = document.getElementById("tv_chart_container");
+
+    if (chart) {
+      chart.style.width = "100%";
+      chart.style.height = "100vh";
+      chart.style.padding = "0";
+      chart.style.margin = "0";
+      chart.style.borderRadius = "0";
+    }
+
+    if (container) {
+      container.style.width = "100%";
+      container.style.height = "100%";
+    }
+  }
+
+  // 🔥 CAMBIO PANEL
   function showPanel(id) {
     showOnlyPanel(id);
 
     const api = ext();
 
     if (id === "marketPanel") {
-      injectMarketSymbols(); // ✅ SOLO ESTO
-
       api.loadRealMarkets?.();
       api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        if (window.renderSymbolsGrid) renderSymbolsGrid();
+      }, 200);
     }
 
     if (id === "positionsPanel") {
@@ -4101,6 +4179,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (id === "tradingPanel") {
       api.openTradingView?.();
       api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        fixTrading();
+        duplicarGraficoAbajo(); // ✅ SOLO ESTO SE AGREGA
+      }, 200);
     }
 
     if (id === "dashboardPanel") {
@@ -4108,7 +4191,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 🔥 CLICK EN SÍMBOLO (NO TOCAR)
+  // 🔥 CLICK EN SIMBOLO
   document.addEventListener("click", (e) => {
 
     const el = e.target.closest("[data-symbol]");
@@ -4127,19 +4210,19 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   }, true);
 
-  // 🔥 BOTONES
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      showPanel(btn.dataset.target);
-    });
-  });
-
-  // 🔥 INICIAR JS2 NORMAL (SIN TOCARLO)
+  // 🔥 INICIAR JS2 (NO SE TOCA)
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
 
   await waitForBroker();
+
+  distribuir();
+
+  // 🔥 BOTONES
+  document.querySelectorAll("[data-target]").forEach(btn => {
+    btn.onclick = () => showPanel(btn.dataset.target);
+  });
 
   // 🔥 PANEL INICIAL
   showPanel("dashboardPanel");
