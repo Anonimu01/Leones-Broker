@@ -4281,11 +4281,26 @@ if (window.__LEONES_BOOTED__) {
 })();
 </script>
 
-  
-<script>
+  <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
-  const panels = document.querySelectorAll(".panel");
+  const privateHost = document.getElementById("privateArea_full");
+  const hasSession = (() => {
+    try {
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("BROKER_TOKEN") ||
+        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
+      return !!token && token !== "null" && token !== "undefined";
+    } catch (e) {
+      return false;
+    }
+  })();
+
+  // 🔒 Si no está en el área privada o no hay sesión, no hace nada
+  if (!privateHost || !hasSession) return;
+
+  const panels = privateHost.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
@@ -4294,12 +4309,12 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 BOTONES ACTIVOS DORADO
   ========================= */
   function setActiveButton(id) {
-    document.querySelectorAll("[data-target]").forEach(btn => {
+    privateHost.querySelectorAll("[data-target]").forEach(btn => {
       btn.style.background = "transparent";
       btn.style.color = "#fff";
     });
 
-    const active = document.querySelector(`[data-target="${id}"]`);
+    const active = privateHost.querySelector(`[data-target="${id}"]`);
     if (active) {
       active.style.background = "gold";
       active.style.color = "#000";
@@ -4308,7 +4323,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function showOnlyPanel(id) {
     panels.forEach(p => p.style.display = "none");
-    const el = document.getElementById(id);
+    const el = privateHost.querySelector("#" + id);
     if (el) el.style.display = "block";
     setActiveButton(id);
   }
@@ -4319,7 +4334,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
+        if (window.__LEONES_BROKER_EXT2 && privateHost.querySelector("#brokerSymbolsGrid")) {
           clearInterval(i);
           resolve();
         }
@@ -4331,8 +4346,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 MARKET FIX
   ========================= */
   function keepMarketAlive() {
-    const target = document.getElementById("marketPanel");
-    const source = document.getElementById("brokerSymbolsPanel");
+    const target = privateHost.querySelector("#marketPanel");
+    const source = privateHost.querySelector("#brokerSymbolsPanel");
     if (!target || !source) return;
 
     if (!target.dataset.ready) {
@@ -4344,8 +4359,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     setTimeout(() => {
-      const original = document.getElementById("brokerSymbolsGrid");
-      const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
+      const original = privateHost.querySelector("#brokerSymbolsGrid");
+      const copy = privateHost.querySelector("#marketClone #brokerSymbolsGrid");
       if (original && copy) {
         copy.innerHTML = original.innerHTML;
       }
@@ -4357,7 +4372,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       keepMarketAlive();
     });
 
-    observer.observe(document.body, {
+    observer.observe(privateHost, {
       childList: true,
       subtree: true
     });
@@ -4367,9 +4382,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
-
     const api = ext();
-    const container = document.getElementById("tv_chart_container");
+    const container = privateHost.querySelector("#tv_chart_container");
 
     if (!container) return;
 
@@ -4391,13 +4405,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
-  }, 1500); // 🔥 refresco rápido
+  }, 1500);
 
   /* =========================
      🔥 RESPONSIVE
   ========================= */
   function responsiveFix() {
-    const cols = document.getElementById("brokerColumns");
+    const cols = privateHost.querySelector("#brokerColumns");
     if (!cols) return;
 
     if (window.innerWidth < 768) {
@@ -4414,7 +4428,7 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 MANTENER MONTO
   ========================= */
   function persistAmount() {
-    const input = document.getElementById("brokerOrderSize");
+    const input = privateHost.querySelector("#brokerOrderSize");
     if (!input) return;
 
     if (LAST_AMOUNT !== null) {
@@ -4427,7 +4441,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function restoreAmount() {
-    const input = document.getElementById("brokerOrderSize");
+    const input = privateHost.querySelector("#brokerOrderSize");
     if (input && LAST_AMOUNT !== null) {
       input.value = LAST_AMOUNT;
     }
@@ -4439,7 +4453,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function forceTrade(direction) {
     const api = ext();
 
-    const amountInput = document.getElementById("brokerOrderSize");
+    const amountInput = privateHost.querySelector("#brokerOrderSize");
     const amount = parseFloat(amountInput?.value);
 
     if (!amount || amount <= 0) {
@@ -4463,26 +4477,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     restoreAmount();
   }
 
-  document.addEventListener("click", (e) => {
+  privateHost.addEventListener("click", (e) => {
+    const buyBtn = e.target.closest('[data-action="buy"]');
+    const sellBtn = e.target.closest('[data-action="sell"]');
 
-    if (e.target.matches('[data-action="buy"]')) {
+    if (buyBtn) {
       e.preventDefault();
       forceTrade("buy");
     }
 
-    if (e.target.matches('[data-action="sell"]')) {
+    if (sellBtn) {
       e.preventDefault();
       forceTrade("sell");
     }
-
   });
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
   function createFloatingTradesPanel() {
-
-    if (document.getElementById("floatingTrades")) return;
+    if (privateHost.querySelector("#floatingTrades")) return;
 
     const div = document.createElement("div");
     div.id = "floatingTrades";
@@ -4505,12 +4519,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       <div id="floatingTradesList">Sin operaciones</div>
     `;
 
-    document.body.appendChild(div);
+    privateHost.appendChild(div);
   }
 
   function updateFloatingTrades() {
     const api = ext();
-    const list = document.getElementById("floatingTradesList");
+    const list = privateHost.querySelector("#floatingTradesList");
     if (!list) return;
 
     const positions = api.positions || [];
@@ -4534,7 +4548,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CAMBIO PANEL
   ========================= */
   function showPanel(id) {
-
     showOnlyPanel(id);
 
     const api = ext();
@@ -4570,10 +4583,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 CLICK SIMBOLO
+     🔥 CLICK EN SIMBOLO
   ========================= */
-  document.addEventListener("click", (e) => {
-
+  privateHost.addEventListener("click", (e) => {
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
 
@@ -4587,7 +4599,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, { openChart: true });
 
     showPanel("tradingPanel");
-
   }, true);
 
   /* =========================
@@ -4605,7 +4616,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   persistAmount();
   createFloatingTradesPanel();
 
-  document.querySelectorAll("[data-target]").forEach(btn => {
+  privateHost.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
@@ -4613,6 +4624,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
+          
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
