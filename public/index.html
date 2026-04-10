@@ -4288,7 +4288,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const panels = document.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
-  let LAST_AMOUNT = null; // 🔥 guarda el monto SIEMPRE
+  let LAST_AMOUNT = null;
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
@@ -4328,25 +4328,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 MERCADO FIJO
+     🔥 MARKET FIX
   ========================= */
   function keepMarketAlive() {
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
     if (!target || !source) return;
 
-    if (!target.dataset.filled) {
+    if (!target.dataset.ready) {
       const clone = source.cloneNode(true);
       clone.id = "marketClone";
+      target.innerHTML = "";
       target.appendChild(clone);
-      target.dataset.filled = "1";
+      target.dataset.ready = "1";
     }
 
     setTimeout(() => {
-      const originalGrid = document.getElementById("brokerSymbolsGrid");
-      const cloneGrid = document.querySelector("#marketClone #brokerSymbolsGrid");
-      if (originalGrid && cloneGrid) {
-        cloneGrid.innerHTML = originalGrid.innerHTML;
+      const original = document.getElementById("brokerSymbolsGrid");
+      const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
+      if (original && copy) {
+        copy.innerHTML = original.innerHTML;
       }
     }, 200);
   }
@@ -4363,25 +4364,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 GRAFICO FULL
+     🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
-    const chart = document.getElementById("brokerChartPanel");
+
+    const api = ext();
     const container = document.getElementById("tv_chart_container");
 
-    if (chart) {
-      chart.style.width = "100%";
-      chart.style.height = "calc(100vh - 10px)";
-      chart.style.padding = "0";
-      chart.style.margin = "0";
-      chart.style.borderRadius = "0";
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const symbol = api.activeSymbol || window.TR?.activeSymbol;
+
+    if (symbol) {
+      api.openTradingView?.({ symbol });
     }
 
-    if (container) {
-      container.style.width = "100%";
-      container.style.height = "100%";
-    }
+    container.style.width = "100%";
+    container.style.height = "100vh";
   }
+
+  /* =========================
+     🔥 VELAS MÁS FLUIDAS
+  ========================= */
+  setInterval(() => {
+    const api = ext();
+    api.loadRealQuotes?.();
+  }, 1500); // 🔥 refresco rápido
 
   /* =========================
      🔥 RESPONSIVE
@@ -4407,19 +4417,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
 
-    // recuperar
     if (LAST_AMOUNT !== null) {
       input.value = LAST_AMOUNT;
     }
 
-    // guardar
     input.addEventListener("input", () => {
       LAST_AMOUNT = input.value;
     });
   }
 
+  function restoreAmount() {
+    const input = document.getElementById("brokerOrderSize");
+    if (input && LAST_AMOUNT !== null) {
+      input.value = LAST_AMOUNT;
+    }
+  }
+
   /* =========================
-     🔥 FORZAR ORDEN (SIN ERROR FALSO)
+     🔥 ORDEN REAL SIN ERROR
   ========================= */
   function forceTrade(direction) {
     const api = ext();
@@ -4439,19 +4454,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // 🔥 FORZAR ENVÍO
     api.placeOrder?.({
       symbol,
       amount,
       direction
     });
 
-    console.log("ORDEN ENVIADA:", symbol, amount, direction);
+    restoreAmount();
   }
 
-  /* =========================
-     🔥 CLICK BUY / SELL GLOBAL
-  ========================= */
   document.addEventListener("click", (e) => {
 
     if (e.target.matches('[data-action="buy"]')) {
@@ -4465,6 +4476,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
   });
+
+  /* =========================
+     🔥 PANEL FLOTANTE TRADES
+  ========================= */
+  function createFloatingTradesPanel() {
+
+    if (document.getElementById("floatingTrades")) return;
+
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
+
+    div.style.cssText = `
+      position:fixed;
+      bottom:20px;
+      left:20px;
+      width:260px;
+      background:#111;
+      color:#fff;
+      padding:12px;
+      border-radius:10px;
+      z-index:9999;
+      font-size:12px;
+    `;
+
+    div.innerHTML = `
+      <b>📊 Operaciones</b>
+      <div id="floatingTradesList">Sin operaciones</div>
+    `;
+
+    document.body.appendChild(div);
+  }
+
+  function updateFloatingTrades() {
+    const api = ext();
+    const list = document.getElementById("floatingTradesList");
+    if (!list) return;
+
+    const positions = api.positions || [];
+
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
+    }
+
+    list.innerHTML = positions.map(p => `
+      <div style="margin-top:6px;">
+        ${p.symbol} | ${p.direction} <br>
+        $${p.amount}
+      </div>
+    `).join("");
+  }
+
+  setInterval(updateFloatingTrades, 2000);
 
   /* =========================
      🔥 CAMBIO PANEL
@@ -4492,6 +4556,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       setTimeout(() => {
         fixTrading();
         persistAmount();
+        restoreAmount();
       }, 300);
     }
 
@@ -4505,7 +4570,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 CLICK EN SIMBOLO
+     🔥 CLICK SIMBOLO
   ========================= */
   document.addEventListener("click", (e) => {
 
@@ -4538,6 +4603,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   keepMarketAlive();
   responsiveFix();
   persistAmount();
+  createFloatingTradesPanel();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
@@ -4547,7 +4613,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
-  
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
