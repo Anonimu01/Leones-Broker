@@ -460,7 +460,36 @@
   </div>
 </div>
 
+<script>
+(function(){
 
+  function hasSession(){
+    try{
+      return !!(
+        localStorage.getItem("token") ||
+        localStorage.getItem("BROKER_TOKEN") ||
+        JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER")||"null")?.token
+      );
+    }catch{ return false; }
+  }
+
+  if(!hasSession()){
+    console.warn("⛔ Broker desactivado en público");
+
+    // 💣 bloquear completamente
+    Object.defineProperty(window, "__LEONES_BROKER_EXT2", {
+      value: {},
+      writable: false
+    });
+
+    window.startBrokerUI = function(){
+      console.warn("Bloqueado");
+    };
+
+  }
+
+})();
+</script>
 
 <script>
 /* LEONES / BROKER FRONT — JS #1
