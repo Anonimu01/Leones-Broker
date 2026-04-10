@@ -4552,6 +4552,184 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const api = ext();
 
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+
+  const privateHost = document.getElementById("privateArea_full");
+
+  // 🔒 VALIDACIÓN FUERTE (NO SE EJECUTA EN PÚBLICO)
+  function isPrivateActive() {
+    if (!privateHost) return false;
+
+    const isVisible = privateHost.offsetParent !== null; // visible real
+    const hasSession = (() => {
+      try {
+        const token =
+          localStorage.getItem("token") ||
+          localStorage.getItem("BROKER_TOKEN") ||
+          (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
+        return !!token;
+      } catch {
+        return false;
+      }
+    })();
+
+    return isVisible && hasSession;
+  }
+
+  // 🔥 BLOQUEO TOTAL SI NO ES PRIVADO
+  if (!isPrivateActive()) return;
+
+  const panels = privateHost.querySelectorAll(".panel");
+  const ext = () => window.__LEONES_BROKER_EXT2 || {};
+
+  let LAST_AMOUNT = null;
+
+  /* =========================
+     🔥 BOTONES ACTIVOS
+  ========================= */
+  function setActiveButton(id) {
+    privateHost.querySelectorAll("[data-target]").forEach(btn => {
+      btn.style.background = "transparent";
+      btn.style.color = "#fff";
+    });
+
+    const active = privateHost.querySelector(`[data-target="${id}"]`);
+    if (active) {
+      active.style.background = "gold";
+      active.style.color = "#000";
+    }
+  }
+
+  function showOnlyPanel(id) {
+    panels.forEach(p => p.style.display = "none");
+    const el = privateHost.querySelector("#" + id);
+    if (el) el.style.display = "block";
+    setActiveButton(id);
+  }
+
+  /* =========================
+     🔥 ESPERAR JS2
+  ========================= */
+  function waitForBroker() {
+    return new Promise(resolve => {
+      const i = setInterval(() => {
+        if (window.__LEONES_BROKER_EXT2 && privateHost.querySelector("#brokerSymbolsGrid")) {
+          clearInterval(i);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+
+  /* =========================
+     🔥 MARKET FIX
+  ========================= */
+  function keepMarketAlive() {
+    const target = privateHost.querySelector("#marketPanel");
+    const source = privateHost.querySelector("#brokerSymbolsPanel");
+    if (!target || !source) return;
+
+    if (!target.dataset.ready) {
+      const clone = source.cloneNode(true);
+      clone.id = "marketClone";
+      target.innerHTML = "";
+      target.appendChild(clone);
+      target.dataset.ready = "1";
+    }
+
+    setTimeout(() => {
+      const original = privateHost.querySelector("#brokerSymbolsGrid");
+      const copy = privateHost.querySelector("#marketClone #brokerSymbolsGrid");
+      if (original && copy) {
+        copy.innerHTML = original.innerHTML;
+      }
+    }, 200);
+  }
+
+  /* =========================
+     🔥 GRAFICO
+  ========================= */
+  function fixTrading() {
+    const api = ext();
+    const container = privateHost.querySelector("#tv_chart_container");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const symbol = api.activeSymbol || window.TR?.activeSymbol;
+
+    if (symbol) {
+      api.openTradingView?.({ symbol });
+    }
+
+    container.style.width = "100%";
+    container.style.height = "100vh";
+  }
+
+  /* =========================
+     🔥 MONTO FIJO
+  ========================= */
+  function persistAmount() {
+    const input = privateHost.querySelector("#brokerOrderSize");
+    if (!input) return;
+
+    if (LAST_AMOUNT !== null) input.value = LAST_AMOUNT;
+
+    input.addEventListener("input", () => {
+      LAST_AMOUNT = input.value;
+    });
+  }
+
+  function restoreAmount() {
+    const input = privateHost.querySelector("#brokerOrderSize");
+    if (input && LAST_AMOUNT !== null) input.value = LAST_AMOUNT;
+  }
+
+  /* =========================
+     🔥 ORDEN REAL
+  ========================= */
+  function forceTrade(direction) {
+    const api = ext();
+
+    const amount = parseFloat(privateHost.querySelector("#brokerOrderSize")?.value);
+
+    if (!amount || amount <= 0) {
+      alert("Coloca un monto válido");
+      return;
+    }
+
+    const symbol = api.activeSymbol || window.TR?.activeSymbol;
+
+    if (!symbol) {
+      alert("Selecciona un símbolo");
+      return;
+    }
+
+    api.placeOrder?.({ symbol, amount, direction });
+
+    restoreAmount();
+  }
+
+  privateHost.addEventListener("click", (e) => {
+    if (e.target.closest('[data-action="buy"]')) {
+      e.preventDefault();
+      forceTrade("buy");
+    }
+    if (e.target.closest('[data-action="sell"]')) {
+      e.preventDefault();
+      forceTrade("sell");
+    }
+  });
+
+  /* =========================
+     🔥 CAMBIO PANEL
+  ========================= */
+  function showPanel(id) {
+    showOnlyPanel(id);
+
+    const api = ext();
+
     if (id === "marketPanel") {
       api.loadRealMarkets?.();
       api.loadRealQuotes?.();
@@ -4583,25 +4761,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 CLICK EN SIMBOLO
-  ========================= */
-  privateHost.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
-
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-  }, true);
-
-  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -4610,11 +4769,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await waitForBroker();
 
-  observeChanges();
-  keepMarketAlive();
-  responsiveFix();
   persistAmount();
-  createFloatingTradesPanel();
 
   privateHost.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
