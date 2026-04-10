@@ -4352,51 +4352,32 @@ if (window.__LEONES_BOOTED__) {
 </script>
   
 <script>
+
+// 🔐 DETECTAR LOGIN
+function isUserLoggedIn() {
+  try {
+    return !!(
+      window.__LEONES_USER__ ||
+      localStorage.getItem("token") ||
+      document.body.classList.contains("logged-in")
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+
+  // 🚫 BLOQUEAR TODO SI NO HAY LOGIN
+  if (!isUserLoggedIn()) {
+    console.warn("⛔ JS2 bloqueado: usuario no logueado");
+    return;
+  }
+
   const panels = document.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
-  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
   let LAST_AMOUNT = null;
-
-  function getToken() {
-    try {
-      return localStorage.getItem('token') ||
-        localStorage.getItem('BROKER_TOKEN') ||
-        (JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')?.token || null);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function isLoggedIn() {
-    const t = getToken();
-    return !!t && t !== 'null' && t !== 'undefined';
-  }
-
-  function syncAuthLayout() {
-    const logged = isLoggedIn();
-    document.body.classList.toggle('leones-authenticated', logged);
-    document.body.classList.toggle('leones-guest', !logged);
-
-    const privateHost = document.getElementById("privateArea_full");
-    if (privateHost) privateHost.style.display = logged ? "" : "none";
-
-    panels.forEach(p => {
-      p.style.display = logged ? "none" : "";
-    });
-
-    const publicWraps = [
-      document.getElementById("publicArea_full"),
-      document.getElementById("publicArea"),
-      document.querySelector(".public-area"),
-      document.querySelector(".public-only")
-    ].filter(Boolean);
-
-    publicWraps.forEach(el => {
-      el.style.display = logged ? "none" : "";
-    });
-  }
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
@@ -4415,8 +4396,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function showOnlyPanel(id) {
-    if (isLoggedIn()) return;
-
     panels.forEach(p => p.style.display = "none");
     const el = document.getElementById(id);
     if (el) el.style.display = "block";
@@ -4438,13 +4417,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 MARKET FIX
+     🔥 MARKET FIX (PROTEGIDO)
   ========================= */
   function keepMarketAlive() {
-    if (isLoggedIn()) return;
+
+    if (!isUserLoggedIn()) return;
+
+    const privateRoot = document.getElementById("privateArea_full");
+    if (!privateRoot || privateRoot.style.display === "none") return;
 
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
+
     if (!target || !source) return;
 
     if (!target.dataset.ready) {
@@ -4458,6 +4442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     setTimeout(() => {
       const original = document.getElementById("brokerSymbolsGrid");
       const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
+
       if (original && copy) {
         copy.innerHTML = original.innerHTML;
       }
@@ -4465,7 +4450,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function observeChanges() {
-    if (isLoggedIn()) return;
+
+    if (!isUserLoggedIn()) return;
 
     const observer = new MutationObserver(() => {
       keepMarketAlive();
@@ -4481,15 +4467,16 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
-    if (isLoggedIn()) return;
 
     const api = ext();
     const container = document.getElementById("tv_chart_container");
+
     if (!container) return;
 
     container.innerHTML = "";
 
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
+
     if (symbol) {
       api.openTradingView?.({ symbol });
     }
@@ -4502,7 +4489,7 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 VELAS MÁS FLUIDAS
   ========================= */
   setInterval(() => {
-    if (isLoggedIn()) return;
+    if (!isUserLoggedIn()) return;
     const api = ext();
     api.loadRealQuotes?.();
   }, 1500);
@@ -4511,8 +4498,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 RESPONSIVE
   ========================= */
   function responsiveFix() {
-    if (isLoggedIn()) return;
-
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
 
@@ -4550,12 +4535,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 ORDEN REAL SIN ERROR
+     🔥 ORDEN CORREGIDA
   ========================= */
   function forceTrade(direction) {
-    if (isLoggedIn()) return;
-
     const api = ext();
+
     const amountInput = document.getElementById("brokerOrderSize");
     const amount = parseFloat(amountInput?.value);
 
@@ -4571,17 +4555,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    api.placeOrder?.({
-      symbol,
-      amount,
-      direction
-    });
+    // ✅ FIX REAL (ANTES ESTABA MAL)
+    api.placeOrder?.(direction);
 
     restoreAmount();
   }
 
   document.addEventListener("click", (e) => {
-    if (isLoggedIn()) return;
+
+    if (!isUserLoggedIn()) return;
 
     if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
@@ -4592,17 +4574,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       e.preventDefault();
       forceTrade("sell");
     }
+
   });
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
   function createFloatingTradesPanel() {
-    if (isLoggedIn()) return;
+
     if (document.getElementById("floatingTrades")) return;
 
     const div = document.createElement("div");
     div.id = "floatingTrades";
+
     div.style.cssText = `
       position:fixed;
       bottom:20px;
@@ -4625,7 +4609,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function updateFloatingTrades() {
-    if (isLoggedIn()) return;
+    if (!isUserLoggedIn()) return;
 
     const api = ext();
     const list = document.getElementById("floatingTradesList");
@@ -4652,7 +4636,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CAMBIO PANEL
   ========================= */
   function showPanel(id) {
-    if (isLoggedIn()) return;
 
     showOnlyPanel(id);
 
@@ -4692,7 +4675,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CLICK SIMBOLO
   ========================= */
   document.addEventListener("click", (e) => {
-    if (isLoggedIn()) return;
+
+    if (!isUserLoggedIn()) return;
 
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
@@ -4707,50 +4691,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, { openChart: true });
 
     showPanel("tradingPanel");
-  }, true);
 
-  /* =========================
-     🔥 SYNC LOGIN / LOGOUT
-  ========================= */
-  window.addEventListener("leones:loggedIn", syncAuthLayout);
-  window.addEventListener("leones:loggedOut", syncAuthLayout);
-  window.addEventListener("storage", syncAuthLayout);
+  }, true);
 
   /* =========================
      🔥 INIT
   ========================= */
-  syncAuthLayout();
-
-  if (isLoggedIn()) {
-    if (window.startBrokerUI) {
-      await window.startBrokerUI();
-    }
-
-    await waitForBroker();
-    observeChanges();
-    keepMarketAlive();
-    responsiveFix();
-    persistAmount();
-    createFloatingTradesPanel();
-  } else {
-    observeChanges();
-    keepMarketAlive();
-    responsiveFix();
-    persistAmount();
-    createFloatingTradesPanel();
-
-    document.querySelectorAll("[data-target]").forEach(btn => {
-      btn.onclick = () => showPanel(btn.dataset.target);
-    });
-
-    showPanel("dashboardPanel");
+  if (window.startBrokerUI && isUserLoggedIn()) {
+    await window.startBrokerUI();
   }
+
+  await waitForBroker();
+
+  observeChanges();
+  keepMarketAlive();
+  responsiveFix();
+  persistAmount();
+  createFloatingTradesPanel();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
-  syncAuthLayout();
+  showPanel("dashboardPanel");
+
 });
 </script>
   
