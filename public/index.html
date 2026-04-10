@@ -2118,30 +2118,6 @@ if (window.__LEONES_BOOTED__) {
     return !!t && t !== 'null' && t !== 'undefined';
   }
 
-  function syncAuthLayout() {
-    const logged = isLoggedIn();
-    document.body.classList.toggle('leones-authenticated', logged);
-    document.body.classList.toggle('leones-guest', !logged);
-
-    const root = document.getElementById(ROOT_ID);
-    if (root) root.style.display = logged ? '' : 'none';
-
-    const publicWraps = [
-      document.getElementById('publicArea_full'),
-      document.getElementById('publicArea'),
-      document.querySelector('.public-area'),
-      document.querySelector('.public-only')
-    ].filter(Boolean);
-
-    publicWraps.forEach(el => {
-      el.style.display = logged ? 'none' : '';
-    });
-
-    document.querySelectorAll('.panel').forEach(el => {
-      try { el.style.display = logged ? 'none' : ''; } catch (e) {}
-    });
-  }
-
   function getUser() {
     try {
       return safeParseJSON(localStorage.getItem(SESSION_KEY), null) || {};
@@ -2373,7 +2349,6 @@ if (window.__LEONES_BOOTED__) {
       root.id = ROOT_ID;
       host.appendChild(root);
     }
-    root.style.display = '';
     return root;
   }
 
@@ -2382,19 +2357,6 @@ if (window.__LEONES_BOOTED__) {
     const style = document.createElement('style');
     style.id = 'leones-ext2-style';
     style.textContent = `
-      body.leones-authenticated .panel,
-      body.leones-authenticated .public-only,
-      body.leones-authenticated .public-area,
-      body.leones-authenticated #publicArea_full,
-      body.leones-authenticated #publicArea{
-        display:none !important;
-      }
-
-      body.leones-guest #privateArea_full,
-      body.leones-guest #${ROOT_ID}{
-        display:none !important;
-      }
-
       #${ROOT_ID}{
         width:100%;
         max-width:1200px;
@@ -3042,8 +3004,6 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderBottomPanels() {
-    if (!isLoggedIn()) return;
-
     const meta = getActiveSymbolMeta();
     const quote = meta ? currentQuote(meta.symbol) : null;
     const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
@@ -3205,14 +3165,6 @@ if (window.__LEONES_BOOTED__) {
     state.lastChartSymbol = null;
     stopAutoRefresh();
     document.body.classList.remove('leones-menu-open');
-
-    const root = document.getElementById(ROOT_ID);
-    if (root) {
-      root.style.display = 'none';
-      root.dataset.leonesShellBuilt = '0';
-    }
-
-    syncAuthLayout();
   }
 
   function updateTradesPrices(prices) {
@@ -3733,7 +3685,6 @@ if (window.__LEONES_BOOTED__) {
       renderPositions();
       renderSymbolsGrid();
       renderBottomPanels();
-      syncAuthLayout();
     } catch (e) {
       warn('requestBackendRefresh', e);
     }
@@ -3788,7 +3739,7 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function selectSymbol(meta, options = {}) {
-    if (!meta || !isLoggedIn()) return;
+    if (!meta) return;
     const openChart = options.openChart !== false;
 
     state.activeSymbol = meta.symbol;
@@ -4165,33 +4116,18 @@ if (window.__LEONES_BOOTED__) {
     window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
 
     window.addEventListener('leones:loggedIn', () => {
-      syncAuthLayout();
       if (isLoggedIn()) initTradingUI().catch(e => warn('initTradingUI after login', e));
     });
 
     window.addEventListener('leones:loggedOut', () => {
       resetTradingState();
-      syncAuthLayout();
-    });
-
-    window.addEventListener('storage', () => {
-      syncAuthLayout();
-      if (isLoggedIn()) {
-        initTradingUI().catch(() => {});
-      } else {
-        resetTradingState();
-      }
     });
   }
 
   async function initTradingUI(context = {}) {
-    if (!isLoggedIn()) {
-      syncAuthLayout();
-      return null;
-    }
+    if (!isLoggedIn()) return null;
 
     injectUiStyles();
-    syncAuthLayout();
 
     const root = ensureRoot();
     if (!root) return null;
@@ -4243,7 +4179,6 @@ if (window.__LEONES_BOOTED__) {
       setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
     }
 
-    syncAuthLayout();
     return true;
   }
 
@@ -4301,7 +4236,7 @@ if (window.__LEONES_BOOTED__) {
   function renderBottomPanelsWrapper() {
     renderBottomPanels();
     const meta = getActiveSymbolMeta();
-    if (meta && isLoggedIn()) {
+    if (meta) {
       renderSymbolDetails(meta);
       requestRealtimeForSymbol(meta);
     }
@@ -4310,8 +4245,6 @@ if (window.__LEONES_BOOTED__) {
   function bootIfLoggedIn() {
     if (state.booted) return;
     state.booted = true;
-
-    syncAuthLayout();
 
     if (isLoggedIn() && getPrivateHost()) {
       initTradingUI().catch(e => warn('boot initTradingUI', e));
@@ -4326,14 +4259,12 @@ if (window.__LEONES_BOOTED__) {
   } else {
     document.addEventListener('DOMContentLoaded', () => {
       injectUiStyles();
-      syncAuthLayout();
       bootIfLoggedIn();
     });
   }
 
   window.addEventListener('load', () => {
     try {
-      syncAuthLayout();
       if (isLoggedIn()) {
         initTradingUI().catch(() => {});
       }
@@ -4342,7 +4273,6 @@ if (window.__LEONES_BOOTED__) {
 
   setInterval(() => {
     try {
-      if (!isLoggedIn()) return;
       renderBottomPanelsWrapper();
     } catch (e) {}
   }, 5000);
