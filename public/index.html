@@ -1938,7 +1938,7 @@ if (window.__LEONES_BOOTED__) {
   color:#fff;
   font-size:20px;
   font-weight:800;
-
+  ">
   Saldo: <span id="dashboardBalance">--</span>
 </div>
 <div id="dashboardPanel" class="panel"></div>   <!-- INICIO -->
@@ -2116,6 +2116,30 @@ if (window.__LEONES_BOOTED__) {
   function isLoggedIn() {
     const t = getToken();
     return !!t && t !== 'null' && t !== 'undefined';
+  }
+
+  function syncAuthLayout() {
+    const logged = isLoggedIn();
+    document.body.classList.toggle('leones-authenticated', logged);
+    document.body.classList.toggle('leones-guest', !logged);
+
+    const root = document.getElementById(ROOT_ID);
+    if (root) root.style.display = logged ? '' : 'none';
+
+    const publicWraps = [
+      document.getElementById('publicArea_full'),
+      document.getElementById('publicArea'),
+      document.querySelector('.public-area'),
+      document.querySelector('.public-only')
+    ].filter(Boolean);
+
+    publicWraps.forEach(el => {
+      el.style.display = logged ? 'none' : '';
+    });
+
+    document.querySelectorAll('.panel').forEach(el => {
+      try { el.style.display = logged ? 'none' : ''; } catch (e) {}
+    });
   }
 
   function getUser() {
@@ -2349,6 +2373,7 @@ if (window.__LEONES_BOOTED__) {
       root.id = ROOT_ID;
       host.appendChild(root);
     }
+    root.style.display = '';
     return root;
   }
 
@@ -2357,6 +2382,19 @@ if (window.__LEONES_BOOTED__) {
     const style = document.createElement('style');
     style.id = 'leones-ext2-style';
     style.textContent = `
+      body.leones-authenticated .panel,
+      body.leones-authenticated .public-only,
+      body.leones-authenticated .public-area,
+      body.leones-authenticated #publicArea_full,
+      body.leones-authenticated #publicArea{
+        display:none !important;
+      }
+
+      body.leones-guest #privateArea_full,
+      body.leones-guest #${ROOT_ID}{
+        display:none !important;
+      }
+
       #${ROOT_ID}{
         width:100%;
         max-width:1200px;
@@ -3004,6 +3042,8 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderBottomPanels() {
+    if (!isLoggedIn()) return;
+
     const meta = getActiveSymbolMeta();
     const quote = meta ? currentQuote(meta.symbol) : null;
     const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
@@ -3165,6 +3205,14 @@ if (window.__LEONES_BOOTED__) {
     state.lastChartSymbol = null;
     stopAutoRefresh();
     document.body.classList.remove('leones-menu-open');
+
+    const root = document.getElementById(ROOT_ID);
+    if (root) {
+      root.style.display = 'none';
+      root.dataset.leonesShellBuilt = '0';
+    }
+
+    syncAuthLayout();
   }
 
   function updateTradesPrices(prices) {
@@ -3685,6 +3733,7 @@ if (window.__LEONES_BOOTED__) {
       renderPositions();
       renderSymbolsGrid();
       renderBottomPanels();
+      syncAuthLayout();
     } catch (e) {
       warn('requestBackendRefresh', e);
     }
@@ -3739,7 +3788,7 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function selectSymbol(meta, options = {}) {
-    if (!meta) return;
+    if (!meta || !isLoggedIn()) return;
     const openChart = options.openChart !== false;
 
     state.activeSymbol = meta.symbol;
@@ -4116,18 +4165,33 @@ if (window.__LEONES_BOOTED__) {
     window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
 
     window.addEventListener('leones:loggedIn', () => {
+      syncAuthLayout();
       if (isLoggedIn()) initTradingUI().catch(e => warn('initTradingUI after login', e));
     });
 
     window.addEventListener('leones:loggedOut', () => {
       resetTradingState();
+      syncAuthLayout();
+    });
+
+    window.addEventListener('storage', () => {
+      syncAuthLayout();
+      if (isLoggedIn()) {
+        initTradingUI().catch(() => {});
+      } else {
+        resetTradingState();
+      }
     });
   }
 
   async function initTradingUI(context = {}) {
-    if (!isLoggedIn()) return null;
+    if (!isLoggedIn()) {
+      syncAuthLayout();
+      return null;
+    }
 
     injectUiStyles();
+    syncAuthLayout();
 
     const root = ensureRoot();
     if (!root) return null;
@@ -4179,6 +4243,7 @@ if (window.__LEONES_BOOTED__) {
       setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
     }
 
+    syncAuthLayout();
     return true;
   }
 
@@ -4236,7 +4301,7 @@ if (window.__LEONES_BOOTED__) {
   function renderBottomPanelsWrapper() {
     renderBottomPanels();
     const meta = getActiveSymbolMeta();
-    if (meta) {
+    if (meta && isLoggedIn()) {
       renderSymbolDetails(meta);
       requestRealtimeForSymbol(meta);
     }
@@ -4245,6 +4310,8 @@ if (window.__LEONES_BOOTED__) {
   function bootIfLoggedIn() {
     if (state.booted) return;
     state.booted = true;
+
+    syncAuthLayout();
 
     if (isLoggedIn() && getPrivateHost()) {
       initTradingUI().catch(e => warn('boot initTradingUI', e));
@@ -4259,12 +4326,14 @@ if (window.__LEONES_BOOTED__) {
   } else {
     document.addEventListener('DOMContentLoaded', () => {
       injectUiStyles();
+      syncAuthLayout();
       bootIfLoggedIn();
     });
   }
 
   window.addEventListener('load', () => {
     try {
+      syncAuthLayout();
       if (isLoggedIn()) {
         initTradingUI().catch(() => {});
       }
@@ -4273,6 +4342,7 @@ if (window.__LEONES_BOOTED__) {
 
   setInterval(() => {
     try {
+      if (!isLoggedIn()) return;
       renderBottomPanelsWrapper();
     } catch (e) {}
   }, 5000);
@@ -4280,15 +4350,53 @@ if (window.__LEONES_BOOTED__) {
   log('EXT2 real loaded');
 })();
 </script>
-
   
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
-
   const panels = document.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
+  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
   let LAST_AMOUNT = null;
+
+  function getToken() {
+    try {
+      return localStorage.getItem('token') ||
+        localStorage.getItem('BROKER_TOKEN') ||
+        (JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')?.token || null);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isLoggedIn() {
+    const t = getToken();
+    return !!t && t !== 'null' && t !== 'undefined';
+  }
+
+  function syncAuthLayout() {
+    const logged = isLoggedIn();
+    document.body.classList.toggle('leones-authenticated', logged);
+    document.body.classList.toggle('leones-guest', !logged);
+
+    const privateHost = document.getElementById("privateArea_full");
+    if (privateHost) privateHost.style.display = logged ? "" : "none";
+
+    panels.forEach(p => {
+      p.style.display = logged ? "none" : "";
+    });
+
+    const publicWraps = [
+      document.getElementById("publicArea_full"),
+      document.getElementById("publicArea"),
+      document.querySelector(".public-area"),
+      document.querySelector(".public-only")
+    ].filter(Boolean);
+
+    publicWraps.forEach(el => {
+      el.style.display = logged ? "none" : "";
+    });
+  }
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
@@ -4307,6 +4415,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function showOnlyPanel(id) {
+    if (isLoggedIn()) return;
+
     panels.forEach(p => p.style.display = "none");
     const el = document.getElementById(id);
     if (el) el.style.display = "block";
@@ -4331,6 +4441,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 MARKET FIX
   ========================= */
   function keepMarketAlive() {
+    if (isLoggedIn()) return;
+
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
     if (!target || !source) return;
@@ -4353,6 +4465,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function observeChanges() {
+    if (isLoggedIn()) return;
+
     const observer = new MutationObserver(() => {
       keepMarketAlive();
     });
@@ -4367,16 +4481,15 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
+    if (isLoggedIn()) return;
 
     const api = ext();
     const container = document.getElementById("tv_chart_container");
-
     if (!container) return;
 
     container.innerHTML = "";
 
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
-
     if (symbol) {
       api.openTradingView?.({ symbol });
     }
@@ -4389,14 +4502,17 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 VELAS MÁS FLUIDAS
   ========================= */
   setInterval(() => {
+    if (isLoggedIn()) return;
     const api = ext();
     api.loadRealQuotes?.();
-  }, 1500); // 🔥 refresco rápido
+  }, 1500);
 
   /* =========================
      🔥 RESPONSIVE
   ========================= */
   function responsiveFix() {
+    if (isLoggedIn()) return;
+
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
 
@@ -4437,8 +4553,9 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 ORDEN REAL SIN ERROR
   ========================= */
   function forceTrade(direction) {
-    const api = ext();
+    if (isLoggedIn()) return;
 
+    const api = ext();
     const amountInput = document.getElementById("brokerOrderSize");
     const amount = parseFloat(amountInput?.value);
 
@@ -4464,6 +4581,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   document.addEventListener("click", (e) => {
+    if (isLoggedIn()) return;
 
     if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
@@ -4474,19 +4592,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       e.preventDefault();
       forceTrade("sell");
     }
-
   });
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
   function createFloatingTradesPanel() {
-
+    if (isLoggedIn()) return;
     if (document.getElementById("floatingTrades")) return;
 
     const div = document.createElement("div");
     div.id = "floatingTrades";
-
     div.style.cssText = `
       position:fixed;
       bottom:20px;
@@ -4509,6 +4625,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function updateFloatingTrades() {
+    if (isLoggedIn()) return;
+
     const api = ext();
     const list = document.getElementById("floatingTradesList");
     if (!list) return;
@@ -4534,6 +4652,7 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CAMBIO PANEL
   ========================= */
   function showPanel(id) {
+    if (isLoggedIn()) return;
 
     showOnlyPanel(id);
 
@@ -4573,6 +4692,7 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CLICK SIMBOLO
   ========================= */
   document.addEventListener("click", (e) => {
+    if (isLoggedIn()) return;
 
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
@@ -4587,32 +4707,53 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, { openChart: true });
 
     showPanel("tradingPanel");
-
   }, true);
+
+  /* =========================
+     🔥 SYNC LOGIN / LOGOUT
+  ========================= */
+  window.addEventListener("leones:loggedIn", syncAuthLayout);
+  window.addEventListener("leones:loggedOut", syncAuthLayout);
+  window.addEventListener("storage", syncAuthLayout);
 
   /* =========================
      🔥 INIT
   ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
+  syncAuthLayout();
+
+  if (isLoggedIn()) {
+    if (window.startBrokerUI) {
+      await window.startBrokerUI();
+    }
+
+    await waitForBroker();
+    observeChanges();
+    keepMarketAlive();
+    responsiveFix();
+    persistAmount();
+    createFloatingTradesPanel();
+  } else {
+    observeChanges();
+    keepMarketAlive();
+    responsiveFix();
+    persistAmount();
+    createFloatingTradesPanel();
+
+    document.querySelectorAll("[data-target]").forEach(btn => {
+      btn.onclick = () => showPanel(btn.dataset.target);
+    });
+
+    showPanel("dashboardPanel");
   }
-
-  await waitForBroker();
-
-  observeChanges();
-  keepMarketAlive();
-  responsiveFix();
-  persistAmount();
-  createFloatingTradesPanel();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
-  showPanel("dashboardPanel");
-
+  syncAuthLayout();
 });
 </script>
+  
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
