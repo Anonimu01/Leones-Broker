@@ -1950,7 +1950,51 @@ if (window.__LEONES_BOOTED__) {
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
 
+<script>
+(function () {
 
+  function hasSession() {
+    try {
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("BROKER_TOKEN") ||
+        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
+
+      return !!token;
+    } catch {
+      return false;
+    }
+  }
+
+  const privateHost = document.getElementById("privateArea_full");
+  const isPrivate = privateHost && privateHost.offsetParent !== null;
+
+  // 🔥 SI NO HAY SESIÓN → BLOQUEAR TODO EL BROKER
+  if (!hasSession() || !isPrivate) {
+
+    console.warn("⛔ Broker bloqueado en público");
+
+    // 💣 MATAMOS startBrokerUI
+    window.startBrokerUI = () => {
+      console.warn("Bloqueado startBrokerUI");
+    };
+
+    // 💣 MATAMOS EL OBJETO COMPLETO
+    window.__LEONES_BROKER_EXT2 = {
+      initTradingUI: () => {},
+      loadRealMarkets: () => {},
+      loadRealQuotes: () => {},
+      loadAccount: () => {},
+      loadPositions: () => {},
+      placeOrder: () => {},
+      openTradingView: () => {},
+      selectSymbol: () => {}
+    };
+
+  }
+
+})();
+</script>
 
 <!-- antes de este script -->
 
@@ -4544,6 +4588,45 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   showPanel("dashboardPanel");
+
+});
+</script>
+
+
+  <script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  function hasSession() {
+    try {
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("BROKER_TOKEN") ||
+        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
+
+      return !!token;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!hasSession()) {
+
+    // 🔥 BORRAR TODO LO PRIVADO
+    document.querySelectorAll(`
+      #brokerSummaryPanel,
+      #brokerSymbolsPanel,
+      #brokerChartPanel,
+      #brokerTicketPanel,
+      #brokerAccountPanel,
+      #brokerPositionsPanel,
+      #brokerSymbolDetailsPanel
+    `).forEach(el => el.remove());
+
+    // 🔥 OCULTAR CONTENEDOR
+    const privateHost = document.getElementById("privateArea_full");
+    if (privateHost) privateHost.style.display = "none";
+
+  }
 
 });
 </script>
