@@ -460,35 +460,50 @@
   </div>
 </div>
 
-<script>
-(function(){
+  <div id="publicArea">
+  <!-- TODO LO PUBLICO -->
+</div>
 
-  function hasSession(){
-    try{
-      return !!(
+<div id="privateArea_full" style="display:none;">
+  <!-- TODO EL DASHBOARD -->
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  function hasSession() {
+    try {
+      const token =
         localStorage.getItem("token") ||
         localStorage.getItem("BROKER_TOKEN") ||
-        JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER")||"null")?.token
-      );
-    }catch{ return false; }
+        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
+
+      return !!token;
+    } catch {
+      return false;
+    }
   }
 
-  if(!hasSession()){
-    console.warn("⛔ Broker desactivado en público");
+  const isLogged = hasSession();
 
-    // 💣 bloquear completamente
-    Object.defineProperty(window, "__LEONES_BROKER_EXT2", {
-      value: {},
-      writable: false
-    });
+  const publicArea =
+    document.getElementById("publicArea") ||
+    document.querySelector(".public-area") ||
+    document.querySelector("[data-public]");
 
-    window.startBrokerUI = function(){
-      console.warn("Bloqueado");
-    };
+  const privateArea =
+    document.getElementById("privateArea_full");
 
+  // 🔥 CONTROL TOTAL DE VISIBILIDAD
+  if (isLogged) {
+    if (publicArea) publicArea.style.display = "none";
+    if (privateArea) privateArea.style.display = "block";
+  } else {
+    if (publicArea) publicArea.style.display = "block";
+    if (privateArea) privateArea.style.display = "none";
   }
 
-})();
+});
 </script>
 
 <script>
