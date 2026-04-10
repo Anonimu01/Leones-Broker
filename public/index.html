@@ -460,51 +460,7 @@
   </div>
 </div>
 
-  <div id="publicArea">
-  <!-- TODO LO PUBLICO -->
-</div>
 
-<div id="privateArea_full" style="display:none;">
-  <!-- TODO EL DASHBOARD -->
-</div>
-
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  function hasSession() {
-    try {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("BROKER_TOKEN") ||
-        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
-
-      return !!token;
-    } catch {
-      return false;
-    }
-  }
-
-  const isLogged = hasSession();
-
-  const publicArea =
-    document.getElementById("publicArea") ||
-    document.querySelector(".public-area") ||
-    document.querySelector("[data-public]");
-
-  const privateArea =
-    document.getElementById("privateArea_full");
-
-  // 🔥 CONTROL TOTAL DE VISIBILIDAD
-  if (isLogged) {
-    if (publicArea) publicArea.style.display = "none";
-    if (privateArea) privateArea.style.display = "block";
-  } else {
-    if (publicArea) publicArea.style.display = "block";
-    if (privateArea) privateArea.style.display = "none";
-  }
-
-});
-</script>
 
 <script>
 /* LEONES / BROKER FRONT — JS #1
@@ -1994,51 +1950,7 @@ if (window.__LEONES_BOOTED__) {
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
 
-<script>
-(function () {
 
-  function hasSession() {
-    try {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("BROKER_TOKEN") ||
-        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
-
-      return !!token;
-    } catch {
-      return false;
-    }
-  }
-
-  const privateHost = document.getElementById("privateArea_full");
-  const isPrivate = privateHost && privateHost.offsetParent !== null;
-
-  // 🔥 SI NO HAY SESIÓN → BLOQUEAR TODO EL BROKER
-  if (!hasSession() || !isPrivate) {
-
-    console.warn("⛔ Broker bloqueado en público");
-
-    // 💣 MATAMOS startBrokerUI
-    window.startBrokerUI = () => {
-      console.warn("Bloqueado startBrokerUI");
-    };
-
-    // 💣 MATAMOS EL OBJETO COMPLETO
-    window.__LEONES_BROKER_EXT2 = {
-      initTradingUI: () => {},
-      loadRealMarkets: () => {},
-      loadRealQuotes: () => {},
-      loadAccount: () => {},
-      loadPositions: () => {},
-      placeOrder: () => {},
-      openTradingView: () => {},
-      selectSymbol: () => {}
-    };
-
-  }
-
-})();
-</script>
 
 <!-- antes de este script -->
 
@@ -4369,59 +4281,25 @@ if (window.__LEONES_BOOTED__) {
 })();
 </script>
 
-        <script>
+  
+<script>
 document.addEventListener("DOMContentLoaded", async () => {
 
-  const privateHost = document.getElementById("privateArea_full");
-
-  /* =========================
-     🔒 VALIDACIÓN REAL (ANTI BUG)
-  ========================= */
-  function hasSession() {
-    try {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("BROKER_TOKEN") ||
-        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
-
-      return !!token;
-    } catch {
-      return false;
-    }
-  }
-
-  function isPrivateActive() {
-    if (!privateHost) return false;
-
-    const visible = privateHost.style.display !== "none" && privateHost.offsetParent !== null;
-
-    return visible && hasSession();
-  }
-
-  // 🔥 BLOQUEO TOTAL (CLAVE)
-  if (!isPrivateActive()) {
-    if (privateHost) privateHost.style.display = "none";
-    return;
-  }
-
-  /* =========================
-     🔥 VARIABLES
-  ========================= */
-  const panels = privateHost.querySelectorAll(".panel");
+  const panels = document.querySelectorAll(".panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
 
   /* =========================
-     🔥 BOTONES ACTIVOS
+     🔥 BOTONES ACTIVOS DORADO
   ========================= */
   function setActiveButton(id) {
-    privateHost.querySelectorAll("[data-target]").forEach(btn => {
+    document.querySelectorAll("[data-target]").forEach(btn => {
       btn.style.background = "transparent";
       btn.style.color = "#fff";
     });
 
-    const active = privateHost.querySelector(`[data-target="${id}"]`);
+    const active = document.querySelector(`[data-target="${id}"]`);
     if (active) {
       active.style.background = "gold";
       active.style.color = "#000";
@@ -4430,10 +4308,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function showOnlyPanel(id) {
     panels.forEach(p => p.style.display = "none");
-
-    const el = privateHost.querySelector("#" + id);
+    const el = document.getElementById(id);
     if (el) el.style.display = "block";
-
     setActiveButton(id);
   }
 
@@ -4443,7 +4319,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && privateHost.querySelector("#brokerSymbolsGrid")) {
+        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
           clearInterval(i);
           resolve();
         }
@@ -4452,87 +4328,119 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 MARKET FIX (NO DUPLICA)
+     🔥 MARKET FIX
   ========================= */
   function keepMarketAlive() {
-    const target = privateHost.querySelector("#marketPanel");
-    const source = privateHost.querySelector("#brokerSymbolsPanel");
-
+    const target = document.getElementById("marketPanel");
+    const source = document.getElementById("brokerSymbolsPanel");
     if (!target || !source) return;
 
-    let clone = privateHost.querySelector("#marketClone");
-
-    if (!clone) {
-      clone = source.cloneNode(true);
+    if (!target.dataset.ready) {
+      const clone = source.cloneNode(true);
       clone.id = "marketClone";
       target.innerHTML = "";
       target.appendChild(clone);
+      target.dataset.ready = "1";
     }
 
-    const original = privateHost.querySelector("#brokerSymbolsGrid");
-    const copy = clone.querySelector("#brokerSymbolsGrid");
+    setTimeout(() => {
+      const original = document.getElementById("brokerSymbolsGrid");
+      const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
+      if (original && copy) {
+        copy.innerHTML = original.innerHTML;
+      }
+    }, 200);
+  }
 
-    if (original && copy) {
-      copy.innerHTML = original.innerHTML;
-    }
+  function observeChanges() {
+    const observer = new MutationObserver(() => {
+      keepMarketAlive();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
   }
 
   /* =========================
-     🔥 GRAFICO FIX REAL
+     🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
+
     const api = ext();
-    const container = privateHost.querySelector("#tv_chart_container");
+    const container = document.getElementById("tv_chart_container");
 
     if (!container) return;
 
+    container.innerHTML = "";
+
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
 
-    if (!symbol) return;
+    if (symbol) {
+      api.openTradingView?.({ symbol });
+    }
 
     container.style.width = "100%";
     container.style.height = "100vh";
-
-    // 🔥 NO BORRAR HTML -> evita bug del chart
-    setTimeout(() => {
-      api.openTradingView?.({ symbol });
-    }, 100);
   }
 
   /* =========================
-     🔥 MONTO PERSISTENTE
+     🔥 VELAS MÁS FLUIDAS
   ========================= */
-  function persistAmount() {
-    const input = privateHost.querySelector("#brokerOrderSize");
-    if (!input) return;
+  setInterval(() => {
+    const api = ext();
+    api.loadRealQuotes?.();
+  }, 1500); // 🔥 refresco rápido
 
-    if (LAST_AMOUNT !== null && document.activeElement !== input) {
-      input.value = LAST_AMOUNT;
-    }
+  /* =========================
+     🔥 RESPONSIVE
+  ========================= */
+  function responsiveFix() {
+    const cols = document.getElementById("brokerColumns");
+    if (!cols) return;
 
-    if (!input.dataset.bound) {
-      input.addEventListener("input", () => {
-        LAST_AMOUNT = input.value;
-      });
-      input.dataset.bound = "1";
+    if (window.innerWidth < 768) {
+      cols.style.display = "block";
+    } else {
+      cols.style.display = "grid";
+      cols.style.gridTemplateColumns = "1fr 350px";
     }
   }
 
+  window.addEventListener("resize", responsiveFix);
+
+  /* =========================
+     🔥 MANTENER MONTO
+  ========================= */
+  function persistAmount() {
+    const input = document.getElementById("brokerOrderSize");
+    if (!input) return;
+
+    if (LAST_AMOUNT !== null) {
+      input.value = LAST_AMOUNT;
+    }
+
+    input.addEventListener("input", () => {
+      LAST_AMOUNT = input.value;
+    });
+  }
+
   function restoreAmount() {
-    const input = privateHost.querySelector("#brokerOrderSize");
+    const input = document.getElementById("brokerOrderSize");
     if (input && LAST_AMOUNT !== null) {
       input.value = LAST_AMOUNT;
     }
   }
 
   /* =========================
-     🔥 ORDEN REAL (SIN BLOQUEO)
+     🔥 ORDEN REAL SIN ERROR
   ========================= */
   function forceTrade(direction) {
     const api = ext();
 
-    const input = privateHost.querySelector("#brokerOrderSize");
-    const amount = parseFloat(input?.value);
+    const amountInput = document.getElementById("brokerOrderSize");
+    const amount = parseFloat(amountInput?.value);
 
     if (!amount || amount <= 0) {
       alert("Coloca un monto válido");
@@ -4546,38 +4454,81 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    try {
-      api.placeOrder?.({
-        symbol,
-        amount,
-        direction
-      });
-
-      console.log("✅ ORDEN ENVIADA:", symbol, amount, direction);
-
-    } catch (e) {
-      console.warn("Orden fallback", e);
-    }
+    api.placeOrder?.({
+      symbol,
+      amount,
+      direction
+    });
 
     restoreAmount();
   }
 
-  /* =========================
-     🔥 CLICK GLOBAL
-  ========================= */
-  privateHost.addEventListener("click", (e) => {
+  document.addEventListener("click", (e) => {
 
-    if (e.target.closest('[data-action="buy"]')) {
+    if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
       forceTrade("buy");
     }
 
-    if (e.target.closest('[data-action="sell"]')) {
+    if (e.target.matches('[data-action="sell"]')) {
       e.preventDefault();
       forceTrade("sell");
     }
 
   });
+
+  /* =========================
+     🔥 PANEL FLOTANTE TRADES
+  ========================= */
+  function createFloatingTradesPanel() {
+
+    if (document.getElementById("floatingTrades")) return;
+
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
+
+    div.style.cssText = `
+      position:fixed;
+      bottom:20px;
+      left:20px;
+      width:260px;
+      background:#111;
+      color:#fff;
+      padding:12px;
+      border-radius:10px;
+      z-index:9999;
+      font-size:12px;
+    `;
+
+    div.innerHTML = `
+      <b>📊 Operaciones</b>
+      <div id="floatingTradesList">Sin operaciones</div>
+    `;
+
+    document.body.appendChild(div);
+  }
+
+  function updateFloatingTrades() {
+    const api = ext();
+    const list = document.getElementById("floatingTradesList");
+    if (!list) return;
+
+    const positions = api.positions || [];
+
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
+    }
+
+    list.innerHTML = positions.map(p => `
+      <div style="margin-top:6px;">
+        ${p.symbol} | ${p.direction} <br>
+        $${p.amount}
+      </div>
+    `).join("");
+  }
+
+  setInterval(updateFloatingTrades, 2000);
 
   /* =========================
      🔥 CAMBIO PANEL
@@ -4599,11 +4550,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (id === "tradingPanel") {
+      api.openTradingView?.();
       api.loadRealQuotes?.();
 
       setTimeout(() => {
         fixTrading();
         persistAmount();
+        restoreAmount();
       }, 300);
     }
 
@@ -4617,6 +4570,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
+     🔥 CLICK SIMBOLO
+  ========================= */
+  document.addEventListener("click", (e) => {
+
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
+
+    const api = ext();
+
+    api.selectSymbol?.({
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
+      market: el.dataset.market || ""
+    }, { openChart: true });
+
+    showPanel("tradingPanel");
+
+  }, true);
+
+  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -4625,9 +4599,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await waitForBroker();
 
+  observeChanges();
+  keepMarketAlive();
+  responsiveFix();
   persistAmount();
+  createFloatingTradesPanel();
 
-  privateHost.querySelectorAll("[data-target]").forEach(btn => {
+  document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
@@ -4635,46 +4613,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
-
-
-  <script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  function hasSession() {
-    try {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("BROKER_TOKEN") ||
-        (JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "null")?.token || null);
-
-      return !!token;
-    } catch {
-      return false;
-    }
-  }
-
-  if (!hasSession()) {
-
-    // 🔥 BORRAR TODO LO PRIVADO
-    document.querySelectorAll(`
-      #brokerSummaryPanel,
-      #brokerSymbolsPanel,
-      #brokerChartPanel,
-      #brokerTicketPanel,
-      #brokerAccountPanel,
-      #brokerPositionsPanel,
-      #brokerSymbolDetailsPanel
-    `).forEach(el => el.remove());
-
-    // 🔥 OCULTAR CONTENEDOR
-    const privateHost = document.getElementById("privateArea_full");
-    if (privateHost) privateHost.style.display = "none";
-
-  }
-
-});
-</script>
-          
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
