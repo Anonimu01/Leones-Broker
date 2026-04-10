@@ -471,6 +471,36 @@
    - Compatible con JS #2 sin duplicar lógica
 */
 
+
+const privateArea = document.getElementById("privateArea_full");
+const publicArea = document.getElementById("publicArea"); // asegúrate que exista
+
+function isLoggedIn() {
+  return !!localStorage.getItem("token");
+}
+
+function updateUI() {
+  if (isLoggedIn()) {
+    privateArea.style.display = "block";
+    if (publicArea) publicArea.style.display = "none";
+  } else {
+    privateArea.style.display = "none";
+    if (publicArea) publicArea.style.display = "block";
+  }
+}
+
+updateUI();
+
+
+
+
+
+
+
+
+
+  
+
 if (window.__LEONES_BOOTED__) {
   console.warn('[LEONES] script already booted, skipping re-evaluation.');
 } else {
@@ -4299,7 +4329,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  const panels = document.querySelectorAll(".panel");
+ const panels = document.querySelectorAll("#privateArea_full .panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
