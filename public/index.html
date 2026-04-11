@@ -471,7 +471,6 @@
    - Compatible con JS #2 sin duplicar lógica
 */
 
-
 if (window.__LEONES_BOOTED__) {
   console.warn('[LEONES] script already booted, skipping re-evaluation.');
 } else {
@@ -1939,9 +1938,10 @@ if (window.__LEONES_BOOTED__) {
   color:#fff;
   font-size:20px;
   font-weight:800;
-  ">
+ ">
   <span id="dashboardBalance"></span>
 </div>
+
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
@@ -4276,31 +4276,12 @@ if (window.__LEONES_BOOTED__) {
   log('EXT2 real loaded');
 })();
 </script>
+
   
 <script>
-
-// 🔐 DETECTAR LOGIN
-function isUserLoggedIn() {
-  try {
-    return !!(
-      window.__LEONES_USER__ ||
-      localStorage.getItem("token") ||
-      document.body.classList.contains("logged-in")
-    );
-  } catch (e) {
-    return false;
-  }
-}
-
 document.addEventListener("DOMContentLoaded", async () => {
 
-  // 🚫 BLOQUEAR TODO SI NO HAY LOGIN
-  if (!isUserLoggedIn()) {
-    console.warn("⛔ JS2 bloqueado: usuario no logueado");
-    return;
-  }
-
- const panels = document.querySelectorAll("#privateArea_full .panel");
+  const panels = document.querySelectorAll("#privateArea_full .panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
@@ -4343,18 +4324,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 MARKET FIX (PROTEGIDO)
+     🔥 MARKET FIX
   ========================= */
   function keepMarketAlive() {
-
-    if (!isUserLoggedIn()) return;
-
-    const privateRoot = document.getElementById("privateArea_full");
-    if (!privateRoot || privateRoot.style.display === "none") return;
-
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
-
     if (!target || !source) return;
 
     if (!target.dataset.ready) {
@@ -4368,7 +4342,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     setTimeout(() => {
       const original = document.getElementById("brokerSymbolsGrid");
       const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
-
       if (original && copy) {
         copy.innerHTML = original.innerHTML;
       }
@@ -4376,9 +4349,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function observeChanges() {
-
-    if (!isUserLoggedIn()) return;
-
     const observer = new MutationObserver(() => {
       keepMarketAlive();
     });
@@ -4415,10 +4385,9 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 VELAS MÁS FLUIDAS
   ========================= */
   setInterval(() => {
-    if (!isUserLoggedIn()) return;
     const api = ext();
     api.loadRealQuotes?.();
-  }, 1500);
+  }, 1500); // 🔥 refresco rápido
 
   /* =========================
      🔥 RESPONSIVE
@@ -4461,7 +4430,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 ORDEN CORREGIDA
+     🔥 ORDEN REAL SIN ERROR
   ========================= */
   function forceTrade(direction) {
     const api = ext();
@@ -4481,15 +4450,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // ✅ FIX REAL (ANTES ESTABA MAL)
-    api.placeOrder?.(direction);
+    api.placeOrder?.({
+      symbol,
+      amount,
+      direction
+    });
 
     restoreAmount();
   }
 
   document.addEventListener("click", (e) => {
-
-    if (!isUserLoggedIn()) return;
 
     if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
@@ -4535,8 +4505,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function updateFloatingTrades() {
-    if (!isUserLoggedIn()) return;
-
     const api = ext();
     const list = document.getElementById("floatingTradesList");
     if (!list) return;
@@ -4602,8 +4570,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   ========================= */
   document.addEventListener("click", (e) => {
 
-    if (!isUserLoggedIn()) return;
-
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
 
@@ -4623,7 +4589,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 INIT
   ========================= */
-  if (window.startBrokerUI && isUserLoggedIn()) {
+  if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
 
@@ -4643,7 +4609,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
-  
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
