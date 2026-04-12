@@ -4388,9 +4388,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   ========================= */
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebarToggle");
+  const floatingMenuBtn = document.getElementById("floatingMenuBtn");
 
   if (sidebar && sidebarToggle) {
     sidebarToggle.addEventListener("click", () => {
+      sidebar.classList.toggle("hidden");
+    });
+  }
+
+  /* 🔥 NUEVO: BOTÓN FLOTANTE FUNCIONAL */
+  if (sidebar && floatingMenuBtn) {
+    floatingMenuBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
     });
   }
@@ -4718,7 +4726,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
-
   
 </div>
 
