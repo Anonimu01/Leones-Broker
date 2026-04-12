@@ -523,6 +523,25 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || '').trim().toLowerCase());
+  }
+
+  function attachPasswordToggle(inputId, buttonId) {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(buttonId);
+    if (!input || !btn || btn.dataset.bound === '1') return;
+
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? '🙈' : '👁️';
+      btn.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    });
+  }
+
   function getSavedToken() {
     try {
       const t1 = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
@@ -1068,7 +1087,7 @@ if (window.__LEONES_BOOTED__) {
     if (!name || !email || !password) throw new Error('name, email y password son requeridos');
 
     const normalized = String(email).trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
+    if (!isValidEmail(normalized)) {
       throw new Error('Por favor, introduce un correo electrónico válido');
     }
 
@@ -1079,7 +1098,7 @@ if (window.__LEONES_BOOTED__) {
     if (!email || !password) throw new Error('email y password requeridos');
 
     const normalized = String(email).trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
+    if (!isValidEmail(normalized)) {
       throw new Error('Por favor, introduce un correo electrónico válido');
     }
 
@@ -1219,10 +1238,18 @@ if (window.__LEONES_BOOTED__) {
       const html = `
         <div style="display:grid;gap:8px">
           <input id="r_name" placeholder="Nombre" />
-          <input id="r_email" placeholder="Correo" type="email" />
-          <input id="r_phone" placeholder="Teléfono" />
-          <input id="r_address" placeholder="Dirección" />
-          <input id="r_pass" placeholder="Contraseña" type="password" />
+          <input id="r_email" placeholder="Correo" type="email" inputmode="email" autocomplete="email" />
+          <input id="r_phone" placeholder="Teléfono" inputmode="tel" autocomplete="tel" />
+          <input id="r_address" placeholder="Dirección" autocomplete="street-address" />
+          <div style="position:relative;display:flex;align-items:center;">
+            <input id="r_pass" placeholder="Contraseña" type="password" autocomplete="new-password" style="padding-right:44px;width:100%;" />
+            <button
+              id="r_pass_toggle"
+              type="button"
+              aria-label="Mostrar contraseña"
+              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;padding:0 4px;"
+            >👁️</button>
+          </div>
         </div>
       `;
       showModal(html, async () => {
@@ -1233,11 +1260,16 @@ if (window.__LEONES_BOOTED__) {
           const address = (document.getElementById('r_address') || {}).value || '';
           const pass = (document.getElementById('r_pass') || {}).value || '';
 
+          const emailInput = document.getElementById('r_email');
           if (!name || !email || !pass) return alert('Completa los campos requeridos');
 
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-            alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
-            return;
+          if (!isValidEmail(email)) {
+            if (emailInput && typeof emailInput.setCustomValidity === 'function') {
+              emailInput.setCustomValidity('Por favor, introduce un correo electrónico válido');
+              emailInput.reportValidity();
+              setTimeout(() => emailInput.setCustomValidity(''), 1000);
+            }
+            return alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
           }
 
           await registerUser({ name, email, password: pass, phone, address });
@@ -1247,13 +1279,23 @@ if (window.__LEONES_BOOTED__) {
           alert(e.message || 'Error registrando');
         }
       });
+
+      setTimeout(() => attachPasswordToggle('r_pass', 'r_pass_toggle'), 0);
     });
 
     addEventListener('leones:openLogin', () => {
       const html = `
         <div style="display:flex;flex-direction:column;gap:8px">
-          <input id="l_email" placeholder="Correo" type="email" />
-          <input id="l_pass" placeholder="Contraseña" type="password" />
+          <input id="l_email" placeholder="Correo" type="email" inputmode="email" autocomplete="email" />
+          <div style="position:relative;display:flex;align-items:center;">
+            <input id="l_pass" placeholder="Contraseña" type="password" autocomplete="current-password" style="padding-right:44px;width:100%;" />
+            <button
+              id="l_pass_toggle"
+              type="button"
+              aria-label="Mostrar contraseña"
+              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;padding:0 4px;"
+            >👁️</button>
+          </div>
         </div>
       `;
       showModal(html, async () => {
@@ -1262,9 +1304,14 @@ if (window.__LEONES_BOOTED__) {
           const pass = (document.getElementById('l_pass') || {}).value || '';
           if (!email || !pass) return alert('Completa los campos');
 
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-            alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
-            return;
+          if (!isValidEmail(email)) {
+            const emailInput = document.getElementById('l_email');
+            if (emailInput && typeof emailInput.setCustomValidity === 'function') {
+              emailInput.setCustomValidity('Por favor, introduce un correo electrónico válido');
+              emailInput.reportValidity();
+              setTimeout(() => emailInput.setCustomValidity(''), 1000);
+            }
+            return alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
           }
 
           const res = await loginUser({ email, password: pass });
@@ -1301,6 +1348,8 @@ if (window.__LEONES_BOOTED__) {
           alert(e.message || 'Error iniciando sesión');
         }
       });
+
+      setTimeout(() => attachPasswordToggle('l_pass', 'l_pass_toggle'), 0);
     });
   }
 
