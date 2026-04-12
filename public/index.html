@@ -1658,7 +1658,7 @@ if (window.__LEONES_BOOTED__) {
   .sidebar{background:linear-gradient(180deg,#0c0c0c,#0b0b0b);border-radius:12px;padding:12px;border:1px solid var(--line);overflow:auto;transition:transform .22s ease;max-height: calc(100vh - 140px); position:relative;}
   .sidebar.hidden{transform:translateX(-110%)}
   .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-  .sidebar .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+  .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
   .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
   .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
 
@@ -1757,7 +1757,7 @@ if (window.__LEONES_BOOTED__) {
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div style="font-weight:800;color:var(--gold)">Menú</div>
-          <button id="sidebarToggle" class="sidebar menu-btn" title="Abrir/Cerrar menú">☰</button>
+          <button id="sidebarToggle" class="menu-btn" title="Abrir/Cerrar menú">☰</button>
         </div>
 
         <div class="menu-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i> Overview</div>
@@ -2000,8 +2000,7 @@ if (window.__LEONES_BOOTED__) {
   </div>
 </div>
 
-
-  <div id="dashboardBalanceBox" style="
+<div id="dashboardBalanceBox" style="
   background:#0b0b0b;
   padding:20px;
   border-radius:15px;
@@ -2011,7 +2010,6 @@ if (window.__LEONES_BOOTED__) {
  ">
   <span id="dashboardBalance"></span>
 </div>
-
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
@@ -4357,6 +4355,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
+     🔥 BOTÓN MENU (FIX REAL)
+  ========================= */
+  const sidebar = document.getElementById("sidebar");
+  const sidebarToggle = document.getElementById("sidebarToggle");
+
+  if (sidebar && sidebarToggle) {
+    sidebarToggle.addEventListener("click", () => {
+      sidebar.classList.toggle("hidden");
+    });
+  }
+
+  /* =========================
      🔥 BOTONES ACTIVOS DORADO
   ========================= */
   function setActiveButton(id) {
@@ -4457,7 +4467,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
-  }, 1500); // 🔥 refresco rápido
+  }, 1500);
 
   /* =========================
      🔥 RESPONSIVE
@@ -4679,6 +4689,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 </script>
+
+  
 </div>
 
 <!-- ================= FIN PARTE PRIVADA COMPLETA ================= -->
