@@ -478,7 +478,7 @@ if (window.__LEONES_BOOTED__) {
 
   /* ===========================
      Config / util
-  =========================== */
+     =========================== */
   window.API = window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api');
   window.SOCKET_URL = window.SOCKET_URL || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
   window.SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
@@ -1066,13 +1066,22 @@ if (window.__LEONES_BOOTED__) {
   =========================== */
   async function registerUser({ name, email, password, phone = '', address = '' } = {}) {
     if (!name || !email || !password) throw new Error('name, email y password son requeridos');
+
     const normalized = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
+      throw new Error('Por favor, introduce un correo electrónico válido');
+    }
+
     return apiPost('/auth/register', { name, email: normalized, password, phone, address });
   }
 
   async function loginUser({ email, password } = {}) {
     if (!email || !password) throw new Error('email y password requeridos');
+
     const normalized = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized)) {
+      throw new Error('Por favor, introduce un correo electrónico válido');
+    }
 
     const res = await apiPost('/auth/login', { email: normalized, password });
 
@@ -1223,7 +1232,14 @@ if (window.__LEONES_BOOTED__) {
           const phone = (document.getElementById('r_phone') || {}).value || '';
           const address = (document.getElementById('r_address') || {}).value || '';
           const pass = (document.getElementById('r_pass') || {}).value || '';
+
           if (!name || !email || !pass) return alert('Completa los campos requeridos');
+
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+            alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
+            return;
+          }
+
           await registerUser({ name, email, password: pass, phone, address });
           alert('Registro completado. Revisa tu correo.');
         } catch (e) {
@@ -1245,6 +1261,11 @@ if (window.__LEONES_BOOTED__) {
           const email = ((document.getElementById('l_email') || {}).value || '').trim().toLowerCase();
           const pass = (document.getElementById('l_pass') || {}).value || '';
           if (!email || !pass) return alert('Completa los campos');
+
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+            alert('Por favor, introduce un correo electrónico válido (ej: usuario@gmail.com)');
+            return;
+          }
 
           const res = await loginUser({ email, password: pass });
 
