@@ -1659,6 +1659,27 @@ if (window.__LEONES_BOOTED__) {
   .sidebar.hidden{transform:translateX(-110%)}
   .sidebar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .menu-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--gold);cursor:pointer}
+
+  /* BOTÓN FLOTANTE DEL MENÚ */
+  #floatingMenuBtn{
+    position:fixed;
+    top:76px;
+    left:12px;
+    z-index:71;
+    display:none;
+    background:#0b0b0b;
+    color:var(--gold);
+    border:1px solid var(--line);
+    padding:10px 12px;
+    border-radius:10px;
+    cursor:pointer;
+    box-shadow:0 8px 20px rgba(0,0,0,0.55);
+  }
+
+  #sidebar.hidden + #floatingMenuBtn{
+    display:block;
+  }
+
   .menu-item{padding:12px 14px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;font-weight:700;font-size:14px}
   .menu-item.active{background:linear-gradient(90deg, rgba(212,175,55,0.08), rgba(201,161,46,0.03));color:var(--gold);box-shadow: inset 0 0 0 1px rgba(212,175,55,0.04);}
 
@@ -1728,6 +1749,11 @@ if (window.__LEONES_BOOTED__) {
     .trade-panel{grid-template-columns:1fr}
     .sidebar{position:fixed;left:0;top:64px;bottom:0;width:220px;z-index:70}
     .sidebar.hidden{transform:translateX(-120%)}
+
+    #floatingMenuBtn{
+      top:76px;
+      left:12px;
+    }
   }
 
   .muted-small{color:var(--muted);font-size:12px}
@@ -1771,6 +1797,9 @@ if (window.__LEONES_BOOTED__) {
         <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;color:var(--muted);font-size:13px">Accesos rápidos</div>
         <div class="menu-item" id="btnInfo"><i class="fa-solid fa-circle-info"></i> Info</div>
       </aside>
+
+      <!-- botón que queda visible cuando se oculta el menú -->
+      <button id="floatingMenuBtn" title="Abrir/Cerrar menú">☰</button>
 
       <section class="panel" id="dashboardPanel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
