@@ -1798,7 +1798,6 @@ if (window.__LEONES_BOOTED__) {
         <div class="menu-item" id="btnInfo"><i class="fa-solid fa-circle-info"></i> Info</div>
       </aside>
 
-      <!-- botón que queda visible cuando se oculta el menú -->
       <button id="floatingMenuBtn" title="Abrir/Cerrar menú">☰</button>
 
       <section class="panel" id="dashboardPanel">
@@ -1894,7 +1893,7 @@ if (window.__LEONES_BOOTED__) {
                 <div class="form-row">
                   <div style="flex:1">
                     <label class="muted-small">Cantidad (ej. BTC)</label>
-                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                    <input id="brokerOrderSize" class="form-input" type="number" step="0.000001" placeholder="0.01">
                   </div>
                 </div>
 
@@ -1903,7 +1902,6 @@ if (window.__LEONES_BOOTED__) {
                   <button class="btn-secondary" id="btnSell">Sell</button>
                 </div>
 
-                <!-- SELECTOR ABAJO -->
                 <div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
                   <label class="muted-small">Tipo de Orden</label>
                   <select id="order-type-bottom" class="form-select">
@@ -2054,37 +2052,6 @@ if (window.__LEONES_BOOTED__) {
  ">
   <span id="dashboardBalance"></span>
 </div>
-
-<script>
-function syncOrderTypeUI() {
-  const top = document.getElementById("order-type");
-  const bottom = document.getElementById("order-type-bottom");
-  const priceBox = document.getElementById("priceBox");
-  const priceBoxBottom = document.getElementById("priceBoxBottom");
-
-  function updateUI(value){
-    const show = value !== "Market";
-    if(priceBox) priceBox.style.display = show ? "block" : "none";
-    if(priceBoxBottom) priceBoxBottom.style.display = show ? "block" : "none";
-  }
-
-  if(top){
-    top.addEventListener("change", () => {
-      if(bottom) bottom.value = top.value;
-      updateUI(top.value);
-    });
-  }
-
-  if(bottom){
-    bottom.addEventListener("change", () => {
-      if(top) top.value = bottom.value;
-      updateUI(bottom.value);
-    });
-  }
-
-  updateUI(top?.value || "Market");
-}
-</script>
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
