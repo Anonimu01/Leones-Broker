@@ -1886,17 +1886,15 @@ if (window.__LEONES_BOOTED__) {
                   </select>
                 </div>
 
-                <div class="form-row">
-                  <div style="flex:1">
-                    <label class="muted-small">Cantidad (ej. BTC)</label>
-                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
-                  </div>
+                <div id="priceBox" style="display:none; margin-bottom:8px;">
+                  <label class="muted-small">Precio</label>
+                  <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
                 </div>
 
                 <div class="form-row">
                   <div style="flex:1">
-                    <label class="muted-small">Precio (si aplica)</label>
-                    <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
                   </div>
                 </div>
 
@@ -1905,43 +1903,22 @@ if (window.__LEONES_BOOTED__) {
                   <button class="btn-secondary" id="btnSell">Sell</button>
                 </div>
 
-                <!-- 🔥 SELECTOR ABAJO (CLIENTE) -->
-<div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
+                <!-- SELECTOR ABAJO -->
+                <div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
+                  <label class="muted-small">Tipo de Orden</label>
+                  <select id="order-type-bottom" class="form-select">
+                    <option value="Market">Market</option>
+                    <option value="Limit">Limit</option>
+                    <option value="Stop Loss">Stop Loss</option>
+                    <option value="Take Profit">Take Profit</option>
+                    <option value="Stop Limit">Stop Limit</option>
+                  </select>
 
-  <label style="font-size:12px;color:#aaa;">Tipo de Orden</label>
-  <select id="order-type-bottom" style="
-    width:100%;
-    padding:8px;
-    border-radius:6px;
-    background:#111;
-    color:#fff;
-    border:1px solid #333;
-  ">
-    <option value="Market">Market</option>
-    <option value="Limit">Limit</option>
-    <option value="Stop Loss">Stop Loss</option>
-    <option value="Take Profit">Take Profit</option>
-    <option value="Stop Limit">Stop Limit</option>
-  </select>
-
-  <div id="priceBoxBottom" style="display:none; margin-top:8px;">
-    <input id="order-price-bottom" type="number" placeholder="Precio"
-      style="
-        width:100%;
-        padding:8px;
-        border-radius:6px;
-        background:#111;
-        color:#fff;
-        border:1px solid #333;
-      ">
-  </div>
-
-</div>
-
-
-
-
-                
+                  <div id="priceBoxBottom" style="display:none; margin-top:8px;">
+                    <label class="muted-small">Precio</label>
+                    <input id="order-price-bottom" class="form-input" type="number" step="0.01" placeholder="Precio">
+                  </div>
+                </div>
 
                 <div class="orders-box" id="orders-box" style="margin-top:12px">
                   <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
@@ -2077,6 +2054,37 @@ if (window.__LEONES_BOOTED__) {
  ">
   <span id="dashboardBalance"></span>
 </div>
+
+<script>
+function syncOrderTypeUI() {
+  const top = document.getElementById("order-type");
+  const bottom = document.getElementById("order-type-bottom");
+  const priceBox = document.getElementById("priceBox");
+  const priceBoxBottom = document.getElementById("priceBoxBottom");
+
+  function updateUI(value){
+    const show = value !== "Market";
+    if(priceBox) priceBox.style.display = show ? "block" : "none";
+    if(priceBoxBottom) priceBoxBottom.style.display = show ? "block" : "none";
+  }
+
+  if(top){
+    top.addEventListener("change", () => {
+      if(bottom) bottom.value = top.value;
+      updateUI(top.value);
+    });
+  }
+
+  if(bottom){
+    bottom.addEventListener("change", () => {
+      if(top) top.value = bottom.value;
+      updateUI(bottom.value);
+    });
+  }
+
+  updateUI(top?.value || "Market");
+}
+</script>
 
 <!-- ================= SCRIPTS AUXILIARES (NO DESTRUYEN TU JS) ================= -->
 
@@ -4431,7 +4439,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 BOTÓN MENU (FIX REAL)
+     🔥 BOTÓN MENU
   ========================= */
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebarToggle");
@@ -4526,10 +4534,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO
   ========================= */
   function fixTrading() {
-
     const api = ext();
     const container = document.getElementById("tv_chart_container");
-
     if (!container) return;
 
     container.innerHTML = "";
@@ -4559,7 +4565,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const api = ext();
     const price = api.lastPrice || window.TR?.lastPrice;
-
     if (!price) return;
 
     advancedOrders.forEach((order, i) => {
@@ -4588,6 +4593,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         if(
           (order.direction === "buy" && price <= order.target) ||
           (order.direction === "sell" && price >= order.target)
+        ){
+          api.placeOrder?.(order);
+          advancedOrders.splice(i,1);
+        }
+      }
+
+      if(order.type === "STOP_LIMIT"){
+        if(
+          (order.direction === "buy" && price <= order.price) ||
+          (order.direction === "sell" && price >= order.price)
         ){
           api.placeOrder?.(order);
           advancedOrders.splice(i,1);
@@ -4639,18 +4654,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 ORDEN PRINCIPAL (MOD)
+     🔥 ORDEN PRINCIPAL
   ========================= */
   function forceTrade(direction) {
 
     const api = ext();
 
-    const amountInput = document.getElementById("brokerOrderSize");
-    const amount = parseFloat(amountInput?.value);
+    const amount = parseFloat(document.getElementById("brokerOrderSize")?.value);
 
-    const type = document.getElementById("order-type")?.value;
-    const priceInput = document.getElementById("order-price");
-    const price = parseFloat(priceInput?.value);
+    // 🔥 LEE TOP O BOTTOM
+    const type = document.getElementById("order-type")?.value 
+              || document.getElementById("order-type-bottom")?.value;
+
+    const price = parseFloat(
+      document.getElementById("order-price")?.value ||
+      document.getElementById("order-price-bottom")?.value
+    );
 
     if (!amount || amount <= 0) {
       alert("Coloca un monto válido");
@@ -4664,48 +4683,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    /* MARKET */
     if(type === "Market"){
       api.placeOrder?.({ symbol, amount, direction });
       return;
     }
 
-    /* LIMIT */
     if(type === "Limit"){
-      advancedOrders.push({
-        id: generateId("LMT"),
-        type:"LIMIT",
-        symbol,
-        amount,
-        direction,
-        price
-      });
+      advancedOrders.push({ id: generateId("LMT"), type:"LIMIT", symbol, amount, direction, price });
       return;
     }
 
-    /* STOP LOSS */
     if(type === "Stop Loss"){
-      advancedOrders.push({
-        id: generateId("SL"),
-        type:"STOP_LOSS",
-        symbol,
-        amount,
-        direction,
-        stop: price
-      });
+      advancedOrders.push({ id: generateId("SL"), type:"STOP_LOSS", symbol, amount, direction, stop: price });
       return;
     }
 
-    /* TAKE PROFIT */
     if(type === "Take Profit"){
-      advancedOrders.push({
-        id: generateId("TP"),
-        type:"TAKE_PROFIT",
-        symbol,
-        amount,
-        direction,
-        target: price
-      });
+      advancedOrders.push({ id: generateId("TP"), type:"TAKE_PROFIT", symbol, amount, direction, target: price });
+      return;
+    }
+
+    if(type === "Stop Limit"){
+      advancedOrders.push({ id: generateId("SLMT"), type:"STOP_LIMIT", symbol, amount, direction, price });
       return;
     }
 
@@ -4726,119 +4725,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   /* =========================
-     🔥 PANEL FLOTANTE
-  ========================= */
-  function createFloatingTradesPanel() {
-
-    if (document.getElementById("floatingTrades")) return;
-
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
-
-    div.style.cssText = `
-      position:fixed;
-      bottom:20px;
-      left:20px;
-      width:260px;
-      background:#111;
-      color:#fff;
-      padding:12px;
-      border-radius:10px;
-      z-index:9999;
-      font-size:12px;
-    `;
-
-    div.innerHTML = `
-      <b>📊 Operaciones</b>
-      <div id="floatingTradesList">Sin operaciones</div>
-    `;
-
-    document.body.appendChild(div);
-  }
-
-  function updateFloatingTrades() {
-    const api = ext();
-    const list = document.getElementById("floatingTradesList");
-    if (!list) return;
-
-    const positions = api.positions || [];
-
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
-    }
-
-    list.innerHTML = positions.map(p => `
-      <div style="margin-top:6px;">
-        ${p.symbol} | ${p.direction} <br>
-        $${p.amount}
-      </div>
-    `).join("");
-  }
-
-  setInterval(updateFloatingTrades, 2000);
-
-  /* =========================
-     🔥 PANEL SWITCH
-  ========================= */
-  function showPanel(id) {
-
-    showOnlyPanel(id);
-
-    const api = ext();
-
-    if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        window.renderSymbolsGrid?.();
-        keepMarketAlive();
-      }, 300);
-    }
-
-    if (id === "tradingPanel") {
-      api.openTradingView?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-        persistAmount();
-        restoreAmount();
-      }, 300);
-    }
-
-    if (id === "positionsPanel") {
-      api.loadPositions?.();
-    }
-
-    if (id === "dashboardPanel") {
-      api.loadAccount?.();
-    }
-  }
-
-  /* =========================
-     🔥 CLICK SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
-
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-
-  }, true);
-
-  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -4851,13 +4737,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   keepMarketAlive();
   responsiveFix();
   persistAmount();
-  createFloatingTradesPanel();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
   showPanel("dashboardPanel");
+
+  // 🔥 ACTIVA UI DE ORDENES
+  syncOrderTypeUI();
 
 });
 
@@ -4895,12 +4783,8 @@ function syncOrderTypeUI() {
     });
   }
 
-  // inicial
   updateUI(top?.value || "Market");
 }
-
-
-  
 </script>
   
 </div>
