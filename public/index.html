@@ -4388,63 +4388,35 @@ if (window.__LEONES_BOOTED__) {
 
 
 
-/* =========================
-   🔥 TIPO DE ORDEN (SELECT)
-========================= */
-function initOrderTypeSelector() {
-
-  const select = document.getElementById("order-type-bottom");
-  if (!select) return;
-
-  // 🔥 guardar tipo activo global
-  window.__ORDER_TYPE__ = select.value;
-
-  select.addEventListener("change", () => {
-    window.__ORDER_TYPE__ = select.value;
-
-    console.log("[ORDER TYPE]", window.__ORDER_TYPE__);
-
-    // 🔥 aquí puedes reaccionar visualmente si quieres
-    handleOrderTypeUI(window.__ORDER_TYPE__);
-  });
-
-}
-
-/* ===== FIX UNIVERSAL BROKER UI + MARKET (NO ROMPE NADA) ===== */
+/* ===== FIX UNIVERSAL BROKER UI (NO ROMPE NADA) ===== */
 (function () {
 
   if (window.__BROKER_FIX_INSTALLED__) return;
   window.__BROKER_FIX_INSTALLED__ = true;
 
   /* ===============================
-     1. MARKET + SYNC ORDER TYPE
+     1. SINCRONIZAR TIPO DE ORDEN
   =============================== */
   function syncOrderTypeAll(value) {
     const ids = ['order-type', 'order-type-bottom'];
 
     ids.forEach(id => {
       const el = document.getElementById(id);
-      if (el && el.value !== value) el.value = value;
-    });
+      if (el) {
+        // Si no tiene valor, forzar Market
+        if (!el.value) el.value = 'Market';
 
-    togglePriceInputs(value);
+        // Sincronizar
+        if (value && el.value !== value) {
+          el.value = value;
+        }
+      }
+    });
   }
 
-  function togglePriceInputs(type) {
-    const isMarket = String(type).toLowerCase() === 'market';
-
-    const priceTop = document.getElementById('order-price');
-    const priceBottom = document.getElementById('order-price-bottom');
-
-    if (priceTop) {
-      priceTop.disabled = isMarket;
-      priceTop.style.opacity = isMarket ? '0.5' : '1';
-    }
-
-    if (priceBottom) {
-      priceBottom.disabled = isMarket;
-      priceBottom.style.opacity = isMarket ? '0.5' : '1';
-    }
+  // 🔥 Forzar Market al cargar
+  function forceMarketDefault() {
+    syncOrderTypeAll('Market');
   }
 
   document.addEventListener('change', (e) => {
@@ -4460,22 +4432,11 @@ function initOrderTypeSelector() {
     try {
       if (!symbol) throw new Error('Sin símbolo');
 
-      const type =
-        document.getElementById('order-type')?.value ||
-        document.getElementById('order-type-bottom')?.value ||
-        'market';
-
-      // Si es MARKET → ignorar precio
-      if (String(type).toLowerCase() === 'market') {
-        price = null;
-      }
-
       const payload = {
         symbol,
         amount,
         side,
-        price,
-        type
+        price
       };
 
       if (typeof window.placeBrokerOrder === 'function') {
@@ -4502,7 +4463,7 @@ function initOrderTypeSelector() {
   async function autoOpenChart() {
     try {
       const api = window.__LEONES_BROKER_EXT2 || {};
-      if (typeof api.openTradingView !== 'function') return;
+      if (!api.openTradingView) return;
 
       const meta = api.activeMeta;
       if (!meta) return;
@@ -4519,7 +4480,7 @@ function initOrderTypeSelector() {
   }
 
   /* ===============================
-     4. CLICK EN SÍMBOLOS
+     4. CLICK EN SÍMBOLOS (FORZADO)
   =============================== */
   document.addEventListener('click', async (e) => {
     const card = e.target.closest('.broker-symbol-card, [data-symbol]');
@@ -4547,30 +4508,43 @@ function initOrderTypeSelector() {
         }
       }
 
+      // 🔥 cada vez que cambias símbolo → asegurar Market
+      syncOrderTypeAll('Market');
+
     } catch (err) {
       console.warn('symbol click fix:', err);
     }
   }, true);
 
   /* ===============================
-     5. AUTO INIT + MARKET INIT
+     5. OBSERVAR EL DOM (CLAVE 🔥)
+  =============================== */
+  const observer = new MutationObserver(() => {
+    // Cada vez que tu UI se renderiza
+    forceMarketDefault();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  /* ===============================
+     6. AUTO INIT AL ENTRAR
   =============================== */
   function waitAndBoot() {
     const api = window.__LEONES_BROKER_EXT2;
 
-    if (!api || !api.activeMeta) {
+    if (!api) {
       setTimeout(waitAndBoot, 800);
       return;
     }
 
+    // 🔥 FORZAR MARKET
+    forceMarketDefault();
+
+    // 🔥 ABRIR GRÁFICO
     autoOpenChart();
-
-    const current =
-      document.getElementById('order-type')?.value ||
-      document.getElementById('order-type-bottom')?.value ||
-      'market';
-
-    syncOrderTypeAll(current);
   }
 
   window.addEventListener('load', () => {
