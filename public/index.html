@@ -2064,12 +2064,25 @@ if (window.__LEONES_BOOTED__) {
 (function () {
   'use strict';
 
-  if (window.__LEONES_BROKER_FULL_UNIFIED_FIXED__) return;
-  window.__LEONES_BROKER_FULL_UNIFIED_FIXED__ = true;
+  if (window.__LEONES_BROKER_EXT2_REAL_SAFE__) {
+    console.warn('[BROKER-EXT2-REAL] already loaded, skipping.');
+    return;
+  }
+  window.__LEONES_BROKER_EXT2_REAL_SAFE__ = true;
 
-  const ROOT_ID = 'broker-ext2-root';
-  const DEFAULT_CURRENCY = 'US$';
+  const NS = window._LEONES = window._LEONES || {};
+  const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+
+  const API_BASE = String(
+    window.API_BASE ||
+    window.API ||
+    (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
+  ).replace(/\/+$/, '');
+
   const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+  const ROOT_ID = 'broker-ext2-root';
+
+  const DEFAULT_CURRENCY = 'US$';
 
   const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
 
@@ -2164,13 +2177,11 @@ if (window.__LEONES_BOOTED__) {
     marketFilter: 'All',
     marketSearch: '',
     lastChartSymbol: null,
-    pollTimer: null,
-    demoMode: false,
-    failedEndpoints: new Set()
+    pollTimer: null
   };
 
-  const log = (...a) => { try { console.log('[BROKER-FULL]', ...a); } catch (e) {} };
-  const warn = (...a) => { try { console.warn('[BROKER-FULL]', ...a); } catch (e) {} };
+  const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
 
   let ACCOUNT = {
     balance: 1000,
@@ -2183,7 +2194,6 @@ if (window.__LEONES_BOOTED__) {
   let OPEN_TRADES = [];
   let marginWarningInterval = null;
   let marginAlertVisible = false;
-  let LAST_AMOUNT = null;
 
   function safeParseJSON(v, fallback = null) {
     try { return JSON.parse(v); } catch (e) { return fallback; }
@@ -2301,6 +2311,11 @@ if (window.__LEONES_BOOTED__) {
     return `OANDA:${s}`;
   }
 
+  function displayLabel(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    return SYMBOL_LABELS[s] || (s.includes('/') ? s : s);
+  }
+
   function getProviderFromTvSymbol(tvSymbol = '') {
     const s = String(tvSymbol || '').toUpperCase();
     if (s.startsWith('OANDA:')) return 'OANDA';
@@ -2376,6 +2391,8 @@ if (window.__LEONES_BOOTED__) {
   }
 
   async function apiFetch(path, opts = {}) {
+    if (typeof NS.apiFetch === 'function') return NS.apiFetch(path, opts);
+
     const token = getToken();
     let url = '';
     if (typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) {
@@ -2383,7 +2400,7 @@ if (window.__LEONES_BOOTED__) {
     } else {
       let p = String(path || '').trim();
       if (!p.startsWith('/')) p = '/' + p;
-      const base = String(window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')).replace(/\/+$/, '');
+      const base = API_BASE.replace(/\/+$/, '');
       if (base.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/, '');
       url = base + p;
     }
@@ -2442,9 +2459,9 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function injectUiStyles() {
-    if (document.getElementById('leones-full-style')) return;
+    if (document.getElementById('leones-ext2-style')) return;
     const style = document.createElement('style');
-    style.id = 'leones-full-style';
+    style.id = 'leones-ext2-style';
     style.textContent = `
       #${ROOT_ID}{
         width:100%;
@@ -2452,6 +2469,20 @@ if (window.__LEONES_BOOTED__) {
         margin:0 auto;
         padding:12px 12px 18px;
         display:block;
+      }
+
+      #${ROOT_ID} .btn,
+      #${ROOT_ID} button,
+      #${ROOT_ID} input,
+      #${ROOT_ID} select,
+      #${ROOT_ID} textarea{
+        touch-action: manipulation;
+      }
+
+      #${ROOT_ID} button:active,
+      #${ROOT_ID} .btn:active,
+      #${ROOT_ID} .broker-symbol-card:active{
+        transform: scale(.985);
       }
 
       #${ROOT_ID} #brokerColumns{
@@ -2471,6 +2502,15 @@ if (window.__LEONES_BOOTED__) {
         overflow:hidden;
       }
 
+      #${ROOT_ID} #brokerSymbolsPanel,
+      #${ROOT_ID} #brokerChartPanel,
+      #${ROOT_ID} #brokerTicketPanel,
+      #${ROOT_ID} #brokerAccountPanel,
+      #${ROOT_ID} #brokerPositionsPanel,
+      #${ROOT_ID} #brokerSymbolDetailsPanel{
+        min-width:0;
+      }
+
       #${ROOT_ID} #brokerSymbolsScroll,
       #${ROOT_ID} #brokerSymbolsScrollBottom{
         max-height:clamp(340px, 55vh, 640px);
@@ -2479,7 +2519,10 @@ if (window.__LEONES_BOOTED__) {
       }
 
       #${ROOT_ID} #brokerMarketTabs,
-      #${ROOT_ID} #brokerMarketTabsBottom{
+      #${ROOT_ID} #brokerMarketTabsBottom,
+      #${ROOT_ID} #overviewMarketTabs,
+      #${ROOT_ID} #overviewMarketsTabs,
+      #${ROOT_ID} #marketTabs{
         display:flex;
         flex-wrap:wrap;
         gap:8px;
@@ -2487,7 +2530,12 @@ if (window.__LEONES_BOOTED__) {
       }
 
       #${ROOT_ID} #brokerSymbolsGrid,
-      #${ROOT_ID} #brokerSymbolsGridBottom{
+      #${ROOT_ID} #brokerSymbolsGridBottom,
+      #${ROOT_ID} #overviewSymbolsGrid,
+      #${ROOT_ID} #overviewMarketList,
+      #${ROOT_ID} #overviewSymbolsList,
+      #${ROOT_ID} #marketList,
+      #${ROOT_ID} #marketGrid{
         display:grid;
         grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
         gap:10px;
@@ -2502,6 +2550,12 @@ if (window.__LEONES_BOOTED__) {
         background:rgba(255,255,255,.03);
         color:#fff;
         cursor:pointer;
+        transition:transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+
+      #${ROOT_ID} .broker-symbol-card:hover{
+        background:rgba(255,255,255,.05);
+        border-color:rgba(240,194,75,.35);
       }
 
       #${ROOT_ID} .broker-symbol-card .market-pill,
@@ -2589,6 +2643,7 @@ if (window.__LEONES_BOOTED__) {
 
   function getSymbols() {
     if (Array.isArray(state.markets) && state.markets.length) return state.markets;
+    if (Array.isArray(TR.ALL_SYMBOLS) && TR.ALL_SYMBOLS.length) return uniqueBySymbol(TR.ALL_SYMBOLS);
     if (Array.isArray(window.__LEONES_MARKETS__) && window.__LEONES_MARKETS__.length) return uniqueBySymbol(window.__LEONES_MARKETS__);
     return DEFAULT_SYMBOLS.slice();
   }
@@ -2612,7 +2667,7 @@ if (window.__LEONES_BOOTED__) {
   function getActiveSymbolMeta() {
     const list = getSymbols();
     if (!list.length) return null;
-    const active = String(state.activeSymbol || window.TR?.activeSymbol || window.__LEONES_TRADING__?.activeSymbol || '').toUpperCase();
+    const active = String(state.activeSymbol || TR.activeSymbol || TR.activeMeta?.symbol || '').toUpperCase();
     if (!active) return list[0];
     return list.find(x => String(x.symbol).toUpperCase() === active || String(x.tvSymbol).toUpperCase() === active) || list[0];
   }
@@ -2706,7 +2761,6 @@ if (window.__LEONES_BOOTED__) {
       const num = Number(marginUsed);
       if (isFinite(num)) ACCOUNT.usedMargin = num;
     }
-
     ACCOUNT.freeMargin = Math.max(ACCOUNT.equity - ACCOUNT.usedMargin, 0);
     ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0 ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100 : 100;
 
@@ -2738,6 +2792,10 @@ if (window.__LEONES_BOOTED__) {
       });
     });
 
+    if (typeof window.applyAccountToUI === 'function') {
+      try { window.applyAccountToUI(safeAccount); } catch (e) {}
+    }
+
     renderAccountUI();
     renderMargin();
     return safeAccount;
@@ -2760,7 +2818,7 @@ if (window.__LEONES_BOOTED__) {
     const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
     const meta = getActiveSymbolMeta();
     const q = meta ? currentQuote(meta.symbol) : null;
-    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta?.symbol]?.price ?? 0;
+    const price = q?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? 0;
     const lev = effectiveLeverage(meta) || 1;
     const balance = Number(ACCOUNT.balance || state.account?.balance || state.account?.bal || state.account?.walletBalance || state.account?.funds || 0);
     const operatingPower = calcOperatingPower(balance, lev);
@@ -2787,7 +2845,7 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderMarketTabs() {
-    const hostIds = ['brokerMarketTabs', 'brokerMarketTabsBottom'];
+    const hostIds = ['brokerMarketTabs', 'brokerMarketTabsBottom', 'overviewMarketTabs', 'overviewMarketsTabs', 'marketTabs'];
     const list = getSymbols();
     const set = new Set(list.map(x => normalizeMarketName(x.market || inferMarketBySymbol(x.symbol))));
     const markets = ['All', ...MARKET_ORDER.filter(m => set.has(m)), ...Array.from(set).filter(m => !MARKET_ORDER.includes(m)).sort()];
@@ -2809,9 +2867,9 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  function symbolCardHtml(item) {
+  function symbolCardHtml(item, variant = 'main') {
     const q = currentQuote(item.symbol);
-    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[item.symbol]?.price ?? null;
+    const price = q?.price ?? TR.symbolPrices?.[item.symbol]?.price ?? null;
     const provider = getProviderFromTvSymbol(item.tvSymbol);
     const icon = getMarketIcon(item.market);
     const market = normalizeMarketName(item.market);
@@ -2847,7 +2905,15 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderSymbolsGrid() {
-    const hostIds = ['brokerSymbolsGrid', 'brokerSymbolsGridBottom'];
+    const hostIds = [
+      'brokerSymbolsGrid',
+      'brokerSymbolsGridBottom',
+      'overviewSymbolsGrid',
+      'overviewMarketList',
+      'overviewSymbolsList',
+      'marketList',
+      'marketGrid'
+    ];
     const list = getSymbols();
 
     const search = String(state.marketSearch || '').trim().toLowerCase();
@@ -2886,7 +2952,7 @@ if (window.__LEONES_BOOTED__) {
     }
 
     const q = currentQuote(meta.symbol);
-    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta.symbol]?.price ?? null;
+    const price = q?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? null;
     const lev = effectiveLeverage(meta);
     const provider = getProviderFromTvSymbol(meta.tvSymbol);
     const market = normalizeMarketName(meta.market);
@@ -2972,637 +3038,81 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderAccountUI() {
-    const elBalance = document.getElementById('balance');
-    const elEquity = document.getElementById('equity');
-    const elMargin = document.getElementById('marginLevel');
+    const account = state.account || {};
+    const name = getAccountNameSource(account);
+    const balance = account.balance ?? account.bal ?? account.walletBalance ?? account.deposit ?? account.funds ?? ACCOUNT.balance;
+    const equity = account.equity ?? account.totalEquity ?? ACCOUNT.equity;
+    const pnl = account.pnl ?? account.profitLoss ?? account.unrealizedPnl ?? 0;
+    const lev = effectiveLeverage(getActiveSymbolMeta());
+    const operating = calcOperatingPower(Number(balance || 0), lev || 1);
+    const marginUsed = account.marginUsed ?? account.margin ?? account.usedMargin ?? ACCOUNT.usedMargin;
 
-    if (elBalance) elBalance.innerText = Number(ACCOUNT.balance).toFixed(2);
-    if (elEquity) elEquity.innerText = Number(ACCOUNT.equity).toFixed(2);
-    if (elMargin) elMargin.innerText = Number(ACCOUNT.marginLevel).toFixed(2) + '%';
+    setTextAll(['brokerAccountName', 'brokerAccountNameBottom'], name);
+    setTextAll(['brokerAccountEmail', 'brokerAccountEmailBottom'], account.email || getUser().email || '--');
+    setTextAll(['brokerAccountBalance', 'brokerAccountBalanceBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountEquity', 'brokerAccountEquityBottom'], equity !== null && equity !== undefined ? formatMoney(equity, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountPnl', 'brokerAccountPnlBottom'], pnl !== null && pnl !== undefined ? formatMoney(pnl, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountLeverage', 'brokerAccountLeverageBottom'], lev ? `1:${lev}` : '--');
+    setTextAll(['brokerAccountOperating', 'brokerAccountOperatingBottom'], balance !== null && balance !== undefined ? formatMoney(operating, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountMargin', 'brokerAccountMarginBottom'], marginUsed !== null && marginUsed !== undefined ? formatMoney(marginUsed, DEFAULT_CURRENCY) : '--');
+
+    if (document.getElementById('balance')) document.getElementById('balance').innerText = Number(ACCOUNT.balance).toFixed(2);
+    if (document.getElementById('equity')) document.getElementById('equity').innerText = Number(ACCOUNT.equity).toFixed(2);
+    if (document.getElementById('marginLevel')) document.getElementById('marginLevel').innerText = Number(ACCOUNT.marginLevel).toFixed(2) + '%';
   }
 
-  async function ensureSocket() {
-    try {
-      if (window.__LEONES_SOCKET__?.socket) return window.__LEONES_SOCKET__.socket;
-      if (typeof window.initSocket === 'function') return window.initSocket(true) || window.initSocket();
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function getEndpointList(kind) {
-    if (kind === 'markets') return [
-      '/market/symbols',
-      '/market/list',
-      '/market/polygon/symbols',
-      '/symbols',
-      '/api/market/symbols',
-      '/api/market/list',
-      '/api/market/polygon/symbols',
-      '/api/symbols'
-    ];
-    if (kind === 'quotes') return [
-      '/market/quotes',
-      '/market/latest',
-      '/market/polygon/quotes',
-      '/quotes',
-      '/api/market/quotes',
-      '/api/market/latest',
-      '/api/market/polygon/quotes',
-      '/api/quotes'
-    ];
-    if (kind === 'account') return ['/account', '/me', '/profile', '/api/account', '/api/me', '/api/profile'];
-    if (kind === 'positions') return ['/positions', '/trade/positions', '/api/positions', '/api/trade/positions'];
-    return [];
-  }
-
-  function shouldSkipEndpoint(ep) {
-    return state.failedEndpoints.has(ep);
-  }
-
-  function markEndpointFailed(ep) {
-    state.failedEndpoints.add(ep);
-  }
-
-  function updateQuotesFromArray(arr) {
-    const normalized = mergeQuotes(arr);
-    if (!normalized.length) return [];
-
-    const map = quoteMap();
-    normalized.forEach(q => {
-      map.set(q.symbol.toUpperCase(), q);
-      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-      window.__LEONES_TRADING__.symbolPrices = window.__LEONES_TRADING__.symbolPrices || {};
-      window.__LEONES_TRADING__.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
-    });
-
-    state.quotes = Array.from(map.values());
-
-    const priceMap = {};
-    state.quotes.forEach(q => {
-      if (q && q.symbol) priceMap[q.symbol] = q.price;
-    });
-    updateTradesPrices(priceMap);
-    return normalized;
-  }
-
-  function updateSymbolsFromArray(arr) {
-    const normalized = uniqueBySymbol(arr);
-    if (!normalized.length) return [];
-
-    const map = new Map();
-    getSymbols().forEach(item => map.set(String(item.symbol).toUpperCase(), item));
-    normalized.forEach(item => map.set(String(item.symbol).toUpperCase(), item));
-
-    state.markets = Array.from(map.values());
-    window.__LEONES_MARKETS__ = state.markets;
-    return normalized;
-  }
-
-  async function loadRealMarkets() {
-    if (state.demoMode) return DEFAULT_SYMBOLS.slice();
-
-    const endpoints = getEndpointList('markets');
-    const merged = [];
-    for (const ep of endpoints) {
-      if (shouldSkipEndpoint(ep)) continue;
+  function openChartContainer(containerId, symbol) {
+    return new Promise(async (resolve, reject) => {
       try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
+        await ensureTradingViewScript();
+        const container = document.getElementById(containerId);
+        if (!container) return reject(new Error('No existe el contenedor del gráfico'));
+
+        const tv = String(symbol || '').trim();
+        if (!tv) return reject(new Error('El símbolo no es válido'));
+
+        container.innerHTML = '';
+
+        if (typeof window.initTradingWidget === 'function') {
+          try {
+            window.initTradingWidget(tv, containerId);
+            return resolve(tv);
+          } catch (e) {
+            warn('window.initTradingWidget failed', e);
+          }
+        }
+
+        if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
+          return reject(new Error('TradingView no está disponible'));
+        }
+
+        new TradingView.widget({
+          autosize: true,
+          symbol: tv,
+          interval: '5',
+          timezone: 'Etc/UTC',
+          theme: 'dark',
+          style: '1',
+          locale: 'es',
+          enable_publishing: false,
+          allow_symbol_change: true,
+          container_id: container.id,
+          hide_side_toolbar: false,
+          withdateranges: true,
+          save_image: false
+        });
+
+        resolve(tv);
       } catch (e) {
-        if (e?.status === 404) markEndpointFailed(ep);
+        reject(e);
       }
-    }
-
-    const backendRows = uniqueBySymbol(merged);
-
-    if (!backendRows.length) {
-      state.demoMode = true;
-      state.markets = DEFAULT_SYMBOLS.slice();
-      window.__LEONES_MARKETS__ = state.markets;
-      return state.markets;
-    }
-
-    const map = new Map();
-    DEFAULT_SYMBOLS.forEach(item => map.set(String(item.symbol).toUpperCase(), item));
-
-    backendRows.forEach(item => {
-      const key = String(item.symbol).toUpperCase();
-      map.set(key, {
-        ...(map.get(key) || {}),
-        ...item,
-        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
-        source: item.source || 'proveedor'
-      });
     });
-
-    const all = Array.from(map.values()).sort((a, b) => {
-      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
-      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
-      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
-      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
-    });
-
-    state.markets = all;
-    window.__LEONES_MARKETS__ = all;
-    return all;
-  }
-
-  async function loadRealQuotes() {
-    if (state.demoMode) {
-      const demo = DEFAULT_SYMBOLS.map(s => ({
-        symbol: s.symbol,
-        price: demoPriceForSymbol(s.symbol),
-        ts: Date.now()
-      }));
-      state.quotes = demo;
-      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-      window.__LEONES_TRADING__.symbolPrices = window.__LEONES_TRADING__.symbolPrices || {};
-      demo.forEach(q => {
-        window.__LEONES_TRADING__.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
-      });
-      return demo;
-    }
-
-    const endpoints = getEndpointList('quotes');
-    const merged = [];
-    for (const ep of endpoints) {
-      if (shouldSkipEndpoint(ep)) continue;
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        const arr = asArrayResponse(res);
-        if (arr.length) merged.push(...arr);
-      } catch (e) {
-        if (e?.status === 404) markEndpointFailed(ep);
-      }
-    }
-
-    const normalized = updateQuotesFromArray(merged);
-
-    if (!normalized.length) {
-      state.demoMode = true;
-      return loadRealQuotes();
-    }
-
-    return normalized;
-  }
-
-  async function loadAccount() {
-    if (state.demoMode) {
-      return syncAccountView({
-        name: getAccountNameSource(getUser()),
-        email: getUser().email || '--',
-        balance: ACCOUNT.balance,
-        equity: ACCOUNT.equity,
-        marginUsed: ACCOUNT.usedMargin
-      });
-    }
-
-    const endpoints = getEndpointList('account');
-    for (const ep of endpoints) {
-      if (shouldSkipEndpoint(ep)) continue;
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        if (!res) continue;
-        const account = extractAccountSource(res);
-        syncAccountView(account);
-        renderBottomPanels();
-        return account;
-      } catch (e) {
-        if (e?.status === 404) markEndpointFailed(ep);
-      }
-    }
-    return null;
-  }
-
-  async function loadPositions() {
-    if (state.demoMode) {
-      state.positions = state.positions.length ? state.positions : [
-        { id: 'POS-1', symbol: 'BINANCE:BTCUSDT', side: 'LONG', qty: 0.02, entryPrice: 86000, status: 'open' },
-        { id: 'POS-2', symbol: 'OANDA:EURUSD', side: 'LONG', qty: 500, entryPrice: 1.08, status: 'open' }
-      ];
-      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-      window.__LEONES_TRADING__.positions = state.positions;
-      renderPositions();
-      return state.positions;
-    }
-
-    const endpoints = getEndpointList('positions');
-    for (const ep of endpoints) {
-      if (shouldSkipEndpoint(ep)) continue;
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        if (!res) continue;
-        const list = asArrayResponse(res);
-        state.positions = list;
-        window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-        window.__LEONES_TRADING__.positions = list;
-        renderPositions();
-        renderBottomPanels();
-        return list;
-      } catch (e) {
-        if (e?.status === 404) markEndpointFailed(ep);
-      }
-    }
-    state.positions = [];
-    window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-    window.__LEONES_TRADING__.positions = [];
-    renderPositions();
-    return [];
-  }
-
-  function demoPriceForSymbol(symbol) {
-    const base = {
-      BTCUSDT: 87243.3, ETHUSDT: 2925.8, BNBUSDT: 618.4, SOLUSDT: 127.7, XRPUSDT: 2.21,
-      ADAUSDT: 0.74, DOGEUSDT: 0.18, DOTUSDT: 8.4, LTCUSDT: 82.5, LINKUSDT: 17.3,
-      AAPL: 182.5, MSFT: 419.2, AMZN: 184.4, TSLA: 238.9, NVDA: 872.1, META: 510.3,
-      GOOGL: 173.6, NFLX: 630.2, AMD: 167.4, PYPL: 65.8,
-      EURUSD: 1.0850, GBPUSD: 1.2500, USDJPY: 154.32, USDCHF: 0.9045, AUDUSD: 0.6620,
-      XAUUSD: 2365.2, XAGUSD: 29.1, USOIL: 82.4, UKOIL: 85.7
-    };
-    const s = String(symbol || '').toUpperCase();
-    const current = Number(base[s] ?? (s.includes('USD') ? 1.0 : 100));
-    const wobble = (Math.random() - 0.5) * (current * 0.002);
-    return Math.max(0.00001, current + wobble);
-  }
-
-  async function requestBackendRefresh() {
-    try {
-      await Promise.allSettled([loadRealMarkets(), loadAccount(), loadPositions()]);
-      const q = await loadRealQuotes();
-      if (q && q.length) {
-        renderSymbolsGrid();
-      }
-      const meta = getActiveSymbolMeta();
-      if (meta) requestRealtimeForSymbol(meta);
-      renderMargin();
-      renderPositions();
-      renderSymbolsGrid();
-      renderBottomPanels();
-    } catch (e) {
-      warn('requestBackendRefresh', e);
-    }
-  }
-
-  function ensureMarketFilterTabsBound() {
-    if (window.__LEONES_MARKET_TABS_BOUND__) return;
-    window.__LEONES_MARKET_TABS_BOUND__ = true;
-
-    document.addEventListener('click', (ev) => {
-      const t = ev.target.closest && ev.target.closest('[data-market]');
-      if (!t || !t.closest('#privateArea_full')) return;
-      ev.preventDefault();
-      state.marketFilter = t.dataset.market || 'All';
-      renderMarketTabs();
-      renderSymbolsGrid();
-      renderBottomPanels();
-    }, true);
-  }
-
-  async function openTradingView(meta, containerId = 'tv_chart_container') {
-    const resolved = meta || getActiveSymbolMeta();
-    if (!resolved) throw new Error('No hay símbolos reales para graficar');
-
-    await ensureTradingViewScript();
-
-    const container = document.getElementById(containerId);
-    if (!container) throw new Error('No existe el contenedor del gráfico');
-
-    const symbol = String(resolved.tvSymbol || resolved.symbol || '').trim();
-    if (!symbol) throw new Error('El símbolo no es válido');
-
-    container.innerHTML = '';
-
-    if (window.TradingView && typeof window.TradingView.widget === 'function') {
-      new TradingView.widget({
-        autosize: true,
-        symbol,
-        interval: '5',
-        timezone: 'Etc/UTC',
-        theme: 'dark',
-        style: '1',
-        locale: 'es',
-        enable_publishing: false,
-        allow_symbol_change: true,
-        container_id: container.id,
-        hide_side_toolbar: false,
-        withdateranges: true,
-        save_image: false
-      });
-      state.lastChartSymbol = symbol;
-      return symbol;
-    }
-
-    throw new Error('TradingView no está disponible');
-  }
-
-  function selectSymbol(meta, options = {}) {
-    if (!meta) return;
-    const openChart = options.openChart !== false;
-
-    state.activeSymbol = meta.symbol;
-    window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-    window.__LEONES_TRADING__.activeSymbol = meta.symbol;
-    window.__LEONES_TRADING__.activeMeta = meta;
-    state.lastChartSymbol = meta.symbol;
-
-    renderSymbolDetails(meta);
-    requestRealtimeForSymbol(meta);
-    renderBottomPanels();
-
-    if (openChart) {
-      openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo abrir el gráfico', 'error'));
-      openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
-    }
-  }
-
-  function applySearchValue(value) {
-    state.marketSearch = String(value || '');
-    renderSymbolsGrid();
-    renderBottomPanels();
-  }
-
-  function syncOrderTypeUI() {
-    const top = document.getElementById('order-type');
-    const bottom = document.getElementById('order-type-bottom');
-    const priceBox = document.getElementById('priceBox');
-    const priceBoxBottom = document.getElementById('priceBoxBottom');
-
-    function updateUI(value) {
-      const show = String(value || 'Market') !== 'Market';
-      if (priceBox) priceBox.style.display = show ? 'block' : 'none';
-      if (priceBoxBottom) priceBoxBottom.style.display = show ? 'block' : 'none';
-    }
-
-    if (top && !top.dataset.bound) {
-      top.dataset.bound = '1';
-      top.addEventListener('change', () => {
-        if (bottom) bottom.value = top.value;
-        updateUI(top.value);
-      });
-    }
-
-    if (bottom && !bottom.dataset.bound) {
-      bottom.dataset.bound = '1';
-      bottom.addEventListener('change', () => {
-        if (top) top.value = bottom.value;
-        updateUI(bottom.value);
-      });
-    }
-
-    updateUI(top?.value || bottom?.value || 'Market');
-  }
-
-  function getOrderModeAndPrice() {
-    const topType = document.getElementById('order-type')?.value;
-    const bottomType = document.getElementById('order-type-bottom')?.value;
-    const type = topType || bottomType || 'Market';
-
-    const topPrice = Number(document.getElementById('order-price')?.value || 0);
-    const bottomPrice = Number(document.getElementById('order-price-bottom')?.value || 0);
-    const price = topPrice || bottomPrice || 0;
-
-    return { type, price };
-  }
-
-  async function placeOrder(side) {
-    const meta = getActiveSymbolMeta();
-    const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
-    const lev = effectiveLeverage(meta) || 1;
-    const { type: orderType, price } = getOrderModeAndPrice();
-
-    if (!meta) throw new Error('Selecciona un símbolo antes de operar');
-    if (!size || size <= 0) throw new Error('Escribe un monto válido');
-
-    const balance = Number(ACCOUNT.balance || state.account?.balance || state.account?.bal || state.account?.walletBalance || state.account?.funds || NaN);
-    const operatingPower = isFinite(balance) ? calcOperatingPower(balance, lev) : NaN;
-    const marginInfo = calculateMargin(size, lev, currentQuote(meta.symbol)?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta.symbol]?.price ?? 0);
-
-    if (isFinite(operatingPower) && operatingPower > 0 && size > operatingPower) {
-      throw new Error('No hay capacidad operativa suficiente para esta operación');
-    }
-
-    if (isFinite(balance) && balance > 0 && marginInfo.requiredMargin > balance) {
-      throw new Error('Margen insuficiente para esta operación');
-    }
-
-    const payload = {
-      symbol: meta.symbol,
-      tvSymbol: meta.tvSymbol || meta.symbol,
-      side,
-      positionSize: size,
-      notional: size,
-      leverage: lev,
-      type: String(orderType || 'Market'),
-      price: isFinite(price) && price > 0 ? price : undefined
-    };
-
-    if (typeof window.placeBrokerOrder === 'function') {
-      const res = await window.placeBrokerOrder(payload);
-      const account = extractAccountSource(res || {});
-      if (account && Object.keys(account).length) syncAccountView(account);
-      await requestBackendRefresh().catch(() => {});
-      return res;
-    }
-
-    const candidates = ['/trade/place', '/api/trade/place', '/orders', '/api/orders', '/trade/open', '/api/trade/open'];
-    let res = null;
-    for (const ep of candidates) {
-      try {
-        res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
-        if (res) break;
-      } catch (e) {}
-    }
-
-    if (!res) {
-      if (state.demoMode) {
-        const fake = { ok: true, payload };
-        return fake;
-      }
-      throw new Error('No se pudo enviar la orden');
-    }
-
-    const account = extractAccountSource(res || {});
-    if (account && Object.keys(account).length) syncAccountView(account);
-
-    await requestBackendRefresh().catch(() => {});
-    return res;
-  }
-
-  async function closePosition(position = {}) {
-    const pid = position?.id || position?._id || position?.positionId || position?.tradeId || null;
-    const symbol = position?.symbol || state.activeSymbol || null;
-    const payload = { positionId: pid, symbol };
-
-    const endpoints = [
-      '/positions/close',
-      '/positions/close-position',
-      '/trade/close',
-      '/api/positions/close',
-      '/api/positions/close-position',
-      '/api/trade/close'
-    ];
-
-    let res = null;
-    for (const ep of endpoints) {
-      try {
-        res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
-        if (res) break;
-      } catch (e) {}
-    }
-
-    const account = extractAccountSource(res || {});
-    if (account && Object.keys(account).length) syncAccountView(account);
-
-    await requestBackendRefresh().catch(() => {});
-    return res;
-  }
-
-  function updateTradesPrices(prices) {
-    OPEN_TRADES.forEach(trade => {
-      const newPrice = prices[trade.symbol];
-      if (newPrice === undefined || newPrice === null) return;
-
-      trade.currentPrice = newPrice;
-
-      let diff = newPrice - trade.openPrice;
-      if (trade.direction === 'sell') diff *= -1;
-
-      trade.profit = diff * trade.amount * 10;
-    });
-
-    updateAccountMetrics();
-  }
-
-  function updateAccountMetrics() {
-    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
-
-    ACCOUNT.equity = ACCOUNT.balance + ACCOUNT.usedMargin + totalProfit;
-    ACCOUNT.freeMargin = ACCOUNT.equity - ACCOUNT.usedMargin;
-    ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0
-      ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100
-      : 100;
-
-    if (ACCOUNT.marginLevel <= 20) {
-      closeAllTrades();
-      alert('⚠️ Todas las posiciones fueron cerradas por bajo margen');
-    }
-
-    if (ACCOUNT.marginLevel < 100) {
-      startMarginWarning();
-    } else {
-      stopMarginWarning();
-    }
-
-    renderAccountUI();
-  }
-
-  function closeAllTrades() {
-    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
-    ACCOUNT.balance += ACCOUNT.usedMargin + totalProfit;
-    ACCOUNT.usedMargin = 0;
-    OPEN_TRADES = [];
-    updateAccountMetrics();
-  }
-
-  function startMarginWarning() {
-    if (marginWarningInterval) return;
-    showMarginAlert();
-    marginWarningInterval = setInterval(() => {
-      showMarginAlert();
-    }, 300000);
-  }
-
-  function stopMarginWarning() {
-    clearInterval(marginWarningInterval);
-    marginWarningInterval = null;
-
-    const alertBox = document.getElementById('marginAlert');
-    if (alertBox) alertBox.remove();
-    marginAlertVisible = false;
-  }
-
-  function showMarginAlert() {
-    if (marginAlertVisible) return;
-    marginAlertVisible = true;
-
-    const div = document.createElement('div');
-    div.id = 'marginAlert';
-
-    div.innerHTML = `
-      <div style="
-        position:fixed;
-        bottom:20px;
-        right:20px;
-        background:#111;
-        color:#fff;
-        padding:15px;
-        border-radius:10px;
-        width:260px;
-        z-index:9999;
-        box-shadow:0 0 10px rgba(0,0,0,0.5);
-      ">
-        <div style="text-align:right;cursor:pointer" id="closeMarginAlert">✖</div>
-        <b>⚠️ Margen bajo</b><br>
-        Tu cuenta está en riesgo.<br>
-        Deposita para mantener la salud.<br><br>
-        Mínimo recomendado: <b>$115</b>
-      </div>
-    `;
-
-    document.body.appendChild(div);
-
-    const closeBtn = document.getElementById('closeMarginAlert');
-    if (closeBtn) {
-      closeBtn.onclick = () => {
-        div.remove();
-        marginAlertVisible = false;
-      };
-    }
-  }
-
-  function adminDeposit(amount) {
-    ACCOUNT.balance += Number(amount) || 0;
-    updateAccountMetrics();
-    stopMarginWarning();
-  }
-
-  function openTrade(symbol, amount, direction, price) {
-    const s = String(symbol || state.activeSymbol || window.__LEONES_TRADING__?.activeSymbol || '').trim();
-    const a = Number(amount || 0);
-    const p = Number(price || 0);
-
-    if (!s) return;
-    if (!a || a <= 0) return;
-
-    if (a > ACCOUNT.balance) {
-      alert('Fondos insuficientes');
-      return;
-    }
-
-    ACCOUNT.balance -= a;
-    ACCOUNT.usedMargin += a;
-
-    const trade = {
-      id: Date.now(),
-      symbol: s,
-      amount: a,
-      direction,
-      openPrice: p,
-      currentPrice: p,
-      profit: 0
-    };
-
-    OPEN_TRADES.push(trade);
-    updateAccountMetrics();
   }
 
   function renderBottomPanels() {
     const meta = getActiveSymbolMeta();
     const quote = meta ? currentQuote(meta.symbol) : null;
-    const activePrice = quote?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta?.symbol]?.price ?? null;
+    const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
 
     const dashboardPanel = document.getElementById('dashboardPanel');
     if (dashboardPanel) {
@@ -3675,24 +3185,6 @@ if (window.__LEONES_BOOTED__) {
             <div style="font-weight:900;margin-bottom:10px;">Ticket de orden</div>
             <div style="display:grid;gap:10px;">
               <label style="display:grid;gap:6px;">
-                <span style="font-size:12px;opacity:.75;">Tipo de orden</span>
-                <select id="order-type-bottom" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
-                  <option value="Market">Market</option>
-                  <option value="Limit">Limit</option>
-                  <option value="Stop Loss">Stop Loss</option>
-                  <option value="Take Profit">Take Profit</option>
-                  <option value="Stop Limit">Stop Limit</option>
-                </select>
-              </label>
-
-              <div id="priceBoxBottom" style="display:none;">
-                <label style="display:grid;gap:6px;">
-                  <span style="font-size:12px;opacity:.75;">Precio</span>
-                  <input id="order-price-bottom" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-                </label>
-              </div>
-
-              <label style="display:grid;gap:6px;">
                 <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
                 <input id="brokerOrderSizeBottom" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
               </label>
@@ -3744,7 +3236,7 @@ if (window.__LEONES_BOOTED__) {
       `;
     }
 
-    const assetsPanel = document.getElementById('activosPanel');
+    const assetsPanel = document.getElementById('assetsPanel');
     if (assetsPanel) {
       assetsPanel.innerHTML = `
         <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
@@ -3767,12 +3259,255 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  function renderBottomPanelsWrapper() {
-    renderBottomPanels();
-    const meta = getActiveSymbolMeta();
-    if (meta) {
-      renderSymbolDetails(meta);
-      requestRealtimeForSymbol(meta);
+  function resetTradingState() {
+    state.started = false;
+    state.markets = [];
+    state.quotes = [];
+    state.positions = [];
+    state.account = null;
+    state.activeSymbol = null;
+    state.marketFilter = 'All';
+    state.marketSearch = '';
+    state.lastChartSymbol = null;
+    stopAutoRefresh();
+    document.body.classList.remove('leones-menu-open');
+  }
+
+  function updateTradesPrices(prices) {
+    OPEN_TRADES.forEach(trade => {
+      const newPrice = prices[trade.symbol];
+      if (newPrice === undefined || newPrice === null) return;
+
+      trade.currentPrice = newPrice;
+
+      let diff = newPrice - trade.openPrice;
+      if (trade.direction === 'sell') diff *= -1;
+
+      trade.profit = diff * trade.amount * 10;
+    });
+
+    updateAccountMetrics();
+  }
+
+  function updateAccountMetrics() {
+    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
+
+    ACCOUNT.equity = ACCOUNT.balance + ACCOUNT.usedMargin + totalProfit;
+    ACCOUNT.freeMargin = ACCOUNT.equity - ACCOUNT.usedMargin;
+    ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0
+      ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100
+      : 100;
+
+    if (ACCOUNT.marginLevel <= 20) {
+      closeAllTrades();
+      alert('⚠️ Todas las posiciones fueron cerradas por bajo margen');
+    }
+
+    if (ACCOUNT.marginLevel < 100) {
+      startMarginWarning();
+    } else {
+      stopMarginWarning();
+    }
+
+    renderAccountUI();
+  }
+
+  function closeAllTrades() {
+    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
+    ACCOUNT.balance += ACCOUNT.usedMargin + totalProfit;
+    ACCOUNT.usedMargin = 0;
+    OPEN_TRADES = [];
+    updateAccountMetrics();
+  }
+
+  function renderAccountUI() {
+    const elBalance = document.getElementById('balance');
+    const elEquity = document.getElementById('equity');
+    const elMargin = document.getElementById('marginLevel');
+
+    if (elBalance) elBalance.innerText = ACCOUNT.balance.toFixed(2);
+    if (elEquity) elEquity.innerText = ACCOUNT.equity.toFixed(2);
+    if (elMargin) elMargin.innerText = ACCOUNT.marginLevel.toFixed(2) + '%';
+  }
+
+  function startMarginWarning() {
+    if (marginWarningInterval) return;
+    showMarginAlert();
+    marginWarningInterval = setInterval(() => {
+      showMarginAlert();
+    }, 300000);
+  }
+
+  function stopMarginWarning() {
+    clearInterval(marginWarningInterval);
+    marginWarningInterval = null;
+
+    const alertBox = document.getElementById('marginAlert');
+    if (alertBox) alertBox.remove();
+    marginAlertVisible = false;
+  }
+
+  function showMarginAlert() {
+    if (marginAlertVisible) return;
+    marginAlertVisible = true;
+
+    const div = document.createElement('div');
+    div.id = 'marginAlert';
+
+    div.innerHTML = `
+      <div style="
+        position:fixed;
+        bottom:20px;
+        right:20px;
+        background:#111;
+        color:#fff;
+        padding:15px;
+        border-radius:10px;
+        width:260px;
+        z-index:9999;
+        box-shadow:0 0 10px rgba(0,0,0,0.5);
+      ">
+        <div style="text-align:right;cursor:pointer" id="closeMarginAlert">✖</div>
+        <b>⚠️ Margen bajo</b><br>
+        Tu cuenta está en riesgo.<br>
+        Deposita para mantener la salud.<br><br>
+        Mínimo recomendado: <b>$115</b>
+      </div>
+    `;
+
+    document.body.appendChild(div);
+
+    document.getElementById('closeMarginAlert').onclick = () => {
+      div.remove();
+      marginAlertVisible = false;
+    };
+  }
+
+  function adminDeposit(amount) {
+    ACCOUNT.balance += Number(amount) || 0;
+    updateAccountMetrics();
+    stopMarginWarning();
+  }
+
+  async function ensureSocket() {
+    try {
+      if (window.__LEONES_SOCKET__?.socket) return window.__LEONES_SOCKET__.socket;
+      if (typeof window.initSocket === 'function') return window.initSocket(true) || window.initSocket();
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function bindSocketListeners() {
+    try {
+      const socket = window.__LEONES_SOCKET__?.socket || null;
+      if (!socket || socket.__leonesExt2Bound) return;
+      socket.__leonesExt2Bound = true;
+
+      const ingestQuotes = (payload) => {
+        const arr = asArrayResponse(payload);
+        if (!arr.length && payload && typeof payload === 'object') {
+          if (payload.symbol || payload.price !== undefined) arr.push(payload);
+        }
+        const normalized = mergeQuotes(arr);
+        if (!normalized.length) return;
+
+        const map = quoteMap();
+        normalized.forEach(q => {
+          map.set(q.symbol.toUpperCase(), q);
+          TR.symbolPrices = TR.symbolPrices || {};
+          TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+        });
+
+        state.quotes = Array.from(map.values());
+
+        const priceMap = {};
+        state.quotes.forEach(q => {
+          if (q && q.symbol) priceMap[q.symbol] = q.price;
+        });
+        updateTradesPrices(priceMap);
+
+        renderSymbolsGrid();
+        const meta = getActiveSymbolMeta();
+        if (meta) renderSymbolDetails(meta);
+      };
+
+      const ingestSymbols = (payload) => {
+        const arr = asArrayResponse(payload);
+        if (!arr.length && payload && typeof payload === 'object') {
+          if (payload.symbol || payload.code || payload.ticker) arr.push(payload);
+        }
+        const normalized = uniqueBySymbol(arr);
+        if (!normalized.length) return;
+
+        const map = new Map();
+        getSymbols().forEach(item => map.set(String(item.symbol).toUpperCase(), item));
+        normalized.forEach(item => map.set(String(item.symbol).toUpperCase(), item));
+
+        state.markets = Array.from(map.values());
+        TR.ALL_SYMBOLS = state.markets;
+        window.__LEONES_MARKETS__ = state.markets;
+
+        renderMarketTabs();
+        renderSymbolsGrid();
+        renderBottomPanels();
+
+        const meta = getActiveSymbolMeta();
+        if (meta) renderSymbolDetails(meta);
+      };
+
+      socket.on('connect', () => {
+        log('socket connected', socket.id);
+        const meta = getActiveSymbolMeta();
+        if (meta) requestRealtimeForSymbol(meta);
+        loadAccount().catch(() => {});
+        loadPositions().catch(() => {});
+      });
+
+      socket.on('disconnect', r => log('socket disconnected', r));
+      socket.on('connect_error', err => warn('socket connect_error', err));
+
+      ['prices_snapshot', 'quotes_snapshot', 'market_quotes', 'price_update', 'ticker', 'symbol_price', 'quotes_update']
+        .forEach(evt => socket.on(evt, ingestQuotes));
+
+      ['symbols_update', 'markets_update']
+        .forEach(evt => socket.on(evt, ingestSymbols));
+
+      ['account_update', 'wallet_update', 'balance_update']
+        .forEach(evt => socket.on(evt, (payload) => {
+          const account = extractAccountSource(payload);
+          syncAccountView(account);
+          renderBottomPanels();
+        }));
+
+      ['positions_update', 'position_update', 'orders_update']
+        .forEach(evt => socket.on(evt, () => loadPositions().catch(() => {})));
+
+      ['order_filled', 'order_opened', 'order_closed', 'trade_opened', 'trade_closed']
+        .forEach(evt => socket.on(evt, (payload) => {
+          const pnlRaw =
+            payload?.realizedPnl ??
+            payload?.pnl ??
+            payload?.profitLoss ??
+            payload?.data?.realizedPnl ??
+            payload?.data?.pnl ??
+            payload?.data?.profitLoss ??
+            null;
+
+          const pnl = Number(pnlRaw);
+          if (isFinite(pnl) && pnl !== 0) {
+            const current = Number(ACCOUNT.balance);
+            if (isFinite(current)) {
+              ACCOUNT.balance = current + pnl;
+              syncAccountView({ ...(state.account || {}), balance: ACCOUNT.balance, equity: ACCOUNT.equity });
+            }
+          }
+
+          requestBackendRefresh().catch(() => {});
+        }));
+    } catch (e) {
+      warn('bindSocketListeners', e);
     }
   }
 
@@ -3799,9 +3534,14 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function isClosedPosition(p = {}) {
+    const status = String(p.status || p.state || p.positionStatus || '').toLowerCase();
+    return status.includes('close') || status === 'closed' || !!p.closedAt || !!p.closed_at;
+  }
+
   async function closePosition(position = {}) {
     const pid = position?.id || position?._id || position?.positionId || position?.tradeId || null;
-    const symbol = position?.symbol || state.activeSymbol || null;
+    const symbol = position?.symbol || state.activeSymbol || TR.activeSymbol || null;
     const payload = { positionId: pid, symbol };
 
     const endpoints = [
@@ -3826,6 +3566,307 @@ if (window.__LEONES_BOOTED__) {
 
     await requestBackendRefresh().catch(() => {});
     return res;
+  }
+
+  async function placeOrder(side) {
+    const meta = getActiveSymbolMeta();
+    const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
+    const lev = effectiveLeverage(meta) || 1;
+
+    if (!meta) throw new Error('Selecciona un símbolo antes de operar');
+    if (!size || size <= 0) throw new Error('Escribe un monto válido');
+
+    const balance = Number(ACCOUNT.balance || state.account?.balance || state.account?.bal || state.account?.walletBalance || state.account?.funds || NaN);
+    const operatingPower = isFinite(balance) ? calcOperatingPower(balance, lev) : NaN;
+    const marginInfo = calculateMargin(size, lev, currentQuote(meta.symbol)?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? 0);
+
+    if (isFinite(operatingPower) && operatingPower > 0 && size > operatingPower) {
+      throw new Error('No hay capacidad operativa suficiente para esta operación');
+    }
+
+    if (isFinite(balance) && balance > 0 && marginInfo.requiredMargin > balance) {
+      throw new Error('Margen insuficiente para esta operación');
+    }
+
+    const payload = {
+      symbol: meta.symbol,
+      tvSymbol: meta.tvSymbol || meta.symbol,
+      side,
+      positionSize: size,
+      notional: size,
+      leverage: lev,
+      type: 'market'
+    };
+
+    if (typeof NS.placeOrder === 'function') {
+      const res = await NS.placeOrder({
+        side,
+        positionSize: size,
+        leverage: lev,
+        type: 'market'
+      });
+      const account = extractAccountSource(res || {});
+      if (account && Object.keys(account).length) syncAccountView(account);
+      await requestBackendRefresh().catch(() => {});
+      return res;
+    }
+
+    if (typeof window.placeBrokerOrder === 'function') {
+      const res = await window.placeBrokerOrder(payload);
+      const account = extractAccountSource(res || {});
+      if (account && Object.keys(account).length) syncAccountView(account);
+      await requestBackendRefresh().catch(() => {});
+      return res;
+    }
+
+    const candidates = ['/trade/place', '/api/trade/place', '/orders', '/api/orders', '/trade/open', '/api/trade/open'];
+    let res = null;
+    for (const ep of candidates) {
+      try {
+        res = await apiFetch(ep, { method: 'POST', body: JSON.stringify(payload) });
+        if (res) break;
+      } catch (e) {}
+    }
+
+    if (!res) throw new Error('No se pudo enviar la orden');
+
+    const account = extractAccountSource(res || {});
+    if (account && Object.keys(account).length) syncAccountView(account);
+
+    await requestBackendRefresh().catch(() => {});
+    return res;
+  }
+
+  async function loadRealMarkets() {
+    const endpoints = [
+      '/market/symbols',
+      '/market/list',
+      '/market/polygon/symbols',
+      '/symbols',
+      '/api/market/symbols',
+      '/api/market/list',
+      '/api/market/polygon/symbols',
+      '/api/symbols'
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const backendRows = uniqueBySymbol(merged);
+    const map = new Map();
+
+    DEFAULT_SYMBOLS.forEach(item => {
+      map.set(String(item.symbol).toUpperCase(), item);
+    });
+
+    backendRows.forEach(item => {
+      const key = String(item.symbol).toUpperCase();
+      map.set(key, {
+        ...(map.get(key) || {}),
+        ...item,
+        market: normalizeMarketName(item.market || inferMarketBySymbol(item.symbol, item.market)),
+        source: item.source || 'proveedor'
+      });
+    });
+
+    const all = Array.from(map.values()).sort((a, b) => {
+      const ma = MARKET_ORDER.indexOf(normalizeMarketName(a.market));
+      const mb = MARKET_ORDER.indexOf(normalizeMarketName(b.market));
+      if (ma !== mb) return (ma === -1 ? 999 : ma) - (mb === -1 ? 999 : mb);
+      return String(a.label || a.symbol).localeCompare(String(b.label || b.symbol));
+    });
+
+    state.markets = all;
+    TR.ALL_SYMBOLS = all;
+    window.__LEONES_MARKETS__ = all;
+    return all;
+  }
+
+  async function loadRealQuotes() {
+    const endpoints = [
+      '/market/quotes',
+      '/market/latest',
+      '/market/polygon/quotes',
+      '/quotes',
+      '/api/market/quotes',
+      '/api/market/latest',
+      '/api/market/polygon/quotes',
+      '/api/quotes'
+    ];
+
+    const merged = [];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        const arr = asArrayResponse(res);
+        if (arr.length) merged.push(...arr);
+      } catch (e) {}
+    }
+
+    const normalized = mergeQuotes(merged);
+    state.quotes = normalized;
+
+    TR.symbolPrices = TR.symbolPrices || {};
+    normalized.forEach(q => {
+      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+    });
+
+    const priceMap = {};
+    normalized.forEach(q => {
+      if (q && q.symbol) priceMap[q.symbol] = q.price;
+    });
+    updateTradesPrices(priceMap);
+
+    return normalized;
+  }
+
+  async function loadAccount() {
+    const endpoints = ['/account', '/me', '/profile', '/api/account', '/api/me', '/api/profile'];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        if (!res) continue;
+        const account = extractAccountSource(res);
+        syncAccountView(account);
+        renderBottomPanels();
+        return account;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  async function loadPositions() {
+    const endpoints = ['/positions', '/trade/positions', '/api/positions', '/api/trade/positions'];
+    for (const ep of endpoints) {
+      try {
+        const res = await apiFetch(ep).catch(() => null);
+        if (!res) continue;
+        const list = asArrayResponse(res);
+        state.positions = list;
+        TR.positions = list;
+        renderPositions();
+        renderBottomPanels();
+        return list;
+      } catch (e) {}
+    }
+    state.positions = [];
+    TR.positions = [];
+    renderPositions();
+    return [];
+  }
+
+  async function loadMarketsAndQuotes() {
+    await loadRealMarkets();
+    await loadRealQuotes();
+    renderMarketTabs();
+    renderSymbolsGrid();
+    renderBottomPanels();
+
+    const meta = getActiveSymbolMeta();
+    if (meta) {
+      renderSymbolDetails(meta);
+    } else if (getSymbols().length) {
+      const first = getSymbols()[0];
+      state.activeSymbol = first.symbol;
+      TR.activeSymbol = first.symbol;
+      TR.activeMeta = first;
+      renderSymbolDetails(first);
+    }
+
+    return getSymbols();
+  }
+
+  async function requestBackendRefresh() {
+    try {
+      await Promise.allSettled([loadMarketsAndQuotes(), loadAccount(), loadPositions()]);
+      const meta = getActiveSymbolMeta();
+      if (meta) requestRealtimeForSymbol(meta);
+      renderMargin();
+      renderPositions();
+      renderSymbolsGrid();
+      renderBottomPanels();
+    } catch (e) {
+      warn('requestBackendRefresh', e);
+    }
+  }
+
+  async function openTradingView(meta, containerId = 'tv_chart_container') {
+    const resolved = meta || getActiveSymbolMeta();
+    if (!resolved) throw new Error('No hay símbolos reales para graficar');
+
+    await ensureTradingViewScript();
+
+    const container = document.getElementById(containerId);
+    if (!container) throw new Error('No existe el contenedor del gráfico');
+
+    const symbol = String(resolved.tvSymbol || resolved.symbol || '').trim();
+    if (!symbol) throw new Error('El símbolo no es válido');
+
+    container.innerHTML = '';
+
+    if (typeof window.initTradingWidget === 'function') {
+      try {
+        window.initTradingWidget(symbol, containerId);
+        state.lastChartSymbol = symbol;
+        return symbol;
+      } catch (e) {
+        warn('window.initTradingWidget failed', e);
+      }
+    }
+
+    if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
+      throw new Error('TradingView no está disponible');
+    }
+
+    new TradingView.widget({
+      autosize: true,
+      symbol,
+      interval: '5',
+      timezone: 'Etc/UTC',
+      theme: 'dark',
+      style: '1',
+      locale: 'es',
+      enable_publishing: false,
+      allow_symbol_change: true,
+      container_id: container.id,
+      hide_side_toolbar: false,
+      withdateranges: true,
+      save_image: false
+    });
+
+    state.lastChartSymbol = symbol;
+    return symbol;
+  }
+
+  function selectSymbol(meta, options = {}) {
+    if (!meta) return;
+    const openChart = options.openChart !== false;
+
+    state.activeSymbol = meta.symbol;
+    TR.activeSymbol = meta.symbol;
+    TR.activeMeta = meta;
+    state.lastChartSymbol = meta.symbol;
+
+    renderSymbolDetails(meta);
+    requestRealtimeForSymbol(meta);
+    renderBottomPanels();
+
+    if (openChart) {
+      openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo abrir el gráfico', 'error'));
+      openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+    }
+  }
+
+  function applySearchValue(value) {
+    state.marketSearch = String(value || '');
+    renderSymbolsGrid();
+    renderBottomPanels();
   }
 
   function attachGlobalDelegation() {
@@ -3956,21 +3997,12 @@ if (window.__LEONES_BOOTED__) {
       try {
         if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
 
-        if (
-          ev.target.id === 'brokerOrderSize' ||
-          ev.target.id === 'brokerOrderSizeBottom' ||
-          ev.target.id === 'order-price' ||
-          ev.target.id === 'order-price-bottom'
-        ) {
+        if (ev.target.id === 'brokerOrderSize' || ev.target.id === 'brokerOrderSizeBottom') {
           renderMargin();
         }
 
         if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
           applySearchValue(ev.target.value);
-        }
-
-        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
-          syncOrderTypeUI();
         }
       } catch (e) {}
     }, true);
@@ -4002,10 +4034,21 @@ if (window.__LEONES_BOOTED__) {
 
   function updatePrivateHeaderName(user = {}) {
     const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente');
-    document.querySelectorAll('#welcomeUser, .welcomeUser, [data-leones-user-name], [data-user-name], [data-welcome-name]')
-      .forEach(el => {
+    const headerName = document.querySelector('#headerActions [data-leones-user-name]');
+    if (headerName) headerName.textContent = name;
+
+    const welcomeSelectors = [
+      '#welcomeUser',
+      '.welcomeUser',
+      '[data-leones-user-name]',
+      '[data-user-name]',
+      '[data-welcome-name]'
+    ];
+    welcomeSelectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
         try { el.textContent = name; } catch (e) {}
       });
+    });
   }
 
   function ensureShell(root) {
@@ -4098,28 +4141,9 @@ if (window.__LEONES_BOOTED__) {
       <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
       <div style="display:grid;gap:10px;">
         <label style="display:grid;gap:6px;">
-          <span style="font-size:12px;opacity:.75;">Tipo de orden</span>
-          <select id="order-type" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
-            <option value="Market">Market</option>
-            <option value="Limit">Limit</option>
-            <option value="Stop Loss">Stop Loss</option>
-            <option value="Take Profit">Take Profit</option>
-            <option value="Stop Limit">Stop Limit</option>
-          </select>
-        </label>
-
-        <div id="priceBox" style="display:none;">
-          <label style="display:grid;gap:6px;">
-            <span style="font-size:12px;opacity:.75;">Precio</span>
-            <input id="order-price" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-          </label>
-        </div>
-
-        <label style="display:grid;gap:6px;">
           <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
           <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
         </label>
-
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
             <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
@@ -4138,7 +4162,6 @@ if (window.__LEONES_BOOTED__) {
             <div id="brokerFreeMarginValue" style="font-weight:800;">--</div>
           </div>
         </div>
-
         <div style="display:flex;gap:8px;">
           <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
           <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
@@ -4203,18 +4226,7 @@ if (window.__LEONES_BOOTED__) {
     });
 
     window.addEventListener('leones:loggedOut', () => {
-      state.started = false;
-      state.booted = false;
-      state.markets = [];
-      state.quotes = [];
-      state.positions = [];
-      state.account = null;
-      state.activeSymbol = null;
-      state.marketFilter = 'All';
-      state.marketSearch = '';
-      state.lastChartSymbol = null;
-      stopAutoRefresh();
-      document.body.classList.remove('leones-menu-open');
+      resetTradingState();
     });
   }
 
@@ -4233,17 +4245,18 @@ if (window.__LEONES_BOOTED__) {
 
     clearMessage();
 
-    const user = getUser();
     if (context && context.user && typeof context.user === 'object') {
       state.account = { ...(state.account || {}), ...context.user };
       updatePrivateHeaderName(context.user);
       syncAccountView(context.user);
-    } else if (user && Object.keys(user).length) {
-      updatePrivateHeaderName(user);
+    } else {
+      const user = getUser();
+      if (user && Object.keys(user).length) {
+        updatePrivateHeaderName(user);
+      }
     }
 
     attachGlobalDelegation();
-    ensureMarketFilterTabsBound();
     await ensureSocket();
     bindSocketListeners();
     startAutoRefresh();
@@ -4256,9 +4269,8 @@ if (window.__LEONES_BOOTED__) {
 
     if (meta) {
       state.activeSymbol = meta.symbol;
-      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-      window.__LEONES_TRADING__.activeSymbol = meta.symbol;
-      window.__LEONES_TRADING__.activeMeta = meta;
+      TR.activeSymbol = meta.symbol;
+      TR.activeMeta = meta;
 
       renderSymbolDetails(meta);
       renderBottomPanels();
@@ -4273,322 +4285,67 @@ if (window.__LEONES_BOOTED__) {
       setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
     }
 
-    syncOrderTypeUI();
     return true;
   }
 
-  function bindSocketListeners() {
-    try {
-      const socket = window.__LEONES_SOCKET__?.socket || null;
-      if (!socket || socket.__leonesExt2Bound) return;
-      socket.__leonesExt2Bound = true;
+  function exposeAPI() {
+    window.startBrokerUI = initTradingUI;
+    window.refreshBrokerUI = requestBackendRefresh;
+    window.openBrokerTradingView = openTradingView;
+    window.selectBrokerSymbol = selectSymbol;
 
-      const ingestQuotes = (payload) => {
-        const arr = asArrayResponse(payload);
-        if (!arr.length && payload && typeof payload === 'object') {
-          if (payload.symbol || payload.price !== undefined) arr.push(payload);
-        }
-        const normalized = mergeQuotes(arr);
-        if (!normalized.length) return;
+    window.openTrade = openTrade;
+    window.updateTradesPrices = updateTradesPrices;
+    window.updateAccountMetrics = updateAccountMetrics;
+    window.closeAllTrades = closeAllTrades;
+    window.adminDeposit = adminDeposit;
 
-        const map = quoteMap();
-        normalized.forEach(q => {
-          map.set(q.symbol.toUpperCase(), q);
-          window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-          window.__LEONES_TRADING__.symbolPrices = window.__LEONES_TRADING__.symbolPrices || {};
-          window.__LEONES_TRADING__.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
-        });
+    window.__LEONES_BROKER_EXT2 = {
+      initTradingUI,
+      refreshBrokerUI: requestBackendRefresh,
+      openTradingView,
+      selectSymbol,
+      loadMarketsAndQuotes,
+      loadRealMarkets,
+      loadRealQuotes,
+      loadAccount,
+      loadPositions,
+      placeOrder,
+      closePosition,
+      requestBackendRefresh
+    };
+  }
 
-        state.quotes = Array.from(map.values());
-
-        const priceMap = {};
-        state.quotes.forEach(q => {
-          if (q && q.symbol) priceMap[q.symbol] = q.price;
-        });
-        updateTradesPrices(priceMap);
-
-        renderSymbolsGrid();
-        const meta = getActiveSymbolMeta();
-        if (meta) renderSymbolDetails(meta);
-      };
-
-      const ingestSymbols = (payload) => {
-        const arr = asArrayResponse(payload);
-        if (!arr.length && payload && typeof payload === 'object') {
-          if (payload.symbol || payload.code || payload.ticker) arr.push(payload);
-        }
-        const normalized = uniqueBySymbol(arr);
-        if (!normalized.length) return;
-
-        const map = new Map();
-        getSymbols().forEach(item => map.set(String(item.symbol).toUpperCase(), item));
-        normalized.forEach(item => map.set(String(item.symbol).toUpperCase(), item));
-
-        state.markets = Array.from(map.values());
-        window.__LEONES_MARKETS__ = state.markets;
-
-        renderMarketTabs();
-        renderSymbolsGrid();
-        renderBottomPanels();
-
-        const meta = getActiveSymbolMeta();
-        if (meta) renderSymbolDetails(meta);
-      };
-
-      socket.on('connect', () => {
-        log('socket connected', socket.id);
-        const meta = getActiveSymbolMeta();
-        if (meta) requestRealtimeForSymbol(meta);
-        loadAccount().catch(() => {});
-        loadPositions().catch(() => {});
-      });
-
-      socket.on('disconnect', r => log('socket disconnected', r));
-      socket.on('connect_error', err => warn('socket connect_error', err));
-
-      ['prices_snapshot', 'quotes_snapshot', 'market_quotes', 'price_update', 'ticker', 'symbol_price', 'quotes_update']
-        .forEach(evt => socket.on(evt, ingestQuotes));
-
-      ['symbols_update', 'markets_update']
-        .forEach(evt => socket.on(evt, ingestSymbols));
-
-      ['account_update', 'wallet_update', 'balance_update']
-        .forEach(evt => socket.on(evt, (payload) => {
-          const account = extractAccountSource(payload);
-          syncAccountView(account);
-          renderBottomPanels();
-        }));
-
-      ['positions_update', 'position_update', 'orders_update']
-        .forEach(evt => socket.on(evt, () => loadPositions().catch(() => {})));
-
-      ['order_filled', 'order_opened', 'order_closed', 'trade_opened', 'trade_closed']
-        .forEach(evt => socket.on(evt, (payload) => {
-          const pnlRaw =
-            payload?.realizedPnl ??
-            payload?.pnl ??
-            payload?.profitLoss ??
-            payload?.data?.realizedPnl ??
-            payload?.data?.pnl ??
-            payload?.data?.profitLoss ??
-            null;
-
-          const pnl = Number(pnlRaw);
-          if (isFinite(pnl) && pnl !== 0) {
-            const current = Number(ACCOUNT.balance);
-            if (isFinite(current)) {
-              ACCOUNT.balance = current + pnl;
-              syncAccountView({ ...(state.account || {}), balance: ACCOUNT.balance, equity: ACCOUNT.equity });
-            }
-          }
-
-          requestBackendRefresh().catch(() => {});
-        }));
-    } catch (e) {
-      warn('bindSocketListeners', e);
+  function openTrade(symbol, amount, direction, price) {
+    if (amount > ACCOUNT.balance) {
+      alert('Fondos insuficientes');
+      return;
     }
+
+    ACCOUNT.balance -= amount;
+    ACCOUNT.usedMargin += amount;
+
+    const trade = {
+      id: Date.now(),
+      symbol,
+      amount,
+      direction,
+      openPrice: price,
+      currentPrice: price,
+      profit: 0
+    };
+
+    OPEN_TRADES.push(trade);
+    updateAccountMetrics();
   }
 
-  function requestRealtimeForSymbol(meta = null) {
-    try {
-      const socket = window.__LEONES_SOCKET__?.socket || window.__LEONES_TRADING_SOCKET__ || null;
-      if (!socket || typeof socket.emit !== 'function') return;
-      const resolved = meta || getActiveSymbolMeta();
-      if (!resolved) return;
-
-      const symbol = resolved.symbol;
-      const tvSymbol = resolved.tvSymbol || symbol;
-
-      socket.emit('request_orderbook', { symbol, tvSymbol });
-      socket.emit('subscribe_symbol', { symbol, tvSymbol });
-      socket.emit('subscribe_prices', { symbols: [symbol, tvSymbol].filter(Boolean) });
-      socket.emit('request_prices', { symbols: [symbol, tvSymbol].filter(Boolean) });
-      socket.emit('request_account');
-      socket.emit('request_positions');
-      socket.emit('request_symbols');
-      socket.emit('request_prices_snapshot');
-    } catch (e) {
-      warn('requestRealtimeForSymbol', e);
-    }
-  }
-
-  function attachGlobalDelegation() {
-    if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
-    window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
-
-    document.addEventListener('click', async (ev) => {
-      try {
-        const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
-        if (!inPrivate) return;
-
-        const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
-        if (clicked) flashButton(clicked);
-
-        const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
-        if (marketBtn && marketBtn.dataset.market !== undefined) {
-          ev.preventDefault();
-          state.marketFilter = marketBtn.dataset.market || 'All';
-          renderMarketTabs();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          return;
-        }
-
-        const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
-        if (symbolCard) {
-          ev.preventDefault();
-          const symbol = symbolCard.dataset.symbol || '';
-          const meta =
-            symbolMap().get(String(symbol).toUpperCase()) ||
-            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
-            null;
-
-          if (meta) selectSymbol(meta, { openChart: true });
-          return;
-        }
-
-        const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
-        if (closeBtn) {
-          ev.preventDefault();
-          const pid = closeBtn.dataset.closePosition;
-          const sym = closeBtn.dataset.symbol;
-          const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
-          await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
-        if (!actionTarget) return;
-
-        const action = actionTarget.dataset.action;
-
-        if (action === 'buy') {
-          ev.preventDefault();
-          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        if (action === 'sell') {
-          ev.preventDefault();
-          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        if (action === 'open-chart') {
-          ev.preventDefault();
-          const meta = getActiveSymbolMeta();
-          if (meta) await openTradingView(meta, 'tv_chart_container');
-          return;
-        }
-
-        if (action === 'open-chart-bottom') {
-          ev.preventDefault();
-          const meta = getActiveSymbolMeta();
-          if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
-          return;
-        }
-
-        if (action === 'refresh-all') {
-          ev.preventDefault();
-          await requestBackendRefresh();
-          return;
-        }
-
-        if (action === 'refresh-symbols') {
-          ev.preventDefault();
-          await loadRealMarkets();
-          renderMarketTabs();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-          return;
-        }
-
-        if (action === 'refresh-quotes') {
-          ev.preventDefault();
-          await loadRealQuotes();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-          return;
-        }
-
-        if (action === 'refresh-account') {
-          ev.preventDefault();
-          await loadAccount();
-          renderBottomPanels();
-          return;
-        }
-
-        if (action === 'refresh-positions') {
-          ev.preventDefault();
-          await loadPositions();
-          renderBottomPanels();
-          return;
-        }
-      } catch (e) {
-        warn('global click delegation', e);
-      }
-    }, true);
-
-    document.addEventListener('input', (ev) => {
-      try {
-        if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
-
-        if (
-          ev.target.id === 'brokerOrderSize' ||
-          ev.target.id === 'brokerOrderSizeBottom' ||
-          ev.target.id === 'order-price' ||
-          ev.target.id === 'order-price-bottom'
-        ) {
-          renderMargin();
-        }
-
-        if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
-          applySearchValue(ev.target.value);
-        }
-
-        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
-          syncOrderTypeUI();
-        }
-      } catch (e) {}
-    }, true);
-  }
-
-  function startAutoRefresh() {
-    if (state.pollTimer) return;
-    state.pollTimer = setInterval(() => {
-      try {
-        if (!isLoggedIn()) return;
-        loadAccount().catch(() => {});
-        loadPositions().catch(() => {});
-        loadRealQuotes().then(() => {
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-        }).catch(() => {});
-      } catch (e) {}
-    }, 7000);
-  }
-
-  function stopAutoRefresh() {
-    if (state.pollTimer) {
-      clearInterval(state.pollTimer);
-      state.pollTimer = null;
-    }
-  }
-
-  function ensureTradingViewAutoOpen() {
+  function renderBottomPanelsWrapper() {
+    renderBottomPanels();
     const meta = getActiveSymbolMeta();
-    if (!meta) return;
-    openTradingView(meta, 'tv_chart_container').catch(() => {});
-    openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+    if (meta) {
+      renderSymbolDetails(meta);
+      requestRealtimeForSymbol(meta);
+    }
   }
 
   function bootIfLoggedIn() {
@@ -4600,32 +4357,7 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  window.startBrokerUI = initTradingUI;
-  window.refreshBrokerUI = requestBackendRefresh;
-  window.openBrokerTradingView = openTradingView;
-  window.selectBrokerSymbol = selectSymbol;
-
-  window.openTrade = openTrade;
-  window.updateTradesPrices = updateTradesPrices;
-  window.updateAccountMetrics = updateAccountMetrics;
-  window.closeAllTrades = closeAllTrades;
-  window.adminDeposit = adminDeposit;
-
-  window.__LEONES_BROKER_EXT2 = {
-    initTradingUI,
-    refreshBrokerUI: requestBackendRefresh,
-    openTradingView,
-    selectSymbol,
-    loadMarketsAndQuotes,
-    loadRealMarkets,
-    loadRealQuotes,
-    loadAccount,
-    loadPositions,
-    placeOrder,
-    closePosition,
-    requestBackendRefresh
-  };
-
+  exposeAPI();
   attachLoginEventBridge();
 
   if (document.readyState !== 'loading') {
@@ -4639,28 +4371,99 @@ if (window.__LEONES_BOOTED__) {
 
   window.addEventListener('load', () => {
     try {
-      if (isLoggedIn()) initTradingUI().catch(() => {});
+      if (isLoggedIn()) {
+        initTradingUI().catch(() => {});
+      }
     } catch (e) {}
   });
 
   setInterval(() => {
     try {
       renderBottomPanelsWrapper();
-      syncOrderTypeUI();
     } catch (e) {}
   }, 5000);
 
-  window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-      const orderTypeTop = document.getElementById('order-type');
-      const orderTypeBottom = document.getElementById('order-type-bottom');
-      if (orderTypeTop || orderTypeBottom) syncOrderTypeUI();
-      ensureTradingViewAutoOpen();
-    }, 400);
+  log('EXT2 real loaded');
+})();
+
+
+
+/* =========================
+   🔥 TIPO DE ORDEN (SELECT)
+========================= */
+function initOrderTypeSelector() {
+
+  const select = document.getElementById("order-type-bottom");
+  if (!select) return;
+
+  // 🔥 guardar tipo activo global
+  window.__ORDER_TYPE__ = select.value;
+
+  select.addEventListener("change", () => {
+    window.__ORDER_TYPE__ = select.value;
+
+    console.log("[ORDER TYPE]", window.__ORDER_TYPE__);
+
+    // 🔥 aquí puedes reaccionar visualmente si quieres
+    handleOrderTypeUI(window.__ORDER_TYPE__);
   });
 
-  log('FULL UNIFIED FIXED LOADED');
-})();
+}
+
+/* =========================
+   🔥 CAMBIO VISUAL SEGÚN TIPO
+========================= */
+function handleOrderTypeUI(type) {
+
+  const limitInputs = document.querySelectorAll(".limit-fields");
+  const stopInputs = document.querySelectorAll(".stop-fields");
+
+  // reset
+  limitInputs.forEach(el => el.style.display = "none");
+  stopInputs.forEach(el => el.style.display = "none");
+
+  if (type === "Limit") {
+    limitInputs.forEach(el => el.style.display = "block");
+  }
+
+  if (type === "Stop Loss" || type === "Take Profit" || type === "Stop Limit") {
+    stopInputs.forEach(el => el.style.display = "block");
+  }
+
+}
+
+
+window.__LEONES_BROKER_EXT2 = {
+
+  /* =========================
+     🔥 PLACE ORDER CORRECTO
+  ========================= */
+  placeOrder({ symbol, amount, direction }) {
+
+    const orderType = window.__ORDER_TYPE__ || "Market";
+
+    console.log("Orden enviada:", {
+      symbol,
+      amount,
+      direction,
+      type: orderType
+    });
+
+    // 🔥 ejemplo real
+    this.positions = this.positions || [];
+
+    this.positions.push({
+      symbol,
+      amount,
+      direction,
+      type: orderType,
+      time: Date.now()
+    });
+
+  }
+
+};
+
 </script>
 
   
@@ -4685,6 +4488,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  /* 🔥 NUEVO: BOTÓN FLOTANTE FUNCIONAL */
   if (sidebar && floatingMenuBtn) {
     floatingMenuBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
@@ -4768,8 +4572,10 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
+
     const api = ext();
     const container = document.getElementById("tv_chart_container");
+
     if (!container) return;
 
     container.innerHTML = "";
@@ -4788,7 +4594,8 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 VELAS MÁS FLUIDAS
   ========================= */
   setInterval(() => {
-    ext().loadRealQuotes?.();
+    const api = ext();
+    api.loadRealQuotes?.();
   }, 1500);
 
   /* =========================
@@ -4861,27 +4668,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     restoreAmount();
   }
 
-  /* =========================
-     🔥 FIX REAL BOTONES BUY/SELL
-  ========================= */
   document.addEventListener("click", (e) => {
 
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-
-    const action = btn.dataset.action;
-
-    if (action === "buy" || action === "sell") {
+    if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
-      e.stopPropagation();
-
-      btn.style.transform = "scale(0.95)";
-      setTimeout(() => btn.style.transform = "scale(1)", 150);
-
-      forceTrade(action);
+      forceTrade("buy");
     }
 
-  }, true);
+    if (e.target.matches('[data-action="sell"]')) {
+      e.preventDefault();
+      forceTrade("sell");
+    }
+
+  });
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
@@ -4915,10 +4714,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function updateFloatingTrades() {
+    const api = ext();
     const list = document.getElementById("floatingTradesList");
     if (!list) return;
 
-    const positions = ext().positions || [];
+    const positions = api.positions || [];
 
     if (!positions.length) {
       list.innerHTML = "Sin operaciones";
@@ -4941,6 +4741,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function showPanel(id) {
 
     showOnlyPanel(id);
+
     const api = ext();
 
     if (id === "marketPanel") {
