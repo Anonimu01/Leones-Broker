@@ -1798,6 +1798,7 @@ if (window.__LEONES_BOOTED__) {
         <div class="menu-item" id="btnInfo"><i class="fa-solid fa-circle-info"></i> Info</div>
       </aside>
 
+      <!-- botón que queda visible cuando se oculta el menú -->
       <button id="floatingMenuBtn" title="Abrir/Cerrar menú">☰</button>
 
       <section class="panel" id="dashboardPanel">
@@ -1885,37 +1886,23 @@ if (window.__LEONES_BOOTED__) {
                   </select>
                 </div>
 
-                <div id="priceBox" style="display:none; margin-bottom:8px;">
-                  <label class="muted-small">Precio</label>
-                  <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="order-qty" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                  </div>
                 </div>
 
                 <div class="form-row">
                   <div style="flex:1">
-                    <label class="muted-small">Cantidad (ej. BTC)</label>
-                    <input id="brokerOrderSize" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                    <label class="muted-small">Precio (si aplica)</label>
+                    <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
                   </div>
                 </div>
 
                 <div style="display:flex;gap:8px;margin-top:8px">
                   <button class="btn-primary" id="btnBuy">Buy</button>
                   <button class="btn-secondary" id="btnSell">Sell</button>
-                </div>
-
-                <div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
-                  <label class="muted-small">Tipo de Orden</label>
-                  <select id="order-type-bottom" class="form-select">
-                    <option value="Market">Market</option>
-                    <option value="Limit">Limit</option>
-                    <option value="Stop Loss">Stop Loss</option>
-                    <option value="Take Profit">Take Profit</option>
-                    <option value="Stop Limit">Stop Limit</option>
-                  </select>
-
-                  <div id="priceBoxBottom" style="display:none; margin-top:8px;">
-                    <label class="muted-small">Precio</label>
-                    <input id="order-price-bottom" class="form-input" type="number" step="0.01" placeholder="Precio">
-                  </div>
                 </div>
 
                 <div class="orders-box" id="orders-box" style="margin-top:12px">
@@ -4386,192 +4373,65 @@ if (window.__LEONES_BOOTED__) {
   log('EXT2 real loaded');
 })();
 
+// mardita  mierda 
 
 
-/* =====================================================
-   🔥 LEONES FINAL FIX FULL (MARKET + CHART REAL)
-   NO ROMPE NADA - SOLO CORRIGE
-===================================================== */
-(function () {
+function getOrderTypeConfig() {
+  const type = document.getElementById('order-type').value;
+  const priceInput = document.getElementById('order-price');
 
-  if (window.__LEONES_FINAL_FULL__) return;
-  window.__LEONES_FINAL_FULL__ = true;
+  let config = {
+    type,
+    requirePrice: false,
+    label: ''
+  };
 
-  /* =========================
-     1. OBTENER TIPO DE ORDEN
-  ========================= */
-  function getOrderType() {
-    return (
-      document.getElementById('order-type')?.value ||
-      document.getElementById('order-type-bottom')?.value ||
-      'market'
-    ).toLowerCase();
+  switch (type) {
+    case 'Market':
+      config.requirePrice = false;
+      config.label = 'Orden de mercado (ejecución inmediata)';
+      priceInput.disabled = true;
+      priceInput.value = '';
+      break;
+
+    case 'Limit':
+      config.requirePrice = true;
+      config.label = 'Orden límite (precio específico)';
+      priceInput.disabled = false;
+      break;
+
+    case 'Stop Loss':
+      config.requirePrice = true;
+      config.label = 'Stop Loss (protección de pérdida)';
+      priceInput.disabled = false;
+      break;
+
+    case 'Take Profit':
+      config.requirePrice = true;
+      config.label = 'Take Profit (asegurar ganancias)';
+      priceInput.disabled = false;
+      break;
+
+    case 'Stop Limit':
+      config.requirePrice = true;
+      config.label = 'Stop Limit (activación + límite)';
+      priceInput.disabled = false;
+      break;
   }
 
-  /* =========================
-     2. SINCRONIZAR SELECTS
-  ========================= */
-  function syncOrderType(value) {
-    ['order-type', 'order-type-bottom'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.value !== value) el.value = value;
-    });
+  return config;
+}
 
-    const isMarket = value === 'market';
 
-    ['order-price', 'order-price-bottom'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.disabled = isMarket;
-      el.style.opacity = isMarket ? '0.5' : '1';
-    });
-  }
 
-  document.addEventListener('change', (e) => {
-    if (e.target.id === 'order-type' || e.target.id === 'order-type-bottom') {
-      syncOrderType(e.target.value);
-    }
-  });
 
-  /* =========================
-     3. FIX ORDEN REAL
-  ========================= */
-  function installOrderFix() {
-    const api = window.__LEONES_BROKER_EXT2;
-    if (!api || !api.placeOrder) {
-      setTimeout(installOrderFix, 800);
-      return;
-    }
-
-    const original = api.placeOrder;
-
-    api.placeOrder = async function (side) {
-      try {
-        const type = getOrderType();
-        const meta = api.activeMeta;
-
-        if (!meta) throw new Error('Selecciona un símbolo');
-
-        const size =
-          Number(document.getElementById('brokerOrderSize')?.value) ||
-          Number(document.getElementById('brokerOrderSizeBottom')?.value) ||
-          0;
-
-        if (!size || size <= 0) {
-          throw new Error('Monto inválido');
-        }
-
-        const payload = {
-          symbol: meta.symbol,
-          tvSymbol: meta.tvSymbol || meta.symbol,
-          side,
-          positionSize: size,
-          leverage: 1,
-          type
-        };
-
-        if (type !== 'market') {
-          payload.price =
-            Number(document.getElementById('order-price')?.value) ||
-            Number(document.getElementById('order-price-bottom')?.value) ||
-            null;
-        }
-
-        if (typeof window.placeBrokerOrder === 'function') {
-          return await window.placeBrokerOrder(payload);
-        }
-
-        return await original.call(this, side);
-
-      } catch (err) {
-        console.error('ORDER FIX:', err);
-        alert(err.message);
-        return null;
-      }
-    };
-  }
-
-  installOrderFix();
-
-  /* =========================
-     4. FIX GRÁFICO FUERTE
-  ========================= */
-  async function openChart(meta) {
-    try {
-      const api = window.__LEONES_BROKER_EXT2;
-      if (!api || !meta) return;
-
-      if (!meta.tvSymbol) meta.tvSymbol = meta.symbol;
-
-      await api.openTradingView(meta, 'tv_chart_container');
-
-      if (document.getElementById('tv_chart_container_bottom')) {
-        await api.openTradingView(meta, 'tv_chart_container_bottom');
-      }
-
-    } catch (e) {
-      console.warn('chart fix:', e);
-    }
-  }
-
-  /* =========================
-     5. CLICK EN SÍMBOLOS
-  ========================= */
-  document.addEventListener('click', async (e) => {
-    const card = e.target.closest('.broker-symbol-card, [data-symbol]');
-    if (!card) return;
-
-    try {
-      const api = window.__LEONES_BROKER_EXT2;
-      if (!api) return;
-
-      const meta = {
-        symbol: card.dataset.symbol,
-        tvSymbol: card.dataset.tvSymbol || card.dataset.symbol,
-        label: card.dataset.label || card.dataset.symbol,
-        market: card.dataset.market || ''
-      };
-
-      if (api.selectSymbol) {
-        api.selectSymbol(meta, { openChart: false });
-      }
-
-      await openChart(meta);
-
-    } catch (err) {
-      console.warn('symbol fix:', err);
-    }
-  }, true);
-
-  /* =========================
-     6. AUTO INIT GRÁFICO
-  ========================= */
-  function waitForAPI() {
-    const api = window.__LEONES_BROKER_EXT2;
-
-    if (!api || !api.activeMeta) {
-      setTimeout(waitForAPI, 800);
-      return;
-    }
-
-    openChart(api.activeMeta);
-
-    const current =
-      document.getElementById('order-type')?.value ||
-      document.getElementById('order-type-bottom')?.value ||
-      'market';
-
-    syncOrderType(current);
-  }
-
-  window.addEventListener('load', () => {
-    setTimeout(waitForAPI, 1200);
-  });
-
-})();
 </script>
 
-  
+ 
+
+
+
+
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
