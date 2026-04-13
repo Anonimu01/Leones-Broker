@@ -1905,6 +1905,44 @@ if (window.__LEONES_BOOTED__) {
                   <button class="btn-secondary" id="btnSell">Sell</button>
                 </div>
 
+                <!-- 🔥 SELECTOR ABAJO (CLIENTE) -->
+<div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
+
+  <label style="font-size:12px;color:#aaa;">Tipo de Orden</label>
+  <select id="order-type-bottom" style="
+    width:100%;
+    padding:8px;
+    border-radius:6px;
+    background:#111;
+    color:#fff;
+    border:1px solid #333;
+  ">
+    <option value="Market">Market</option>
+    <option value="Limit">Limit</option>
+    <option value="Stop Loss">Stop Loss</option>
+    <option value="Take Profit">Take Profit</option>
+    <option value="Stop Limit">Stop Limit</option>
+  </select>
+
+  <div id="priceBoxBottom" style="display:none; margin-top:8px;">
+    <input id="order-price-bottom" type="number" placeholder="Precio"
+      style="
+        width:100%;
+        padding:8px;
+        border-radius:6px;
+        background:#111;
+        color:#fff;
+        border:1px solid #333;
+      ">
+  </div>
+
+</div>
+
+
+
+
+                
+
                 <div class="orders-box" id="orders-box" style="margin-top:12px">
                   <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
                   <div id="orders-list" class="muted-small">— no hay órdenes —</div>
@@ -4822,6 +4860,47 @@ document.addEventListener("DOMContentLoaded", async () => {
   showPanel("dashboardPanel");
 
 });
+
+
+/* =========================
+   🔥 CONTROL UI ORDENES
+========================= */
+
+function syncOrderTypeUI() {
+
+  const top = document.getElementById("order-type");
+  const bottom = document.getElementById("order-type-bottom");
+
+  const priceBox = document.getElementById("priceBox");
+  const priceBoxBottom = document.getElementById("priceBoxBottom");
+
+  function updateUI(value){
+    const show = value !== "Market";
+
+    if(priceBox) priceBox.style.display = show ? "block" : "none";
+    if(priceBoxBottom) priceBoxBottom.style.display = show ? "block" : "none";
+  }
+
+  if(top){
+    top.addEventListener("change", () => {
+      if(bottom) bottom.value = top.value;
+      updateUI(top.value);
+    });
+  }
+
+  if(bottom){
+    bottom.addEventListener("change", () => {
+      if(top) top.value = bottom.value;
+      updateUI(bottom.value);
+    });
+  }
+
+  // inicial
+  updateUI(top?.value || "Market");
+}
+
+
+  
 </script>
   
 </div>
