@@ -4389,15 +4389,16 @@ if (window.__LEONES_BOOTED__) {
 
 
 /* =====================================================
-   🔥 FIX FINAL MARKET + CHART (NO ROMPE NADA EXISTENTE)
+   🔥 LEONES FINAL FIX FULL (MARKET + CHART REAL)
+   NO ROMPE NADA - SOLO CORRIGE
 ===================================================== */
 (function () {
 
-  if (window.__FINAL_BROKER_FIX__) return;
-  window.__FINAL_BROKER_FIX__ = true;
+  if (window.__LEONES_FINAL_FULL__) return;
+  window.__LEONES_FINAL_FULL__ = true;
 
   /* =========================
-     1. TOMAR TIPO DE ORDEN REAL
+     1. OBTENER TIPO DE ORDEN
   ========================= */
   function getOrderType() {
     return (
@@ -4408,17 +4409,48 @@ if (window.__LEONES_BOOTED__) {
   }
 
   /* =========================
-     2. FIX PLACE ORDER REAL
+     2. SINCRONIZAR SELECTS
   ========================= */
-  const originalPlaceOrder = window.__LEONES_BROKER_EXT2?.placeOrder;
+  function syncOrderType(value) {
+    ['order-type', 'order-type-bottom'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.value !== value) el.value = value;
+    });
 
-  if (originalPlaceOrder) {
-    window.__LEONES_BROKER_EXT2.placeOrder = async function (side) {
+    const isMarket = value === 'market';
+
+    ['order-price', 'order-price-bottom'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = isMarket;
+      el.style.opacity = isMarket ? '0.5' : '1';
+    });
+  }
+
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'order-type' || e.target.id === 'order-type-bottom') {
+      syncOrderType(e.target.value);
+    }
+  });
+
+  /* =========================
+     3. FIX ORDEN REAL
+  ========================= */
+  function installOrderFix() {
+    const api = window.__LEONES_BROKER_EXT2;
+    if (!api || !api.placeOrder) {
+      setTimeout(installOrderFix, 800);
+      return;
+    }
+
+    const original = api.placeOrder;
+
+    api.placeOrder = async function (side) {
       try {
         const type = getOrderType();
+        const meta = api.activeMeta;
 
-        const meta = window.__LEONES_BROKER_EXT2.activeMeta;
-        if (!meta) throw new Error('Sin símbolo');
+        if (!meta) throw new Error('Selecciona un símbolo');
 
         const size =
           Number(document.getElementById('brokerOrderSize')?.value) ||
@@ -4435,10 +4467,9 @@ if (window.__LEONES_BOOTED__) {
           side,
           positionSize: size,
           leverage: 1,
-          type // 🔥 AQUI ESTA LA CLAVE
+          type
         };
 
-        // 🔥 SI ES MARKET → NO MANDA PRECIO
         if (type !== 'market') {
           payload.price =
             Number(document.getElementById('order-price')?.value) ||
@@ -4450,27 +4481,27 @@ if (window.__LEONES_BOOTED__) {
           return await window.placeBrokerOrder(payload);
         }
 
-        return await originalPlaceOrder.call(this, side);
+        return await original.call(this, side);
 
       } catch (err) {
-        console.error('FIX placeOrder:', err);
+        console.error('ORDER FIX:', err);
         alert(err.message);
         return null;
       }
     };
   }
 
+  installOrderFix();
+
   /* =========================
-     3. FIX GRÁFICO SIEMPRE ACTIVO
+     4. FIX GRÁFICO FUERTE
   ========================= */
-  async function forceChart(meta) {
+  async function openChart(meta) {
     try {
       const api = window.__LEONES_BROKER_EXT2;
       if (!api || !meta) return;
 
-      if (!meta.tvSymbol) {
-        meta.tvSymbol = meta.symbol;
-      }
+      if (!meta.tvSymbol) meta.tvSymbol = meta.symbol;
 
       await api.openTradingView(meta, 'tv_chart_container');
 
@@ -4479,12 +4510,12 @@ if (window.__LEONES_BOOTED__) {
       }
 
     } catch (e) {
-      console.warn('forceChart:', e);
+      console.warn('chart fix:', e);
     }
   }
 
   /* =========================
-     4. CLICK EN SÍMBOLOS (MEJORADO)
+     5. CLICK EN SÍMBOLOS
   ========================= */
   document.addEventListener('click', async (e) => {
     const card = e.target.closest('.broker-symbol-card, [data-symbol]');
@@ -4501,43 +4532,43 @@ if (window.__LEONES_BOOTED__) {
         market: card.dataset.market || ''
       };
 
-      // 🔥 seleccionar símbolo SIN romper nada
       if (api.selectSymbol) {
         api.selectSymbol(meta, { openChart: false });
       }
 
-      // 🔥 FORZAR gráfico SIEMPRE
-      await forceChart(meta);
+      await openChart(meta);
 
     } catch (err) {
-      console.warn('click fix final:', err);
+      console.warn('symbol fix:', err);
     }
   }, true);
 
   /* =========================
-     5. AUTO CHART AL INICIAR
+     6. AUTO INIT GRÁFICO
   ========================= */
-  async function autoInitChart() {
-    try {
-      const api = window.__LEONES_BROKER_EXT2;
-      if (!api) return;
+  function waitForAPI() {
+    const api = window.__LEONES_BROKER_EXT2;
 
-      const meta = api.activeMeta;
-      if (!meta) return;
-
-      await forceChart(meta);
-
-    } catch (e) {
-      console.warn('autoInitChart:', e);
+    if (!api || !api.activeMeta) {
+      setTimeout(waitForAPI, 800);
+      return;
     }
+
+    openChart(api.activeMeta);
+
+    const current =
+      document.getElementById('order-type')?.value ||
+      document.getElementById('order-type-bottom')?.value ||
+      'market';
+
+    syncOrderType(current);
   }
 
   window.addEventListener('load', () => {
-    setTimeout(autoInitChart, 1200);
+    setTimeout(waitForAPI, 1200);
   });
 
 })();
-
 </script>
 
   
