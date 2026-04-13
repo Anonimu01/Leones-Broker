@@ -4429,7 +4429,207 @@ function getOrderTypeConfig() {
 
  
 
+<script>
+(function () {
+  'use strict';
 
+  function getOrderTypeConfig() {
+    const typeEl = document.getElementById('order-type');
+    const priceInput = document.getElementById('order-price');
+
+    const type = String(typeEl?.value || 'Market').trim();
+
+    const config = {
+      type,
+      requirePrice: false,
+      label: ''
+    };
+
+    if (!priceInput) return config;
+
+    switch (type) {
+      case 'Market':
+        config.requirePrice = false;
+        config.label = 'Orden de mercado (ejecución inmediata)';
+        priceInput.disabled = true;
+        priceInput.value = '';
+        break;
+
+      case 'Limit':
+        config.requirePrice = true;
+        config.label = 'Orden límite (precio específico)';
+        priceInput.disabled = false;
+        break;
+
+      case 'Stop Loss':
+        config.requirePrice = true;
+        config.label = 'Stop Loss (protección de pérdida)';
+        priceInput.disabled = false;
+        break;
+
+      case 'Take Profit':
+        config.requirePrice = true;
+        config.label = 'Take Profit (asegurar ganancias)';
+        priceInput.disabled = false;
+        break;
+
+      case 'Stop Limit':
+        config.requirePrice = true;
+        config.label = 'Stop Limit (activación + límite)';
+        priceInput.disabled = false;
+        break;
+
+      default:
+        config.requirePrice = false;
+        config.label = 'Orden de mercado (ejecución inmediata)';
+        priceInput.disabled = true;
+        priceInput.value = '';
+        break;
+    }
+
+    return config;
+  }
+
+  function syncOrderTypeUI() {
+    const typeEl = document.getElementById('order-type');
+    const priceInput = document.getElementById('order-price');
+    const config = getOrderTypeConfig();
+
+    if (typeEl) {
+      window.__ORDER_TYPE__ = String(typeEl.value || 'Market');
+    }
+
+    if (priceInput) {
+      if (config.requirePrice) {
+        priceInput.removeAttribute('disabled');
+      } else {
+        priceInput.setAttribute('disabled', 'disabled');
+        priceInput.value = '';
+      }
+    }
+
+    return config;
+  }
+
+  function bindOrderTypeEvents() {
+    const typeEl = document.getElementById('order-type');
+    const priceInput = document.getElementById('order-price');
+
+    if (!typeEl) return;
+
+    if (!typeEl.dataset.boundOrderType) {
+      typeEl.dataset.boundOrderType = '1';
+      typeEl.addEventListener('change', () => {
+        syncOrderTypeUI();
+      });
+    }
+
+    if (priceInput && !priceInput.dataset.boundOrderPrice) {
+      priceInput.dataset.boundOrderPrice = '1';
+      priceInput.addEventListener('input', () => {
+        const config = getOrderTypeConfig();
+        if (!config.requirePrice) {
+          priceInput.value = '';
+        }
+      });
+    }
+
+    syncOrderTypeUI();
+  }
+
+  const originalPlaceOrder = window.__LEONES_BROKER_EXT2?.placeOrder;
+
+  if (window.__LEONES_BROKER_EXT2) {
+    window.__LEONES_BROKER_EXT2.placeOrder = async function (side) {
+      const api = window.__LEONES_BROKER_EXT2;
+      const meta = api?.activeMeta || api?.selectSymbol?.activeMeta || null;
+
+      const activeMeta =
+        meta ||
+        (typeof window.__LEONES_TRADING__?.activeMeta === 'object' ? window.__LEONES_TRADING__.activeMeta : null) ||
+        null;
+
+      if (!activeMeta) {
+        throw new Error('Selecciona un símbolo antes de operar');
+      }
+
+      const size = Number(
+        document.getElementById('brokerOrderSize')?.value ||
+        document.getElementById('brokerOrderSizeBottom')?.value ||
+        0
+      );
+
+      if (!size || size <= 0) {
+        throw new Error('Escribe un monto válido');
+      }
+
+      const cfg = getOrderTypeConfig();
+      const type = cfg.type || 'Market';
+
+      let price = null;
+      if (cfg.requirePrice) {
+        price = Number(document.getElementById('order-price')?.value || 0) || null;
+        if (!price || price <= 0) {
+          throw new Error('Debes escribir un precio válido para este tipo de orden');
+        }
+      }
+
+      const payload = {
+        symbol: activeMeta.symbol,
+        tvSymbol: activeMeta.tvSymbol || activeMeta.symbol,
+        side,
+        positionSize: size,
+        notional: size,
+        leverage: 1,
+        type
+      };
+
+      if (price !== null) {
+        payload.price = price;
+      }
+
+      if (typeof window.placeBrokerOrder === 'function') {
+        return await window.placeBrokerOrder(payload);
+      }
+
+      if (typeof originalPlaceOrder === 'function') {
+        return await originalPlaceOrder.call(this, side);
+      }
+
+      throw new Error('No hay método de orden conectado');
+    };
+  }
+
+  function attachOrderTypeBridge() {
+    bindOrderTypeEvents();
+
+    document.addEventListener('change', (e) => {
+      if (e.target && e.target.id === 'order-type') {
+        syncOrderTypeUI();
+      }
+    }, true);
+
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'order-price') {
+        const cfg = getOrderTypeConfig();
+        if (!cfg.requirePrice) {
+          e.target.value = '';
+        }
+      }
+    }, true);
+  }
+
+  if (document.readyState !== 'loading') {
+    attachOrderTypeBridge();
+  } else {
+    document.addEventListener('DOMContentLoaded', attachOrderTypeBridge);
+  }
+
+  window.getOrderTypeConfig = getOrderTypeConfig;
+  window.syncOrderTypeUI = syncOrderTypeUI;
+
+})();
+</script>
 
 
 <script>
