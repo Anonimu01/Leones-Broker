@@ -2064,25 +2064,12 @@ if (window.__LEONES_BOOTED__) {
 (function () {
   'use strict';
 
-  if (window.__LEONES_BROKER_EXT2_REAL_SAFE__) {
-    console.warn('[BROKER-EXT2-REAL] already loaded, skipping.');
-    return;
-  }
-  window.__LEONES_BROKER_EXT2_REAL_SAFE__ = true;
+  if (window.__LEONES_BROKER_FULL_UNIFIED__) return;
+  window.__LEONES_BROKER_FULL_UNIFIED__ = true;
 
-  const NS = window._LEONES = window._LEONES || {};
-  const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
-
-  const API_BASE = String(
-    window.API_BASE ||
-    window.API ||
-    (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
-  ).replace(/\/+$/, '');
-
-  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
   const ROOT_ID = 'broker-ext2-root';
-
   const DEFAULT_CURRENCY = 'US$';
+  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
 
   const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
 
@@ -2180,8 +2167,8 @@ if (window.__LEONES_BOOTED__) {
     pollTimer: null
   };
 
-  const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
-  const warn = (...a) => { try { console.warn('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
+  const log = (...a) => { try { console.log('[BROKER-FULL]', ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn('[BROKER-FULL]', ...a); } catch (e) {} };
 
   let ACCOUNT = {
     balance: 1000,
@@ -2391,8 +2378,6 @@ if (window.__LEONES_BOOTED__) {
   }
 
   async function apiFetch(path, opts = {}) {
-    if (typeof NS.apiFetch === 'function') return NS.apiFetch(path, opts);
-
     const token = getToken();
     let url = '';
     if (typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) {
@@ -2400,7 +2385,7 @@ if (window.__LEONES_BOOTED__) {
     } else {
       let p = String(path || '').trim();
       if (!p.startsWith('/')) p = '/' + p;
-      const base = API_BASE.replace(/\/+$/, '');
+      const base = String(window.API_BASE || window.API || (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')).replace(/\/+$/, '');
       if (base.endsWith('/api') && p.startsWith('/api')) p = p.replace(/^\/api/, '');
       url = base + p;
     }
@@ -2459,9 +2444,9 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function injectUiStyles() {
-    if (document.getElementById('leones-ext2-style')) return;
+    if (document.getElementById('leones-full-style')) return;
     const style = document.createElement('style');
-    style.id = 'leones-ext2-style';
+    style.id = 'leones-full-style';
     style.textContent = `
       #${ROOT_ID}{
         width:100%;
@@ -2469,20 +2454,6 @@ if (window.__LEONES_BOOTED__) {
         margin:0 auto;
         padding:12px 12px 18px;
         display:block;
-      }
-
-      #${ROOT_ID} .btn,
-      #${ROOT_ID} button,
-      #${ROOT_ID} input,
-      #${ROOT_ID} select,
-      #${ROOT_ID} textarea{
-        touch-action: manipulation;
-      }
-
-      #${ROOT_ID} button:active,
-      #${ROOT_ID} .btn:active,
-      #${ROOT_ID} .broker-symbol-card:active{
-        transform: scale(.985);
       }
 
       #${ROOT_ID} #brokerColumns{
@@ -2502,15 +2473,6 @@ if (window.__LEONES_BOOTED__) {
         overflow:hidden;
       }
 
-      #${ROOT_ID} #brokerSymbolsPanel,
-      #${ROOT_ID} #brokerChartPanel,
-      #${ROOT_ID} #brokerTicketPanel,
-      #${ROOT_ID} #brokerAccountPanel,
-      #${ROOT_ID} #brokerPositionsPanel,
-      #${ROOT_ID} #brokerSymbolDetailsPanel{
-        min-width:0;
-      }
-
       #${ROOT_ID} #brokerSymbolsScroll,
       #${ROOT_ID} #brokerSymbolsScrollBottom{
         max-height:clamp(340px, 55vh, 640px);
@@ -2519,10 +2481,7 @@ if (window.__LEONES_BOOTED__) {
       }
 
       #${ROOT_ID} #brokerMarketTabs,
-      #${ROOT_ID} #brokerMarketTabsBottom,
-      #${ROOT_ID} #overviewMarketTabs,
-      #${ROOT_ID} #overviewMarketsTabs,
-      #${ROOT_ID} #marketTabs{
+      #${ROOT_ID} #brokerMarketTabsBottom{
         display:flex;
         flex-wrap:wrap;
         gap:8px;
@@ -2530,12 +2489,7 @@ if (window.__LEONES_BOOTED__) {
       }
 
       #${ROOT_ID} #brokerSymbolsGrid,
-      #${ROOT_ID} #brokerSymbolsGridBottom,
-      #${ROOT_ID} #overviewSymbolsGrid,
-      #${ROOT_ID} #overviewMarketList,
-      #${ROOT_ID} #overviewSymbolsList,
-      #${ROOT_ID} #marketList,
-      #${ROOT_ID} #marketGrid{
+      #${ROOT_ID} #brokerSymbolsGridBottom{
         display:grid;
         grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
         gap:10px;
@@ -2550,12 +2504,6 @@ if (window.__LEONES_BOOTED__) {
         background:rgba(255,255,255,.03);
         color:#fff;
         cursor:pointer;
-        transition:transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
-      }
-
-      #${ROOT_ID} .broker-symbol-card:hover{
-        background:rgba(255,255,255,.05);
-        border-color:rgba(240,194,75,.35);
       }
 
       #${ROOT_ID} .broker-symbol-card .market-pill,
@@ -2591,27 +2539,6 @@ if (window.__LEONES_BOOTED__) {
         font-size:18px;
       }
 
-      #${ROOT_ID} input,
-      #${ROOT_ID} textarea,
-      #${ROOT_ID} select{
-        outline:none;
-        border:1px solid rgba(255,255,255,.18);
-        box-shadow:0 0 0 1px rgba(0,255,204,.35), 0 0 10px rgba(0,255,204,.12);
-        transition:box-shadow .2s ease, border-color .2s ease, transform .2s ease;
-      }
-
-      #${ROOT_ID} input:focus,
-      #${ROOT_ID} textarea:focus,
-      #${ROOT_ID} select:focus{
-        border-color:#00ffcc;
-        box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 14px rgba(0,255,204,.22);
-      }
-
-      #${ROOT_ID} .btn.flash,
-      #${ROOT_ID} button.flash{
-        box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 16px rgba(0,255,204,.18) !important;
-      }
-
       @media (max-width: 980px){
         #${ROOT_ID} #brokerColumns{
           grid-template-columns:1fr;
@@ -2643,7 +2570,6 @@ if (window.__LEONES_BOOTED__) {
 
   function getSymbols() {
     if (Array.isArray(state.markets) && state.markets.length) return state.markets;
-    if (Array.isArray(TR.ALL_SYMBOLS) && TR.ALL_SYMBOLS.length) return uniqueBySymbol(TR.ALL_SYMBOLS);
     if (Array.isArray(window.__LEONES_MARKETS__) && window.__LEONES_MARKETS__.length) return uniqueBySymbol(window.__LEONES_MARKETS__);
     return DEFAULT_SYMBOLS.slice();
   }
@@ -2667,7 +2593,7 @@ if (window.__LEONES_BOOTED__) {
   function getActiveSymbolMeta() {
     const list = getSymbols();
     if (!list.length) return null;
-    const active = String(state.activeSymbol || TR.activeSymbol || TR.activeMeta?.symbol || '').toUpperCase();
+    const active = String(state.activeSymbol || window.TR?.activeSymbol || window.__LEONES_TRADING__?.activeSymbol || '').toUpperCase();
     if (!active) return list[0];
     return list.find(x => String(x.symbol).toUpperCase() === active || String(x.tvSymbol).toUpperCase() === active) || list[0];
   }
@@ -2692,8 +2618,9 @@ if (window.__LEONES_BOOTED__) {
   function flashButton(el) {
     if (!el) return;
     try {
-      el.classList.add('flash');
-      setTimeout(() => el.classList.remove('flash'), 180);
+      el.style.transition = 'transform .12s ease, box-shadow .12s ease';
+      el.style.transform = 'scale(.985)';
+      setTimeout(() => { try { el.style.transform = ''; } catch (e) {} }, 120);
     } catch (e) {}
   }
 
@@ -2761,6 +2688,7 @@ if (window.__LEONES_BOOTED__) {
       const num = Number(marginUsed);
       if (isFinite(num)) ACCOUNT.usedMargin = num;
     }
+
     ACCOUNT.freeMargin = Math.max(ACCOUNT.equity - ACCOUNT.usedMargin, 0);
     ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0 ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100 : 100;
 
@@ -2792,10 +2720,6 @@ if (window.__LEONES_BOOTED__) {
       });
     });
 
-    if (typeof window.applyAccountToUI === 'function') {
-      try { window.applyAccountToUI(safeAccount); } catch (e) {}
-    }
-
     renderAccountUI();
     renderMargin();
     return safeAccount;
@@ -2818,7 +2742,7 @@ if (window.__LEONES_BOOTED__) {
     const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
     const meta = getActiveSymbolMeta();
     const q = meta ? currentQuote(meta.symbol) : null;
-    const price = q?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? 0;
+    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta?.symbol]?.price ?? 0;
     const lev = effectiveLeverage(meta) || 1;
     const balance = Number(ACCOUNT.balance || state.account?.balance || state.account?.bal || state.account?.walletBalance || state.account?.funds || 0);
     const operatingPower = calcOperatingPower(balance, lev);
@@ -2845,7 +2769,7 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderMarketTabs() {
-    const hostIds = ['brokerMarketTabs', 'brokerMarketTabsBottom', 'overviewMarketTabs', 'overviewMarketsTabs', 'marketTabs'];
+    const hostIds = ['brokerMarketTabs', 'brokerMarketTabsBottom'];
     const list = getSymbols();
     const set = new Set(list.map(x => normalizeMarketName(x.market || inferMarketBySymbol(x.symbol))));
     const markets = ['All', ...MARKET_ORDER.filter(m => set.has(m)), ...Array.from(set).filter(m => !MARKET_ORDER.includes(m)).sort()];
@@ -2867,9 +2791,9 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  function symbolCardHtml(item, variant = 'main') {
+  function symbolCardHtml(item) {
     const q = currentQuote(item.symbol);
-    const price = q?.price ?? TR.symbolPrices?.[item.symbol]?.price ?? null;
+    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[item.symbol]?.price ?? null;
     const provider = getProviderFromTvSymbol(item.tvSymbol);
     const icon = getMarketIcon(item.market);
     const market = normalizeMarketName(item.market);
@@ -2907,12 +2831,7 @@ if (window.__LEONES_BOOTED__) {
   function renderSymbolsGrid() {
     const hostIds = [
       'brokerSymbolsGrid',
-      'brokerSymbolsGridBottom',
-      'overviewSymbolsGrid',
-      'overviewMarketList',
-      'overviewSymbolsList',
-      'marketList',
-      'marketGrid'
+      'brokerSymbolsGridBottom'
     ];
     const list = getSymbols();
 
@@ -2952,7 +2871,7 @@ if (window.__LEONES_BOOTED__) {
     }
 
     const q = currentQuote(meta.symbol);
-    const price = q?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? null;
+    const price = q?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta.symbol]?.price ?? null;
     const lev = effectiveLeverage(meta);
     const provider = getProviderFromTvSymbol(meta.tvSymbol);
     const market = normalizeMarketName(meta.market);
@@ -3038,355 +2957,13 @@ if (window.__LEONES_BOOTED__) {
   }
 
   function renderAccountUI() {
-    const account = state.account || {};
-    const name = getAccountNameSource(account);
-    const balance = account.balance ?? account.bal ?? account.walletBalance ?? account.deposit ?? account.funds ?? ACCOUNT.balance;
-    const equity = account.equity ?? account.totalEquity ?? ACCOUNT.equity;
-    const pnl = account.pnl ?? account.profitLoss ?? account.unrealizedPnl ?? 0;
-    const lev = effectiveLeverage(getActiveSymbolMeta());
-    const operating = calcOperatingPower(Number(balance || 0), lev || 1);
-    const marginUsed = account.marginUsed ?? account.margin ?? account.usedMargin ?? ACCOUNT.usedMargin;
-
-    setTextAll(['brokerAccountName', 'brokerAccountNameBottom'], name);
-    setTextAll(['brokerAccountEmail', 'brokerAccountEmailBottom'], account.email || getUser().email || '--');
-    setTextAll(['brokerAccountBalance', 'brokerAccountBalanceBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountEquity', 'brokerAccountEquityBottom'], equity !== null && equity !== undefined ? formatMoney(equity, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountPnl', 'brokerAccountPnlBottom'], pnl !== null && pnl !== undefined ? formatMoney(pnl, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountLeverage', 'brokerAccountLeverageBottom'], lev ? `1:${lev}` : '--');
-    setTextAll(['brokerAccountOperating', 'brokerAccountOperatingBottom'], balance !== null && balance !== undefined ? formatMoney(operating, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountMargin', 'brokerAccountMarginBottom'], marginUsed !== null && marginUsed !== undefined ? formatMoney(marginUsed, DEFAULT_CURRENCY) : '--');
-
-    if (document.getElementById('balance')) document.getElementById('balance').innerText = Number(ACCOUNT.balance).toFixed(2);
-    if (document.getElementById('equity')) document.getElementById('equity').innerText = Number(ACCOUNT.equity).toFixed(2);
-    if (document.getElementById('marginLevel')) document.getElementById('marginLevel').innerText = Number(ACCOUNT.marginLevel).toFixed(2) + '%';
-  }
-
-  function openChartContainer(containerId, symbol) {
-    return new Promise(async (resolve, reject) => {
-      try {
-        await ensureTradingViewScript();
-        const container = document.getElementById(containerId);
-        if (!container) return reject(new Error('No existe el contenedor del gráfico'));
-
-        const tv = String(symbol || '').trim();
-        if (!tv) return reject(new Error('El símbolo no es válido'));
-
-        container.innerHTML = '';
-
-        if (typeof window.initTradingWidget === 'function') {
-          try {
-            window.initTradingWidget(tv, containerId);
-            return resolve(tv);
-          } catch (e) {
-            warn('window.initTradingWidget failed', e);
-          }
-        }
-
-        if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
-          return reject(new Error('TradingView no está disponible'));
-        }
-
-        new TradingView.widget({
-          autosize: true,
-          symbol: tv,
-          interval: '5',
-          timezone: 'Etc/UTC',
-          theme: 'dark',
-          style: '1',
-          locale: 'es',
-          enable_publishing: false,
-          allow_symbol_change: true,
-          container_id: container.id,
-          hide_side_toolbar: false,
-          withdateranges: true,
-          save_image: false
-        });
-
-        resolve(tv);
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-
-  function renderBottomPanels() {
-    const meta = getActiveSymbolMeta();
-    const quote = meta ? currentQuote(meta.symbol) : null;
-    const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
-
-    const dashboardPanel = document.getElementById('dashboardPanel');
-    if (dashboardPanel) {
-      dashboardPanel.innerHTML = `
-        <div style="padding:16px;border:1px solid rgba(255,255,255,.06);border-radius:16px;background:#0b0b0b;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Inicio</div>
-              <div style="opacity:.75;font-size:13px;margin-top:3px;">Resumen en tiempo real</div>
-            </div>
-            <span id="brokerUserBadgeBottom" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px;">
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Saldo</div><div id="brokerBalanceBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Apalancamiento</div><div id="brokerLeverageBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Operativo</div><div id="brokerOperatingBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Margen</div><div id="brokerMarginBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-          </div>
-          <div style="margin-top:12px;opacity:.8;font-size:13px;">
-            Símbolo activo: <strong>${escapeHtml(meta ? meta.label : '--')}</strong>
-            ${meta ? ` · Precio: <strong>${activePrice !== null && activePrice !== undefined ? formatNumber(activePrice) : '--'}</strong>` : ''}
-          </div>
-        </div>
-      `;
-    }
-
-    const marketPanel = document.getElementById('marketPanel');
-    if (marketPanel) {
-      marketPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Mercados</div>
-              <div style="opacity:.75;font-size:13px;margin-top:3px;">Símbolos en vivo</div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn ghost" data-action="refresh-all">Actualizar</button>
-              <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
-              <button class="btn ghost" data-action="refresh-quotes">Precios</button>
-            </div>
-          </div>
-
-          <label style="display:grid;gap:6px;margin-bottom:12px;">
-            <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
-            <input id="brokerMarketSearchBottom" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
-          </label>
-
-          <div id="brokerSymbolsScrollBottom">
-            <div id="brokerMarketTabsBottom"></div>
-            <div id="brokerSymbolsGridBottom"></div>
-          </div>
-        </section>
-      `;
-    }
-
-    const tradingPanel = document.getElementById('tradingPanel');
-    if (tradingPanel) {
-      tradingPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Trading</div>
-              <div id="brokerActiveSymbolBottom" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
-            </div>
-            <button class="btn glow" data-action="open-chart-bottom">Abrir gráfico</button>
-          </div>
-          <div id="tv_chart_container_bottom"></div>
-
-          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
-            <div style="font-weight:900;margin-bottom:10px;">Ticket de orden</div>
-            <div style="display:grid;gap:10px;">
-              <label style="display:grid;gap:6px;">
-                <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
-                <input id="brokerOrderSizeBottom" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-              </label>
-
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
-                  <div id="brokerLeverageValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Margen requerido</div>
-                  <div id="brokerMarginValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
-                  <div id="brokerOperatingPowerValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Margen libre</div>
-                  <div id="brokerFreeMarginValueBottom" style="font-weight:800;">--</div>
-                </div>
-              </div>
-
-              <div style="display:flex;gap:8px;">
-                <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
-                <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
-            <div style="font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
-            <div id="brokerSymbolDetailsBottom" style="display:grid;gap:8px;">--</div>
-          </div>
-        </section>
-      `;
-    }
-
-    const positionsPanel = document.getElementById('positionsPanel');
-    if (positionsPanel) {
-      positionsPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div style="font-size:18px;font-weight:900;">Posiciones</div>
-            <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
-          </div>
-          <div id="brokerPositionsListBottom" style="display:grid;gap:8px;"></div>
-        </section>
-      `;
-    }
-
-    const assetsPanel = document.getElementById('assetsPanel');
-    if (assetsPanel) {
-      assetsPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div style="font-size:18px;font-weight:900;">Activos</div>
-            <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
-          </div>
-          <div style="display:grid;gap:8px;">
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountNameBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmailBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalanceBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquityBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnlBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverageBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperatingBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMarginBottom">--</strong></div>
-          </div>
-        </section>
-      `;
-    }
-  }
-
-  function resetTradingState() {
-    state.started = false;
-    state.markets = [];
-    state.quotes = [];
-    state.positions = [];
-    state.account = null;
-    state.activeSymbol = null;
-    state.marketFilter = 'All';
-    state.marketSearch = '';
-    state.lastChartSymbol = null;
-    stopAutoRefresh();
-    document.body.classList.remove('leones-menu-open');
-  }
-
-  function updateTradesPrices(prices) {
-    OPEN_TRADES.forEach(trade => {
-      const newPrice = prices[trade.symbol];
-      if (newPrice === undefined || newPrice === null) return;
-
-      trade.currentPrice = newPrice;
-
-      let diff = newPrice - trade.openPrice;
-      if (trade.direction === 'sell') diff *= -1;
-
-      trade.profit = diff * trade.amount * 10;
-    });
-
-    updateAccountMetrics();
-  }
-
-  function updateAccountMetrics() {
-    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
-
-    ACCOUNT.equity = ACCOUNT.balance + ACCOUNT.usedMargin + totalProfit;
-    ACCOUNT.freeMargin = ACCOUNT.equity - ACCOUNT.usedMargin;
-    ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0
-      ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100
-      : 100;
-
-    if (ACCOUNT.marginLevel <= 20) {
-      closeAllTrades();
-      alert('⚠️ Todas las posiciones fueron cerradas por bajo margen');
-    }
-
-    if (ACCOUNT.marginLevel < 100) {
-      startMarginWarning();
-    } else {
-      stopMarginWarning();
-    }
-
-    renderAccountUI();
-  }
-
-  function closeAllTrades() {
-    const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
-    ACCOUNT.balance += ACCOUNT.usedMargin + totalProfit;
-    ACCOUNT.usedMargin = 0;
-    OPEN_TRADES = [];
-    updateAccountMetrics();
-  }
-
-  function renderAccountUI() {
     const elBalance = document.getElementById('balance');
     const elEquity = document.getElementById('equity');
     const elMargin = document.getElementById('marginLevel');
 
-    if (elBalance) elBalance.innerText = ACCOUNT.balance.toFixed(2);
-    if (elEquity) elEquity.innerText = ACCOUNT.equity.toFixed(2);
-    if (elMargin) elMargin.innerText = ACCOUNT.marginLevel.toFixed(2) + '%';
-  }
-
-  function startMarginWarning() {
-    if (marginWarningInterval) return;
-    showMarginAlert();
-    marginWarningInterval = setInterval(() => {
-      showMarginAlert();
-    }, 300000);
-  }
-
-  function stopMarginWarning() {
-    clearInterval(marginWarningInterval);
-    marginWarningInterval = null;
-
-    const alertBox = document.getElementById('marginAlert');
-    if (alertBox) alertBox.remove();
-    marginAlertVisible = false;
-  }
-
-  function showMarginAlert() {
-    if (marginAlertVisible) return;
-    marginAlertVisible = true;
-
-    const div = document.createElement('div');
-    div.id = 'marginAlert';
-
-    div.innerHTML = `
-      <div style="
-        position:fixed;
-        bottom:20px;
-        right:20px;
-        background:#111;
-        color:#fff;
-        padding:15px;
-        border-radius:10px;
-        width:260px;
-        z-index:9999;
-        box-shadow:0 0 10px rgba(0,0,0,0.5);
-      ">
-        <div style="text-align:right;cursor:pointer" id="closeMarginAlert">✖</div>
-        <b>⚠️ Margen bajo</b><br>
-        Tu cuenta está en riesgo.<br>
-        Deposita para mantener la salud.<br><br>
-        Mínimo recomendado: <b>$115</b>
-      </div>
-    `;
-
-    document.body.appendChild(div);
-
-    document.getElementById('closeMarginAlert').onclick = () => {
-      div.remove();
-      marginAlertVisible = false;
-    };
-  }
-
-  function adminDeposit(amount) {
-    ACCOUNT.balance += Number(amount) || 0;
-    updateAccountMetrics();
-    stopMarginWarning();
+    if (elBalance) elBalance.innerText = Number(ACCOUNT.balance).toFixed(2);
+    if (elEquity) elEquity.innerText = Number(ACCOUNT.equity).toFixed(2);
+    if (elMargin) elMargin.innerText = Number(ACCOUNT.marginLevel).toFixed(2) + '%';
   }
 
   async function ensureSocket() {
@@ -3416,8 +2993,9 @@ if (window.__LEONES_BOOTED__) {
         const map = quoteMap();
         normalized.forEach(q => {
           map.set(q.symbol.toUpperCase(), q);
-          TR.symbolPrices = TR.symbolPrices || {};
-          TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+          window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+          window.__LEONES_TRADING__.symbolPrices = window.__LEONES_TRADING__.symbolPrices || {};
+          window.__LEONES_TRADING__.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
         });
 
         state.quotes = Array.from(map.values());
@@ -3446,7 +3024,6 @@ if (window.__LEONES_BOOTED__) {
         normalized.forEach(item => map.set(String(item.symbol).toUpperCase(), item));
 
         state.markets = Array.from(map.values());
-        TR.ALL_SYMBOLS = state.markets;
         window.__LEONES_MARKETS__ = state.markets;
 
         renderMarketTabs();
@@ -3534,14 +3111,9 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  function isClosedPosition(p = {}) {
-    const status = String(p.status || p.state || p.positionStatus || '').toLowerCase();
-    return status.includes('close') || status === 'closed' || !!p.closedAt || !!p.closed_at;
-  }
-
   async function closePosition(position = {}) {
     const pid = position?.id || position?._id || position?.positionId || position?.tradeId || null;
-    const symbol = position?.symbol || state.activeSymbol || TR.activeSymbol || null;
+    const symbol = position?.symbol || state.activeSymbol || null;
     const payload = { positionId: pid, symbol };
 
     const endpoints = [
@@ -3572,13 +3144,15 @@ if (window.__LEONES_BOOTED__) {
     const meta = getActiveSymbolMeta();
     const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
     const lev = effectiveLeverage(meta) || 1;
+    const orderType = document.getElementById('order-type')?.value || document.getElementById('order-type-bottom')?.value || 'Market';
+    const priceVal = Number(document.getElementById('order-price')?.value || document.getElementById('order-price-bottom')?.value || 0);
 
     if (!meta) throw new Error('Selecciona un símbolo antes de operar');
     if (!size || size <= 0) throw new Error('Escribe un monto válido');
 
     const balance = Number(ACCOUNT.balance || state.account?.balance || state.account?.bal || state.account?.walletBalance || state.account?.funds || NaN);
     const operatingPower = isFinite(balance) ? calcOperatingPower(balance, lev) : NaN;
-    const marginInfo = calculateMargin(size, lev, currentQuote(meta.symbol)?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? 0);
+    const marginInfo = calculateMargin(size, lev, currentQuote(meta.symbol)?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta.symbol]?.price ?? 0);
 
     if (isFinite(operatingPower) && operatingPower > 0 && size > operatingPower) {
       throw new Error('No hay capacidad operativa suficiente para esta operación');
@@ -3595,21 +3169,9 @@ if (window.__LEONES_BOOTED__) {
       positionSize: size,
       notional: size,
       leverage: lev,
-      type: 'market'
+      type: String(orderType || 'Market'),
+      price: isFinite(priceVal) && priceVal > 0 ? priceVal : undefined
     };
-
-    if (typeof NS.placeOrder === 'function') {
-      const res = await NS.placeOrder({
-        side,
-        positionSize: size,
-        leverage: lev,
-        type: 'market'
-      });
-      const account = extractAccountSource(res || {});
-      if (account && Object.keys(account).length) syncAccountView(account);
-      await requestBackendRefresh().catch(() => {});
-      return res;
-    }
 
     if (typeof window.placeBrokerOrder === 'function') {
       const res = await window.placeBrokerOrder(payload);
@@ -3683,7 +3245,6 @@ if (window.__LEONES_BOOTED__) {
     });
 
     state.markets = all;
-    TR.ALL_SYMBOLS = all;
     window.__LEONES_MARKETS__ = all;
     return all;
   }
@@ -3712,9 +3273,10 @@ if (window.__LEONES_BOOTED__) {
     const normalized = mergeQuotes(merged);
     state.quotes = normalized;
 
-    TR.symbolPrices = TR.symbolPrices || {};
+    window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+    window.__LEONES_TRADING__.symbolPrices = window.__LEONES_TRADING__.symbolPrices || {};
     normalized.forEach(q => {
-      TR.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
+      window.__LEONES_TRADING__.symbolPrices[q.symbol] = { price: q.price, ts: q.ts };
     });
 
     const priceMap = {};
@@ -3749,14 +3311,16 @@ if (window.__LEONES_BOOTED__) {
         if (!res) continue;
         const list = asArrayResponse(res);
         state.positions = list;
-        TR.positions = list;
+        window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+        window.__LEONES_TRADING__.positions = list;
         renderPositions();
         renderBottomPanels();
         return list;
       } catch (e) {}
     }
     state.positions = [];
-    TR.positions = [];
+    window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+    window.__LEONES_TRADING__.positions = [];
     renderPositions();
     return [];
   }
@@ -3774,8 +3338,8 @@ if (window.__LEONES_BOOTED__) {
     } else if (getSymbols().length) {
       const first = getSymbols()[0];
       state.activeSymbol = first.symbol;
-      TR.activeSymbol = first.symbol;
-      TR.activeMeta = first;
+      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+      window.__LEONES_TRADING__.activeSymbol = first.symbol;
       renderSymbolDetails(first);
     }
 
@@ -3810,38 +3374,27 @@ if (window.__LEONES_BOOTED__) {
 
     container.innerHTML = '';
 
-    if (typeof window.initTradingWidget === 'function') {
-      try {
-        window.initTradingWidget(symbol, containerId);
-        state.lastChartSymbol = symbol;
-        return symbol;
-      } catch (e) {
-        warn('window.initTradingWidget failed', e);
-      }
+    if (window.TradingView && typeof window.TradingView.widget === 'function') {
+      new TradingView.widget({
+        autosize: true,
+        symbol,
+        interval: '5',
+        timezone: 'Etc/UTC',
+        theme: 'dark',
+        style: '1',
+        locale: 'es',
+        enable_publishing: false,
+        allow_symbol_change: true,
+        container_id: container.id,
+        hide_side_toolbar: false,
+        withdateranges: true,
+        save_image: false
+      });
+      state.lastChartSymbol = symbol;
+      return symbol;
     }
 
-    if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
-      throw new Error('TradingView no está disponible');
-    }
-
-    new TradingView.widget({
-      autosize: true,
-      symbol,
-      interval: '5',
-      timezone: 'Etc/UTC',
-      theme: 'dark',
-      style: '1',
-      locale: 'es',
-      enable_publishing: false,
-      allow_symbol_change: true,
-      container_id: container.id,
-      hide_side_toolbar: false,
-      withdateranges: true,
-      save_image: false
-    });
-
-    state.lastChartSymbol = symbol;
-    return symbol;
+    throw new Error('TradingView no está disponible');
   }
 
   function selectSymbol(meta, options = {}) {
@@ -3849,8 +3402,9 @@ if (window.__LEONES_BOOTED__) {
     const openChart = options.openChart !== false;
 
     state.activeSymbol = meta.symbol;
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
+    window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+    window.__LEONES_TRADING__.activeSymbol = meta.symbol;
+    window.__LEONES_TRADING__.activeMeta = meta;
     state.lastChartSymbol = meta.symbol;
 
     renderSymbolDetails(meta);
@@ -3997,12 +3551,16 @@ if (window.__LEONES_BOOTED__) {
       try {
         if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
 
-        if (ev.target.id === 'brokerOrderSize' || ev.target.id === 'brokerOrderSizeBottom') {
+        if (ev.target.id === 'brokerOrderSize' || ev.target.id === 'brokerOrderSizeBottom' || ev.target.id === 'order-price' || ev.target.id === 'order-price-bottom') {
           renderMargin();
         }
 
         if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
           applySearchValue(ev.target.value);
+        }
+
+        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
+          syncOrderTypeUI();
         }
       } catch (e) {}
     }, true);
@@ -4034,21 +3592,10 @@ if (window.__LEONES_BOOTED__) {
 
   function updatePrivateHeaderName(user = {}) {
     const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente');
-    const headerName = document.querySelector('#headerActions [data-leones-user-name]');
-    if (headerName) headerName.textContent = name;
-
-    const welcomeSelectors = [
-      '#welcomeUser',
-      '.welcomeUser',
-      '[data-leones-user-name]',
-      '[data-user-name]',
-      '[data-welcome-name]'
-    ];
-    welcomeSelectors.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
+    document.querySelectorAll('#welcomeUser, .welcomeUser, [data-leones-user-name], [data-user-name], [data-welcome-name]')
+      .forEach(el => {
         try { el.textContent = name; } catch (e) {}
       });
-    });
   }
 
   function ensureShell(root) {
@@ -4141,9 +3688,28 @@ if (window.__LEONES_BOOTED__) {
       <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
       <div style="display:grid;gap:10px;">
         <label style="display:grid;gap:6px;">
+          <span style="font-size:12px;opacity:.75;">Tipo de orden</span>
+          <select id="order-type" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
+            <option value="Market">Market</option>
+            <option value="Limit">Limit</option>
+            <option value="Stop Loss">Stop Loss</option>
+            <option value="Take Profit">Take Profit</option>
+            <option value="Stop Limit">Stop Limit</option>
+          </select>
+        </label>
+
+        <div id="priceBox" style="display:none;">
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:12px;opacity:.75;">Precio</span>
+            <input id="order-price" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+          </label>
+        </div>
+
+        <label style="display:grid;gap:6px;">
           <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
           <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
         </label>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
             <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
@@ -4162,6 +3728,7 @@ if (window.__LEONES_BOOTED__) {
             <div id="brokerFreeMarginValue" style="font-weight:800;">--</div>
           </div>
         </div>
+
         <div style="display:flex;gap:8px;">
           <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
           <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
@@ -4226,8 +3793,50 @@ if (window.__LEONES_BOOTED__) {
     });
 
     window.addEventListener('leones:loggedOut', () => {
-      resetTradingState();
+      state.started = false;
+      state.booted = false;
+      state.markets = [];
+      state.quotes = [];
+      state.positions = [];
+      state.account = null;
+      state.activeSymbol = null;
+      state.marketFilter = 'All';
+      state.marketSearch = '';
+      state.lastChartSymbol = null;
+      stopAutoRefresh();
+      document.body.classList.remove('leones-menu-open');
     });
+  }
+
+  function syncOrderTypeUI() {
+    const top = document.getElementById('order-type');
+    const bottom = document.getElementById('order-type-bottom');
+    const priceBox = document.getElementById('priceBox');
+    const priceBoxBottom = document.getElementById('priceBoxBottom');
+
+    function updateUI(value) {
+      const show = String(value || 'Market') !== 'Market';
+      if (priceBox) priceBox.style.display = show ? 'block' : 'none';
+      if (priceBoxBottom) priceBoxBottom.style.display = show ? 'block' : 'none';
+    }
+
+    if (top && !top.dataset.bound) {
+      top.dataset.bound = '1';
+      top.addEventListener('change', () => {
+        if (bottom) bottom.value = top.value;
+        updateUI(top.value);
+      });
+    }
+
+    if (bottom && !bottom.dataset.bound) {
+      bottom.dataset.bound = '1';
+      bottom.addEventListener('change', () => {
+        if (top) top.value = bottom.value;
+        updateUI(bottom.value);
+      });
+    }
+
+    updateUI(top?.value || bottom?.value || 'Market');
   }
 
   async function initTradingUI(context = {}) {
@@ -4245,15 +3854,13 @@ if (window.__LEONES_BOOTED__) {
 
     clearMessage();
 
+    const user = getUser();
     if (context && context.user && typeof context.user === 'object') {
       state.account = { ...(state.account || {}), ...context.user };
       updatePrivateHeaderName(context.user);
       syncAccountView(context.user);
-    } else {
-      const user = getUser();
-      if (user && Object.keys(user).length) {
-        updatePrivateHeaderName(user);
-      }
+    } else if (user && Object.keys(user).length) {
+      updatePrivateHeaderName(user);
     }
 
     attachGlobalDelegation();
@@ -4269,8 +3876,9 @@ if (window.__LEONES_BOOTED__) {
 
     if (meta) {
       state.activeSymbol = meta.symbol;
-      TR.activeSymbol = meta.symbol;
-      TR.activeMeta = meta;
+      window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
+      window.__LEONES_TRADING__.activeSymbol = meta.symbol;
+      window.__LEONES_TRADING__.activeMeta = meta;
 
       renderSymbolDetails(meta);
       renderBottomPanels();
@@ -4285,58 +3893,176 @@ if (window.__LEONES_BOOTED__) {
       setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
     }
 
+    syncOrderTypeUI();
     return true;
   }
 
-  function exposeAPI() {
-    window.startBrokerUI = initTradingUI;
-    window.refreshBrokerUI = requestBackendRefresh;
-    window.openBrokerTradingView = openTradingView;
-    window.selectBrokerSymbol = selectSymbol;
+  function renderBottomPanels() {
+    const meta = getActiveSymbolMeta();
+    const quote = meta ? currentQuote(meta.symbol) : null;
+    const activePrice = quote?.price ?? window.__LEONES_TRADING__?.symbolPrices?.[meta?.symbol]?.price ?? null;
 
-    window.openTrade = openTrade;
-    window.updateTradesPrices = updateTradesPrices;
-    window.updateAccountMetrics = updateAccountMetrics;
-    window.closeAllTrades = closeAllTrades;
-    window.adminDeposit = adminDeposit;
-
-    window.__LEONES_BROKER_EXT2 = {
-      initTradingUI,
-      refreshBrokerUI: requestBackendRefresh,
-      openTradingView,
-      selectSymbol,
-      loadMarketsAndQuotes,
-      loadRealMarkets,
-      loadRealQuotes,
-      loadAccount,
-      loadPositions,
-      placeOrder,
-      closePosition,
-      requestBackendRefresh
-    };
-  }
-
-  function openTrade(symbol, amount, direction, price) {
-    if (amount > ACCOUNT.balance) {
-      alert('Fondos insuficientes');
-      return;
+    const dashboardPanel = document.getElementById('dashboardPanel');
+    if (dashboardPanel) {
+      dashboardPanel.innerHTML = `
+        <div style="padding:16px;border:1px solid rgba(255,255,255,.06);border-radius:16px;background:#0b0b0b;color:#fff;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:18px;font-weight:900;">Inicio</div>
+              <div style="opacity:.75;font-size:13px;margin-top:3px;">Resumen en tiempo real</div>
+            </div>
+            <span id="brokerUserBadgeBottom" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px;">
+            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Saldo</div><div id="brokerBalanceBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Apalancamiento</div><div id="brokerLeverageBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Operativo</div><div id="brokerOperatingBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Margen</div><div id="brokerMarginBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+          </div>
+          <div style="margin-top:12px;opacity:.8;font-size:13px;">
+            Símbolo activo: <strong>${escapeHtml(meta ? meta.label : '--')}</strong>
+            ${meta ? ` · Precio: <strong>${activePrice !== null && activePrice !== undefined ? formatNumber(activePrice) : '--'}</strong>` : ''}
+          </div>
+        </div>
+      `;
     }
 
-    ACCOUNT.balance -= amount;
-    ACCOUNT.usedMargin += amount;
+    const marketPanel = document.getElementById('marketPanel');
+    if (marketPanel) {
+      marketPanel.innerHTML = `
+        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <div>
+              <div style="font-size:18px;font-weight:900;">Mercados</div>
+              <div style="opacity:.75;font-size:13px;margin-top:3px;">Símbolos en vivo</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn ghost" data-action="refresh-all">Actualizar</button>
+              <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
+              <button class="btn ghost" data-action="refresh-quotes">Precios</button>
+            </div>
+          </div>
 
-    const trade = {
-      id: Date.now(),
-      symbol,
-      amount,
-      direction,
-      openPrice: price,
-      currentPrice: price,
-      profit: 0
-    };
+          <label style="display:grid;gap:6px;margin-bottom:12px;">
+            <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
+            <input id="brokerMarketSearchBottom" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
+          </label>
 
-    OPEN_TRADES.push(trade);
-    updateAccountMetrics();
+          <div id="brokerSymbolsScrollBottom">
+            <div id="brokerMarketTabsBottom"></div>
+            <div id="brokerSymbolsGridBottom"></div>
+          </div>
+        </section>
+      `;
+    }
+
+    const tradingPanel = document.getElementById('tradingPanel');
+    if (tradingPanel) {
+      tradingPanel.innerHTML = `
+        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <div>
+              <div style="font-size:18px;font-weight:900;">Trading</div>
+              <div id="brokerActiveSymbolBottom" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
+            </div>
+            <button class="btn glow" data-action="open-chart-bottom">Abrir gráfico</button>
+          </div>
+          <div id="tv_chart_container_bottom"></div>
+
+          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
+            <div style="font-weight:900;margin-bottom:10px;">Ticket de orden</div>
+            <div style="display:grid;gap:10px;">
+              <label style="display:grid;gap:6px;">
+                <span style="font-size:12px;opacity:.75;">Tipo de orden</span>
+                <select id="order-type-bottom" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
+                  <option value="Market">Market</option>
+                  <option value="Limit">Limit</option>
+                  <option value="Stop Loss">Stop Loss</option>
+                  <option value="Take Profit">Take Profit</option>
+                  <option value="Stop Limit">Stop Limit</option>
+                </select>
+              </label>
+
+              <div id="priceBoxBottom" style="display:none;">
+                <label style="display:grid;gap:6px;">
+                  <span style="font-size:12px;opacity:.75;">Precio</span>
+                  <input id="order-price-bottom" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+                </label>
+              </div>
+
+              <label style="display:grid;gap:6px;">
+                <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
+                <input id="brokerOrderSizeBottom" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+              </label>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                  <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
+                  <div id="brokerLeverageValueBottom" style="font-weight:800;">--</div>
+                </div>
+                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                  <div style="font-size:12px;opacity:.75;">Margen requerido</div>
+                  <div id="brokerMarginValueBottom" style="font-weight:800;">--</div>
+                </div>
+                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                  <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
+                  <div id="brokerOperatingPowerValueBottom" style="font-weight:800;">--</div>
+                </div>
+                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                  <div style="font-size:12px;opacity:.75;">Margen libre</div>
+                  <div id="brokerFreeMarginValueBottom" style="font-weight:800;">--</div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;">
+                <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
+                <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
+            <div style="font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
+            <div id="brokerSymbolDetailsBottom" style="display:grid;gap:8px;">--</div>
+          </div>
+        </section>
+      `;
+    }
+
+    const positionsPanel = document.getElementById('positionsPanel');
+    if (positionsPanel) {
+      positionsPanel.innerHTML = `
+        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="font-size:18px;font-weight:900;">Posiciones</div>
+            <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
+          </div>
+          <div id="brokerPositionsListBottom" style="display:grid;gap:8px;"></div>
+        </section>
+      `;
+    }
+
+    const assetsPanel = document.getElementById('activosPanel');
+    if (assetsPanel) {
+      assetsPanel.innerHTML = `
+        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="font-size:18px;font-weight:900;">Activos</div>
+            <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
+          </div>
+          <div style="display:grid;gap:8px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountNameBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmailBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalanceBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquityBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnlBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverageBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperatingBottom">--</strong></div>
+            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMarginBottom">--</strong></div>
+          </div>
+        </section>
+      `;
+    }
   }
 
   function renderBottomPanelsWrapper() {
@@ -4348,6 +4074,185 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function attachGlobalDelegation() {
+    if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
+    window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
+
+    document.addEventListener('click', async (ev) => {
+      try {
+        const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
+        if (!inPrivate) return;
+
+        const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
+        if (clicked) flashButton(clicked);
+
+        const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
+        if (marketBtn && marketBtn.dataset.market !== undefined) {
+          ev.preventDefault();
+          state.marketFilter = marketBtn.dataset.market || 'All';
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          return;
+        }
+
+        const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
+        if (symbolCard) {
+          ev.preventDefault();
+          const symbol = symbolCard.dataset.symbol || '';
+          const meta =
+            symbolMap().get(String(symbol).toUpperCase()) ||
+            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
+            null;
+
+          if (meta) selectSymbol(meta, { openChart: true });
+          return;
+        }
+
+        const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
+        if (closeBtn) {
+          ev.preventDefault();
+          const pid = closeBtn.dataset.closePosition;
+          const sym = closeBtn.dataset.symbol;
+          const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
+          await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
+        if (!actionTarget) return;
+
+        const action = actionTarget.dataset.action;
+
+        if (action === 'buy') {
+          ev.preventDefault();
+          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === 'sell') {
+          ev.preventDefault();
+          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === 'open-chart') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container');
+          return;
+        }
+
+        if (action === 'open-chart-bottom') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
+          return;
+        }
+
+        if (action === 'refresh-all') {
+          ev.preventDefault();
+          await requestBackendRefresh();
+          return;
+        }
+
+        if (action === 'refresh-symbols') {
+          ev.preventDefault();
+          await loadRealMarkets();
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === 'refresh-quotes') {
+          ev.preventDefault();
+          await loadRealQuotes();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === 'refresh-account') {
+          ev.preventDefault();
+          await loadAccount();
+          renderBottomPanels();
+          return;
+        }
+
+        if (action === 'refresh-positions') {
+          ev.preventDefault();
+          await loadPositions();
+          renderBottomPanels();
+          return;
+        }
+      } catch (e) {
+        warn('global click delegation', e);
+      }
+    }, true);
+
+    document.addEventListener('input', (ev) => {
+      try {
+        if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
+
+        if (
+          ev.target.id === 'brokerOrderSize' ||
+          ev.target.id === 'brokerOrderSizeBottom' ||
+          ev.target.id === 'order-price' ||
+          ev.target.id === 'order-price-bottom'
+        ) {
+          renderMargin();
+        }
+
+        if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
+          applySearchValue(ev.target.value);
+        }
+
+        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
+          syncOrderTypeUI();
+        }
+      } catch (e) {}
+    }, true);
+  }
+
+  function startAutoRefresh() {
+    if (state.pollTimer) return;
+    state.pollTimer = setInterval(() => {
+      try {
+        if (!isLoggedIn()) return;
+        loadAccount().catch(() => {});
+        loadPositions().catch(() => {});
+        loadRealQuotes().then(() => {
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+        }).catch(() => {});
+      } catch (e) {}
+    }, 7000);
+  }
+
+  function stopAutoRefresh() {
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  function ensureTradingViewAutoOpen() {
+    const meta = getActiveSymbolMeta();
+    if (!meta) return;
+    openTradingView(meta, 'tv_chart_container').catch(() => {});
+    openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+  }
+
   function bootIfLoggedIn() {
     if (state.booted) return;
     state.booted = true;
@@ -4357,7 +4262,32 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
-  exposeAPI();
+  window.startBrokerUI = initTradingUI;
+  window.refreshBrokerUI = requestBackendRefresh;
+  window.openBrokerTradingView = openTradingView;
+  window.selectBrokerSymbol = selectSymbol;
+
+  window.openTrade = openTrade;
+  window.updateTradesPrices = updateTradesPrices;
+  window.updateAccountMetrics = updateAccountMetrics;
+  window.closeAllTrades = closeAllTrades;
+  window.adminDeposit = adminDeposit;
+
+  window.__LEONES_BROKER_EXT2 = {
+    initTradingUI,
+    refreshBrokerUI: requestBackendRefresh,
+    openTradingView,
+    selectSymbol,
+    loadMarketsAndQuotes,
+    loadRealMarkets,
+    loadRealQuotes,
+    loadAccount,
+    loadPositions,
+    placeOrder,
+    closePosition,
+    requestBackendRefresh
+  };
+
   attachLoginEventBridge();
 
   if (document.readyState !== 'loading') {
@@ -4371,19 +4301,27 @@ if (window.__LEONES_BOOTED__) {
 
   window.addEventListener('load', () => {
     try {
-      if (isLoggedIn()) {
-        initTradingUI().catch(() => {});
-      }
+      if (isLoggedIn()) initTradingUI().catch(() => {});
     } catch (e) {}
   });
 
   setInterval(() => {
     try {
       renderBottomPanelsWrapper();
+      syncOrderTypeUI();
     } catch (e) {}
   }, 5000);
 
-  log('EXT2 real loaded');
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      const orderTypeTop = document.getElementById('order-type');
+      const orderTypeBottom = document.getElementById('order-type-bottom');
+      if (orderTypeTop || orderTypeBottom) syncOrderTypeUI();
+      ensureTradingViewAutoOpen();
+    }, 400);
+  });
+
+  log('FULL UNIFIED LOADED');
 })();
 </script>
 
