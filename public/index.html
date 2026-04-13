@@ -4388,7 +4388,7 @@ if (window.__LEONES_BOOTED__) {
 </script>
 
   
-<script>
+<script> 
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll("#privateArea_full .panel");
@@ -4397,16 +4397,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
-     🔥 SISTEMA AVANZADO ÓRDENES
-  ========================= */
-  let advancedOrders = [];
-
-  function generateId(prefix){
-    return prefix + "-" + Date.now() + "-" + Math.floor(Math.random()*9999);
-  }
-
-  /* =========================
-     🔥 BOTÓN MENU
+     🔥 BOTÓN MENU (FIX REAL)
   ========================= */
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebarToggle");
@@ -4418,6 +4409,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  /* 🔥 BOTÓN FLOTANTE FUNCIONAL */
   if (sidebar && floatingMenuBtn) {
     floatingMenuBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
@@ -4425,7 +4417,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 BOTONES ACTIVOS
+     🔥 BOTONES ACTIVOS DORADO
   ========================= */
   function setActiveButton(id) {
     document.querySelectorAll("[data-target]").forEach(btn => {
@@ -4453,7 +4445,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
+        if (window.__LEONES_BROKER_EXT2) {
           clearInterval(i);
           resolve();
         }
@@ -4462,10 +4454,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 MARKET FIX
+     🔥 MARKET FIX (CORREGIDO)
   ========================= */
   function keepMarketAlive() {
-    const target = document.getElementById("marketPanel");
+    const target = document.getElementById("marketsPanel"); // 🔥 FIX REAL
     const source = document.getElementById("brokerSymbolsPanel");
     if (!target || !source) return;
 
@@ -4498,11 +4490,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 GRAFICO
+     🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
+
     const api = ext();
     const container = document.getElementById("tv_chart_container");
+
     if (!container) return;
 
     container.innerHTML = "";
@@ -4514,71 +4508,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     container.style.width = "100%";
-    container.style.height = "100vh";
+    container.style.height = "100%"; // 🔥 mejor que 100vh para tu layout
   }
 
   /* =========================
-     🔥 PRECIOS REALTIME
+     🔥 VELAS MÁS FLUIDAS
   ========================= */
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
   }, 1500);
-
-  /* =========================
-     🔥 MOTOR DE ÓRDENES 🔥
-  ========================= */
-  setInterval(() => {
-
-    const api = ext();
-    const price = api.lastPrice || window.TR?.lastPrice;
-    if (!price) return;
-
-    advancedOrders.forEach((order, i) => {
-
-      if(order.type === "LIMIT"){
-        if(
-          (order.direction === "buy" && price <= order.price) ||
-          (order.direction === "sell" && price >= order.price)
-        ){
-          api.placeOrder?.(order);
-          advancedOrders.splice(i,1);
-        }
-      }
-
-      if(order.type === "STOP_LOSS"){
-        if(
-          (order.direction === "buy" && price >= order.stop) ||
-          (order.direction === "sell" && price <= order.stop)
-        ){
-          api.placeOrder?.(order);
-          advancedOrders.splice(i,1);
-        }
-      }
-
-      if(order.type === "TAKE_PROFIT"){
-        if(
-          (order.direction === "buy" && price <= order.target) ||
-          (order.direction === "sell" && price >= order.target)
-        ){
-          api.placeOrder?.(order);
-          advancedOrders.splice(i,1);
-        }
-      }
-
-      if(order.type === "STOP_LIMIT"){
-        if(
-          (order.direction === "buy" && price <= order.price) ||
-          (order.direction === "sell" && price >= order.price)
-        ){
-          api.placeOrder?.(order);
-          advancedOrders.splice(i,1);
-        }
-      }
-
-    });
-
-  }, 1000);
 
   /* =========================
      🔥 RESPONSIVE
@@ -4598,7 +4537,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("resize", responsiveFix);
 
   /* =========================
-     🔥 MONTO
+     🔥 MANTENER MONTO
   ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
@@ -4621,22 +4560,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 ORDEN PRINCIPAL
+     🔥 ORDEN REAL SIN ERROR
   ========================= */
   function forceTrade(direction) {
-
     const api = ext();
 
-    const amount = parseFloat(document.getElementById("brokerOrderSize")?.value);
-
-    // 🔥 LEE TOP O BOTTOM
-    const type = document.getElementById("order-type")?.value 
-              || document.getElementById("order-type-bottom")?.value;
-
-    const price = parseFloat(
-      document.getElementById("order-price")?.value ||
-      document.getElementById("order-price-bottom")?.value
-    );
+    const amountInput = document.getElementById("brokerOrderSize");
+    const amount = parseFloat(amountInput?.value);
 
     if (!amount || amount <= 0) {
       alert("Coloca un monto válido");
@@ -4650,31 +4580,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    if(type === "Market"){
-      api.placeOrder?.({ symbol, amount, direction });
-      return;
-    }
+    api.placeOrder?.({
+      symbol,
+      amount,
+      direction
+    });
 
-    if(type === "Limit"){
-      advancedOrders.push({ id: generateId("LMT"), type:"LIMIT", symbol, amount, direction, price });
-      return;
-    }
-
-    if(type === "Stop Loss"){
-      advancedOrders.push({ id: generateId("SL"), type:"STOP_LOSS", symbol, amount, direction, stop: price });
-      return;
-    }
-
-    if(type === "Take Profit"){
-      advancedOrders.push({ id: generateId("TP"), type:"TAKE_PROFIT", symbol, amount, direction, target: price });
-      return;
-    }
-
-    if(type === "Stop Limit"){
-      advancedOrders.push({ id: generateId("SLMT"), type:"STOP_LIMIT", symbol, amount, direction, price });
-      return;
-    }
-
+    restoreAmount();
   }
 
   document.addEventListener("click", (e) => {
@@ -4692,6 +4604,119 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   /* =========================
+     🔥 PANEL FLOTANTE TRADES
+  ========================= */
+  function createFloatingTradesPanel() {
+
+    if (document.getElementById("floatingTrades")) return;
+
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
+
+    div.style.cssText = `
+      position:fixed;
+      bottom:20px;
+      left:20px;
+      width:260px;
+      background:#111;
+      color:#fff;
+      padding:12px;
+      border-radius:10px;
+      z-index:9999;
+      font-size:12px;
+    `;
+
+    div.innerHTML = `
+      <b>📊 Operaciones</b>
+      <div id="floatingTradesList">Sin operaciones</div>
+    `;
+
+    document.body.appendChild(div);
+  }
+
+  function updateFloatingTrades() {
+    const api = ext();
+    const list = document.getElementById("floatingTradesList");
+    if (!list) return;
+
+    const positions = api.positions || [];
+
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
+    }
+
+    list.innerHTML = positions.map(p => `
+      <div style="margin-top:6px;">
+        ${p.symbol} | ${p.direction} <br>
+        $${p.amount}
+      </div>
+    `).join("");
+  }
+
+  setInterval(updateFloatingTrades, 2000);
+
+  /* =========================
+     🔥 CAMBIO PANEL
+  ========================= */
+  function showPanel(id) {
+
+    showOnlyPanel(id);
+
+    const api = ext();
+
+    if (id === "marketsPanel") { // 🔥 FIX REAL
+      api.loadRealMarkets?.();
+      api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        window.renderSymbolsGrid?.();
+        keepMarketAlive();
+      }, 300);
+    }
+
+    if (id === "tradingPanel") {
+      api.openTradingView?.();
+      api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        fixTrading();
+        persistAmount();
+        restoreAmount();
+      }, 300);
+    }
+
+    if (id === "positionsPanel") {
+      api.loadPositions?.();
+    }
+
+    if (id === "dashboardPanel") {
+      api.loadAccount?.();
+    }
+  }
+
+  /* =========================
+     🔥 CLICK SIMBOLO
+  ========================= */
+  document.addEventListener("click", (e) => {
+
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
+
+    const api = ext();
+
+    api.selectSymbol?.({
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
+      market: el.dataset.market || ""
+    }, { openChart: true });
+
+    showPanel("tradingPanel");
+
+  }, true);
+
+  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -4704,6 +4729,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   keepMarketAlive();
   responsiveFix();
   persistAmount();
+  createFloatingTradesPanel();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
@@ -4711,47 +4737,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   showPanel("dashboardPanel");
 
-  // 🔥 ACTIVA UI DE ORDENES
-  syncOrderTypeUI();
-
 });
-
-
-/* =========================
-   🔥 CONTROL UI ORDENES
-========================= */
-
-function syncOrderTypeUI() {
-
-  const top = document.getElementById("order-type");
-  const bottom = document.getElementById("order-type-bottom");
-
-  const priceBox = document.getElementById("priceBox");
-  const priceBoxBottom = document.getElementById("priceBoxBottom");
-
-  function updateUI(value){
-    const show = value !== "Market";
-
-    if(priceBox) priceBox.style.display = show ? "block" : "none";
-    if(priceBoxBottom) priceBoxBottom.style.display = show ? "block" : "none";
-  }
-
-  if(top){
-    top.addEventListener("change", () => {
-      if(bottom) bottom.value = top.value;
-      updateUI(top.value);
-    });
-  }
-
-  if(bottom){
-    bottom.addEventListener("change", () => {
-      if(top) top.value = bottom.value;
-      updateUI(bottom.value);
-    });
-  }
-
-  updateUI(top?.value || "Market");
-}
 </script>
   
 </div>
