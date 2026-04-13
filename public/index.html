@@ -4388,7 +4388,7 @@ if (window.__LEONES_BOOTED__) {
 </script>
 
   
-<script> 
+<script>
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll("#privateArea_full .panel");
@@ -4396,9 +4396,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   let LAST_AMOUNT = null;
 
-  /* =========================
-     🔥 BOTÓN MENU (FIX REAL)
-  ========================= */
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebarToggle");
   const floatingMenuBtn = document.getElementById("floatingMenuBtn");
@@ -4409,16 +4406,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  /* 🔥 BOTÓN FLOTANTE FUNCIONAL */
   if (sidebar && floatingMenuBtn) {
     floatingMenuBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
     });
   }
 
-  /* =========================
-     🔥 BOTONES ACTIVOS DORADO
-  ========================= */
   function setActiveButton(id) {
     document.querySelectorAll("[data-target]").forEach(btn => {
       btn.style.background = "transparent";
@@ -4439,9 +4432,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     setActiveButton(id);
   }
 
-  /* =========================
-     🔥 ESPERAR JS2
-  ========================= */
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
@@ -4453,11 +4443,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  /* =========================
-     🔥 MARKET FIX (CORREGIDO)
-  ========================= */
   function keepMarketAlive() {
-    const target = document.getElementById("marketsPanel"); // 🔥 FIX REAL
+    const target = document.getElementById("marketsPanel"); // 🔥 FIX ID
     const source = document.getElementById("brokerSymbolsPanel");
     if (!target || !source) return;
 
@@ -4490,38 +4477,48 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 GRAFICO REAL
+     🔥 GRAFICO SIEMPRE ACTIVO
   ========================= */
-  function fixTrading() {
+  function fixTrading(forceSymbol=null) {
 
     const api = ext();
     const container = document.getElementById("tv_chart_container");
 
     if (!container) return;
 
+    const symbol = forceSymbol || api.activeSymbol || "BTCUSDT";
+
     container.innerHTML = "";
 
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
-
-    if (symbol) {
+    setTimeout(() => {
       api.openTradingView?.({ symbol });
-    }
+    }, 100);
 
     container.style.width = "100%";
-    container.style.height = "100%"; // 🔥 mejor que 100vh para tu layout
+    container.style.height = "420px";
   }
 
-  /* =========================
-     🔥 VELAS MÁS FLUIDAS
-  ========================= */
+  /* 🔥 CARGAR GRAFICO AUTOMATICO */
+  function loadInitialChart() {
+    const api = ext();
+
+    setTimeout(() => {
+      api.selectSymbol?.({
+        symbol: "BTCUSDT",
+        tvSymbol: "BINANCE:BTCUSDT",
+        label: "BTC/USDT",
+        market: "BINANCE"
+      });
+
+      fixTrading("BTCUSDT");
+    }, 300);
+  }
+
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
   }, 1500);
 
-  /* =========================
-     🔥 RESPONSIVE
-  ========================= */
   function responsiveFix() {
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
@@ -4536,9 +4533,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   window.addEventListener("resize", responsiveFix);
 
-  /* =========================
-     🔥 MANTENER MONTO
-  ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
@@ -4559,9 +4553,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  /* =========================
-     🔥 ORDEN REAL SIN ERROR
-  ========================= */
   function forceTrade(direction) {
     const api = ext();
 
@@ -4573,12 +4564,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
-
-    if (!symbol) {
-      alert("Selecciona un símbolo");
-      return;
-    }
+    const symbol = api.activeSymbol || "BTCUSDT";
 
     api.placeOrder?.({
       symbol,
@@ -4603,9 +4589,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   });
 
-  /* =========================
-     🔥 PANEL FLOTANTE TRADES
-  ========================= */
   function createFloatingTradesPanel() {
 
     if (document.getElementById("floatingTrades")) return;
@@ -4656,16 +4639,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   setInterval(updateFloatingTrades, 2000);
 
-  /* =========================
-     🔥 CAMBIO PANEL
-  ========================= */
   function showPanel(id) {
 
     showOnlyPanel(id);
 
     const api = ext();
 
-    if (id === "marketsPanel") { // 🔥 FIX REAL
+    if (id === "marketsPanel") { // 🔥 FIX
       api.loadRealMarkets?.();
       api.loadRealQuotes?.();
 
@@ -4676,14 +4656,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (id === "tradingPanel") {
-      api.openTradingView?.();
       api.loadRealQuotes?.();
 
       setTimeout(() => {
         fixTrading();
         persistAmount();
         restoreAmount();
-      }, 300);
+      }, 200);
     }
 
     if (id === "positionsPanel") {
@@ -4696,7 +4675,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 CLICK SIMBOLO
+     🔥 CLICK SIMBOLO (INSTANTO)
   ========================= */
   document.addEventListener("click", (e) => {
 
@@ -4705,20 +4684,33 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const api = ext();
 
+    const symbol = el.dataset.symbol;
+
     api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
+      symbol,
+      tvSymbol: el.dataset.tvSymbol || symbol,
+      label: el.dataset.label || symbol,
       market: el.dataset.market || ""
     }, { openChart: true });
 
     showPanel("tradingPanel");
 
+    setTimeout(() => {
+      fixTrading(symbol); // 🔥 INMEDIATO
+    }, 100);
+
   }, true);
 
   /* =========================
-     🔥 INIT
+     🔥 DROPDOWN ORDEN (FIX)
   ========================= */
+  const orderType = document.getElementById("order-type");
+  if (orderType) {
+    orderType.addEventListener("change", () => {
+      console.log("Tipo orden:", orderType.value);
+    });
+  }
+
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
@@ -4735,7 +4727,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
-  showPanel("dashboardPanel");
+  /* 🔥 ARRANQUE DIRECTO CON TRADING */
+  showPanel("tradingPanel");
+  loadInitialChart();
 
 });
 </script>
