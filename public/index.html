@@ -4384,6 +4384,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
+     🔥 SISTEMA AVANZADO ÓRDENES
+  ========================= */
+  let advancedOrders = [];
+
+  function generateId(prefix){
+    return prefix + "-" + Date.now() + "-" + Math.floor(Math.random()*9999);
+  }
+
+  /* =========================
      🔥 BOTÓN MENU (FIX REAL)
   ========================= */
   const sidebar = document.getElementById("sidebar");
@@ -4396,7 +4405,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  /* 🔥 NUEVO: BOTÓN FLOTANTE FUNCIONAL */
   if (sidebar && floatingMenuBtn) {
     floatingMenuBtn.addEventListener("click", () => {
       sidebar.classList.toggle("hidden");
@@ -4404,7 +4412,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 BOTONES ACTIVOS DORADO
+     🔥 BOTONES ACTIVOS
   ========================= */
   function setActiveButton(id) {
     document.querySelectorAll("[data-target]").forEach(btn => {
@@ -4477,7 +4485,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 GRAFICO REAL
+     🔥 GRAFICO
   ========================= */
   function fixTrading() {
 
@@ -4499,12 +4507,58 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 VELAS MÁS FLUIDAS
+     🔥 PRECIOS REALTIME
   ========================= */
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
   }, 1500);
+
+  /* =========================
+     🔥 MOTOR DE ÓRDENES 🔥
+  ========================= */
+  setInterval(() => {
+
+    const api = ext();
+    const price = api.lastPrice || window.TR?.lastPrice;
+
+    if (!price) return;
+
+    advancedOrders.forEach((order, i) => {
+
+      if(order.type === "LIMIT"){
+        if(
+          (order.direction === "buy" && price <= order.price) ||
+          (order.direction === "sell" && price >= order.price)
+        ){
+          api.placeOrder?.(order);
+          advancedOrders.splice(i,1);
+        }
+      }
+
+      if(order.type === "STOP_LOSS"){
+        if(
+          (order.direction === "buy" && price >= order.stop) ||
+          (order.direction === "sell" && price <= order.stop)
+        ){
+          api.placeOrder?.(order);
+          advancedOrders.splice(i,1);
+        }
+      }
+
+      if(order.type === "TAKE_PROFIT"){
+        if(
+          (order.direction === "buy" && price <= order.target) ||
+          (order.direction === "sell" && price >= order.target)
+        ){
+          api.placeOrder?.(order);
+          advancedOrders.splice(i,1);
+        }
+      }
+
+    });
+
+  }, 1000);
 
   /* =========================
      🔥 RESPONSIVE
@@ -4524,7 +4578,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("resize", responsiveFix);
 
   /* =========================
-     🔥 MANTENER MONTO
+     🔥 MONTO
   ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
@@ -4547,13 +4601,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   /* =========================
-     🔥 ORDEN REAL SIN ERROR
+     🔥 ORDEN PRINCIPAL (MOD)
   ========================= */
   function forceTrade(direction) {
+
     const api = ext();
 
     const amountInput = document.getElementById("brokerOrderSize");
     const amount = parseFloat(amountInput?.value);
+
+    const type = document.getElementById("order-type")?.value;
+    const priceInput = document.getElementById("order-price");
+    const price = parseFloat(priceInput?.value);
 
     if (!amount || amount <= 0) {
       alert("Coloca un monto válido");
@@ -4567,13 +4626,51 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    api.placeOrder?.({
-      symbol,
-      amount,
-      direction
-    });
+    /* MARKET */
+    if(type === "Market"){
+      api.placeOrder?.({ symbol, amount, direction });
+      return;
+    }
 
-    restoreAmount();
+    /* LIMIT */
+    if(type === "Limit"){
+      advancedOrders.push({
+        id: generateId("LMT"),
+        type:"LIMIT",
+        symbol,
+        amount,
+        direction,
+        price
+      });
+      return;
+    }
+
+    /* STOP LOSS */
+    if(type === "Stop Loss"){
+      advancedOrders.push({
+        id: generateId("SL"),
+        type:"STOP_LOSS",
+        symbol,
+        amount,
+        direction,
+        stop: price
+      });
+      return;
+    }
+
+    /* TAKE PROFIT */
+    if(type === "Take Profit"){
+      advancedOrders.push({
+        id: generateId("TP"),
+        type:"TAKE_PROFIT",
+        symbol,
+        amount,
+        direction,
+        target: price
+      });
+      return;
+    }
+
   }
 
   document.addEventListener("click", (e) => {
@@ -4591,7 +4688,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   /* =========================
-     🔥 PANEL FLOTANTE TRADES
+     🔥 PANEL FLOTANTE
   ========================= */
   function createFloatingTradesPanel() {
 
@@ -4644,7 +4741,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(updateFloatingTrades, 2000);
 
   /* =========================
-     🔥 CAMBIO PANEL
+     🔥 PANEL SWITCH
   ========================= */
   function showPanel(id) {
 
