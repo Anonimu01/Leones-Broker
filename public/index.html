@@ -4783,6 +4783,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     return document.getElementById("floatingMenuBtn");
   }
 
+  function isSidebarHidden() {
+    const sidebar = getSidebar();
+    return !!sidebar && sidebar.classList.contains("hidden");
+  }
+
   function toggleSidebar(forceState = null) {
     const sidebar = getSidebar();
     if (!sidebar) return;
@@ -4842,6 +4847,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       sidebarToggle.style.visibility = sidebarHidden ? "hidden" : "visible";
       sidebarToggle.style.opacity = sidebarHidden ? "0" : "1";
       sidebarToggle.style.pointerEvents = sidebarHidden ? "none" : "auto";
+      sidebarToggle.style.display = sidebarHidden ? "none" : "";
     }
 
     if (floatingMenuBtn) {
