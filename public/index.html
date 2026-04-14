@@ -4769,7 +4769,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
-     🔥 SIDEBAR CONTROL BASE
+     🔥 BOTÓN MENU (FIX DEFINITIVO)
   ========================= */
   function getSidebar() {
     return document.getElementById("sidebar");
@@ -4785,118 +4785,202 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function isSidebarHidden() {
     const sidebar = getSidebar();
-    return sidebar && sidebar.classList.contains("hidden");
+    return !!sidebar && sidebar.classList.contains("hidden");
   }
 
-  function toggleSidebar(force) {
+  function toggleSidebar(forceState = null) {
     const sidebar = getSidebar();
     if (!sidebar) return;
 
-    if (force === true) sidebar.classList.remove("hidden");
-    else if (force === false) sidebar.classList.add("hidden");
-    else sidebar.classList.toggle("hidden");
-
-    syncMenu();
-  }
-
-  /* =========================
-     🔥 CREAR BOTÓN FLOTANTE
-  ========================= */
-  function ensureFloatingButton() {
-    let btn = getFloatingMenuBtn();
-
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = "floatingMenuBtn";
-      btn.innerHTML = "☰";
-      document.body.appendChild(btn);
+    if (forceState === true) {
+      sidebar.classList.remove("hidden");
+    } else if (forceState === false) {
+      sidebar.classList.add("hidden");
+    } else {
+      sidebar.classList.toggle("hidden");
     }
 
-    btn.style.position = "fixed";
-    btn.style.left = "16px";
-    btn.style.top = "16px"; /* MISMO NIVEL QUE EL OTRO */
-    btn.style.width = "44px";
-    btn.style.height = "44px";
-    btn.style.borderRadius = "12px";
-    btn.style.zIndex = "999999";
-
-    /* 🔥 IMPORTANTE: empieza oculto */
-    btn.style.display = "none";
-    btn.style.pointerEvents = "none";
-    btn.style.opacity = "0";
+    syncMenuButtons();
   }
 
-  /* =========================
-     🔥 SINCRONIZACIÓN PERFECTA
-  ========================= */
-  function syncMenu() {
+  function ensureFloatingMenuButton() {
+    let floatingMenuBtn = getFloatingMenuBtn();
+
+    if (!floatingMenuBtn) {
+      floatingMenuBtn = document.createElement("button");
+      floatingMenuBtn.id = "floatingMenuBtn";
+      floatingMenuBtn.type = "button";
+      floatingMenuBtn.setAttribute("aria-label", "Abrir menú");
+      floatingMenuBtn.innerHTML = "☰";
+      document.body.appendChild(floatingMenuBtn);
+    } else if (floatingMenuBtn.parentElement !== document.body) {
+      document.body.appendChild(floatingMenuBtn);
+    }
+
+    /* 🔥 AJUSTE VISUAL SOLICITADO */
+    floatingMenuBtn.style.position = "fixed";
+    floatingMenuBtn.style.left = "10px";     // más hacia la izquierda
+    floatingMenuBtn.style.bottom = "20px";   // misma altura que otro botón
+    floatingMenuBtn.style.width = "44px";
+    floatingMenuBtn.style.height = "44px";
+    floatingMenuBtn.style.borderRadius = "12px";
+    floatingMenuBtn.style.zIndex = "999999";
+    floatingMenuBtn.style.display = "none";
+    floatingMenuBtn.style.alignItems = "center";
+    floatingMenuBtn.style.justifyContent = "center";
+    floatingMenuBtn.style.visibility = "hidden";
+    floatingMenuBtn.style.opacity = "0";
+    floatingMenuBtn.style.pointerEvents = "none";
+  }
+
+  function syncMenuButtons() {
     const sidebar = getSidebar();
-    const toggle = getSidebarToggle();
-    const floating = getFloatingMenuBtn();
+    const sidebarToggle = getSidebarToggle();
+    const floatingMenuBtn = getFloatingMenuBtn();
 
-    const hidden = sidebar?.classList.contains("hidden");
+    const sidebarHidden = !!sidebar && sidebar.classList.contains("hidden");
 
-    // botón normal solo si sidebar está abierto
-    if (toggle) {
-      toggle.style.display = hidden ? "none" : "flex";
+    if (sidebarToggle) {
+      sidebarToggle.style.visibility = sidebarHidden ? "hidden" : "visible";
+      sidebarToggle.style.opacity = sidebarHidden ? "0" : "1";
+      sidebarToggle.style.pointerEvents = sidebarHidden ? "none" : "auto";
     }
 
-    // flotante solo si sidebar está cerrado
-    if (floating) {
-      if (hidden) {
-        floating.style.display = "flex";
-        floating.style.opacity = "1";
-        floating.style.pointerEvents = "auto";
-      } else {
-        floating.style.display = "none";
-        floating.style.opacity = "0";
-        floating.style.pointerEvents = "none";
-      }
+    if (floatingMenuBtn) {
+      /* 🔥 SOLO APARECE CUANDO EL MENU ESTÁ CERRADO */
+      floatingMenuBtn.style.visibility = sidebarHidden ? "visible" : "hidden";
+      floatingMenuBtn.style.opacity = sidebarHidden ? "1" : "0";
+      floatingMenuBtn.style.pointerEvents = sidebarHidden ? "auto" : "none";
+      floatingMenuBtn.style.display = sidebarHidden ? "flex" : "none";
     }
+
+    ensureFloatingMenuButton();
   }
 
-  /* =========================
-     🔥 BIND EVENTOS
-  ========================= */
-  function bindMenu() {
-    const toggle = getSidebarToggle();
-    const floating = getFloatingMenuBtn();
+  function bindMenuButtons() {
+    const sidebarToggle = getSidebarToggle();
+    const floatingMenuBtn = getFloatingMenuBtn();
 
-    if (toggle && !toggle.dataset.bound) {
-      toggle.dataset.bound = "1";
-      toggle.addEventListener("click", () => toggleSidebar());
+    if (sidebarToggle && !sidebarToggle.dataset.menuBound) {
+      sidebarToggle.dataset.menuBound = "1";
+      sidebarToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar();
+      }, true);
     }
 
-    if (floating && !floating.dataset.bound) {
-      floating.dataset.bound = "1";
-      floating.addEventListener("click", () => toggleSidebar(true));
+    if (floatingMenuBtn && !floatingMenuBtn.dataset.menuBound) {
+      floatingMenuBtn.dataset.menuBound = "1";
+      floatingMenuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar(true);
+      }, true);
     }
 
-    syncMenu();
+    syncMenuButtons();
   }
 
   document.addEventListener("click", (e) => {
-    if (e.target.closest("#sidebarToggle")) {
-      e.preventDefault();
-      toggleSidebar();
-    }
+    const isMenuButton =
+      e.target.closest("#sidebarToggle") ||
+      e.target.closest("#floatingMenuBtn");
+
+    if (!isMenuButton) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
 
     if (e.target.closest("#floatingMenuBtn")) {
-      e.preventDefault();
       toggleSidebar(true);
+    } else {
+      toggleSidebar();
     }
   }, true);
 
   /* =========================
-     🔥 INIT MENU
+     🔥 TODO LO DEMÁS (SIN CAMBIOS)
   ========================= */
-  ensureFloatingButton();
-  bindMenu();
 
-  setInterval(() => {
-    ensureFloatingButton();
-    syncMenu();
-  }, 800);
+  function setActiveButton(id) {
+    document.querySelectorAll("[data-target]").forEach(btn => {
+      btn.style.background = "transparent";
+      btn.style.color = "#fff";
+    });
+
+    const active = document.querySelector(`[data-target="${id}"]`);
+    if (active) {
+      active.style.background = "gold";
+      active.style.color = "#000";
+    }
+  }
+
+  function showOnlyPanel(id) {
+    panels.forEach(p => p.style.display = "none");
+    const el = document.getElementById(id);
+    if (el) el.style.display = "block";
+    setActiveButton(id);
+  }
+
+  function waitForBroker() {
+    return new Promise(resolve => {
+      const i = setInterval(() => {
+        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
+          clearInterval(i);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+
+  function keepMarketAlive() {
+    const target = document.getElementById("marketPanel");
+    const source = document.getElementById("brokerSymbolsPanel");
+    if (!target || !source) return;
+
+    if (!target.dataset.ready) {
+      const clone = source.cloneNode(true);
+      clone.id = "marketClone";
+      target.innerHTML = "";
+      target.appendChild(clone);
+      target.dataset.ready = "1";
+    }
+
+    setTimeout(() => {
+      const original = document.getElementById("brokerSymbolsGrid");
+      const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
+      if (original && copy) {
+        copy.innerHTML = original.innerHTML;
+      }
+    }, 200);
+  }
+
+  function observeChanges() {
+    const observer = new MutationObserver(() => {
+      keepMarketAlive();
+      bindMenuButtons();
+      syncMenuButtons();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  /* INIT */
+  if (window.startBrokerUI) await window.startBrokerUI();
+  await waitForBroker();
+
+  ensureFloatingMenuButton();
+  bindMenuButtons();
+  observeChanges();
+
+  setInterval(() => bindMenuButtons(), 1000);
 
 });
 </script>
