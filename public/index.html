@@ -5059,7 +5059,8 @@ document.addEventListener("click", (e) => {
    🔥 PANEL FLOTANTE TRADES
 ========================= */
 function createFloatingTradesPanel() {
-  if (document.getElementById("floatingTrades")) return;
+  const old = document.getElementById("floatingTrades");
+  if (old) old.remove();
 
   const privateArea = document.getElementById("privateArea_full");
   if (!privateArea) return;
@@ -5067,13 +5068,10 @@ function createFloatingTradesPanel() {
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
-  // 🔥 RESTAURAR POSICIÓN GUARDADA
-  const saved = JSON.parse(localStorage.getItem("floatingTradesPos") || "{}");
-
   div.style.cssText = `
     position:fixed;
-    top:${saved.top || 80}px;
-    left:${saved.left || 10}px;
+    top:80px;
+    left:10px;
     width:260px;
     background:#111;
     color:#fff;
@@ -5082,7 +5080,6 @@ function createFloatingTradesPanel() {
     z-index:999999;
     font-size:12px;
     touch-action:none;
-    user-select:none;
   `;
 
   div.innerHTML = `
@@ -5090,51 +5087,39 @@ function createFloatingTradesPanel() {
       <b>📊 Operaciones</b>
       <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
     </div>
-
-    <div style="margin:6px 0;">
-      <input id="miniAmount" type="number" placeholder="Monto" style="width:100%;margin-bottom:5px;">
-      <button id="miniBuy" style="width:48%;">BUY</button>
-      <button id="miniSell" style="width:48%;">SELL</button>
-    </div>
-
     <div id="floatingTradesList">Sin operaciones</div>
   `;
 
   privateArea.appendChild(div);
 
   /* =========================
-     🔥 DRAG PRO (TOUCH + MOUSE + INERCIA)
+     🔥 DRAG REAL (FIX DEFINITIVO)
   ========================= */
-  let isDragging = false;
-  let startX, startY, currentX, currentY;
-  let velocityX = 0;
-  let velocityY = 0;
+  let dragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
 
-  function getPoint(e) {
-    return e.touches ? e.touches[0] : e;
+  const header = div.querySelector("#dragHeader");
+
+  function start(e) {
+    dragging = true;
+
+    const touch = e.touches ? e.touches[0] : e;
+
+    offsetX = touch.clientX - div.offsetLeft;
+    offsetY = touch.clientY - div.offsetTop;
+
+    e.stopPropagation();
   }
 
-  function startDrag(e) {
-    const p = getPoint(e);
-    isDragging = true;
-    startX = p.clientX - div.offsetLeft;
-    startY = p.clientY - div.offsetTop;
-    velocityX = 0;
-    velocityY = 0;
-  }
+  function move(e) {
+    if (!dragging) return;
 
-  function moveDrag(e) {
-    if (!isDragging) return;
+    const touch = e.touches ? e.touches[0] : e;
 
-    const p = getPoint(e);
+    let x = touch.clientX - offsetX;
+    let y = touch.clientY - offsetY;
 
-    let x = p.clientX - startX;
-    let y = p.clientY - startY;
-
-    velocityX = x - (div.offsetLeft || 0);
-    velocityY = y - (div.offsetTop || 0);
-
-    // 🔥 LIMITES
     const maxX = window.innerWidth - div.offsetWidth;
     const maxY = window.innerHeight - div.offsetHeight;
 
@@ -5144,77 +5129,22 @@ function createFloatingTradesPanel() {
     div.style.left = x + "px";
     div.style.top = y + "px";
     div.style.bottom = "auto";
+
+    e.preventDefault();
+    e.stopPropagation();
   }
 
-  function endDrag() {
-    if (!isDragging) return;
-    isDragging = false;
-
-    // 🔥 INERCIA SUAVE
-    let x = div.offsetLeft;
-    let y = div.offsetTop;
-
-    let friction = 0.90;
-
-    function animate() {
-      velocityX *= friction;
-      velocityY *= friction;
-
-      x += velocityX;
-      y += velocityY;
-
-      const maxX = window.innerWidth - div.offsetWidth;
-      const maxY = window.innerHeight - div.offsetHeight;
-
-      x = Math.max(0, Math.min(x, maxX));
-      y = Math.max(0, Math.min(y, maxY));
-
-      div.style.left = x + "px";
-      div.style.top = y + "px";
-
-      if (Math.abs(velocityX) > 0.5 || Math.abs(velocityY) > 0.5) {
-        requestAnimationFrame(animate);
-      } else {
-        snapToEdge();
-        savePosition();
-      }
-    }
-
-    animate();
+  function end() {
+    dragging = false;
   }
 
-  // 🔥 SNAP A BORDE (TIPO WHATSAPP)
-  function snapToEdge() {
-    const mid = window.innerWidth / 2;
-    let x = div.offsetLeft;
-
-    if (x < mid) {
-      div.style.left = "0px";
-    } else {
-      div.style.left = (window.innerWidth - div.offsetWidth) + "px";
-    }
-  }
-
-  function savePosition() {
-    localStorage.setItem("floatingTradesPos", JSON.stringify({
-      left: div.offsetLeft,
-      top: div.offsetTop
-    }));
-  }
-
-  const header = div.querySelector("#dragHeader");
-
-  header.addEventListener("mousedown", startDrag);
-  header.addEventListener("touchstart", startDrag, { passive: false });
-
-  document.addEventListener("mousemove", moveDrag);
-  document.addEventListener("touchmove", moveDrag, { passive: false });
-
-  document.addEventListener("mouseup", endDrag);
-  document.addEventListener("touchend", endDrag);
+  // 🔥 IMPORTANTE: pointer events (mejor que mouse+touch separados)
+  header.addEventListener("pointerdown", start);
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", end);
 
   /* =========================
-     🔥 CERRAR / MINIMIZAR
+     🔥 CERRAR / ABRIR
   ========================= */
   const closeBtn = div.querySelector("#closeFloatingTrades");
 
@@ -5255,19 +5185,6 @@ function createFloatingTradesPanel() {
       mini.remove();
     };
   }
-
-  /* =========================
-     🔥 BUY / SELL DESDE PANEL
-  ========================= */
-  div.querySelector("#miniBuy").onclick = () => {
-    const amount = parseFloat(document.getElementById("miniAmount").value);
-    ext().placeOrder?.({ amount, direction: "buy" });
-  };
-
-  div.querySelector("#miniSell").onclick = () => {
-    const amount = parseFloat(document.getElementById("miniAmount").value);
-    ext().placeOrder?.({ amount, direction: "sell" });
-  };
 
   /* =========================
      🔥 SOLO EN PRIVADO
