@@ -4775,17 +4775,53 @@ document.addEventListener("DOMContentLoaded", async () => {
   const sidebarToggle = document.getElementById("sidebarToggle");
   const floatingMenuBtn = document.getElementById("floatingMenuBtn");
 
+  function toggleSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.toggle("hidden");
+  }
+
+  function bindMenuButtons() {
+    const sidebarToggleNow = document.getElementById("sidebarToggle");
+    const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
+
+    if (sidebarToggleNow && !sidebarToggleNow.dataset.menuBound) {
+      sidebarToggleNow.dataset.menuBound = "1";
+      sidebarToggleNow.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar();
+      }, true);
+    }
+
+    if (floatingMenuBtnNow && !floatingMenuBtnNow.dataset.menuBound) {
+      floatingMenuBtnNow.dataset.menuBound = "1";
+      floatingMenuBtnNow.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar();
+      }, true);
+    }
+  }
+
   if (sidebar && sidebarToggle) {
-    sidebarToggle.addEventListener("click", () => {
-      sidebar.classList.toggle("hidden");
-    });
+    sidebarToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      toggleSidebar();
+    }, true);
   }
 
   /* 🔥 NUEVO: BOTÓN FLOTANTE FUNCIONAL */
   if (sidebar && floatingMenuBtn) {
-    floatingMenuBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("hidden");
-    });
+    floatingMenuBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      toggleSidebar();
+    }, true);
   }
 
   /* =========================
@@ -4853,6 +4889,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function observeChanges() {
     const observer = new MutationObserver(() => {
       keepMarketAlive();
+      bindMenuButtons();
     });
 
     observer.observe(document.body, {
@@ -4973,7 +5010,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       forceTrade("sell");
     }
 
-  });
+  }, true);
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
@@ -5089,6 +5126,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   }, true);
 
   /* =========================
+     🔥 MENU: CAPTURE GLOBAL PARA EVITAR BLOQUEOS
+  ========================= */
+  document.addEventListener("click", (e) => {
+    const isMenuButton =
+      e.target.closest("#sidebarToggle") ||
+      e.target.closest("#floatingMenuBtn");
+
+    if (isMenuButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      toggleSidebar();
+    }
+  }, true);
+
+  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -5102,6 +5155,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   responsiveFix();
   persistAmount();
   createFloatingTradesPanel();
+  bindMenuButtons();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
@@ -5111,43 +5165,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   /* =========================
    🔥 FIX FINAL BOTÓN MENÚ (ROBUSTO)
-========================= */
-(function fixMenuButtonForever() {
+  ========================= */
+  (function fixMenuButtonForever() {
 
-  function bindMenu() {
-    const sidebar = document.getElementById("sidebar");
-    const sidebarToggle = document.getElementById("sidebarToggle");
-    const floatingMenuBtn = document.getElementById("floatingMenuBtn");
-
-    if (!sidebar) return;
-
-    // IMPORTANTE: evitar duplicar listeners
-    if (sidebarToggle && !sidebarToggle.dataset.bound) {
-      sidebarToggle.dataset.bound = "1";
-      sidebarToggle.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        sidebar.classList.toggle("hidden");
-      });
+    function bindMenu() {
+      bindMenuButtons();
     }
 
-    if (floatingMenuBtn && !floatingMenuBtn.dataset.bound) {
-      floatingMenuBtn.dataset.bound = "1";
-      floatingMenuBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        sidebar.classList.toggle("hidden");
-      });
-    }
-  }
+    bindMenu();
+    setInterval(bindMenu, 1000);
 
-  // Ejecutar inmediato
-  bindMenu();
-
-  // Re-asegurar (porque tu broker re-renderiza DOM)
-  setInterval(bindMenu, 1000);
-
-})();
+  })();
 
 });
 </script>
