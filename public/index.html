@@ -4793,7 +4793,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     floatingMenuBtn.style.position = "fixed";
     floatingMenuBtn.style.left = "2px";
-    floatingMenuBtn.style.bottom = "310px";
+    floatingMenuBtn.style.bottom = "320px";
     floatingMenuBtn.style.zIndex = "999999";
     floatingMenuBtn.style.display = "flex";
     floatingMenuBtn.style.alignItems = "center";
@@ -4802,6 +4802,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.opacity = "1";
     floatingMenuBtn.style.pointerEvents = "auto";
   }
+
+  function syncMenuButtons() {
+  const sidebar = document.getElementById("sidebar");
+  const sidebarToggle = document.getElementById("sidebarToggle");
+  const floatingMenuBtn = document.getElementById("floatingMenuBtn");
+
+  const sidebarHidden = sidebar.classList.contains("hidden");
+
+  // 🔥 BOTÓN NORMAL
+  if (sidebarToggle) {
+    sidebarToggle.style.display = sidebarHidden ? "none" : "block";
+  }
+
+  // 🔥 BOTÓN FLOTANTE
+  if (floatingMenuBtn) {
+    floatingMenuBtn.style.display = sidebarHidden ? "flex" : "none";
+  }
+}
+
+
+  
 
   function bindMenuButtons() {
     const sidebarToggleNow = document.getElementById("sidebarToggle");
