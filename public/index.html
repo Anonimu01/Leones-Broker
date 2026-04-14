@@ -5055,33 +5055,38 @@ document.addEventListener("click", (e) => {
     }
   }, true);
 
- /* =========================
+/* =========================
    🔥 PANEL FLOTANTE TRADES
 ========================= */
+function isPrivateBrokerArea() {
+  return !!document.querySelector(
+    "#dashboardPanel, #tradingPanel, #positionsPanel, #marketPanel"
+  );
+}
+
 function createFloatingTradesPanel() {
   if (document.getElementById("floatingTrades")) return;
-
-  // 🔒 NO MOSTRAR EN PARTE PÚBLICA
-  // Ajusta esta condición según tu sistema (ej: si tienes una clase "private-mode")
-  const isPublic = document.body.classList.contains("public-mode");
-  if (isPublic) return;
+  if (!isPrivateBrokerArea()) return;
 
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
   div.style.cssText = `
-    position:fixed;
-    bottom:20px;
-    left:20px;
-    width:260px;
-    background:#111;
-    color:#fff;
-    padding:12px;
-    border-radius:10px;
-    z-index:9999;
-    font-size:12px;
-    cursor:grab;
-    touch-action:none;
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 260px;
+    background: #111;
+    color: #fff;
+    padding: 12px;
+    border-radius: 10px;
+    z-index: 9999;
+    font-size: 12px;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    cursor: grab;
+    box-sizing: border-box;
   `;
 
   div.innerHTML = `
@@ -5091,51 +5096,59 @@ function createFloatingTradesPanel() {
 
   document.body.appendChild(div);
 
-  // =========================
-  // 🔥 DRAG / MOVER PANEL (PC + CELULAR)
-  // =========================
-  let isDragging = false;
+  let dragging = false;
   let offsetX = 0;
   let offsetY = 0;
+  const panelWidth = 260;
+  const panelHeightMin = 60;
 
   const startDrag = (e) => {
-    isDragging = true;
+    if (e.button !== undefined && e.button !== 0) return;
+
+    dragging = true;
     div.style.cursor = "grabbing";
 
     const rect = div.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
 
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    div.style.bottom = "auto";
+    div.style.right = "auto";
 
-    offsetX = clientX - rect.left;
-    offsetY = clientY - rect.top;
+    if (div.setPointerCapture && e.pointerId !== undefined) {
+      try {
+        div.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    }
+
+    e.preventDefault();
   };
 
   const moveDrag = (e) => {
-    if (!isDragging) return;
+    if (!dragging) return;
 
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const x = e.clientX - offsetX;
+    const y = e.clientY - offsetY;
 
-    div.style.left = (clientX - offsetX) + "px";
-    div.style.top = (clientY - offsetY) + "px";
-    div.style.bottom = "auto";
+    const maxX = Math.max(0, window.innerWidth - panelWidth);
+    const maxY = Math.max(0, window.innerHeight - panelHeightMin);
+
+    const left = Math.min(Math.max(0, x), maxX);
+    const top = Math.min(Math.max(0, y), maxY);
+
+    div.style.left = left + "px";
+    div.style.top = top + "px";
   };
 
   const endDrag = () => {
-    isDragging = false;
+    dragging = false;
     div.style.cursor = "grab";
   };
 
-  // Mouse
-  div.addEventListener("mousedown", startDrag);
-  document.addEventListener("mousemove", moveDrag);
-  document.addEventListener("mouseup", endDrag);
-
-  // Touch
-  div.addEventListener("touchstart", startDrag, { passive: true });
-  document.addEventListener("touchmove", moveDrag, { passive: true });
-  document.addEventListener("touchend", endDrag);
+  div.addEventListener("pointerdown", startDrag);
+  window.addEventListener("pointermove", moveDrag);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
 }
 
 function updateFloatingTrades() {
@@ -5215,7 +5228,6 @@ document.addEventListener("click", (e) => {
   }, { openChart: true });
 
   showPanel("tradingPanel");
-
 }, true);
 
 /* =========================
@@ -5232,14 +5244,7 @@ observeChanges();
 keepMarketAlive();
 responsiveFix();
 persistAmount();
-
-// 🔒 SOLO CREAR SI ESTÁ EN PRIVADO
-setTimeout(() => {
-  const isPublic = document.body.classList.contains("public-mode");
-  if (!isPublic) {
-    createFloatingTradesPanel();
-  }
-}, 500);
+createFloatingTradesPanel();
 
 document.querySelectorAll("[data-target]").forEach(btn => {
   btn.onclick = () => showPanel(btn.dataset.target);
@@ -5253,6 +5258,7 @@ showPanel("dashboardPanel");
 setInterval(() => {
   bindMenuButtons();
 }, 1000);
+  
 </script>
   
 </div>
