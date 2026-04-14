@@ -4793,7 +4793,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     floatingMenuBtn.style.position = "fixed";
     floatingMenuBtn.style.left = "2px";
-    floatingMenuBtn.style.bottom = "320px";
+    floatingMenuBtn.style.bottom = "340px";
     floatingMenuBtn.style.zIndex = "999999";
     floatingMenuBtn.style.display = "flex";
     floatingMenuBtn.style.alignItems = "center";
@@ -4803,58 +4803,72 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.pointerEvents = "auto";
   }
 
-  function syncMenuButtons() {
+ function syncMenuButtons() {
   const sidebar = document.getElementById("sidebar");
   const sidebarToggle = document.getElementById("sidebarToggle");
   const floatingMenuBtn = document.getElementById("floatingMenuBtn");
 
-  const sidebarHidden = sidebar.classList.contains("hidden");
+  if (!sidebar) return;
 
-  // 🔥 BOTÓN NORMAL
+  const hidden = sidebar.classList.contains("hidden");
+
+  // botón normal
   if (sidebarToggle) {
-    sidebarToggle.style.display = sidebarHidden ? "none" : "block";
+    sidebarToggle.style.display = hidden ? "none" : "block";
   }
 
-  // 🔥 BOTÓN FLOTANTE
+  // botón flotante
   if (floatingMenuBtn) {
-    floatingMenuBtn.style.display = sidebarHidden ? "flex" : "none";
+    floatingMenuBtn.style.display = hidden ? "flex" : "none";
   }
 }
 
 
   
 
-  function bindMenuButtons() {
-    const sidebarToggleNow = document.getElementById("sidebarToggle");
-    const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
+ function bindMenuButtons() {
+  const sidebarToggleNow = document.getElementById("sidebarToggle");
+  const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
 
-    if (sidebarToggleNow) {
-      sidebarToggleNow.style.pointerEvents = "auto";
-      sidebarToggleNow.style.visibility = "visible";
-      sidebarToggleNow.style.opacity = "1";
-    }
-
-    if (floatingMenuBtnNow) {
-      floatingMenuBtnNow.style.pointerEvents = "auto";
-      floatingMenuBtnNow.style.visibility = "visible";
-      floatingMenuBtnNow.style.opacity = "1";
-    }
-
-    ensureFloatingMenuButton();
+  if (sidebarToggleNow) {
+    sidebarToggleNow.style.pointerEvents = "auto";
+    sidebarToggleNow.style.visibility = "visible";
+    sidebarToggleNow.style.opacity = "1";
   }
 
-  document.addEventListener("click", (e) => {
-    const isMenuButton =
-      e.target.closest("#sidebarToggle") ||
-      e.target.closest("#floatingMenuBtn");
+  if (floatingMenuBtnNow) {
+    floatingMenuBtnNow.style.pointerEvents = "auto";
+    // ❌ YA NO FORZAMOS VISIBILIDAD AQUÍ
+    // floatingMenuBtnNow.style.visibility = "visible";
+    // floatingMenuBtnNow.style.opacity = "1";
+  }
 
-    if (!isMenuButton) return;
+  ensureFloatingMenuButton();
 
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
-    toggleSidebar();
-  }, true);
+  // 🔥 CLAVE: sincroniza quién se muestra
+  if (typeof syncMenuButtons === "function") {
+    syncMenuButtons();
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const isMenuButton =
+    e.target.closest("#sidebarToggle") ||
+    e.target.closest("#floatingMenuBtn");
+
+  if (!isMenuButton) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation?.();
+
+  toggleSidebar();
+
+  // 🔥 asegura actualización inmediata
+  if (typeof syncMenuButtons === "function") {
+    syncMenuButtons();
+  }
+}, true);
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
