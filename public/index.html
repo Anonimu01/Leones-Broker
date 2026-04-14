@@ -5058,51 +5058,55 @@ document.addEventListener("click", (e) => {
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
- function createFloatingTradesPanel() {
-  if (document.getElementById("floatingTrades")) return;
+function createFloatingTradesPanel() {
+
+  // 🔥 BORRAR SI EXISTE (esto evita que siga igual)
+  const old = document.getElementById("floatingTrades");
+  if (old) old.remove();
 
   const privateArea = document.getElementById("privateArea_full");
-  if (!privateArea) return; // 🔥 NO se crea en parte pública
+  if (!privateArea) return;
 
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
   div.style.cssText = `
     position:fixed;
-    bottom:20px;
-    left:20px;
+    top:80px;
+    left:10px;
     width:260px;
     background:#111;
     color:#fff;
-    padding:12px;
+    padding:10px;
     border-radius:10px;
-    z-index:9999;
+    z-index:999999;
     font-size:12px;
     cursor:grab;
   `;
 
   div.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
       <b>📊 Operaciones</b>
-      <span id="closeFloatingTrades" style="cursor:pointer;font-size:14px;">✖</span>
+      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
     </div>
-    <div id="floatingTradesList" style="margin-top:6px;">Sin operaciones</div>
+    <div id="floatingTradesList">Sin operaciones</div>
   `;
 
   privateArea.appendChild(div);
 
   /* =========================
-     🔥 DRAG (MOVER PANEL)
+     🔥 DRAG REAL (FUNCIONA)
   ========================= */
   let isDragging = false;
   let offsetX = 0;
   let offsetY = 0;
 
-  div.addEventListener("mousedown", (e) => {
+  const header = div.querySelector("#dragHeader");
+
+  header.addEventListener("mousedown", (e) => {
     isDragging = true;
-    div.style.cursor = "grabbing";
-    offsetX = e.clientX - div.getBoundingClientRect().left;
-    offsetY = e.clientY - div.getBoundingClientRect().top;
+    offsetX = e.clientX - div.offsetLeft;
+    offsetY = e.clientY - div.offsetTop;
   });
 
   document.addEventListener("mousemove", (e) => {
@@ -5111,7 +5115,7 @@ document.addEventListener("click", (e) => {
     let x = e.clientX - offsetX;
     let y = e.clientY - offsetY;
 
-    // 🔥 LIMITES (NO SE SALE DE PANTALLA)
+    // 🔥 LIMITES
     const maxX = window.innerWidth - div.offsetWidth;
     const maxY = window.innerHeight - div.offsetHeight;
 
@@ -5127,70 +5131,62 @@ document.addEventListener("click", (e) => {
 
   document.addEventListener("mouseup", () => {
     isDragging = false;
-    div.style.cursor = "grab";
   });
 
   /* =========================
-     🔥 CERRAR / ABRIR
+     🔥 CERRAR / ABRIR REAL
   ========================= */
   const closeBtn = div.querySelector("#closeFloatingTrades");
 
-  closeBtn.addEventListener("click", () => {
+  closeBtn.onclick = () => {
     div.style.display = "none";
-    showMiniButton();
-  });
+    showMini();
+  };
 
-  /* =========================
-     🔥 BOTÓN MINI PARA ABRIR
-  ========================= */
-  function showMiniButton() {
-    let btn = document.getElementById("floatingTradesMini");
+  function showMini() {
+    let mini = document.getElementById("floatingTradesMini");
 
-    if (!btn) {
-      btn = document.createElement("div");
-      btn.id = "floatingTradesMini";
+    if (mini) return;
 
-      btn.style.cssText = `
-        position:fixed;
-        bottom:20px;
-        left:20px;
-        width:44px;
-        height:44px;
-        background:#111;
-        color:#fff;
-        border-radius:12px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        z-index:9999;
-        cursor:pointer;
-      `;
+    mini = document.createElement("div");
+    mini.id = "floatingTradesMini";
 
-      btn.innerHTML = "📊";
+    mini.style.cssText = `
+      position:fixed;
+      top:80px;
+      left:10px;
+      width:40px;
+      height:40px;
+      background:#111;
+      color:#fff;
+      border-radius:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:999999;
+      cursor:pointer;
+    `;
 
-      privateArea.appendChild(btn);
+    mini.innerHTML = "📊";
 
-      btn.addEventListener("click", () => {
-        div.style.display = "block";
-        btn.remove();
-      });
-    }
+    privateArea.appendChild(mini);
+
+    mini.onclick = () => {
+      div.style.display = "block";
+      mini.remove();
+    };
   }
 
   /* =========================
-     🔥 SOLO EN ÁREA PRIVADA
+     🔥 SOLO EN PRIVADO (FORZADO)
   ========================= */
-  const observer = new MutationObserver(() => {
-    const isPrivateVisible = privateArea.style.display !== "none";
-    div.style.display = isPrivateVisible ? "block" : "none";
-  });
+  function checkPrivate() {
+    const isVisible = privateArea.offsetParent !== null;
+    div.style.display = isVisible ? "block" : "none";
+  }
 
-  observer.observe(privateArea, {
-    attributes: true,
-    attributeFilter: ["style"]
-  });
+  setInterval(checkPrivate, 500);
 }
-
   /* =========================
      🔥 CAMBIO PANEL
   ========================= */
