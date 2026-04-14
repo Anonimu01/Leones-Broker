@@ -5056,7 +5056,7 @@ document.addEventListener("click", (e) => {
   }, true);
 
 /* =========================
-   🔥 PANEL FLOTANTE TRADES
+   🔥 PANEL FLOTANTE TRADES (FIX REAL)
 ========================= */
 function createFloatingTradesPanel() {
   if (document.getElementById("floatingTrades")) return;
@@ -5069,30 +5069,30 @@ function createFloatingTradesPanel() {
 
   div.style.cssText = `
     position:fixed;
-    bottom:20px;
-    left:20px;
+    top:80px;
+    left:10px;
     width:260px;
     background:#111;
     color:#fff;
     padding:12px;
     border-radius:10px;
-    z-index:9999;
+    z-index:999999;
     font-size:12px;
     touch-action:none;
   `;
 
   div.innerHTML = `
-    <div id="dragHeader" style="cursor:grab;">
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
       <b>📊 Operaciones</b>
+      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
     </div>
     <div id="floatingTradesList">Sin operaciones</div>
   `;
 
-  // 🔥 IMPORTANTE: ahora va dentro del área privada (NO público)
   privateArea.appendChild(div);
 
   /* =========================
-     🔥 DRAG SUAVE (NO ROMPE NADA)
+     🔥 DRAG UNIVERSAL (PC + MÓVIL)
   ========================= */
   let isDragging = false;
   let offsetX = 0;
@@ -5100,76 +5100,112 @@ function createFloatingTradesPanel() {
 
   const header = div.querySelector("#dragHeader");
 
-  function startDrag(e) {
-    const p = e.touches ? e.touches[0] : e;
+  function startDrag(x, y) {
     isDragging = true;
-    offsetX = p.clientX - div.offsetLeft;
-    offsetY = p.clientY - div.offsetTop;
+    offsetX = x - div.offsetLeft;
+    offsetY = y - div.offsetTop;
   }
 
-  function moveDrag(e) {
+  function moveDrag(x, y) {
     if (!isDragging) return;
 
-    const p = e.touches ? e.touches[0] : e;
-
-    let x = p.clientX - offsetX;
-    let y = p.clientY - offsetY;
+    let posX = x - offsetX;
+    let posY = y - offsetY;
 
     const maxX = window.innerWidth - div.offsetWidth;
     const maxY = window.innerHeight - div.offsetHeight;
 
-    x = Math.max(0, Math.min(x, maxX));
-    y = Math.max(0, Math.min(y, maxY));
+    if (posX < 0) posX = 0;
+    if (posY < 0) posY = 0;
+    if (posX > maxX) posX = maxX;
+    if (posY > maxY) posY = maxY;
 
-    div.style.left = x + "px";
-    div.style.top = y + "px";
+    div.style.left = posX + "px";
+    div.style.top = posY + "px";
     div.style.bottom = "auto";
   }
 
-  function endDrag() {
+  function stopDrag() {
     isDragging = false;
   }
 
-  // PC
-  header.addEventListener("mousedown", startDrag);
-  document.addEventListener("mousemove", moveDrag);
-  document.addEventListener("mouseup", endDrag);
+  // 🖱️ PC
+  header.addEventListener("mousedown", (e) => {
+    startDrag(e.clientX, e.clientY);
+  });
 
-  // MÓVIL
-  header.addEventListener("touchstart", startDrag, { passive: true });
-  document.addEventListener("touchmove", moveDrag, { passive: true });
-  document.addEventListener("touchend", endDrag);
+  document.addEventListener("mousemove", (e) => {
+    moveDrag(e.clientX, e.clientY);
+  });
+
+  document.addEventListener("mouseup", stopDrag);
+
+  // 📱 MÓVIL
+  header.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  });
+
+  document.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  });
+
+  document.addEventListener("touchend", stopDrag);
 
   /* =========================
-     🔥 SOLO PRIVADO (NO PÚBLICO)
+     🔥 CERRAR / ABRIR
   ========================= */
-  setInterval(() => {
-    const visible = privateArea.offsetParent !== null;
-    div.style.display = visible ? "block" : "none";
-  }, 500);
-}
+  const closeBtn = div.querySelector("#closeFloatingTrades");
 
-function updateFloatingTrades() {
-  const api = ext();
-  const list = document.getElementById("floatingTradesList");
-  if (!list) return;
+  closeBtn.onclick = () => {
+    div.style.display = "none";
+    showMini();
+  };
 
-  const positions = api.positions || [];
+  function showMini() {
+    let mini = document.getElementById("floatingTradesMini");
+    if (mini) return;
 
-  if (!positions.length) {
-    list.innerHTML = "Sin operaciones";
-    return;
+    mini = document.createElement("div");
+    mini.id = "floatingTradesMini";
+
+    mini.style.cssText = `
+      position:fixed;
+      top:80px;
+      left:10px;
+      width:40px;
+      height:40px;
+      background:#111;
+      color:#fff;
+      border-radius:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:999999;
+      cursor:pointer;
+    `;
+
+    mini.innerHTML = "📊";
+
+    privateArea.appendChild(mini);
+
+    mini.onclick = () => {
+      div.style.display = "block";
+      mini.remove();
+    };
   }
 
-  list.innerHTML = positions.map(p => `
-    <div style="margin-top:6px;">
-      ${p.symbol} | ${p.direction} <br>
-      $${p.amount}
-    </div>
-  `).join("");
-}
+  /* =========================
+     🔥 SOLO ÁREA PRIVADA
+  ========================= */
+  function checkPrivate() {
+    const visible = privateArea.offsetParent !== null;
+    div.style.display = visible ? "block" : "none";
+  }
 
-setInterval(updateFloatingTrades, 2000);
+  setInterval(checkPrivate, 500);
+}
 </script>
   
 </div>
