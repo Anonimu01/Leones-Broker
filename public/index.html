@@ -5109,6 +5109,46 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   showPanel("dashboardPanel");
 
+  /* =========================
+   🔥 FIX FINAL BOTÓN MENÚ (ROBUSTO)
+========================= */
+(function fixMenuButtonForever() {
+
+  function bindMenu() {
+    const sidebar = document.getElementById("sidebar");
+    const sidebarToggle = document.getElementById("sidebarToggle");
+    const floatingMenuBtn = document.getElementById("floatingMenuBtn");
+
+    if (!sidebar) return;
+
+    // IMPORTANTE: evitar duplicar listeners
+    if (sidebarToggle && !sidebarToggle.dataset.bound) {
+      sidebarToggle.dataset.bound = "1";
+      sidebarToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        sidebar.classList.toggle("hidden");
+      });
+    }
+
+    if (floatingMenuBtn && !floatingMenuBtn.dataset.bound) {
+      floatingMenuBtn.dataset.bound = "1";
+      floatingMenuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        sidebar.classList.toggle("hidden");
+      });
+    }
+  }
+
+  // Ejecutar inmediato
+  bindMenu();
+
+  // Re-asegurar (porque tu broker re-renderiza DOM)
+  setInterval(bindMenu, 1000);
+
+})();
+
 });
 </script>
   
