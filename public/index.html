@@ -5056,7 +5056,7 @@ document.addEventListener("click", (e) => {
   }, true);
 
 /* =========================
-   🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
+   🔥 PANEL FLOTANTE TRADES (DRAG UNIVERSAL)
 ========================= */
 function createFloatingTradesPanel() {
 
@@ -5069,7 +5069,6 @@ function createFloatingTradesPanel() {
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
-  // 🔥 POSICIÓN GUARDADA
   let savedX = localStorage.getItem("trades_x");
   let savedY = localStorage.getItem("trades_y");
 
@@ -5084,10 +5083,11 @@ function createFloatingTradesPanel() {
     border-radius:10px;
     z-index:999999;
     font-size:12px;
+    touch-action:none; /* 🔥 CLAVE PARA MOVIL */
   `;
 
   div.innerHTML = `
-    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;touch-action:none;">
       <b>📊 Operaciones</b>
       <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
     </div>
@@ -5097,7 +5097,7 @@ function createFloatingTradesPanel() {
   privateArea.appendChild(div);
 
   /* =========================
-     🔥 DRAG REAL (MOUSE + TOUCH)
+     🔥 DRAG UNIVERSAL (MOUSE + TOUCH)
   ========================= */
   let isDragging = false;
   let offsetX = 0;
@@ -5105,34 +5105,33 @@ function createFloatingTradesPanel() {
 
   const header = div.querySelector("#dragHeader");
 
-  function startDrag(clientX, clientY) {
+  function startDrag(x, y) {
     isDragging = true;
-    offsetX = clientX - div.offsetLeft;
-    offsetY = clientY - div.offsetTop;
+    offsetX = x - div.offsetLeft;
+    offsetY = y - div.offsetTop;
     header.style.cursor = "grabbing";
   }
 
-  function moveDrag(clientX, clientY) {
+  function moveDrag(x, y) {
     if (!isDragging) return;
 
-    let x = clientX - offsetX;
-    let y = clientY - offsetY;
+    let newX = x - offsetX;
+    let newY = y - offsetY;
 
     const maxX = window.innerWidth - div.offsetWidth;
     const maxY = window.innerHeight - div.offsetHeight;
 
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x > maxX) x = maxX;
-    if (y > maxY) y = maxY;
+    if (newX < 0) newX = 0;
+    if (newY < 0) newY = 0;
+    if (newX > maxX) newX = maxX;
+    if (newY > maxY) newY = maxY;
 
-    div.style.left = x + "px";
-    div.style.top = y + "px";
+    div.style.left = newX + "px";
+    div.style.top = newY + "px";
     div.style.bottom = "auto";
 
-    // 🔥 GUARDAR POSICIÓN
-    localStorage.setItem("trades_x", x);
-    localStorage.setItem("trades_y", y);
+    localStorage.setItem("trades_x", newX);
+    localStorage.setItem("trades_y", newY);
   }
 
   function stopDrag() {
@@ -5140,7 +5139,7 @@ function createFloatingTradesPanel() {
     header.style.cursor = "grab";
   }
 
-  // 🖱 MOUSE
+  /* 🖱 PC */
   header.addEventListener("mousedown", (e) => {
     e.preventDefault();
     startDrag(e.clientX, e.clientY);
@@ -5152,16 +5151,19 @@ function createFloatingTradesPanel() {
 
   document.addEventListener("mouseup", stopDrag);
 
-  // 📱 TOUCH
+  /* 📱 MOVIL (FIX REAL) */
   header.addEventListener("touchstart", (e) => {
+    e.preventDefault(); // 🔥 evita scroll
     const t = e.touches[0];
     startDrag(t.clientX, t.clientY);
-  });
+  }, { passive:false });
 
   document.addEventListener("touchmove", (e) => {
+    if (!isDragging) return;
+    e.preventDefault(); // 🔥 clave para que NO haga scroll
     const t = e.touches[0];
     moveDrag(t.clientX, t.clientY);
-  }, { passive: false });
+  }, { passive:false });
 
   document.addEventListener("touchend", stopDrag);
 
@@ -5196,6 +5198,7 @@ function createFloatingTradesPanel() {
       justify-content:center;
       z-index:999999;
       cursor:pointer;
+      touch-action:none;
     `;
 
     mini.innerHTML = "📊";
