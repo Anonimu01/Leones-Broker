@@ -4769,7 +4769,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
-     🔥 BOTÓN MENU (FIX DEFINITIVO)
+     🔥 SIDEBAR CONTROL BASE
   ========================= */
   function getSidebar() {
     return document.getElementById("sidebar");
@@ -4785,453 +4785,118 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function isSidebarHidden() {
     const sidebar = getSidebar();
-    return !!sidebar && sidebar.classList.contains("hidden");
+    return sidebar && sidebar.classList.contains("hidden");
   }
 
-  function toggleSidebar(forceState = null) {
+  function toggleSidebar(force) {
     const sidebar = getSidebar();
     if (!sidebar) return;
 
-    if (forceState === true) {
-      sidebar.classList.remove("hidden");
-    } else if (forceState === false) {
-      sidebar.classList.add("hidden");
-    } else {
-      sidebar.classList.toggle("hidden");
-    }
+    if (force === true) sidebar.classList.remove("hidden");
+    else if (force === false) sidebar.classList.add("hidden");
+    else sidebar.classList.toggle("hidden");
 
-    syncMenuButtons();
+    syncMenu();
   }
 
-  function ensureFloatingMenuButton() {
-    let floatingMenuBtn = getFloatingMenuBtn();
+  /* =========================
+     🔥 CREAR BOTÓN FLOTANTE
+  ========================= */
+  function ensureFloatingButton() {
+    let btn = getFloatingMenuBtn();
 
-    if (!floatingMenuBtn) {
-      floatingMenuBtn = document.createElement("button");
-      floatingMenuBtn.id = "floatingMenuBtn";
-      floatingMenuBtn.type = "button";
-      floatingMenuBtn.setAttribute("aria-label", "Abrir menú");
-      floatingMenuBtn.innerHTML = "☰";
-      document.body.appendChild(floatingMenuBtn);
-    } else if (floatingMenuBtn.parentElement !== document.body) {
-      document.body.appendChild(floatingMenuBtn);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "floatingMenuBtn";
+      btn.innerHTML = "☰";
+      document.body.appendChild(btn);
     }
 
-    floatingMenuBtn.style.position = "fixed";
-    floatingMenuBtn.style.left = "16px";
-    floatingMenuBtn.style.top = "16px";
-    floatingMenuBtn.style.width = "44px";
-    floatingMenuBtn.style.height = "44px";
-    floatingMenuBtn.style.padding = "0";
-    floatingMenuBtn.style.margin = "0";
-    floatingMenuBtn.style.borderRadius = "12px";
-    floatingMenuBtn.style.zIndex = "999999";
-    floatingMenuBtn.style.display = "none";
-    floatingMenuBtn.style.alignItems = "center";
-    floatingMenuBtn.style.justifyContent = "center";
-    floatingMenuBtn.style.visibility = "hidden";
-    floatingMenuBtn.style.opacity = "0";
-    floatingMenuBtn.style.pointerEvents = "none";
-    floatingMenuBtn.style.transform = "none";
-    floatingMenuBtn.style.boxSizing = "border-box";
+    btn.style.position = "fixed";
+    btn.style.left = "16px";
+    btn.style.top = "16px"; /* MISMO NIVEL QUE EL OTRO */
+    btn.style.width = "44px";
+    btn.style.height = "44px";
+    btn.style.borderRadius = "12px";
+    btn.style.zIndex = "999999";
+
+    /* 🔥 IMPORTANTE: empieza oculto */
+    btn.style.display = "none";
+    btn.style.pointerEvents = "none";
+    btn.style.opacity = "0";
   }
 
-  function syncMenuButtons() {
+  /* =========================
+     🔥 SINCRONIZACIÓN PERFECTA
+  ========================= */
+  function syncMenu() {
     const sidebar = getSidebar();
-    const sidebarToggle = getSidebarToggle();
-    const floatingMenuBtn = getFloatingMenuBtn();
+    const toggle = getSidebarToggle();
+    const floating = getFloatingMenuBtn();
 
-    const sidebarHidden = !!sidebar && sidebar.classList.contains("hidden");
+    const hidden = sidebar?.classList.contains("hidden");
 
-    if (sidebarToggle) {
-      sidebarToggle.style.visibility = sidebarHidden ? "hidden" : "visible";
-      sidebarToggle.style.opacity = sidebarHidden ? "0" : "1";
-      sidebarToggle.style.pointerEvents = sidebarHidden ? "none" : "auto";
-      sidebarToggle.style.display = sidebarHidden ? "none" : "";
+    // botón normal solo si sidebar está abierto
+    if (toggle) {
+      toggle.style.display = hidden ? "none" : "flex";
     }
 
-    if (floatingMenuBtn) {
-      floatingMenuBtn.style.visibility = sidebarHidden ? "visible" : "hidden";
-      floatingMenuBtn.style.opacity = sidebarHidden ? "1" : "0";
-      floatingMenuBtn.style.pointerEvents = sidebarHidden ? "auto" : "none";
-      floatingMenuBtn.style.display = sidebarHidden ? "flex" : "none";
+    // flotante solo si sidebar está cerrado
+    if (floating) {
+      if (hidden) {
+        floating.style.display = "flex";
+        floating.style.opacity = "1";
+        floating.style.pointerEvents = "auto";
+      } else {
+        floating.style.display = "none";
+        floating.style.opacity = "0";
+        floating.style.pointerEvents = "none";
+      }
     }
-
-    ensureFloatingMenuButton();
   }
 
-  function bindMenuButtons() {
-    const sidebarToggle = getSidebarToggle();
-    const floatingMenuBtn = getFloatingMenuBtn();
+  /* =========================
+     🔥 BIND EVENTOS
+  ========================= */
+  function bindMenu() {
+    const toggle = getSidebarToggle();
+    const floating = getFloatingMenuBtn();
 
-    if (sidebarToggle && !sidebarToggle.dataset.menuBound) {
-      sidebarToggle.dataset.menuBound = "1";
-      sidebarToggle.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation?.();
-        toggleSidebar();
-      }, true);
+    if (toggle && !toggle.dataset.bound) {
+      toggle.dataset.bound = "1";
+      toggle.addEventListener("click", () => toggleSidebar());
     }
 
-    if (floatingMenuBtn && !floatingMenuBtn.dataset.menuBound) {
-      floatingMenuBtn.dataset.menuBound = "1";
-      floatingMenuBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation?.();
-        toggleSidebar(true);
-      }, true);
+    if (floating && !floating.dataset.bound) {
+      floating.dataset.bound = "1";
+      floating.addEventListener("click", () => toggleSidebar(true));
     }
 
-    syncMenuButtons();
+    syncMenu();
   }
 
   document.addEventListener("click", (e) => {
-    const isMenuButton =
-      e.target.closest("#sidebarToggle") ||
-      e.target.closest("#floatingMenuBtn");
-
-    if (!isMenuButton) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
-
-    if (e.target.closest("#floatingMenuBtn")) {
-      toggleSidebar(true);
-    } else {
+    if (e.target.closest("#sidebarToggle")) {
+      e.preventDefault();
       toggleSidebar();
     }
-  }, true);
 
-  /* =========================
-     🔥 BOTONES ACTIVOS DORADO
-  ========================= */
-  function setActiveButton(id) {
-    document.querySelectorAll("[data-target]").forEach(btn => {
-      btn.style.background = "transparent";
-      btn.style.color = "#fff";
-    });
-
-    const active = document.querySelector(`[data-target="${id}"]`);
-    if (active) {
-      active.style.background = "gold";
-      active.style.color = "#000";
-    }
-  }
-
-  function showOnlyPanel(id) {
-    panels.forEach(p => p.style.display = "none");
-    const el = document.getElementById(id);
-    if (el) el.style.display = "block";
-    setActiveButton(id);
-  }
-
-  /* =========================
-     🔥 ESPERAR JS2
-  ========================= */
-  function waitForBroker() {
-    return new Promise(resolve => {
-      const i = setInterval(() => {
-        if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
-          clearInterval(i);
-          resolve();
-        }
-      }, 200);
-    });
-  }
-
-  /* =========================
-     🔥 MARKET FIX
-  ========================= */
-  function keepMarketAlive() {
-    const target = document.getElementById("marketPanel");
-    const source = document.getElementById("brokerSymbolsPanel");
-    if (!target || !source) return;
-
-    if (!target.dataset.ready) {
-      const clone = source.cloneNode(true);
-      clone.id = "marketClone";
-      target.innerHTML = "";
-      target.appendChild(clone);
-      target.dataset.ready = "1";
-    }
-
-    setTimeout(() => {
-      const original = document.getElementById("brokerSymbolsGrid");
-      const copy = document.querySelector("#marketClone #brokerSymbolsGrid");
-      if (original && copy) {
-        copy.innerHTML = original.innerHTML;
-      }
-    }, 200);
-  }
-
-  function observeChanges() {
-    const observer = new MutationObserver(() => {
-      keepMarketAlive();
-      bindMenuButtons();
-      syncMenuButtons();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-
-  /* =========================
-     🔥 GRAFICO REAL
-  ========================= */
-  function fixTrading() {
-    const api = ext();
-    const container = document.getElementById("tv_chart_container");
-
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
-
-    if (symbol) {
-      api.openTradingView?.({ symbol });
-    }
-
-    container.style.width = "100%";
-    container.style.height = "100vh";
-  }
-
-  /* =========================
-     🔥 VELAS MÁS FLUIDAS
-  ========================= */
-  setInterval(() => {
-    const api = ext();
-    api.loadRealQuotes?.();
-  }, 1500);
-
-  /* =========================
-     🔥 RESPONSIVE
-  ========================= */
-  function responsiveFix() {
-    const cols = document.getElementById("brokerColumns");
-    if (!cols) return;
-
-    if (window.innerWidth < 768) {
-      cols.style.display = "block";
-    } else {
-      cols.style.display = "grid";
-      cols.style.gridTemplateColumns = "1fr 350px";
-    }
-  }
-
-  window.addEventListener("resize", responsiveFix);
-
-  /* =========================
-     🔥 MANTENER MONTO
-  ========================= */
-  function persistAmount() {
-    const input = document.getElementById("brokerOrderSize");
-    if (!input) return;
-
-    if (LAST_AMOUNT !== null) {
-      input.value = LAST_AMOUNT;
-    }
-
-    input.addEventListener("input", () => {
-      LAST_AMOUNT = input.value;
-    });
-  }
-
-  function restoreAmount() {
-    const input = document.getElementById("brokerOrderSize");
-    if (input && LAST_AMOUNT !== null) {
-      input.value = LAST_AMOUNT;
-    }
-  }
-
-  /* =========================
-     🔥 ORDEN REAL SIN ERROR
-  ========================= */
-  function forceTrade(direction) {
-    const api = ext();
-
-    const amountInput = document.getElementById("brokerOrderSize");
-    const amount = parseFloat(amountInput?.value);
-
-    if (!amount || amount <= 0) {
-      alert("Coloca un monto válido");
-      return;
-    }
-
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
-
-    if (!symbol) {
-      alert("Selecciona un símbolo");
-      return;
-    }
-
-    api.placeOrder?.({
-      symbol,
-      amount,
-      direction
-    });
-
-    restoreAmount();
-  }
-
-  document.addEventListener("click", (e) => {
-    if (e.target.matches('[data-action="buy"]')) {
+    if (e.target.closest("#floatingMenuBtn")) {
       e.preventDefault();
-      forceTrade("buy");
-    }
-
-    if (e.target.matches('[data-action="sell"]')) {
-      e.preventDefault();
-      forceTrade("sell");
+      toggleSidebar(true);
     }
   }, true);
 
   /* =========================
-     🔥 PANEL FLOTANTE TRADES
+     🔥 INIT MENU
   ========================= */
-  function createFloatingTradesPanel() {
-    if (document.getElementById("floatingTrades")) return;
+  ensureFloatingButton();
+  bindMenu();
 
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
-
-    div.style.cssText = `
-      position:fixed;
-      bottom:20px;
-      left:20px;
-      width:260px;
-      background:#111;
-      color:#fff;
-      padding:12px;
-      border-radius:10px;
-      z-index:9999;
-      font-size:12px;
-    `;
-
-    div.innerHTML = `
-      <b>📊 Operaciones</b>
-      <div id="floatingTradesList">Sin operaciones</div>
-    `;
-
-    document.body.appendChild(div);
-  }
-
-  function updateFloatingTrades() {
-    const api = ext();
-    const list = document.getElementById("floatingTradesList");
-    if (!list) return;
-
-    const positions = api.positions || [];
-
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
-    }
-
-    list.innerHTML = positions.map(p => `
-      <div style="margin-top:6px;">
-        ${p.symbol} | ${p.direction} <br>
-        $${p.amount}
-      </div>
-    `).join("");
-  }
-
-  setInterval(updateFloatingTrades, 2000);
-
-  /* =========================
-     🔥 CAMBIO PANEL
-  ========================= */
-  function showPanel(id) {
-    showOnlyPanel(id);
-
-    const api = ext();
-
-    if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        window.renderSymbolsGrid?.();
-        keepMarketAlive();
-      }, 300);
-    }
-
-    if (id === "tradingPanel") {
-      api.openTradingView?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-        persistAmount();
-        restoreAmount();
-      }, 300);
-    }
-
-    if (id === "positionsPanel") {
-      api.loadPositions?.();
-    }
-
-    if (id === "dashboardPanel") {
-      api.loadAccount?.();
-    }
-  }
-
-  /* =========================
-     🔥 CLICK SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
-
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-
-  }, true);
-
-  /* =========================
-     🔥 INIT
-  ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
-  }
-
-  await waitForBroker();
-
-  ensureFloatingMenuButton();
-  bindMenuButtons();
-  observeChanges();
-  keepMarketAlive();
-  responsiveFix();
-  persistAmount();
-  createFloatingTradesPanel();
-  syncMenuButtons();
-
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.onclick = () => showPanel(btn.dataset.target);
-  });
-
-  showPanel("dashboardPanel");
-
-  /* =========================
-     🔥 REFORZAR BOTÓN FLOTANTE
-  ========================= */
   setInterval(() => {
-    bindMenuButtons();
-    syncMenuButtons();
-  }, 1000);
+    ensureFloatingButton();
+    syncMenu();
+  }, 800);
 
 });
 </script>
