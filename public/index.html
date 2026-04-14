@@ -4771,62 +4771,114 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 BOTÓN MENU (FIX DEFINITIVO)
   ========================= */
-  function toggleSidebar() {
-    const sidebar = document.getElementById("sidebar");
+  function getSidebar() {
+    return document.getElementById("sidebar");
+  }
+
+  function getSidebarToggle() {
+    return document.getElementById("sidebarToggle");
+  }
+
+  function getFloatingMenuBtn() {
+    return document.getElementById("floatingMenuBtn");
+  }
+
+  function toggleSidebar(forceState = null) {
+    const sidebar = getSidebar();
     if (!sidebar) return;
-    sidebar.classList.toggle("hidden");
+
+    if (forceState === true) {
+      sidebar.classList.remove("hidden");
+    } else if (forceState === false) {
+      sidebar.classList.add("hidden");
+    } else {
+      sidebar.classList.toggle("hidden");
+    }
+
+    syncMenuButtons();
   }
 
   function ensureFloatingMenuButton() {
-    let floatingMenuBtn = document.getElementById("floatingMenuBtn");
+    let floatingMenuBtn = getFloatingMenuBtn();
 
     if (!floatingMenuBtn) {
       floatingMenuBtn = document.createElement("button");
       floatingMenuBtn.id = "floatingMenuBtn";
       floatingMenuBtn.type = "button";
       floatingMenuBtn.setAttribute("aria-label", "Abrir menú");
-      floatingMenuBtn.textContent = "☰";
+      floatingMenuBtn.innerHTML = "☰";
       document.body.appendChild(floatingMenuBtn);
     } else if (floatingMenuBtn.parentElement !== document.body) {
       document.body.appendChild(floatingMenuBtn);
     }
 
     floatingMenuBtn.style.position = "fixed";
-    floatingMenuBtn.style.left = "12px";
-    floatingMenuBtn.style.bottom = "12px";
-    floatingMenuBtn.style.width = "48px";
-    floatingMenuBtn.style.height = "48px";
+    floatingMenuBtn.style.left = "16px";
+    floatingMenuBtn.style.top = "16px";
+    floatingMenuBtn.style.width = "44px";
+    floatingMenuBtn.style.height = "44px";
     floatingMenuBtn.style.padding = "0";
     floatingMenuBtn.style.margin = "0";
     floatingMenuBtn.style.borderRadius = "12px";
     floatingMenuBtn.style.zIndex = "999999";
-    floatingMenuBtn.style.display = "flex";
+    floatingMenuBtn.style.display = "none";
     floatingMenuBtn.style.alignItems = "center";
     floatingMenuBtn.style.justifyContent = "center";
-    floatingMenuBtn.style.visibility = "visible";
-    floatingMenuBtn.style.opacity = "1";
-    floatingMenuBtn.style.pointerEvents = "auto";
+    floatingMenuBtn.style.visibility = "hidden";
+    floatingMenuBtn.style.opacity = "0";
+    floatingMenuBtn.style.pointerEvents = "none";
     floatingMenuBtn.style.transform = "none";
     floatingMenuBtn.style.boxSizing = "border-box";
   }
 
-  function bindMenuButtons() {
-    const sidebarToggleNow = document.getElementById("sidebarToggle");
-    const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
+  function syncMenuButtons() {
+    const sidebar = getSidebar();
+    const sidebarToggle = getSidebarToggle();
+    const floatingMenuBtn = getFloatingMenuBtn();
 
-    if (sidebarToggleNow) {
-      sidebarToggleNow.style.pointerEvents = "auto";
-      sidebarToggleNow.style.visibility = "visible";
-      sidebarToggleNow.style.opacity = "1";
+    const sidebarHidden = !!sidebar && sidebar.classList.contains("hidden");
+
+    if (sidebarToggle) {
+      sidebarToggle.style.visibility = sidebarHidden ? "hidden" : "visible";
+      sidebarToggle.style.opacity = sidebarHidden ? "0" : "1";
+      sidebarToggle.style.pointerEvents = sidebarHidden ? "none" : "auto";
     }
 
-    if (floatingMenuBtnNow) {
-      floatingMenuBtnNow.style.pointerEvents = "auto";
-      floatingMenuBtnNow.style.visibility = "visible";
-      floatingMenuBtnNow.style.opacity = "1";
+    if (floatingMenuBtn) {
+      floatingMenuBtn.style.visibility = sidebarHidden ? "visible" : "hidden";
+      floatingMenuBtn.style.opacity = sidebarHidden ? "1" : "0";
+      floatingMenuBtn.style.pointerEvents = sidebarHidden ? "auto" : "none";
+      floatingMenuBtn.style.display = sidebarHidden ? "flex" : "none";
     }
 
     ensureFloatingMenuButton();
+  }
+
+  function bindMenuButtons() {
+    const sidebarToggle = getSidebarToggle();
+    const floatingMenuBtn = getFloatingMenuBtn();
+
+    if (sidebarToggle && !sidebarToggle.dataset.menuBound) {
+      sidebarToggle.dataset.menuBound = "1";
+      sidebarToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar();
+      }, true);
+    }
+
+    if (floatingMenuBtn && !floatingMenuBtn.dataset.menuBound) {
+      floatingMenuBtn.dataset.menuBound = "1";
+      floatingMenuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        toggleSidebar(true);
+      }, true);
+    }
+
+    syncMenuButtons();
   }
 
   document.addEventListener("click", (e) => {
@@ -4839,7 +4891,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation?.();
-    toggleSidebar();
+
+    if (e.target.closest("#floatingMenuBtn")) {
+      toggleSidebar(true);
+    } else {
+      toggleSidebar();
+    }
   }, true);
 
   /* =========================
@@ -4908,6 +4965,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const observer = new MutationObserver(() => {
       keepMarketAlive();
       bindMenuButtons();
+      syncMenuButtons();
     });
 
     observer.observe(document.body, {
@@ -5146,12 +5204,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await waitForBroker();
 
+  ensureFloatingMenuButton();
   bindMenuButtons();
   observeChanges();
   keepMarketAlive();
   responsiveFix();
   persistAmount();
   createFloatingTradesPanel();
+  syncMenuButtons();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
@@ -5164,6 +5224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   ========================= */
   setInterval(() => {
     bindMenuButtons();
+    syncMenuButtons();
   }, 1000);
 
 });
