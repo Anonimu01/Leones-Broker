@@ -5058,54 +5058,138 @@ document.addEventListener("click", (e) => {
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
-  function createFloatingTradesPanel() {
-    if (document.getElementById("floatingTrades")) return;
+ function createFloatingTradesPanel() {
+  if (document.getElementById("floatingTrades")) return;
 
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
+  const privateArea = document.getElementById("privateArea_full");
+  if (!privateArea) return; // 🔥 NO se crea en parte pública
 
-    div.style.cssText = `
-      position:fixed;
-      bottom:20px;
-      left:20px;
-      width:260px;
-      background:#111;
-      color:#fff;
-      padding:12px;
-      border-radius:10px;
-      z-index:9999;
-      font-size:12px;
-    `;
+  const div = document.createElement("div");
+  div.id = "floatingTrades";
 
-    div.innerHTML = `
+  div.style.cssText = `
+    position:fixed;
+    bottom:20px;
+    left:20px;
+    width:260px;
+    background:#111;
+    color:#fff;
+    padding:12px;
+    border-radius:10px;
+    z-index:9999;
+    font-size:12px;
+    cursor:grab;
+  `;
+
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
       <b>📊 Operaciones</b>
-      <div id="floatingTradesList">Sin operaciones</div>
-    `;
+      <span id="closeFloatingTrades" style="cursor:pointer;font-size:14px;">✖</span>
+    </div>
+    <div id="floatingTradesList" style="margin-top:6px;">Sin operaciones</div>
+  `;
 
-    document.body.appendChild(div);
-  }
+  privateArea.appendChild(div);
 
-  function updateFloatingTrades() {
-    const api = ext();
-    const list = document.getElementById("floatingTradesList");
-    if (!list) return;
+  /* =========================
+     🔥 DRAG (MOVER PANEL)
+  ========================= */
+  let isDragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
 
-    const positions = api.positions || [];
+  div.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    div.style.cursor = "grabbing";
+    offsetX = e.clientX - div.getBoundingClientRect().left;
+    offsetY = e.clientY - div.getBoundingClientRect().top;
+  });
 
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+
+    let x = e.clientX - offsetX;
+    let y = e.clientY - offsetY;
+
+    // 🔥 LIMITES (NO SE SALE DE PANTALLA)
+    const maxX = window.innerWidth - div.offsetWidth;
+    const maxY = window.innerHeight - div.offsetHeight;
+
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > maxX) x = maxX;
+    if (y > maxY) y = maxY;
+
+    div.style.left = x + "px";
+    div.style.top = y + "px";
+    div.style.bottom = "auto";
+  });
+
+  document.addEventListener("mouseup", () => {
+    isDragging = false;
+    div.style.cursor = "grab";
+  });
+
+  /* =========================
+     🔥 CERRAR / ABRIR
+  ========================= */
+  const closeBtn = div.querySelector("#closeFloatingTrades");
+
+  closeBtn.addEventListener("click", () => {
+    div.style.display = "none";
+    showMiniButton();
+  });
+
+  /* =========================
+     🔥 BOTÓN MINI PARA ABRIR
+  ========================= */
+  function showMiniButton() {
+    let btn = document.getElementById("floatingTradesMini");
+
+    if (!btn) {
+      btn = document.createElement("div");
+      btn.id = "floatingTradesMini";
+
+      btn.style.cssText = `
+        position:fixed;
+        bottom:20px;
+        left:20px;
+        width:44px;
+        height:44px;
+        background:#111;
+        color:#fff;
+        border-radius:12px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        z-index:9999;
+        cursor:pointer;
+      `;
+
+      btn.innerHTML = "📊";
+
+      privateArea.appendChild(btn);
+
+      btn.addEventListener("click", () => {
+        div.style.display = "block";
+        btn.remove();
+      });
     }
-
-    list.innerHTML = positions.map(p => `
-      <div style="margin-top:6px;">
-        ${p.symbol} | ${p.direction} <br>
-        $${p.amount}
-      </div>
-    `).join("");
   }
 
-  setInterval(updateFloatingTrades, 2000);
+  /* =========================
+     🔥 SOLO EN ÁREA PRIVADA
+  ========================= */
+  const observer = new MutationObserver(() => {
+    const isPrivateVisible = privateArea.style.display !== "none";
+    div.style.display = isPrivateVisible ? "block" : "none";
+  });
+
+  observer.observe(privateArea, {
+    attributes: true,
+    attributeFilter: ["style"]
+  });
+}
 
   /* =========================
      🔥 CAMBIO PANEL
