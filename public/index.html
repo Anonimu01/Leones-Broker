@@ -4769,60 +4769,71 @@ document.addEventListener("DOMContentLoaded", async () => {
   let LAST_AMOUNT = null;
 
   /* =========================
-     🔥 BOTÓN MENU (FIX REAL)
+     🔥 BOTÓN MENU (FIX DEFINITIVO)
   ========================= */
-  const sidebar = document.getElementById("sidebar");
-  const sidebarToggle = document.getElementById("sidebarToggle");
-  const floatingMenuBtn = document.getElementById("floatingMenuBtn");
-
   function toggleSidebar() {
+    const sidebar = document.getElementById("sidebar");
     if (!sidebar) return;
     sidebar.classList.toggle("hidden");
+  }
+
+  function ensureFloatingMenuButton() {
+    let floatingMenuBtn = document.getElementById("floatingMenuBtn");
+
+    if (!floatingMenuBtn) {
+      floatingMenuBtn = document.createElement("button");
+      floatingMenuBtn.id = "floatingMenuBtn";
+      floatingMenuBtn.type = "button";
+      floatingMenuBtn.setAttribute("aria-label", "Abrir menú");
+      floatingMenuBtn.textContent = "☰";
+      document.body.appendChild(floatingMenuBtn);
+    } else if (floatingMenuBtn.parentElement !== document.body) {
+      document.body.appendChild(floatingMenuBtn);
+    }
+
+    floatingMenuBtn.style.position = "fixed";
+    floatingMenuBtn.style.left = "20px";
+    floatingMenuBtn.style.bottom = "20px";
+    floatingMenuBtn.style.zIndex = "999999";
+    floatingMenuBtn.style.display = "flex";
+    floatingMenuBtn.style.alignItems = "center";
+    floatingMenuBtn.style.justifyContent = "center";
+    floatingMenuBtn.style.visibility = "visible";
+    floatingMenuBtn.style.opacity = "1";
+    floatingMenuBtn.style.pointerEvents = "auto";
   }
 
   function bindMenuButtons() {
     const sidebarToggleNow = document.getElementById("sidebarToggle");
     const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
 
-    if (sidebarToggleNow && !sidebarToggleNow.dataset.menuBound) {
-      sidebarToggleNow.dataset.menuBound = "1";
-      sidebarToggleNow.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation?.();
-        toggleSidebar();
-      }, true);
+    if (sidebarToggleNow) {
+      sidebarToggleNow.style.pointerEvents = "auto";
+      sidebarToggleNow.style.visibility = "visible";
+      sidebarToggleNow.style.opacity = "1";
     }
 
-    if (floatingMenuBtnNow && !floatingMenuBtnNow.dataset.menuBound) {
-      floatingMenuBtnNow.dataset.menuBound = "1";
-      floatingMenuBtnNow.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation?.();
-        toggleSidebar();
-      }, true);
+    if (floatingMenuBtnNow) {
+      floatingMenuBtnNow.style.pointerEvents = "auto";
+      floatingMenuBtnNow.style.visibility = "visible";
+      floatingMenuBtnNow.style.opacity = "1";
     }
+
+    ensureFloatingMenuButton();
   }
 
-  if (sidebar && sidebarToggle) {
-    sidebarToggle.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-      toggleSidebar();
-    }, true);
-  }
+  document.addEventListener("click", (e) => {
+    const isMenuButton =
+      e.target.closest("#sidebarToggle") ||
+      e.target.closest("#floatingMenuBtn");
 
-  /* 🔥 NUEVO: BOTÓN FLOTANTE FUNCIONAL */
-  if (sidebar && floatingMenuBtn) {
-    floatingMenuBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-      toggleSidebar();
-    }, true);
-  }
+    if (!isMenuButton) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+    toggleSidebar();
+  }, true);
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
@@ -4902,7 +4913,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 GRAFICO REAL
   ========================= */
   function fixTrading() {
-
     const api = ext();
     const container = document.getElementById("tv_chart_container");
 
@@ -4999,7 +5009,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   document.addEventListener("click", (e) => {
-
     if (e.target.matches('[data-action="buy"]')) {
       e.preventDefault();
       forceTrade("buy");
@@ -5009,14 +5018,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       e.preventDefault();
       forceTrade("sell");
     }
-
   }, true);
 
   /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
   function createFloatingTradesPanel() {
-
     if (document.getElementById("floatingTrades")) return;
 
     const div = document.createElement("div");
@@ -5069,7 +5076,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CAMBIO PANEL
   ========================= */
   function showPanel(id) {
-
     showOnlyPanel(id);
 
     const api = ext();
@@ -5108,7 +5114,6 @@ document.addEventListener("DOMContentLoaded", async () => {
      🔥 CLICK SIMBOLO
   ========================= */
   document.addEventListener("click", (e) => {
-
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
 
@@ -5126,22 +5131,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }, true);
 
   /* =========================
-     🔥 MENU: CAPTURE GLOBAL PARA EVITAR BLOQUEOS
-  ========================= */
-  document.addEventListener("click", (e) => {
-    const isMenuButton =
-      e.target.closest("#sidebarToggle") ||
-      e.target.closest("#floatingMenuBtn");
-
-    if (isMenuButton) {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-      toggleSidebar();
-    }
-  }, true);
-
-  /* =========================
      🔥 INIT
   ========================= */
   if (window.startBrokerUI) {
@@ -5150,12 +5139,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await waitForBroker();
 
+  bindMenuButtons();
   observeChanges();
   keepMarketAlive();
   responsiveFix();
   persistAmount();
   createFloatingTradesPanel();
-  bindMenuButtons();
 
   document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
@@ -5164,18 +5153,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   showPanel("dashboardPanel");
 
   /* =========================
-   🔥 FIX FINAL BOTÓN MENÚ (ROBUSTO)
+     🔥 REFORZAR BOTÓN FLOTANTE
   ========================= */
-  (function fixMenuButtonForever() {
-
-    function bindMenu() {
-      bindMenuButtons();
-    }
-
-    bindMenu();
-    setInterval(bindMenu, 1000);
-
-  })();
+  setInterval(() => {
+    bindMenuButtons();
+  }, 1000);
 
 });
 </script>
