@@ -5059,459 +5059,222 @@ document.addEventListener("click", (e) => {
    🔥 PANEL FLOTANTE TRADES
 ========================= */
 function createFloatingTradesPanel() {
-  const old = document.getElementById("floatingTrades");
-  if (old) old.remove();
-
-  const oldMini = document.getElementById("floatingTradesMini");
-  if (oldMini) oldMini.remove();
+  if (document.getElementById("floatingTrades")) return;
 
   const privateArea = document.getElementById("privateArea_full");
   if (!privateArea) return;
 
-  const api = ext();
-
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
-  const savedX = localStorage.getItem("floatingTrades_x");
-  const savedY = localStorage.getItem("floatingTrades_y");
-  const savedMode = localStorage.getItem("floatingTrades_mode") || "open";
+  // 🔥 RESTAURAR POSICIÓN GUARDADA
+  const saved = JSON.parse(localStorage.getItem("floatingTradesPos") || "{}");
 
   div.style.cssText = `
     position:fixed;
-    left:${savedX ? savedX + "px" : "20px"};
-    top:${savedY ? savedY + "px" : "80px"};
-    width:min(320px, calc(100vw - 16px));
-    max-width:320px;
+    top:${saved.top || 80}px;
+    left:${saved.left || 10}px;
+    width:260px;
     background:#111;
     color:#fff;
-    padding:12px;
-    border-radius:12px;
+    padding:10px;
+    border-radius:10px;
     z-index:999999;
     font-size:12px;
-    box-shadow:0 10px 30px rgba(0,0,0,.35);
-    user-select:none;
-    -webkit-user-select:none;
     touch-action:none;
+    user-select:none;
   `;
 
   div.innerHTML = `
-    <div id="floatingTradesHeader" style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:grab;touch-action:none;margin-bottom:10px;">
-      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-        <b style="white-space:nowrap;">📊 Operaciones</b>
-        <span id="floatingTradesCount" style="opacity:.8;white-space:nowrap;">0</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
-        <button id="floatingTradesRefresh" type="button" style="
-          border:none;
-          background:rgba(255,255,255,.08);
-          color:#fff;
-          border-radius:8px;
-          padding:6px 8px;
-          cursor:pointer;
-          font-size:12px;
-        ">↻</button>
-        <button id="closeFloatingTrades" type="button" style="
-          border:none;
-          background:rgba(255,255,255,.08);
-          color:#fff;
-          border-radius:8px;
-          padding:6px 8px;
-          cursor:pointer;
-          font-size:12px;
-          line-height:1;
-        ">✖</button>
-      </div>
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+      <b>📊 Operaciones</b>
+      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
     </div>
 
-    <div style="display:grid;gap:10px;">
-      <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,.04);">
-        <div style="font-size:12px;opacity:.75;margin-bottom:6px;">Nueva posición</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;">
-          <input id="floatingTradeAmount" type="number" min="0" step="0.01" placeholder="Monto" style="
-            width:100%;
-            padding:10px 12px;
-            border-radius:10px;
-            border:1px solid rgba(255,255,255,.10);
-            background:#090909;
-            color:#fff;
-            outline:none;
-          " />
-          <div style="display:flex;gap:8px;">
-            <button id="floatingBuyBtn" type="button" style="
-              flex:1;
-              border:none;
-              background:#16a34a;
-              color:#fff;
-              border-radius:10px;
-              padding:10px 12px;
-              cursor:pointer;
-              font-weight:700;
-            ">BUY</button>
-            <button id="floatingSellBtn" type="button" style="
-              flex:1;
-              border:none;
-              background:#dc2626;
-              color:#fff;
-              border-radius:10px;
-              padding:10px 12px;
-              cursor:pointer;
-              font-weight:700;
-            ">SELL</button>
-          </div>
-        </div>
-      </div>
-
-      <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,.04);">
-        <div style="font-size:12px;opacity:.75;margin-bottom:6px;">Posiciones abiertas</div>
-        <div id="floatingTradesList" style="display:grid;gap:8px;max-height:45vh;overflow:auto;padding-right:2px;">Sin operaciones</div>
-      </div>
+    <div style="margin:6px 0;">
+      <input id="miniAmount" type="number" placeholder="Monto" style="width:100%;margin-bottom:5px;">
+      <button id="miniBuy" style="width:48%;">BUY</button>
+      <button id="miniSell" style="width:48%;">SELL</button>
     </div>
+
+    <div id="floatingTradesList">Sin operaciones</div>
   `;
 
   privateArea.appendChild(div);
 
-  function getPositions() {
-    const fromApi = Array.isArray(api.positions) ? api.positions : [];
-    const fromTR = Array.isArray(window.TR?.positions) ? window.TR.positions : [];
-    return fromApi.length ? fromApi : fromTR;
+  /* =========================
+     🔥 DRAG PRO (TOUCH + MOUSE + INERCIA)
+  ========================= */
+  let isDragging = false;
+  let startX, startY, currentX, currentY;
+  let velocityX = 0;
+  let velocityY = 0;
+
+  function getPoint(e) {
+    return e.touches ? e.touches[0] : e;
   }
 
-  function getActiveSymbol() {
-    const current =
-      api.activeSymbol ||
-      window.TR?.activeSymbol ||
-      document.querySelector("[data-symbol].active")?.dataset?.symbol ||
-      null;
-    return current;
+  function startDrag(e) {
+    const p = getPoint(e);
+    isDragging = true;
+    startX = p.clientX - div.offsetLeft;
+    startY = p.clientY - div.offsetTop;
+    velocityX = 0;
+    velocityY = 0;
   }
 
-  function openTradeFromPanel(direction) {
-    const amountInput = div.querySelector("#floatingTradeAmount");
-    const amount = parseFloat(amountInput?.value);
+  function moveDrag(e) {
+    if (!isDragging) return;
 
-    if (!amount || amount <= 0) {
-      alert("Coloca un monto válido");
-      return;
+    const p = getPoint(e);
+
+    let x = p.clientX - startX;
+    let y = p.clientY - startY;
+
+    velocityX = x - (div.offsetLeft || 0);
+    velocityY = y - (div.offsetTop || 0);
+
+    // 🔥 LIMITES
+    const maxX = window.innerWidth - div.offsetWidth;
+    const maxY = window.innerHeight - div.offsetHeight;
+
+    x = Math.max(0, Math.min(x, maxX));
+    y = Math.max(0, Math.min(y, maxY));
+
+    div.style.left = x + "px";
+    div.style.top = y + "px";
+    div.style.bottom = "auto";
+  }
+
+  function endDrag() {
+    if (!isDragging) return;
+    isDragging = false;
+
+    // 🔥 INERCIA SUAVE
+    let x = div.offsetLeft;
+    let y = div.offsetTop;
+
+    let friction = 0.90;
+
+    function animate() {
+      velocityX *= friction;
+      velocityY *= friction;
+
+      x += velocityX;
+      y += velocityY;
+
+      const maxX = window.innerWidth - div.offsetWidth;
+      const maxY = window.innerHeight - div.offsetHeight;
+
+      x = Math.max(0, Math.min(x, maxX));
+      y = Math.max(0, Math.min(y, maxY));
+
+      div.style.left = x + "px";
+      div.style.top = y + "px";
+
+      if (Math.abs(velocityX) > 0.5 || Math.abs(velocityY) > 0.5) {
+        requestAnimationFrame(animate);
+      } else {
+        snapToEdge();
+        savePosition();
+      }
     }
 
-    const symbol = getActiveSymbol();
-    if (!symbol) {
-      alert("Selecciona un símbolo");
-      return;
-    }
+    animate();
+  }
 
-    if (typeof api.placeOrder === "function") {
-      api.placeOrder({
-        symbol,
-        amount,
-        direction
-      });
-      return;
-    }
+  // 🔥 SNAP A BORDE (TIPO WHATSAPP)
+  function snapToEdge() {
+    const mid = window.innerWidth / 2;
+    let x = div.offsetLeft;
 
-    if (typeof window.placeBrokerOrder === "function") {
-      window.placeBrokerOrder({
-        symbol,
-        amount,
-        direction
-      });
-      return;
-    }
-
-    if (typeof window.openTrade === "function") {
-      window.openTrade(symbol, amount, direction, null);
+    if (x < mid) {
+      div.style.left = "0px";
+    } else {
+      div.style.left = (window.innerWidth - div.offsetWidth) + "px";
     }
   }
 
-  function openPositionChart(position) {
-    const symbol =
-      position?.symbol ||
-      position?.tvSymbol ||
-      getActiveSymbol();
-
-    if (!symbol) return;
-
-    if (typeof api.selectSymbol === "function") {
-      api.selectSymbol({
-        symbol,
-        tvSymbol: position?.tvSymbol || symbol,
-        label: position?.label || position?.symbol || symbol,
-        market: position?.market || ""
-      }, { openChart: true });
-      return;
-    }
-
-    if (typeof api.openTradingView === "function") {
-      api.openTradingView({ symbol });
-    }
+  function savePosition() {
+    localStorage.setItem("floatingTradesPos", JSON.stringify({
+      left: div.offsetLeft,
+      top: div.offsetTop
+    }));
   }
 
-  function renderPositions() {
-    const list = div.querySelector("#floatingTradesList");
-    const count = div.querySelector("#floatingTradesCount");
-    if (!list) return;
+  const header = div.querySelector("#dragHeader");
 
-    const positions = getPositions();
-    if (count) count.textContent = String(positions.length);
+  header.addEventListener("mousedown", startDrag);
+  header.addEventListener("touchstart", startDrag, { passive: false });
 
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
-    }
+  document.addEventListener("mousemove", moveDrag);
+  document.addEventListener("touchmove", moveDrag, { passive: false });
 
-    list.innerHTML = positions.map((p, idx) => {
-      const symbol = p.symbol || p.s || "--";
-      const direction = p.direction || p.side || "--";
-      const amount = p.amount ?? p.size ?? p.qty ?? p.positionSize ?? "--";
-      const pid = p.id || p._id || p.positionId || p.tradeId || idx;
+  document.addEventListener("mouseup", endDrag);
+  document.addEventListener("touchend", endDrag);
 
-      return `
-        <button type="button"
-          data-floating-position="${String(pid)}"
-          style="
-            width:100%;
-            text-align:left;
-            border:none;
-            background:rgba(255,255,255,.06);
-            color:#fff;
-            border-radius:10px;
-            padding:10px;
-            cursor:pointer;
-          ">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-            <div style="min-width:0;">
-              <div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${symbol}</div>
-              <div style="opacity:.8;font-size:11px;margin-top:2px;">${direction}</div>
-            </div>
-            <div style="font-weight:700;white-space:nowrap;">${amount}</div>
-          </div>
-        </button>
-      `;
-    }).join("");
-  }
+  /* =========================
+     🔥 CERRAR / MINIMIZAR
+  ========================= */
+  const closeBtn = div.querySelector("#closeFloatingTrades");
 
-  function showMiniButton() {
+  closeBtn.onclick = () => {
+    div.style.display = "none";
+    showMini();
+  };
+
+  function showMini() {
     let mini = document.getElementById("floatingTradesMini");
     if (mini) return;
 
-    mini = document.createElement("button");
+    mini = document.createElement("div");
     mini.id = "floatingTradesMini";
-    mini.type = "button";
-    mini.innerHTML = "📊";
 
     mini.style.cssText = `
       position:fixed;
-      left:${div.style.left || "20px"};
-      top:${div.style.top || "80px"};
-      width:42px;
-      height:42px;
-      border:none;
-      border-radius:12px;
+      top:80px;
+      left:10px;
+      width:40px;
+      height:40px;
       background:#111;
       color:#fff;
+      border-radius:10px;
       display:flex;
       align-items:center;
       justify-content:center;
       z-index:999999;
       cursor:pointer;
-      box-shadow:0 10px 30px rgba(0,0,0,.35);
-      touch-action:none;
     `;
+
+    mini.innerHTML = "📊";
 
     privateArea.appendChild(mini);
 
-    mini.addEventListener("click", () => {
+    mini.onclick = () => {
+      div.style.display = "block";
       mini.remove();
-      div.style.display = "block";
-      localStorage.setItem("floatingTrades_mode", "open");
-      syncVisibility();
-    });
-  }
-
-  function syncVisibility() {
-    const sidebar = document.getElementById("sidebar");
-    const sidebarHidden = !!sidebar && sidebar.classList.contains("hidden");
-    const mode = localStorage.getItem("floatingTrades_mode") || "open";
-
-    if (!sidebarHidden) {
-      div.style.display = "none";
-      const mini = document.getElementById("floatingTradesMini");
-      if (mini) mini.remove();
-      return;
-    }
-
-    if (mode === "closed") {
-      div.style.display = "none";
-      showMiniButton();
-    } else {
-      div.style.display = "block";
-      const mini = document.getElementById("floatingTradesMini");
-      if (mini) mini.remove();
-    }
+    };
   }
 
   /* =========================
-     DRAG UNIVERSAL (MOUSE + TOUCH + POINTER)
+     🔥 BUY / SELL DESDE PANEL
   ========================= */
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
-  let activePointerId = null;
+  div.querySelector("#miniBuy").onclick = () => {
+    const amount = parseFloat(document.getElementById("miniAmount").value);
+    ext().placeOrder?.({ amount, direction: "buy" });
+  };
 
-  const header = div.querySelector("#floatingTradesHeader");
-
-  function startDrag(clientX, clientY, pointerId = null) {
-    isDragging = true;
-    activePointerId = pointerId;
-    const rect = div.getBoundingClientRect();
-    offsetX = clientX - rect.left;
-    offsetY = clientY - rect.top;
-    header.style.cursor = "grabbing";
-    localStorage.setItem("floatingTrades_mode", "open");
-    const mini = document.getElementById("floatingTradesMini");
-    if (mini) mini.remove();
-  }
-
-  function moveDrag(clientX, clientY) {
-    if (!isDragging) return;
-
-    let x = clientX - offsetX;
-    let y = clientY - offsetY;
-
-    const maxX = window.innerWidth - div.offsetWidth;
-    const maxY = window.innerHeight - div.offsetHeight;
-
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x > maxX) x = maxX;
-    if (y > maxY) y = maxY;
-
-    div.style.left = x + "px";
-    div.style.top = y + "px";
-    div.style.bottom = "auto";
-
-    localStorage.setItem("floatingTrades_x", String(x));
-    localStorage.setItem("floatingTrades_y", String(y));
-  }
-
-  function stopDrag() {
-    isDragging = false;
-    activePointerId = null;
-    header.style.cursor = "grab";
-  }
-
-  header.addEventListener("pointerdown", (e) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    e.preventDefault();
-    startDrag(e.clientX, e.clientY, e.pointerId);
-    try { header.setPointerCapture(e.pointerId); } catch (err) {}
-  });
-
-  document.addEventListener("pointermove", (e) => {
-    if (activePointerId !== null && e.pointerId !== activePointerId) return;
-    moveDrag(e.clientX, e.clientY);
-  });
-
-  document.addEventListener("pointerup", (e) => {
-    if (activePointerId !== null && e.pointerId !== activePointerId) return;
-    stopDrag();
-  });
-
-  header.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    if (!t) return;
-    e.preventDefault();
-    startDrag(t.clientX, t.clientY);
-  }, { passive: false });
-
-  document.addEventListener("touchmove", (e) => {
-    if (!isDragging) return;
-    const t = e.touches[0];
-    if (!t) return;
-    e.preventDefault();
-    moveDrag(t.clientX, t.clientY);
-  }, { passive: false });
-
-  document.addEventListener("touchend", stopDrag);
+  div.querySelector("#miniSell").onclick = () => {
+    const amount = parseFloat(document.getElementById("miniAmount").value);
+    ext().placeOrder?.({ amount, direction: "sell" });
+  };
 
   /* =========================
-     EVENTS DEL PANEL
+     🔥 SOLO EN PRIVADO
   ========================= */
-  div.querySelector("#closeFloatingTrades").addEventListener("click", () => {
-    localStorage.setItem("floatingTrades_mode", "closed");
-    div.style.display = "none";
-    showMiniButton();
-  });
-
-  div.querySelector("#floatingTradesRefresh").addEventListener("click", (e) => {
-    e.preventDefault();
-    renderPositions();
-    if (typeof api.loadPositions === "function") api.loadPositions();
-  });
-
-  div.querySelector("#floatingBuyBtn").addEventListener("click", (e) => {
-    e.preventDefault();
-    openTradeFromPanel("buy");
-  });
-
-  div.querySelector("#floatingSellBtn").addEventListener("click", (e) => {
-    e.preventDefault();
-    openTradeFromPanel("sell");
-  });
-
-  div.addEventListener("click", (e) => {
-    const positionBtn = e.target.closest("[data-floating-position]");
-    if (!positionBtn) return;
-
-    const positions = getPositions();
-    const label = positionBtn.getAttribute("data-floating-position");
-    const pos = positions.find((p, idx) => String(p.id || p._id || p.positionId || p.tradeId || idx) === String(label));
-
-    if (pos) {
-      openPositionChart(pos);
-    }
-  });
-
-  /* =========================
-     SOLO PRIVADO
-  ========================= */
-  function checkPrivate() {
-    const sidebar = document.getElementById("sidebar");
-    const sidebarHidden = !!sidebar && sidebar.classList.contains("hidden");
-
-    if (!sidebarHidden) {
-      div.style.display = "none";
-      const mini = document.getElementById("floatingTradesMini");
-      if (mini) mini.remove();
-      return;
-    }
-
-    const mode = localStorage.getItem("floatingTrades_mode") || "open";
-    if (mode === "closed") {
-      div.style.display = "none";
-      showMiniButton();
-    } else {
-      div.style.display = "block";
-      const mini = document.getElementById("floatingTradesMini");
-      if (mini) mini.remove();
-    }
-  }
-
-  if (savedMode === "closed") {
-    div.style.display = "none";
-    showMiniButton();
-  } else {
-    div.style.display = "block";
-  }
-
-  renderPositions();
-  syncVisibility();
   setInterval(() => {
-    renderPositions();
-    syncVisibility();
-    checkPrivate();
-  }, 1500);
+    div.style.display = privateArea.offsetParent !== null ? "block" : "none";
+  }, 500);
 }
 </script>
   
