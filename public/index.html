@@ -4792,8 +4792,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     floatingMenuBtn.style.position = "fixed";
-    floatingMenuBtn.style.left = "20px";
-    floatingMenuBtn.style.bottom = "20px";
+    floatingMenuBtn.style.left = "12px";
+    floatingMenuBtn.style.bottom = "12px";
+    floatingMenuBtn.style.width = "48px";
+    floatingMenuBtn.style.height = "48px";
+    floatingMenuBtn.style.padding = "0";
+    floatingMenuBtn.style.margin = "0";
+    floatingMenuBtn.style.borderRadius = "12px";
     floatingMenuBtn.style.zIndex = "999999";
     floatingMenuBtn.style.display = "flex";
     floatingMenuBtn.style.alignItems = "center";
@@ -4801,6 +4806,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.visibility = "visible";
     floatingMenuBtn.style.opacity = "1";
     floatingMenuBtn.style.pointerEvents = "auto";
+    floatingMenuBtn.style.transform = "none";
+    floatingMenuBtn.style.boxSizing = "border-box";
   }
 
   function bindMenuButtons() {
