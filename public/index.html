@@ -5055,12 +5055,11 @@ document.addEventListener("click", (e) => {
     }
   }, true);
 
-  /* =========================
-     🔥 PANEL FLOTANTE TRADES
-  ========================= */
+/* =========================
+   🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
+========================= */
 function createFloatingTradesPanel() {
 
-  // 🔥 BORRAR SI EXISTE (esto evita que siga igual)
   const old = document.getElementById("floatingTrades");
   if (old) old.remove();
 
@@ -5070,10 +5069,14 @@ function createFloatingTradesPanel() {
   const div = document.createElement("div");
   div.id = "floatingTrades";
 
+  // 🔥 POSICIÓN GUARDADA
+  let savedX = localStorage.getItem("trades_x");
+  let savedY = localStorage.getItem("trades_y");
+
   div.style.cssText = `
     position:fixed;
-    top:80px;
-    left:10px;
+    top:${savedY ? savedY + "px" : "80px"};
+    left:${savedX ? savedX + "px" : "10px"};
     width:260px;
     background:#111;
     color:#fff;
@@ -5081,7 +5084,6 @@ function createFloatingTradesPanel() {
     border-radius:10px;
     z-index:999999;
     font-size:12px;
-    cursor:grab;
   `;
 
   div.innerHTML = `
@@ -5095,7 +5097,7 @@ function createFloatingTradesPanel() {
   privateArea.appendChild(div);
 
   /* =========================
-     🔥 DRAG REAL (FUNCIONA)
+     🔥 DRAG REAL (MOUSE + TOUCH)
   ========================= */
   let isDragging = false;
   let offsetX = 0;
@@ -5103,19 +5105,19 @@ function createFloatingTradesPanel() {
 
   const header = div.querySelector("#dragHeader");
 
-  header.addEventListener("mousedown", (e) => {
+  function startDrag(clientX, clientY) {
     isDragging = true;
-    offsetX = e.clientX - div.offsetLeft;
-    offsetY = e.clientY - div.offsetTop;
-  });
+    offsetX = clientX - div.offsetLeft;
+    offsetY = clientY - div.offsetTop;
+    header.style.cursor = "grabbing";
+  }
 
-  document.addEventListener("mousemove", (e) => {
+  function moveDrag(clientX, clientY) {
     if (!isDragging) return;
 
-    let x = e.clientX - offsetX;
-    let y = e.clientY - offsetY;
+    let x = clientX - offsetX;
+    let y = clientY - offsetY;
 
-    // 🔥 LIMITES
     const maxX = window.innerWidth - div.offsetWidth;
     const maxY = window.innerHeight - div.offsetHeight;
 
@@ -5127,14 +5129,44 @@ function createFloatingTradesPanel() {
     div.style.left = x + "px";
     div.style.top = y + "px";
     div.style.bottom = "auto";
+
+    // 🔥 GUARDAR POSICIÓN
+    localStorage.setItem("trades_x", x);
+    localStorage.setItem("trades_y", y);
+  }
+
+  function stopDrag() {
+    isDragging = false;
+    header.style.cursor = "grab";
+  }
+
+  // 🖱 MOUSE
+  header.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
   });
 
-  document.addEventListener("mouseup", () => {
-    isDragging = false;
+  document.addEventListener("mousemove", (e) => {
+    moveDrag(e.clientX, e.clientY);
   });
+
+  document.addEventListener("mouseup", stopDrag);
+
+  // 📱 TOUCH
+  header.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  });
+
+  document.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
+
+  document.addEventListener("touchend", stopDrag);
 
   /* =========================
-     🔥 CERRAR / ABRIR REAL
+     🔥 CERRAR / MINIMIZAR
   ========================= */
   const closeBtn = div.querySelector("#closeFloatingTrades");
 
@@ -5145,7 +5177,6 @@ function createFloatingTradesPanel() {
 
   function showMini() {
     let mini = document.getElementById("floatingTradesMini");
-
     if (mini) return;
 
     mini = document.createElement("div");
@@ -5153,8 +5184,8 @@ function createFloatingTradesPanel() {
 
     mini.style.cssText = `
       position:fixed;
-      top:80px;
-      left:10px;
+      top:${localStorage.getItem("trades_y") || 80}px;
+      left:${localStorage.getItem("trades_x") || 10}px;
       width:40px;
       height:40px;
       background:#111;
@@ -5178,7 +5209,7 @@ function createFloatingTradesPanel() {
   }
 
   /* =========================
-     🔥 SOLO EN PRIVADO (FORZADO)
+     🔥 SOLO PRIVADO
   ========================= */
   function checkPrivate() {
     const isVisible = privateArea.offsetParent !== null;
@@ -5187,94 +5218,6 @@ function createFloatingTradesPanel() {
 
   setInterval(checkPrivate, 500);
 }
-  /* =========================
-     🔥 CAMBIO PANEL
-  ========================= */
-  function showPanel(id) {
-    showOnlyPanel(id);
-
-    const api = ext();
-
-    if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        window.renderSymbolsGrid?.();
-        keepMarketAlive();
-      }, 300);
-    }
-
-    if (id === "tradingPanel") {
-      api.openTradingView?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-        persistAmount();
-        restoreAmount();
-      }, 300);
-    }
-
-    if (id === "positionsPanel") {
-      api.loadPositions?.();
-    }
-
-    if (id === "dashboardPanel") {
-      api.loadAccount?.();
-    }
-  }
-
-  /* =========================
-     🔥 CLICK SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
-
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-
-  }, true);
-
-  /* =========================
-     🔥 INIT
-  ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
-  }
-
-  await waitForBroker();
-
-  bindMenuButtons();
-  observeChanges();
-  keepMarketAlive();
-  responsiveFix();
-  persistAmount();
-  createFloatingTradesPanel();
-
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.onclick = () => showPanel(btn.dataset.target);
-  });
-
-  showPanel("dashboardPanel");
-
-  /* =========================
-     🔥 REFORZAR BOTÓN FLOTANTE
-  ========================= */
-  setInterval(() => {
-    bindMenuButtons();
-  }, 1000);
-
-});
 </script>
   
 </div>
