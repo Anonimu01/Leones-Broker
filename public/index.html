@@ -4953,13 +4953,20 @@ document.addEventListener("click", (e) => {
 
     if (!container) return;
 
-    container.innerHTML = "";
-
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
+    if (!symbol) return;
 
-    if (symbol) {
-      api.openTradingView?.({ symbol });
+    // Evita reinicializar el gráfico si ya está mostrando el mismo símbolo
+    if (container.dataset.chartReady === "1" && container.dataset.chartSymbol === String(symbol)) {
+      container.style.width = "100%";
+      container.style.height = "100vh";
+      return;
     }
+
+    container.dataset.chartReady = "1";
+    container.dataset.chartSymbol = String(symbol);
+
+    api.openTradingView?.({ symbol });
 
     container.style.width = "100%";
     container.style.height = "100vh";
@@ -4968,8 +4975,15 @@ document.addEventListener("click", (e) => {
   /* =========================
      🔥 VELAS MÁS FLUIDAS
   ========================= */
+  let lastQuoteCall = 0;
   setInterval(() => {
     const api = ext();
+    const now = Date.now();
+
+    // Reduce el refresco agresivo para evitar el brinco visual
+    if (now - lastQuoteCall < 5000) return;
+    lastQuoteCall = now;
+
     api.loadRealQuotes?.();
   }, 1500);
 
@@ -4997,7 +5011,10 @@ document.addEventListener("click", (e) => {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
 
-    if (LAST_AMOUNT !== null) {
+    if (input.dataset.amountBound === "1") return;
+    input.dataset.amountBound = "1";
+
+    if (LAST_AMOUNT !== null && input.value === "") {
       input.value = LAST_AMOUNT;
     }
 
@@ -5008,7 +5025,9 @@ document.addEventListener("click", (e) => {
 
   function restoreAmount() {
     const input = document.getElementById("brokerOrderSize");
-    if (input && LAST_AMOUNT !== null) {
+    if (!input) return;
+
+    if (LAST_AMOUNT !== null && input.value === "") {
       input.value = LAST_AMOUNT;
     }
   }
