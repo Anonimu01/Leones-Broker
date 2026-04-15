@@ -5056,24 +5056,21 @@ document.addEventListener("click", (e) => {
   }, true);
 
  /* =========================
-     🔥 PANEL FLOTANTE TRADES
-  ========================= */
+   🔥 PANEL FLOTANTE TRADES
+========================= */
 function isPrivateBrokerArea() {
-  // SOLO aparece si alguno de estos paneles está visible
-  const panels = [
-    document.getElementById("dashboardPanel"),
-    document.getElementById("tradingPanel"),
-    document.getElementById("positionsPanel"),
-    document.getElementById("marketPanel")
-  ];
+  const ids = ["dashboardPanel","tradingPanel","positionsPanel","marketPanel"];
 
-  return panels.some(p => p && p.style.display !== "none");
+  return ids.some(id => {
+    const el = document.getElementById(id);
+    return el && el.style.display !== "none";
+  });
 }
 
 function createFloatingTradesPanel() {
   if (document.getElementById("floatingTrades")) return;
 
-  // 🔒 EVITA PARTE PÚBLICA
+  // 🔒 SOLO SI HAY PANEL PRIVADO VISIBLE
   if (!isPrivateBrokerArea()) return;
 
   const div = document.createElement("div");
@@ -5101,7 +5098,7 @@ function createFloatingTradesPanel() {
 
   document.body.appendChild(div);
 
-  // 🔥 DRAG REAL (FUNCIONA EN TODO)
+  // 🔥 DRAG REAL (PC + CELULAR)
   let dragging = false;
   let offsetX = 0;
   let offsetY = 0;
