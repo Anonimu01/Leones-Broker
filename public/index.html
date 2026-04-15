@@ -5058,16 +5058,22 @@ document.addEventListener("click", (e) => {
  /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
- function isPrivateBrokerArea() {
-  return !!document.querySelector(
-    "#dashboardPanel, #tradingPanel, #positionsPanel, #marketPanel"
-  );
+function isPrivateBrokerArea() {
+  // SOLO aparece si alguno de estos paneles está visible
+  const panels = [
+    document.getElementById("dashboardPanel"),
+    document.getElementById("tradingPanel"),
+    document.getElementById("positionsPanel"),
+    document.getElementById("marketPanel")
+  ];
+
+  return panels.some(p => p && p.style.display !== "none");
 }
 
 function createFloatingTradesPanel() {
   if (document.getElementById("floatingTrades")) return;
 
-  // 🔒 EVITA QUE SALGA EN LA PARTE PÚBLICA
+  // 🔒 EVITA PARTE PÚBLICA
   if (!isPrivateBrokerArea()) return;
 
   const div = document.createElement("div");
@@ -5095,12 +5101,12 @@ function createFloatingTradesPanel() {
 
   document.body.appendChild(div);
 
-  // 🔥 DRAG (MOUSE + DEDO)
+  // 🔥 DRAG REAL (FUNCIONA EN TODO)
   let dragging = false;
   let offsetX = 0;
   let offsetY = 0;
 
-  const startDrag = (e) => {
+  div.addEventListener("pointerdown", (e) => {
     dragging = true;
 
     const rect = div.getBoundingClientRect();
@@ -5108,26 +5114,18 @@ function createFloatingTradesPanel() {
     offsetY = e.clientY - rect.top;
 
     div.style.bottom = "auto";
-  };
+  });
 
-  const moveDrag = (e) => {
+  window.addEventListener("pointermove", (e) => {
     if (!dragging) return;
 
-    const x = e.clientX - offsetX;
-    const y = e.clientY - offsetY;
+    div.style.left = (e.clientX - offsetX) + "px";
+    div.style.top = (e.clientY - offsetY) + "px";
+  });
 
-    div.style.left = x + "px";
-    div.style.top = y + "px";
-  };
-
-  const endDrag = () => {
+  window.addEventListener("pointerup", () => {
     dragging = false;
-  };
-
-  div.addEventListener("pointerdown", startDrag);
-  window.addEventListener("pointermove", moveDrag);
-  window.addEventListener("pointerup", endDrag);
-  window.addEventListener("pointercancel", endDrag);
+  });
 }
   function updateFloatingTrades() {
     const api = ext();
