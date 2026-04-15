@@ -4966,10 +4966,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 VELAS MÁS FLUIDAS
   ========================= */
-  setInterval(() => {
-    const api = ext();
-    api.loadRealQuotes?.();
-  }, 5000);
+ let lastQuotesOk = true;
+let lastCall = 0;
+
+setInterval(() => {
+  const api = ext();
+  const now = Date.now();
+
+  // 🔥 evita spam agresivo
+  if (now - lastCall < 4000) return;
+
+  lastCall = now;
+
+  try {
+    const res = api.loadRealQuotes?.();
+
+    // si la función devuelve promesa
+    if (res && typeof res.then === "function") {
+      res.then(() => {
+        lastQuotesOk = true;
+      }).catch(() => {
+        lastQuotesOk = false;
+      });
+    }
+
+  } catch (e) {
+    lastQuotesOk = false;
+  }
+
+}, 1500);
 
   /* =========================
      🔥 RESPONSIVE
