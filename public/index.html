@@ -4759,7 +4759,7 @@ if (window.__LEONES_BOOTED__) {
 })();
 </script>
 
-  <script>
+<script>
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll("#privateArea_full .panel");
@@ -4802,72 +4802,62 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.pointerEvents = "auto";
   }
 
- function syncMenuButtons() {
-  const sidebar = document.getElementById("sidebar");
-  const sidebarToggle = document.getElementById("sidebarToggle");
-  const floatingMenuBtn = document.getElementById("floatingMenuBtn");
+  function syncMenuButtons() {
+    const sidebar = document.getElementById("sidebar");
+    const sidebarToggle = document.getElementById("sidebarToggle");
+    const floatingMenuBtn = document.getElementById("floatingMenuBtn");
 
-  if (!sidebar) return;
+    if (!sidebar) return;
 
-  const hidden = sidebar.classList.contains("hidden");
+    const hidden = sidebar.classList.contains("hidden");
 
-  // botón normal
-  if (sidebarToggle) {
-    sidebarToggle.style.display = hidden ? "none" : "block";
+    if (sidebarToggle) {
+      sidebarToggle.style.display = hidden ? "none" : "block";
+    }
+
+    if (floatingMenuBtn) {
+      floatingMenuBtn.style.display = hidden ? "flex" : "none";
+    }
   }
 
-  // botón flotante
-  if (floatingMenuBtn) {
-    floatingMenuBtn.style.display = hidden ? "flex" : "none";
-  }
-}
+  function bindMenuButtons() {
+    const sidebarToggleNow = document.getElementById("sidebarToggle");
+    const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
 
+    if (sidebarToggleNow) {
+      sidebarToggleNow.style.pointerEvents = "auto";
+      sidebarToggleNow.style.visibility = "visible";
+      sidebarToggleNow.style.opacity = "1";
+    }
 
-  
+    if (floatingMenuBtnNow) {
+      floatingMenuBtnNow.style.pointerEvents = "auto";
+    }
 
- function bindMenuButtons() {
-  const sidebarToggleNow = document.getElementById("sidebarToggle");
-  const floatingMenuBtnNow = document.getElementById("floatingMenuBtn");
+    ensureFloatingMenuButton();
 
-  if (sidebarToggleNow) {
-    sidebarToggleNow.style.pointerEvents = "auto";
-    sidebarToggleNow.style.visibility = "visible";
-    sidebarToggleNow.style.opacity = "1";
-  }
-
-  if (floatingMenuBtnNow) {
-    floatingMenuBtnNow.style.pointerEvents = "auto";
-    // ❌ YA NO FORZAMOS VISIBILIDAD AQUÍ
-    // floatingMenuBtnNow.style.visibility = "visible";
-    // floatingMenuBtnNow.style.opacity = "1";
+    if (typeof syncMenuButtons === "function") {
+      syncMenuButtons();
+    }
   }
 
-  ensureFloatingMenuButton();
+  document.addEventListener("click", (e) => {
+    const isMenuButton =
+      e.target.closest("#sidebarToggle") ||
+      e.target.closest("#floatingMenuBtn");
 
-  // 🔥 CLAVE: sincroniza quién se muestra
-  if (typeof syncMenuButtons === "function") {
-    syncMenuButtons();
-  }
-}
+    if (!isMenuButton) return;
 
-document.addEventListener("click", (e) => {
-  const isMenuButton =
-    e.target.closest("#sidebarToggle") ||
-    e.target.closest("#floatingMenuBtn");
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
 
-  if (!isMenuButton) return;
+    toggleSidebar();
 
-  e.preventDefault();
-  e.stopPropagation();
-  e.stopImmediatePropagation?.();
-
-  toggleSidebar();
-
-  // 🔥 asegura actualización inmediata
-  if (typeof syncMenuButtons === "function") {
-    syncMenuButtons();
-  }
-}, true);
+    if (typeof syncMenuButtons === "function") {
+      syncMenuButtons();
+    }
+  }, true);
 
   /* =========================
      🔥 BOTONES ACTIVOS DORADO
@@ -4955,7 +4945,6 @@ document.addEventListener("click", (e) => {
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
     if (!symbol) return;
 
-    // no reinicia el gráfico si ya está cargado para ese símbolo
     if (container.dataset.chartSymbol === String(symbol)) {
       container.style.width = "100%";
       container.style.height = "100vh";
@@ -4963,6 +4952,10 @@ document.addEventListener("click", (e) => {
     }
 
     container.dataset.chartSymbol = String(symbol);
+
+    if (container.firstChild) {
+      container.innerHTML = "";
+    }
 
     api.openTradingView?.({ symbol });
 
@@ -4976,7 +4969,7 @@ document.addEventListener("click", (e) => {
   setInterval(() => {
     const api = ext();
     api.loadRealQuotes?.();
-  }, 1500);
+  }, 5000);
 
   /* =========================
      🔥 RESPONSIVE
@@ -5005,6 +4998,9 @@ document.addEventListener("click", (e) => {
     if (!input.dataset.bound) {
       input.dataset.bound = "1";
       input.addEventListener("input", () => {
+        LAST_AMOUNT = input.value;
+      });
+      input.addEventListener("blur", () => {
         LAST_AMOUNT = input.value;
       });
     }
@@ -5064,169 +5060,156 @@ document.addEventListener("click", (e) => {
     }
   }, true);
 
-/* =========================
-   🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
-========================= */
-function createFloatingTradesPanel() {
-
-  const old = document.getElementById("floatingTrades");
-  if (old) old.remove();
-
-  const privateArea = document.getElementById("privateArea_full");
-  if (!privateArea) return;
-
-  const div = document.createElement("div");
-  div.id = "floatingTrades";
-
-  // 🔥 POSICIÓN GUARDADA
-  let savedX = localStorage.getItem("trades_x");
-  let savedY = localStorage.getItem("trades_y");
-
-  div.style.cssText = `
-    position:fixed;
-    top:${savedY ? savedY + "px" : "80px"};
-    left:${savedX ? savedX + "px" : "10px"};
-    width:260px;
-    background:#111;
-    color:#fff;
-    padding:10px;
-    border-radius:10px;
-    z-index:999999;
-    font-size:12px;
-  `;
-
-  div.innerHTML = `
-    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
-      <b>📊 Operaciones</b>
-      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
-    </div>
-    <div id="floatingTradesList">Sin operaciones</div>
-  `;
-
-  privateArea.appendChild(div);
-
   /* =========================
-     🔥 DRAG REAL (MOUSE + TOUCH)
+     🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
   ========================= */
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
+  function createFloatingTradesPanel() {
 
-  const header = div.querySelector("#dragHeader");
+    const old = document.getElementById("floatingTrades");
+    if (old) old.remove();
 
-  function startDrag(clientX, clientY) {
-    isDragging = true;
-    offsetX = clientX - div.offsetLeft;
-    offsetY = clientY - div.offsetTop;
-    header.style.cursor = "grabbing";
-  }
+    const privateArea = document.getElementById("privateArea_full");
+    if (!privateArea) return;
 
-  function moveDrag(clientX, clientY) {
-    if (!isDragging) return;
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
 
-    let x = clientX - offsetX;
-    let y = clientY - offsetY;
+    let savedX = localStorage.getItem("trades_x");
+    let savedY = localStorage.getItem("trades_y");
 
-    const maxX = window.innerWidth - div.offsetWidth;
-    const maxY = window.innerHeight - div.offsetHeight;
-
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x > maxX) x = maxX;
-    if (y > maxY) y = maxY;
-
-    div.style.left = x + "px";
-    div.style.top = y + "px";
-    div.style.bottom = "auto";
-
-    // 🔥 GUARDAR POSICIÓN
-    localStorage.setItem("trades_x", x);
-    localStorage.setItem("trades_y", y);
-  }
-
-  function stopDrag() {
-    isDragging = false;
-    header.style.cursor = "grab";
-  }
-
-  // 🖱 MOUSE
-  header.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    startDrag(e.clientX, e.clientY);
-  });
-
-  document.addEventListener("mousemove", (e) => {
-    moveDrag(e.clientX, e.clientY);
-  });
-
-  document.addEventListener("mouseup", stopDrag);
-
-  // 📱 TOUCH
-  header.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    startDrag(t.clientX, t.clientY);
-  });
-
-  document.addEventListener("touchmove", (e) => {
-    const t = e.touches[0];
-    moveDrag(t.clientX, t.clientY);
-  }, { passive: false });
-
-  document.addEventListener("touchend", stopDrag);
-
-  /* =========================
-     🔥 CERRAR / MINIMIZAR
-  ========================= */
-  const closeBtn = div.querySelector("#closeFloatingTrades");
-
-  closeBtn.onclick = () => {
-    div.style.display = "none";
-    showMini();
-  };
-
-  function showMini() {
-    let mini = document.getElementById("floatingTradesMini");
-    if (mini) return;
-
-    mini = document.createElement("div");
-    mini.id = "floatingTradesMini";
-
-    mini.style.cssText = `
+    div.style.cssText = `
       position:fixed;
-      top:${localStorage.getItem("trades_y") || 80}px;
-      left:${localStorage.getItem("trades_x") || 10}px;
-      width:40px;
-      height:40px;
+      top:${savedY ? savedY + "px" : "80px"};
+      left:${savedX ? savedX + "px" : "10px"};
+      width:260px;
       background:#111;
       color:#fff;
+      padding:10px;
       border-radius:10px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
       z-index:999999;
-      cursor:pointer;
+      font-size:12px;
     `;
 
-    mini.innerHTML = "📊";
+    div.innerHTML = `
+      <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+        <b>📊 Operaciones</b>
+        <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
+      </div>
+      <div id="floatingTradesList">Sin operaciones</div>
+    `;
 
-    privateArea.appendChild(mini);
+    privateArea.appendChild(div);
 
-    mini.onclick = () => {
-      div.style.display = "block";
-      mini.remove();
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    const header = div.querySelector("#dragHeader");
+
+    function startDrag(clientX, clientY) {
+      isDragging = true;
+      offsetX = clientX - div.offsetLeft;
+      offsetY = clientY - div.offsetTop;
+      header.style.cursor = "grabbing";
+    }
+
+    function moveDrag(clientX, clientY) {
+      if (!isDragging) return;
+
+      let x = clientX - offsetX;
+      let y = clientY - offsetY;
+
+      const maxX = window.innerWidth - div.offsetWidth;
+      const maxY = window.innerHeight - div.offsetHeight;
+
+      if (x < 0) x = 0;
+      if (y < 0) y = 0;
+      if (x > maxX) x = maxX;
+      if (y > maxY) y = maxY;
+
+      div.style.left = x + "px";
+      div.style.top = y + "px";
+      div.style.bottom = "auto";
+
+      localStorage.setItem("trades_x", x);
+      localStorage.setItem("trades_y", y);
+    }
+
+    function stopDrag() {
+      isDragging = false;
+      header.style.cursor = "grab";
+    }
+
+    header.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      startDrag(e.clientX, e.clientY);
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      moveDrag(e.clientX, e.clientY);
+    });
+
+    document.addEventListener("mouseup", stopDrag);
+
+    header.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+    }, { passive: true });
+
+    document.addEventListener("touchmove", (e) => {
+      const t = e.touches[0];
+      moveDrag(t.clientX, t.clientY);
+    }, { passive: false });
+
+    document.addEventListener("touchend", stopDrag);
+
+    const closeBtn = div.querySelector("#closeFloatingTrades");
+
+    closeBtn.onclick = () => {
+      div.style.display = "none";
+      showMini();
     };
-  }
 
-  /* =========================
-     🔥 SOLO PRIVADO
-  ========================= */
-  function checkPrivate() {
-    const isVisible = privateArea.offsetParent !== null;
-    div.style.display = isVisible ? "block" : "none";
-  }
+    function showMini() {
+      let mini = document.getElementById("floatingTradesMini");
+      if (mini) return;
 
-  setInterval(checkPrivate, 500);
-}
+      mini = document.createElement("div");
+      mini.id = "floatingTradesMini";
+
+      mini.style.cssText = `
+        position:fixed;
+        top:${localStorage.getItem("trades_y") || 80}px;
+        left:${localStorage.getItem("trades_x") || 10}px;
+        width:40px;
+        height:40px;
+        background:#111;
+        color:#fff;
+        border-radius:10px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        z-index:999999;
+        cursor:pointer;
+      `;
+
+      mini.innerHTML = "📊";
+
+      privateArea.appendChild(mini);
+
+      mini.onclick = () => {
+        div.style.display = "block";
+        mini.remove();
+      };
+    }
+
+    function checkPrivate() {
+      const isVisible = privateArea.offsetParent !== null;
+      div.style.display = isVisible ? "block" : "none";
+    }
+
+    setInterval(checkPrivate, 500);
+  }
 
   function updateFloatingTrades() {
     const api = ext();
@@ -5338,8 +5321,6 @@ function createFloatingTradesPanel() {
   }, 1000);
 
 });
-
-  
 </script>
 
   
