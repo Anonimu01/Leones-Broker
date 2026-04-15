@@ -4759,8 +4759,7 @@ if (window.__LEONES_BOOTED__) {
 })();
 </script>
 
-  
-<script>
+  <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
   const panels = document.querySelectorAll("#privateArea_full .panel");
@@ -4956,14 +4955,13 @@ document.addEventListener("click", (e) => {
     const symbol = api.activeSymbol || window.TR?.activeSymbol;
     if (!symbol) return;
 
-    // Evita reinicializar el gráfico si ya está mostrando el mismo símbolo
-    if (container.dataset.chartReady === "1" && container.dataset.chartSymbol === String(symbol)) {
+    // no reinicia el gráfico si ya está cargado para ese símbolo
+    if (container.dataset.chartSymbol === String(symbol)) {
       container.style.width = "100%";
       container.style.height = "100vh";
       return;
     }
 
-    container.dataset.chartReady = "1";
     container.dataset.chartSymbol = String(symbol);
 
     api.openTradingView?.({ symbol });
@@ -4975,15 +4973,8 @@ document.addEventListener("click", (e) => {
   /* =========================
      🔥 VELAS MÁS FLUIDAS
   ========================= */
-  let lastQuoteCall = 0;
   setInterval(() => {
     const api = ext();
-    const now = Date.now();
-
-    // Reduce el refresco agresivo para evitar el brinco visual
-    if (now - lastQuoteCall < 5000) return;
-    lastQuoteCall = now;
-
     api.loadRealQuotes?.();
   }, 1500);
 
@@ -5011,23 +5002,21 @@ document.addEventListener("click", (e) => {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
 
-    if (input.dataset.amountBound === "1") return;
-    input.dataset.amountBound = "1";
+    if (!input.dataset.bound) {
+      input.dataset.bound = "1";
+      input.addEventListener("input", () => {
+        LAST_AMOUNT = input.value;
+      });
+    }
 
     if (LAST_AMOUNT !== null && input.value === "") {
       input.value = LAST_AMOUNT;
     }
-
-    input.addEventListener("input", () => {
-      LAST_AMOUNT = input.value;
-    });
   }
 
   function restoreAmount() {
     const input = document.getElementById("brokerOrderSize");
-    if (!input) return;
-
-    if (LAST_AMOUNT !== null && input.value === "") {
+    if (input && LAST_AMOUNT !== null && input.value === "") {
       input.value = LAST_AMOUNT;
     }
   }
@@ -5059,6 +5048,7 @@ document.addEventListener("click", (e) => {
       direction
     });
 
+    LAST_AMOUNT = amountInput.value;
     restoreAmount();
   }
 
@@ -5351,6 +5341,7 @@ function createFloatingTradesPanel() {
 
   
 </script>
+
   
 </div>
 
