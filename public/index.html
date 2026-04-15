@@ -5058,33 +5058,77 @@ document.addEventListener("click", (e) => {
  /* =========================
      🔥 PANEL FLOTANTE TRADES
   ========================= */
-  function createFloatingTradesPanel() {
-    if (document.getElementById("floatingTrades")) return;
+ function isPrivateBrokerArea() {
+  return !!document.querySelector(
+    "#dashboardPanel, #tradingPanel, #positionsPanel, #marketPanel"
+  );
+}
 
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
+function createFloatingTradesPanel() {
+  if (document.getElementById("floatingTrades")) return;
 
-    div.style.cssText = `
-      position:fixed;
-      bottom:20px;
-      left:20px;
-      width:260px;
-      background:#111;
-      color:#fff;
-      padding:12px;
-      border-radius:10px;
-      z-index:9999;
-      font-size:12px;
-    `;
+  // 🔒 EVITA QUE SALGA EN LA PARTE PÚBLICA
+  if (!isPrivateBrokerArea()) return;
 
-    div.innerHTML = `
-      <b>📊 Operaciones</b>
-      <div id="floatingTradesList">Sin operaciones</div>
-    `;
+  const div = document.createElement("div");
+  div.id = "floatingTrades";
 
-    document.body.appendChild(div);
-  }
+  div.style.cssText = `
+    position:fixed;
+    bottom:20px;
+    left:20px;
+    width:260px;
+    background:#111;
+    color:#fff;
+    padding:12px;
+    border-radius:10px;
+    z-index:9999;
+    font-size:12px;
+    cursor:grab;
+    touch-action:none;
+  `;
 
+  div.innerHTML = `
+    <b>📊 Operaciones</b>
+    <div id="floatingTradesList">Sin operaciones</div>
+  `;
+
+  document.body.appendChild(div);
+
+  // 🔥 DRAG (MOUSE + DEDO)
+  let dragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  const startDrag = (e) => {
+    dragging = true;
+
+    const rect = div.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+
+    div.style.bottom = "auto";
+  };
+
+  const moveDrag = (e) => {
+    if (!dragging) return;
+
+    const x = e.clientX - offsetX;
+    const y = e.clientY - offsetY;
+
+    div.style.left = x + "px";
+    div.style.top = y + "px";
+  };
+
+  const endDrag = () => {
+    dragging = false;
+  };
+
+  div.addEventListener("pointerdown", startDrag);
+  window.addEventListener("pointermove", moveDrag);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+}
   function updateFloatingTrades() {
     const api = ext();
     const list = document.getElementById("floatingTradesList");
