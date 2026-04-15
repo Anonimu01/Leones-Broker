@@ -5055,14 +5055,15 @@ document.addEventListener("click", (e) => {
     }
   }, true);
 
- /* =========================
+/* =========================
    🔥 PANEL FLOTANTE TRADES
 ========================= */
 function createFloatingTradesPanel() {
   if (document.getElementById("floatingTrades")) return;
 
-  // 🔒 NO mostrar si no existe el área privada
-  if (!document.getElementById("privateArea_full")) return;
+  // 🔒 VALIDACIÓN CORRECTA PRIVADO
+  const area = document.getElementById("privateArea_full");
+  if (!area || area.style.display === "none") return;
 
   const div = document.createElement("div");
   div.id = "floatingTrades";
@@ -5089,7 +5090,7 @@ function createFloatingTradesPanel() {
 
   document.body.appendChild(div);
 
-  // 🔥 DRAG SIMPLE (FUNCIONA EN TODO)
+  // 🔥 DRAG CORREGIDO
   let dragging = false;
   let offsetX = 0;
   let offsetY = 0;
@@ -5102,6 +5103,7 @@ function createFloatingTradesPanel() {
     offsetY = e.clientY - rect.top;
 
     div.style.bottom = "auto";
+    div.style.top = div.offsetTop + "px";
   });
 
   window.addEventListener("pointermove", (e) => {
@@ -5115,116 +5117,118 @@ function createFloatingTradesPanel() {
     dragging = false;
   });
 }
-  function updateFloatingTrades() {
-    const api = ext();
-    const list = document.getElementById("floatingTradesList");
-    if (!list) return;
 
-    const positions = api.positions || [];
+function updateFloatingTrades() {
+  const api = ext();
+  const list = document.getElementById("floatingTradesList");
+  if (!list) return;
 
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
-    }
+  const positions = api.positions || [];
 
-    list.innerHTML = positions.map(p => `
-      <div style="margin-top:6px;">
-        ${p.symbol} | ${p.direction} <br>
-        $${p.amount}
-      </div>
-    `).join("");
+  if (!positions.length) {
+    list.innerHTML = "Sin operaciones";
+    return;
   }
 
-  setInterval(updateFloatingTrades, 2000);
+  list.innerHTML = positions.map(p => `
+    <div style="margin-top:6px;">
+      ${p.symbol} | ${p.direction} <br>
+      $${p.amount}
+    </div>
+  `).join("");
+}
 
-  /* =========================
-     🔥 CAMBIO PANEL
-  ========================= */
-  function showPanel(id) {
-    showOnlyPanel(id);
+setInterval(updateFloatingTrades, 2000);
 
-    const api = ext();
+/* =========================
+   🔥 CAMBIO PANEL
+========================= */
+function showPanel(id) {
+  showOnlyPanel(id);
 
-    if (id === "marketPanel") {
-      api.loadRealMarkets?.();
-      api.loadRealQuotes?.();
+  const api = ext();
 
-      setTimeout(() => {
-        window.renderSymbolsGrid?.();
-        keepMarketAlive();
-      }, 300);
-    }
+  if (id === "marketPanel") {
+    api.loadRealMarkets?.();
+    api.loadRealQuotes?.();
 
-    if (id === "tradingPanel") {
-      api.openTradingView?.();
-      api.loadRealQuotes?.();
-
-      setTimeout(() => {
-        fixTrading();
-        persistAmount();
-        restoreAmount();
-      }, 300);
-    }
-
-    if (id === "positionsPanel") {
-      api.loadPositions?.();
-    }
-
-    if (id === "dashboardPanel") {
-      api.loadAccount?.();
-    }
+    setTimeout(() => {
+      window.renderSymbolsGrid?.();
+      keepMarketAlive();
+    }, 300);
   }
 
-  /* =========================
-     🔥 CLICK SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
+  if (id === "tradingPanel") {
+    api.openTradingView?.();
+    api.loadRealQuotes?.();
 
-    const api = ext();
-
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
-
-    showPanel("tradingPanel");
-
-  }, true);
-
-  /* =========================
-     🔥 INIT
-  ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
+    setTimeout(() => {
+      fixTrading();
+      persistAmount();
+      restoreAmount();
+    }, 300);
   }
 
-  await waitForBroker();
+  if (id === "positionsPanel") {
+    api.loadPositions?.();
+  }
 
+  if (id === "dashboardPanel") {
+    api.loadAccount?.();
+  }
+}
+
+/* =========================
+   🔥 CLICK SIMBOLO
+========================= */
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-symbol]");
+  if (!el) return;
+
+  const api = ext();
+
+  api.selectSymbol?.({
+    symbol: el.dataset.symbol,
+    tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+    label: el.dataset.label || el.dataset.symbol,
+    market: el.dataset.market || ""
+  }, { openChart: true });
+
+  showPanel("tradingPanel");
+
+}, true);
+
+/* =========================
+   🔥 INIT
+========================= */
+if (window.startBrokerUI) {
+  await window.startBrokerUI();
+}
+
+await waitForBroker();
+
+bindMenuButtons();
+observeChanges();
+keepMarketAlive();
+responsiveFix();
+persistAmount();
+
+showPanel("dashboardPanel"); // 🔥 PRIMERO mostrar panel
+createFloatingTradesPanel(); // 🔥 DESPUÉS crear panel
+
+document.querySelectorAll("[data-target]").forEach(btn => {
+  btn.onclick = () => showPanel(btn.dataset.target);
+});
+
+/* =========================
+   🔥 REFORZAR BOTÓN FLOTANTE
+========================= */
+setInterval(() => {
   bindMenuButtons();
-  observeChanges();
-  keepMarketAlive();
-  responsiveFix();
-  persistAmount();
-  createFloatingTradesPanel();
-
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.onclick = () => showPanel(btn.dataset.target);
-  });
-
-  showPanel("dashboardPanel");
-
-  /* =========================
-     🔥 REFORZAR BOTÓN FLOTANTE
-  ========================= */
-  setInterval(() => {
-    bindMenuButtons();
-  }, 1000);
+}, 1000);
 
 });
+  
 </script>
   
 </div>
