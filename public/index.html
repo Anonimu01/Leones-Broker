@@ -5083,6 +5083,7 @@ function createFloatingTradesPanel() {
     touch-action:none;
   `;
 
+  // ✅ HTML CORRECTO (sin romper JS)
   div.innerHTML = `
     <b>📊 Operaciones</b>
     <div id="floatingTradesList">Sin operaciones</div>
@@ -5130,6 +5131,7 @@ function updateFloatingTrades() {
     return;
   }
 
+  // ✅ HTML CORRECTO (template string)
   list.innerHTML = positions.map(p => `
     <div style="margin-top:6px;">
       ${p.symbol} | ${p.direction} <br>
@@ -5213,8 +5215,8 @@ keepMarketAlive();
 responsiveFix();
 persistAmount();
 
-showPanel("dashboardPanel"); // 🔥 PRIMERO mostrar panel
-createFloatingTradesPanel(); // 🔥 DESPUÉS crear panel
+showPanel("dashboardPanel"); // primero
+createFloatingTradesPanel(); // después
 
 document.querySelectorAll("[data-target]").forEach(btn => {
   btn.onclick = () => showPanel(btn.dataset.target);
