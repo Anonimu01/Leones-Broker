@@ -5055,211 +5055,208 @@ document.addEventListener("click", (e) => {
     }
   }, true);
 
-
 /* =========================
-   🔥 PANEL FLOTANTE TRADES
-========================= */
-function createFloatingTradesPanel() {
-  if (document.getElementById("floatingTrades")) return;
+     🔥 PANEL FLOTANTE TRADES
+  ========================= */
+  function createFloatingTradesPanel() {
+    if (document.getElementById("floatingTrades")) return;
 
-  // 🔥 SOLO EN PANEL PRIVADO
-  const isPrivate = document.getElementById("dashboardPanel")?.style.display !== "none";
-  if (!isPrivate) return;
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
 
-  const div = document.createElement("div");
-  div.id = "floatingTrades";
+    div.style.cssText = `
+      position:fixed;
+      bottom:20px;
+      left:20px;
+      width:260px;
+      background:#111;
+      color:#fff;
+      padding:12px;
+      border-radius:10px;
+      z-index:9999;
+      font-size:12px;
+      cursor:grab;
+      touch-action:none;
+      user-select:none;
+      -webkit-user-select:none;
+    `;
 
-  div.style.cssText = `
-    position:fixed;
-    bottom:20px;
-    left:20px;
-    width:260px;
-    background:#111;
-    color:#fff;
-    padding:12px;
-    border-radius:10px;
-    z-index:9999;
-    font-size:12px;
-    cursor:grab;
-    touch-action:none;
-  `;
+    div.innerHTML = `
+      <b>📊 Operaciones</b>
+      <div id="floatingTradesList">Sin operaciones</div>
+    `;
 
-  div.innerHTML = `
-    <b>📊 Operaciones</b>
-    <div id="floatingTradesList">Sin operaciones</div>
-  `;
+    document.body.appendChild(div);
 
-  document.body.appendChild(div);
+    // 🔥 DRAG CON MOUSE Y DEDO
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
 
-  // 🔥 DRAG (MOUSE + TOUCH)
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
+    const startDrag = (e) => {
+      isDragging = true;
 
-  const startDrag = (e) => {
-    isDragging = true;
-    const rect = div.getBoundingClientRect();
+      const rect = div.getBoundingClientRect();
+      const point = e.touches ? e.touches[0] : e;
 
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      offsetX = point.clientX - rect.left;
+      offsetY = point.clientY - rect.top;
 
-    offsetX = clientX - rect.left;
-    offsetY = clientY - rect.top;
+      div.style.cursor = "grabbing";
+    };
 
-    div.style.cursor = "grabbing";
-  };
+    const moveDrag = (e) => {
+      if (!isDragging) return;
 
-  const moveDrag = (e) => {
-    if (!isDragging) return;
+      const point = e.touches ? e.touches[0] : e;
 
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      div.style.left = (point.clientX - offsetX) + "px";
+      div.style.top = (point.clientY - offsetY) + "px";
+      div.style.bottom = "auto";
+      div.style.right = "auto";
+    };
 
-    div.style.left = (clientX - offsetX) + "px";
-    div.style.top = (clientY - offsetY) + "px";
-    div.style.bottom = "auto";
-  };
+    const stopDrag = () => {
+      isDragging = false;
+      div.style.cursor = "grab";
+    };
 
-  const stopDrag = () => {
-    isDragging = false;
-    div.style.cursor = "grab";
-  };
+    div.addEventListener("mousedown", startDrag);
+    document.addEventListener("mousemove", moveDrag);
+    document.addEventListener("mouseup", stopDrag);
 
-  div.addEventListener("mousedown", startDrag);
-  document.addEventListener("mousemove", moveDrag);
-  document.addEventListener("mouseup", stopDrag);
-
-  div.addEventListener("touchstart", startDrag, { passive: true });
-  document.addEventListener("touchmove", moveDrag, { passive: true });
-  document.addEventListener("touchend", stopDrag);
-}
-
-function updateFloatingTrades() {
-  const api = ext();
-  const list = document.getElementById("floatingTradesList");
-  if (!list) return;
-
-  const positions = api.positions || [];
-
-  if (!positions.length) {
-    list.innerHTML = "Sin operaciones";
-    return;
+    div.addEventListener("touchstart", startDrag, { passive: true });
+    document.addEventListener("touchmove", moveDrag, { passive: true });
+    document.addEventListener("touchend", stopDrag);
   }
 
-  list.innerHTML = positions.map(p => `
-    <div style="margin-top:6px;">
-      ${p.symbol} | ${p.direction} <br>
-      $${p.amount}
-    </div>
-  `).join("");
-}
+  function updateFloatingTrades() {
+    const api = ext();
+    const list = document.getElementById("floatingTradesList");
+    if (!list) return;
 
-setInterval(updateFloatingTrades, 2000);
+    const positions = api.positions || [];
 
-/* =========================
-   🔥 CAMBIO PANEL
-========================= */
-function showPanel(id) {
-  showOnlyPanel(id);
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
+    }
 
-  const api = ext();
-
-  // 🔥 CONTROL VISIBILIDAD DEL PANEL FLOTANTE
-  const floating = document.getElementById("floatingTrades");
-
-  const isPrivate = [
-    "dashboardPanel",
-    "tradingPanel",
-    "positionsPanel"
-  ].includes(id);
-
-  if (isPrivate) {
-    if (!floating) createFloatingTradesPanel();
-    else floating.style.display = "block";
-  } else {
-    if (floating) floating.style.display = "none";
+    list.innerHTML = positions.map(p => `
+      <div style="margin-top:6px;">
+        ${p.symbol} | ${p.direction} <br>
+        $${p.amount}
+      </div>
+    `).join("");
   }
 
-  if (id === "marketPanel") {
-    api.loadRealMarkets?.();
-    api.loadRealQuotes?.();
+  setInterval(updateFloatingTrades, 2000);
 
-    setTimeout(() => {
-      window.renderSymbolsGrid?.();
-      keepMarketAlive();
-    }, 300);
+  /* =========================
+     🔥 CAMBIO PANEL
+  ========================= */
+  function showPanel(id) {
+    showOnlyPanel(id);
+
+    const api = ext();
+
+    if (id === "marketPanel") {
+      api.loadRealMarkets?.();
+      api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        window.renderSymbolsGrid?.();
+        keepMarketAlive();
+      }, 300);
+    }
+
+    if (id === "tradingPanel") {
+      api.openTradingView?.();
+      api.loadRealQuotes?.();
+
+      setTimeout(() => {
+        fixTrading();
+        persistAmount();
+        restoreAmount();
+      }, 300);
+    }
+
+    if (id === "positionsPanel") {
+      api.loadPositions?.();
+    }
+
+    if (id === "dashboardPanel") {
+      api.loadAccount?.();
+    }
   }
 
-  if (id === "tradingPanel") {
-    api.openTradingView?.();
-    api.loadRealQuotes?.();
+  /* =========================
+     🔥 CLICK SIMBOLO
+  ========================= */
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
 
-    setTimeout(() => {
-      fixTrading();
-      persistAmount();
-      restoreAmount();
-    }, 300);
+    const api = ext();
+
+    api.selectSymbol?.({
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
+      market: el.dataset.market || ""
+    }, { openChart: true });
+
+    showPanel("tradingPanel");
+
+  }, true);
+
+  /* =========================
+     🔥 INIT
+  ========================= */
+  if (window.startBrokerUI) {
+    await window.startBrokerUI();
   }
 
-  if (id === "positionsPanel") {
-    api.loadPositions?.();
-  }
+  await waitForBroker();
 
-  if (id === "dashboardPanel") {
-    api.loadAccount?.();
-  }
-}
+  bindMenuButtons();
+  observeChanges();
+  keepMarketAlive();
+  responsiveFix();
+  persistAmount();
+  createFloatingTradesPanel();
 
-/* =========================
-   🔥 CLICK SIMBOLO
-========================= */
-document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-symbol]");
-  if (!el) return;
+  // 🔥 SOLO PRIVADO, NUNCA PÚBLICO
+  setInterval(() => {
+    const floating = document.getElementById("floatingTrades");
+    if (!floating) return;
 
-  const api = ext();
+    const dashboardVisible = document.getElementById("dashboardPanel")?.style.display !== "none";
+    const tradingVisible = document.getElementById("tradingPanel")?.style.display !== "none";
+    const positionsVisible = document.getElementById("positionsPanel")?.style.display !== "none";
 
-  api.selectSymbol?.({
-    symbol: el.dataset.symbol,
-    tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-    label: el.dataset.label || el.dataset.symbol,
-    market: el.dataset.market || ""
-  }, { openChart: true });
+    if (dashboardVisible || tradingVisible || positionsVisible) {
+      floating.style.display = "block";
+    } else {
+      floating.style.display = "none";
+    }
+  }, 300);
 
-  showPanel("tradingPanel");
+  document.querySelectorAll("[data-target]").forEach(btn => {
+    btn.onclick = () => showPanel(btn.dataset.target);
+  });
 
-}, true);
+  showPanel("dashboardPanel");
 
-/* =========================
-   🔥 INIT
-========================= */
-if (window.startBrokerUI) {
-  await window.startBrokerUI();
-}
+  /* =========================
+     🔥 REFORZAR BOTÓN FLOTANTE
+  ========================= */
+  setInterval(() => {
+    bindMenuButtons();
+  }, 1000);
 
-await waitForBroker();
-
-bindMenuButtons();
-observeChanges();
-keepMarketAlive();
-responsiveFix();
-persistAmount();
-
-// 🔥 SE CREA SOLO SI ES PRIVADO
-createFloatingTradesPanel();
-
-document.querySelectorAll("[data-target]").forEach(btn => {
-  btn.onclick = () => showPanel(btn.dataset.target);
 });
 
-showPanel("dashboardPanel");
-
-/* =========================
-   🔥 REFORZAR BOTÓN FLOTANTE
-========================= */
-setInterval(() => {
-  bindMenuButtons();
-}, 1000);
   
 </script>
   
