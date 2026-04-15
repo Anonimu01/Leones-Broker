@@ -5091,34 +5091,49 @@ function createFloatingTradesPanel() {
 
   document.body.appendChild(div);
 
-  // 🔥 DRAG REAL (ARREGLADO)
-  let dragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
+function showPanel(id) {
+  showOnlyPanel(id);
 
-  div.addEventListener("pointerdown", (e) => {
-    dragging = true;
+  const api = ext();
 
-    div.setPointerCapture(e.pointerId); // 🔥 clave
+  // 🔥 CONTROL REAL DEL PANEL FLOTANTE
+  const area = document.getElementById("privateArea_full");
+  const floating = document.getElementById("floatingTrades");
 
-    const rect = div.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    offsetY = e.clientY - rect.top;
+  if (area && window.getComputedStyle(area).display !== "none") {
+    if (!floating) createFloatingTradesPanel();
+  } else {
+    if (floating) floating.remove();
+  }
 
-    e.preventDefault(); // 🔥 clave
-  });
+  if (id === "marketPanel") {
+    api.loadRealMarkets?.();
+    api.loadRealQuotes?.();
 
-  div.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
+    setTimeout(() => {
+      window.renderSymbolsGrid?.();
+      keepMarketAlive();
+    }, 300);
+  }
 
-    div.style.left = (e.clientX - offsetX) + "px";
-    div.style.top = (e.clientY - offsetY) + "px";
-  });
+  if (id === "tradingPanel") {
+    api.openTradingView?.();
+    api.loadRealQuotes?.();
 
-  div.addEventListener("pointerup", (e) => {
-    dragging = false;
-    div.releasePointerCapture(e.pointerId);
-  });
+    setTimeout(() => {
+      fixTrading();
+      persistAmount();
+      restoreAmount();
+    }, 300);
+  }
+
+  if (id === "positionsPanel") {
+    api.loadPositions?.();
+  }
+
+  if (id === "dashboardPanel") {
+    api.loadAccount?.();
+  }
 }
 
 function updateFloatingTrades() {
