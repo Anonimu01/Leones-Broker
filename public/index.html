@@ -4761,552 +4761,19 @@ if (window.__LEONES_BOOTED__) {
 
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
+
   const panels = document.querySelectorAll("#privateArea_full .panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
 
-  window.selectedSymbol = window.selectedSymbol || null;
-  window.selectedSimbol = window.selectedSymbol || null;
-
-  const STATE_KEY = "leones_broker_state_v3";
-  const TX_KEY = "leones_broker_transactions_v3";
-  const POS_KEY = "leones_broker_positions_v3";
-
-  const state = {
-    cashBalance: 0,
-    equity: 0,
-    reserved: 0,
-    available: 0,
-    currency: "USD",
-    positions: [],
-    transactions: [],
-    lastPrices: {},
-    seenTxIds: new Set(),
-    lastSyncAt: null,
-  };
-
-  function safeNumber(value, fallback = 0) {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function money(value) {
-    const n = safeNumber(value, 0);
-    try {
-      return new Intl.NumberFormat("es-DO", {
-        style: "currency",
-        currency: state.currency || "USD",
-        maximumFractionDigits: 2,
-      }).format(n);
-    } catch {
-      return `${n.toFixed(2)} ${state.currency || "USD"}`;
-    }
-  }
-
-  function makeId(prefix = "id") {
-    return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  }
-
-  function loadSavedState() {
-    try {
-      const raw = localStorage.getItem(STATE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return;
-
-      state.cashBalance = safeNumber(parsed.cashBalance, state.cashBalance);
-      state.equity = safeNumber(parsed.equity, state.equity);
-      state.reserved = safeNumber(parsed.reserved, state.reserved);
-      state.available = safeNumber(parsed.available, state.available);
-      state.currency = parsed.currency || state.currency || "USD";
-      state.positions = Array.isArray(parsed.positions) ? parsed.positions : state.positions;
-      state.transactions = Array.isArray(parsed.transactions) ? parsed.transactions : state.transactions;
-
-      state.seenTxIds = new Set(
-        state.transactions
-          .map((t) => t && t.id)
-          .filter(Boolean)
-      );
-    } catch (e) {
-      console.warn("[LEONES] loadSavedState error:", e);
-    }
-  }
-
-  function saveState() {
-    try {
-      localStorage.setItem(
-        STATE_KEY,
-        JSON.stringify({
-          cashBalance: state.cashBalance,
-          equity: state.equity,
-          reserved: state.reserved,
-          available: state.available,
-          currency: state.currency,
-          positions: state.positions,
-          transactions: state.transactions,
-        })
-      );
-      localStorage.setItem(POS_KEY, JSON.stringify(state.positions));
-      localStorage.setItem(TX_KEY, JSON.stringify(state.transactions));
-    } catch (e) {
-      console.warn("[LEONES] saveState error:", e);
-    }
-  }
-
-  function getPriceStore() {
-    const api = ext();
-    const candidates = [
-      api.prices,
-      api.quotes,
-      api.marketQuotes,
-      api.lastQuotes,
-      api.priceStore,
-      window.__LEONES_LAST_QUOTES__,
-      window.__LEONES_PRICE_STORE__,
-      window.__LEONES_QUOTES__,
-      window.__LEONES_MARKET_QUOTES__,
-    ];
-
-    for (const store of candidates) {
-      if (!store) continue;
-      if (store instanceof Map) {
-        const obj = Object.fromEntries(store.entries());
-        if (Object.keys(obj).length) return obj;
-      }
-      if (typeof store === "object" && Object.keys(store).length) return store;
-    }
-
-    return {};
-  }
-
-  function readPriceFromStore(store, symbol) {
-    if (!store || !symbol) return null;
-
-    if (store instanceof Map) {
-      const direct = store.get(symbol);
-      if (direct != null) return readPriceFromStore({ value: direct }, "value");
-      return null;
-    }
-
-    const direct = store[symbol];
-    if (direct == null) return null;
-
-    if (typeof direct === "number") return direct;
-    if (typeof direct === "string") {
-      const n = Number(direct);
-      return Number.isFinite(n) ? n : null;
-    }
-
-    if (typeof direct === "object") {
-      const n = [
-        direct.price,
-        direct.last,
-        direct.close,
-        direct.value,
-        direct.mid,
-        direct.mark,
-      ].find((v) => Number.isFinite(Number(v)));
-
-      return Number.isFinite(Number(n)) ? Number(n) : null;
-    }
-
-    return null;
-  }
-
-  function getCurrentPrice(symbol) {
-    const store = getPriceStore();
-    const direct = readPriceFromStore(store, symbol);
-    if (direct != null) return direct;
-
-    const api = ext();
-    const symbolInfo =
-      api.symbols?.find?.((s) => s.symbol === symbol) ||
-      api.symbolMap?.[symbol] ||
-      window.__LEONES_LAST_SYMBOLS__?.find?.((s) => s.symbol === symbol);
-
-    if (symbolInfo && Number.isFinite(Number(symbolInfo.price))) {
-      return Number(symbolInfo.price);
-    }
-
-    return null;
-  }
-
-  function normalizePosition(p) {
-    if (!p || typeof p !== "object") return null;
-
-    const id = p.id || p._id || makeId("pos");
-    const symbol = p.symbol || p.asset || "";
-    const direction = (p.direction || p.side || "buy").toLowerCase();
-
-    const amount = safeNumber(p.amount ?? p.margin ?? p.stake ?? p.size, 0);
-    const entryPrice = Number.isFinite(Number(p.entryPrice))
-      ? Number(p.entryPrice)
-      : Number.isFinite(Number(p.openPrice))
-      ? Number(p.openPrice)
-      : Number.isFinite(Number(p.price))
-      ? Number(p.price)
-      : null;
-
-    const currentPrice = Number.isFinite(Number(p.currentPrice))
-      ? Number(p.currentPrice)
-      : entryPrice;
-
-    const realizedPnl = safeNumber(p.realizedPnl ?? p.pnl ?? 0, 0);
-    const unrealizedPnl = safeNumber(p.unrealizedPnl ?? 0, 0);
-
-    return {
-      id,
-      symbol,
-      direction,
-      amount,
-      entryPrice,
-      currentPrice,
-      realizedPnl,
-      unrealizedPnl,
-      status: p.status || "open",
-      openedAt: p.openedAt || p.createdAt || new Date().toISOString(),
-      closedAt: p.closedAt || null,
-      source: p.source || "local",
-      raw: p,
-    };
-  }
-
-  function normalizeTransaction(tx) {
-    if (!tx || typeof tx !== "object") return null;
-
-    const id = tx.id || tx._id || makeId("tx");
-    const amount = safeNumber(tx.amount ?? tx.value ?? tx.cash ?? 0, 0);
-    const pnl = safeNumber(tx.pnl ?? tx.profit ?? 0, 0);
-
-    return {
-      id,
-      type: tx.type || "adjustment",
-      title: tx.title || tx.description || tx.note || tx.type || "Movimiento",
-      symbol: tx.symbol || "",
-      direction: tx.direction || tx.side || "",
-      amount,
-      pnl,
-      balanceAfter: Number.isFinite(Number(tx.balanceAfter)) ? Number(tx.balanceAfter) : null,
-      createdAt: tx.createdAt || tx.date || tx.timestamp || new Date().toISOString(),
-      source: tx.source || "local",
-      raw: tx,
-    };
-  }
-
-  function recalcBalances() {
-    const reserved = state.positions
-      .filter((p) => p.status === "open")
-      .reduce((sum, p) => sum + safeNumber(p.amount, 0), 0);
-
-    const unrealized = state.positions
-      .filter((p) => p.status === "open")
-      .reduce((sum, p) => sum + safeNumber(p.unrealizedPnl, 0), 0);
-
-    state.reserved = reserved;
-    state.available = Math.max(0, state.cashBalance);
-    state.equity = state.cashBalance + state.reserved + unrealized;
-  }
-
-  function updateWalletUI() {
-    const balanceEls = [
-      document.getElementById("balance"),
-      document.querySelector("[data-wallet-balance]"),
-    ].filter(Boolean);
-
-    const equityEls = [
-      document.getElementById("equity"),
-      document.querySelector("[data-wallet-equity]"),
-    ].filter(Boolean);
-
-    const availableEls = [
-      document.getElementById("availableBalance"),
-      document.querySelector("[data-wallet-available]"),
-    ].filter(Boolean);
-
-    const reservedEls = [
-      document.getElementById("reservedBalance"),
-      document.querySelector("[data-wallet-reserved]"),
-    ].filter(Boolean);
-
-    const currencyEls = [
-      document.getElementById("walletCurrency"),
-      document.querySelector("[data-wallet-currency]"),
-    ].filter(Boolean);
-
-    const walletText = money(state.cashBalance);
-    const equityText = money(state.equity);
-    const availableText = money(state.available);
-    const reservedText = money(state.reserved);
-
-    balanceEls.forEach((el) => (el.textContent = walletText));
-    equityEls.forEach((el) => (el.textContent = equityText));
-    availableEls.forEach((el) => (el.textContent = availableText));
-    reservedEls.forEach((el) => (el.textContent = reservedText));
-    currencyEls.forEach((el) => (el.textContent = state.currency || "USD"));
-  }
-
-  function ensureWalletSummaryBox() {
-    if (document.getElementById("walletSummaryBox")) return;
-
-    const host = document.getElementById("dashboardPanel") || document.getElementById("privateArea_full");
-    if (!host) return;
-
-    const box = document.createElement("div");
-    box.id = "walletSummaryBox";
-    box.style.cssText = `
-      background:#111;
-      color:#fff;
-      border:1px solid rgba(255,255,255,.08);
-      border-radius:12px;
-      padding:12px;
-      margin:10px 0 14px;
-      font-size:13px;
-      line-height:1.5;
-    `;
-    box.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <div><b>Saldo disponible:</b> <span id="availableBalance">${money(state.available)}</span></div>
-        <div><b>Balance actual:</b> <span id="balance">${money(state.cashBalance)}</span></div>
-        <div><b>Equity:</b> <span id="equity">${money(state.equity)}</span></div>
-        <div><b>Reservado:</b> <span id="reservedBalance">${money(state.reserved)}</span></div>
-      </div>
-      <div style="margin-top:6px;color:#bbb;"><b>Moneda:</b> <span id="walletCurrency">${state.currency || "USD"}</span></div>
-    `;
-    host.prepend(box);
-  }
-
-  function applyWalletSnapshot(snapshot) {
-    if (!snapshot) return;
-
-    const account = snapshot.account || snapshot;
-
-    const balance =
-      account.balance ??
-      snapshot.balance ??
-      snapshot.wallet?.balance ??
-      state.cashBalance;
-
-    const currency = account.currency || snapshot.currency || state.currency || "USD";
-
-    state.currency = currency;
-    state.cashBalance = safeNumber(balance, state.cashBalance);
-
-    if (Array.isArray(snapshot.positions) && snapshot.positions.length) {
-      mergePositions(snapshot.positions, true);
-    }
-
-    if (Array.isArray(snapshot.transactions) && snapshot.transactions.length) {
-      mergeTransactions(snapshot.transactions, true);
-    }
-
-    recalcBalances();
-    ensureWalletSummaryBox();
-    updateWalletUI();
-    saveState();
-  }
-
-  async function fetchJson(url, options = {}) {
-    try {
-      const res = await fetch(url, {
-        credentials: "include",
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          ...(options.headers || {}),
-        },
-      });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async function loadWalletSnapshot() {
-    const endpoints = ["/api/account", "/api/wallet", "/api/me", "/api/profile"];
-    for (const url of endpoints) {
-      const data = await fetchJson(url);
-      if (data) {
-        applyWalletSnapshot(data);
-        return data;
-      }
-    }
-    return null;
-  }
-
-  async function loadPositionsSnapshot() {
-    const endpoints = ["/api/positions", "/api/trade/positions"];
-    for (const url of endpoints) {
-      const data = await fetchJson(url);
-      if (data) {
-        const items = Array.isArray(data)
-          ? data
-          : Array.isArray(data.positions)
-          ? data.positions
-          : Array.isArray(data.items)
-          ? data.items
-          : Array.isArray(data.data)
-          ? data.data
-          : [];
-
-        if (items.length) {
-          mergePositions(items, true);
-          recalcBalances();
-          updateWalletUI();
-          renderFloatingTradesPanel();
-          saveState();
-          return items;
-        }
-      }
-    }
-    return [];
-  }
-
-  async function loadTransactionsSnapshot() {
-    const endpoints = [
-      "/api/transactions",
-      "/api/wallet/transactions",
-      "/api/account/transactions",
-      "/api/history/transactions",
-      "/api/movements",
-    ];
-
-    for (const url of endpoints) {
-      const data = await fetchJson(url);
-      if (!data) continue;
-
-      const items = Array.isArray(data)
-        ? data
-        : Array.isArray(data.transactions)
-        ? data.transactions
-        : Array.isArray(data.items)
-        ? data.items
-        : Array.isArray(data.data)
-        ? data.data
-        : [];
-
-      if (items.length) {
-        mergeTransactions(items, true);
-        saveState();
-        renderFloatingTradesPanel();
-        return items;
-      }
-    }
-
-    return [];
-  }
-
-  function isDepositTx(type) {
-    const t = String(type || "").toLowerCase();
-    return ["deposit", "depo", "credit", "admin_deposit", "wallet_deposit", "add_funds"].includes(t);
-  }
-
-  function isWithdrawalTx(type) {
-    const t = String(type || "").toLowerCase();
-    return ["withdrawal", "withdraw", "debit", "admin_withdrawal", "remove_funds"].includes(t);
-  }
-
-  function isOpenTx(type) {
-    const t = String(type || "").toLowerCase();
-    return ["open_position", "open", "buy", "sell", "trade_open"].includes(t);
-  }
-
-  function isCloseTx(type) {
-    const t = String(type || "").toLowerCase();
-    return ["close_position", "close", "trade_close"].includes(t);
-  }
-
-  function mergeTransactions(list, fromBackend = false) {
-    if (!Array.isArray(list)) return;
-
-    for (const raw of list) {
-      const tx = normalizeTransaction(raw);
-      if (!tx) continue;
-
-      if (state.seenTxIds.has(tx.id)) continue;
-      state.seenTxIds.add(tx.id);
-
-      state.transactions.unshift(tx);
-
-      if (!fromBackend) {
-        if (isDepositTx(tx.type)) {
-          state.cashBalance += Math.abs(tx.amount || 0);
-        } else if (isWithdrawalTx(tx.type)) {
-          state.cashBalance -= Math.abs(tx.amount || 0);
-        }
-      }
-    }
-
-    state.transactions = state.transactions.slice(0, 200);
-    recalcBalances();
-    updateWalletUI();
-    saveState();
-  }
-
-  function mergePositions(list, fromBackend = false) {
-    if (!Array.isArray(list)) return;
-
-    const byId = new Map(state.positions.map((p) => [String(p.id), p]));
-
-    for (const raw of list) {
-      const np = normalizePosition(raw);
-      if (!np) continue;
-
-      const existing = byId.get(String(np.id));
-      if (existing) {
-        Object.assign(existing, np, { raw: raw });
-      } else {
-        state.positions.unshift(np);
-        byId.set(String(np.id), np);
-      }
-    }
-
-    state.positions = state.positions.map((p) => normalizePosition(p) || p);
-    if (fromBackend) {
-      state.positions = state.positions.filter(Boolean);
-    }
-
-    recalcBalances();
-    updateWalletUI();
-    saveState();
-  }
-
-  function computePnL(position, currentPrice) {
-    const entry = safeNumber(position.entryPrice, 0);
-    const current = safeNumber(currentPrice, 0);
-
-    if (!entry || !current) return 0;
-
-    const diff = (current - entry) / entry;
-    const amount = safeNumber(position.amount, 0);
-    const side = String(position.direction || "buy").toLowerCase();
-
-    const pnl = side === "sell" ? amount * -diff : amount * diff;
-    return Number.isFinite(pnl) ? pnl : 0;
-  }
-
-  function refreshPositionPrices() {
-    let changed = false;
-
-    for (const position of state.positions) {
-      if (position.status !== "open") continue;
-
-      const currentPrice = getCurrentPrice(position.symbol);
-      if (currentPrice != null) {
-        const pnl = computePnL(position, currentPrice);
-        position.currentPrice = currentPrice;
-        position.unrealizedPnl = pnl;
-        changed = true;
-      }
-    }
-
-    recalcBalances();
-    if (changed) {
-      updateWalletUI();
-      renderFloatingTradesPanel();
-      saveState();
-    }
+  /* =========================
+     🔥 BOTÓN MENU (FIX DEFINITIVO)
+  ========================= */
+  function toggleSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    sidebar.classList.toggle("hidden");
   }
 
   function ensureFloatingMenuButton() {
@@ -5333,13 +4800,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.visibility = "visible";
     floatingMenuBtn.style.opacity = "1";
     floatingMenuBtn.style.pointerEvents = "auto";
-  }
-
-  function toggleSidebar() {
-    const sidebar = document.getElementById("sidebar");
-    if (!sidebar) return;
-    sidebar.classList.toggle("hidden");
-    syncMenuButtons();
   }
 
   function syncMenuButtons() {
@@ -5375,30 +4835,35 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     ensureFloatingMenuButton();
-    syncMenuButtons();
+
+    if (typeof syncMenuButtons === "function") {
+      syncMenuButtons();
+    }
   }
 
-  document.addEventListener(
-    "click",
-    (e) => {
-      const isMenuButton =
-        e.target.closest("#sidebarToggle") ||
-        e.target.closest("#floatingMenuBtn");
+  document.addEventListener("click", (e) => {
+    const isMenuButton =
+      e.target.closest("#sidebarToggle") ||
+      e.target.closest("#floatingMenuBtn");
 
-      if (!isMenuButton) return;
+    if (!isMenuButton) return;
 
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
 
-      toggleSidebar();
+    toggleSidebar();
+
+    if (typeof syncMenuButtons === "function") {
       syncMenuButtons();
-    },
-    true
-  );
+    }
+  }, true);
 
+  /* =========================
+     🔥 BOTONES ACTIVOS DORADO
+  ========================= */
   function setActiveButton(id) {
-    document.querySelectorAll("[data-target]").forEach((btn) => {
+    document.querySelectorAll("[data-target]").forEach(btn => {
       btn.style.background = "transparent";
       btn.style.color = "#fff";
     });
@@ -5411,14 +4876,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function showOnlyPanel(id) {
-    panels.forEach((p) => (p.style.display = "none"));
+    panels.forEach(p => p.style.display = "none");
     const el = document.getElementById(id);
     if (el) el.style.display = "block";
     setActiveButton(id);
   }
 
+  /* =========================
+     🔥 ESPERAR JS2
+  ========================= */
   function waitForBroker() {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const i = setInterval(() => {
         if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
           clearInterval(i);
@@ -5428,6 +4896,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  /* =========================
+     🔥 MARKET FIX
+  ========================= */
   function keepMarketAlive() {
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
@@ -5454,22 +4925,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     const observer = new MutationObserver(() => {
       keepMarketAlive();
       bindMenuButtons();
-      updateWalletUI();
     });
 
     observer.observe(document.body, {
       childList: true,
-      subtree: true,
+      subtree: true
     });
   }
 
+  /* =========================
+     🔥 GRAFICO REAL
+  ========================= */
   function fixTrading() {
     const api = ext();
     const container = document.getElementById("tv_chart_container");
 
     if (!container) return;
 
-    const symbol = window.selectedSymbol || api.activeSymbol || window.TR?.activeSymbol;
+    const symbol = api.activeSymbol || window.TR?.activeSymbol;
     if (!symbol) return;
 
     if (container.dataset.chartSymbol === String(symbol)) {
@@ -5490,26 +4963,37 @@ document.addEventListener("DOMContentLoaded", async () => {
     container.style.height = "100vh";
   }
 
-  let updatingQuotes = false;
+  /* =========================
+     🔥 VELAS MÁS FLUIDAS
+  ========================= */
+let lastQuotesOk = true;
+let updatingQuotes = false;
 
-  setInterval(async () => {
-    const api = ext();
+setInterval(async () => {
+  const api = ext();
 
-    if (updatingQuotes) return;
-    if (!api || typeof api.loadRealQuotes !== "function") return;
+  // 🔥 no ejecutar si ya está corriendo
+  if (updatingQuotes) return;
 
-    updatingQuotes = true;
+  // 🔥 no ejecutar si no existe función
+  if (!api || typeof api.loadRealQuotes !== "function") return;
 
-    try {
-      await api.loadRealQuotes();
-      refreshPositionPrices();
-    } catch (e) {
-      console.warn("[LEONES] loadRealQuotes error:", e);
-    }
+  updatingQuotes = true;
 
-    updatingQuotes = false;
-  }, 5000);
+  try {
+    await api.loadRealQuotes();
+    lastQuotesOk = true;
+  } catch (e) {
+    console.warn("[LEONES] loadRealQuotes error:", e);
+    lastQuotesOk = false;
+  }
 
+  updatingQuotes = false;
+
+}, 5000); // 🔥 cada 5 segundos (estable, sin brincos)
+  /* =========================
+     🔥 RESPONSIVE
+  ========================= */
   function responsiveFix() {
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
@@ -5524,6 +5008,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   window.addEventListener("resize", responsiveFix);
 
+  /* =========================
+     🔥 MANTENER MONTO
+  ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
@@ -5550,101 +5037,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  function setSelectedSymbol(symbol, meta = {}) {
-    window.selectedSymbol = symbol || null;
-    window.selectedSimbol = window.selectedSymbol;
-    window.TR = window.TR || {};
-    window.TR.activeSymbol = symbol || null;
-
-    const api = ext();
-    api.activeSymbol = symbol || null;
-    api.selectedSymbol = symbol || null;
-    api.lastSelectedSymbol = meta;
-  }
-
-  function addTransaction(tx, applyEffect = true) {
-    const item = normalizeTransaction(tx);
-    if (!item) return null;
-
-    if (state.seenTxIds.has(item.id)) return item;
-    state.seenTxIds.add(item.id);
-
-    state.transactions.unshift(item);
-    state.transactions = state.transactions.slice(0, 200);
-
-    if (applyEffect) {
-      if (isDepositTx(item.type)) {
-        state.cashBalance += Math.abs(item.amount || 0);
-      } else if (isWithdrawalTx(item.type)) {
-        state.cashBalance -= Math.abs(item.amount || 0);
-      }
-    }
-
-    recalcBalances();
-    saveState();
-    updateWalletUI();
-    renderFloatingTradesPanel();
-
-    return item;
-  }
-
-  function addOpenPosition(position) {
-    const pos = normalizePosition(position);
-    if (!pos) return null;
-
-    state.positions.unshift(pos);
-    recalcBalances();
-    saveState();
-    updateWalletUI();
-    renderFloatingTradesPanel();
-    return pos;
-  }
-
-  async function tryBackendOpenPosition(payload) {
-    const api = ext();
-
-    if (typeof api.placeOrder === "function") {
-      try {
-        return await api.placeOrder(payload);
-      } catch (e) {
-        console.warn("[LEONES] api.placeOrder error:", e);
-      }
-    }
-
-    if (typeof api.openPosition === "function") {
-      try {
-        return await api.openPosition(payload);
-      } catch (e) {
-        console.warn("[LEONES] api.openPosition error:", e);
-      }
-    }
-
-    return null;
-  }
-
-  async function tryBackendClosePosition(payload) {
-    const api = ext();
-
-    if (typeof api.closePosition === "function") {
-      try {
-        return await api.closePosition(payload);
-      } catch (e) {
-        console.warn("[LEONES] api.closePosition error:", e);
-      }
-    }
-
-    if (typeof api.closeTrade === "function") {
-      try {
-        return await api.closeTrade(payload);
-      } catch (e) {
-        console.warn("[LEONES] api.closeTrade error:", e);
-      }
-    }
-
-    return null;
-  }
-
-  async function forceTrade(direction) {
+  /* =========================
+     🔥 ORDEN REAL SIN ERROR
+  ========================= */
+  function forceTrade(direction) {
     const api = ext();
 
     const amountInput = document.getElementById("brokerOrderSize");
@@ -5655,177 +5051,40 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const symbol =
-      window.selectedSymbol ||
-      api.activeSymbol ||
-      window.TR?.activeSymbol;
+    const symbol = api.activeSymbol || window.TR?.activeSymbol;
 
     if (!symbol) {
       alert("Selecciona un símbolo");
       return;
     }
 
-    await loadWalletSnapshot();
-
-    if (state.cashBalance < amount) {
-      alert("Saldo insuficiente para abrir esta posición");
-      return;
-    }
-
-    const entryPrice = getCurrentPrice(symbol);
-    const positionId = makeId("pos");
-    const txId = makeId("tx");
-
-    const position = {
-      id: positionId,
-      symbol,
-      direction,
-      amount,
-      entryPrice: entryPrice || null,
-      currentPrice: entryPrice || null,
-      unrealizedPnl: 0,
-      realizedPnl: 0,
-      status: "open",
-      openedAt: new Date().toISOString(),
-      source: "local",
-    };
-
-    const backendResult = await tryBackendOpenPosition({
+    api.placeOrder?.({
       symbol,
       amount,
-      direction,
-      entryPrice,
-      positionId,
+      direction
     });
 
-    if (backendResult && backendResult.error) {
-      alert(backendResult.error || "No se pudo abrir la posición");
-      return;
-    }
-
-    state.cashBalance -= amount;
-    addOpenPosition(position);
-
-    addTransaction(
-      {
-        id: backendResult?.transactionId || txId,
-        type: "open_position",
-        title: `Apertura ${direction}`,
-        symbol,
-        direction,
-        amount,
-        pnl: 0,
-        balanceAfter: state.cashBalance,
-        createdAt: new Date().toISOString(),
-        source: "local",
-      },
-      false
-    );
-
-    LAST_AMOUNT = amountInput?.value || null;
+    LAST_AMOUNT = amountInput.value;
     restoreAmount();
-    updateWalletUI();
-    renderFloatingTradesPanel();
-    saveState();
-
-    try {
-      await loadWalletSnapshot();
-      await loadPositionsSnapshot();
-      await loadTransactionsSnapshot();
-    } catch (e) {
-      console.warn("[LEONES] sync after open error:", e);
-    }
   }
 
-  async function closePosition(positionId) {
-    const idx = state.positions.findIndex((p) => String(p.id) === String(positionId));
-    if (idx === -1) return;
-
-    const position = state.positions[idx];
-    if (position.status !== "open") return;
-
-    const currentPrice = getCurrentPrice(position.symbol) ?? position.entryPrice ?? 0;
-    const pnl = computePnL(position, currentPrice);
-
-    const backendResult = await tryBackendClosePosition({
-      positionId: position.id,
-      symbol: position.symbol,
-      amount: position.amount,
-      direction: position.direction,
-      entryPrice: position.entryPrice,
-      currentPrice,
-      pnl,
-    });
-
-    if (backendResult && backendResult.error) {
-      alert(backendResult.error || "No se pudo cerrar la posición");
-      return;
+  document.addEventListener("click", (e) => {
+    if (e.target.matches('[data-action="buy"]')) {
+      e.preventDefault();
+      forceTrade("buy");
     }
 
-    state.cashBalance += safeNumber(position.amount, 0) + safeNumber(pnl, 0);
-
-    position.currentPrice = currentPrice;
-    position.unrealizedPnl = 0;
-    position.realizedPnl = pnl;
-    position.status = "closed";
-    position.closedAt = new Date().toISOString();
-
-    state.positions[idx] = position;
-
-    addTransaction(
-      {
-        id: backendResult?.transactionId || makeId("tx"),
-        type: "close_position",
-        title: `Cierre ${position.direction}`,
-        symbol: position.symbol,
-        direction: position.direction,
-        amount: position.amount,
-        pnl,
-        balanceAfter: state.cashBalance,
-        createdAt: new Date().toISOString(),
-        source: "local",
-      },
-      false
-    );
-
-    recalcBalances();
-    updateWalletUI();
-    renderFloatingTradesPanel();
-    saveState();
-
-    try {
-      await loadWalletSnapshot();
-      await loadPositionsSnapshot();
-      await loadTransactionsSnapshot();
-    } catch (e) {
-      console.warn("[LEONES] sync after close error:", e);
+    if (e.target.matches('[data-action="sell"]')) {
+      e.preventDefault();
+      forceTrade("sell");
     }
-  }
+  }, true);
 
-  document.addEventListener(
-    "click",
-    (e) => {
-      if (e.target.matches('[data-action="buy"]')) {
-        e.preventDefault();
-        forceTrade("buy");
-      }
-
-      if (e.target.matches('[data-action="sell"]')) {
-        e.preventDefault();
-        forceTrade("sell");
-      }
-
-      const closeBtn = e.target.closest("[data-close-position]");
-      if (closeBtn) {
-        e.preventDefault();
-        const id = closeBtn.getAttribute("data-close-position");
-        closePosition(id);
-      }
-    },
-    true
-  );
-
+  /* =========================
+     🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
+  ========================= */
   function createFloatingTradesPanel() {
+
     const old = document.getElementById("floatingTrades");
     if (old) old.remove();
 
@@ -5835,39 +5094,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     const div = document.createElement("div");
     div.id = "floatingTrades";
 
-    const savedX = localStorage.getItem("trades_x");
-    const savedY = localStorage.getItem("trades_y");
+    let savedX = localStorage.getItem("trades_x");
+    let savedY = localStorage.getItem("trades_y");
 
     div.style.cssText = `
       position:fixed;
       top:${savedY ? savedY + "px" : "80px"};
       left:${savedX ? savedX + "px" : "10px"};
-      width:300px;
-      max-width:90vw;
+      width:260px;
       background:#111;
       color:#fff;
       padding:10px;
       border-radius:10px;
       z-index:999999;
       font-size:12px;
-      box-shadow:0 10px 30px rgba(0,0,0,.35);
     `;
 
     div.innerHTML = `
-      <div id="dragHeader" style="display:flex;justify-content:space-between;align-items:center;cursor:grab;gap:8px;">
-        <b>📊 Operaciones y movimientos</b>
+      <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+        <b>📊 Operaciones</b>
         <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
       </div>
-
-      <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">
-        <div style="font-weight:bold;margin-bottom:6px;">Posiciones abiertas</div>
-        <div id="floatingTradesList">Sin operaciones</div>
-      </div>
-
-      <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">
-        <div style="font-weight:bold;margin-bottom:6px;">Historial de transacciones</div>
-        <div id="floatingTransactionsList">Sin movimientos</div>
-      </div>
+      <div id="floatingTradesList">Sin operaciones</div>
     `;
 
     privateArea.appendChild(div);
@@ -5923,23 +5171,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     document.addEventListener("mouseup", stopDrag);
 
-    header.addEventListener(
-      "touchstart",
-      (e) => {
-        const t = e.touches[0];
-        startDrag(t.clientX, t.clientY);
-      },
-      { passive: true }
-    );
+    header.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+    }, { passive: true });
 
-    document.addEventListener(
-      "touchmove",
-      (e) => {
-        const t = e.touches[0];
-        moveDrag(t.clientX, t.clientY);
-      },
-      { passive: false }
-    );
+    document.addEventListener("touchmove", (e) => {
+      const t = e.touches[0];
+      moveDrag(t.clientX, t.clientY);
+    }, { passive: false });
 
     document.addEventListener("touchend", stopDrag);
 
@@ -5974,6 +5214,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       `;
 
       mini.innerHTML = "📊";
+
       privateArea.appendChild(mini);
 
       mini.onclick = () => {
@@ -5990,60 +5231,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     setInterval(checkPrivate, 500);
   }
 
-  function renderFloatingTradesPanel() {
+  function updateFloatingTrades() {
+    const api = ext();
     const list = document.getElementById("floatingTradesList");
-    const txList = document.getElementById("floatingTransactionsList");
-    if (!list || !txList) return;
+    if (!list) return;
 
-    const openPositions = state.positions.filter((p) => p.status === "open");
-    const recentTx = state.transactions.slice(0, 12);
+    const positions = api.positions || [];
 
-    if (!openPositions.length) {
-      list.innerHTML = `<div style="opacity:.8">Sin operaciones</div>`;
-    } else {
-      list.innerHTML = openPositions
-        .map((p) => {
-          const currentPrice = p.currentPrice ?? getCurrentPrice(p.symbol) ?? p.entryPrice ?? 0;
-          const pnl = safeNumber(
-            p.unrealizedPnl ?? computePnL(p, currentPrice),
-            0
-          );
-          const pnlSign = pnl >= 0 ? "+" : "";
-          return `
-            <div style="margin-top:6px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.03);">
-              <div style="display:flex;justify-content:space-between;gap:8px;">
-                <div><b>${p.symbol}</b></div>
-                <button type="button" data-close-position="${p.id}" style="cursor:pointer;border:none;background:gold;color:#000;border-radius:6px;padding:4px 8px;font-weight:bold;">Cerrar</button>
-              </div>
-              <div style="margin-top:4px;">${p.direction.toUpperCase()} | Monto: ${money(p.amount)}</div>
-              <div>Entrada: ${p.entryPrice != null ? p.entryPrice : "--"} | Actual: ${currentPrice != null ? currentPrice : "--"}</div>
-              <div>PnL no realizado: <b>${pnlSign}${money(pnl)}</b></div>
-            </div>
-          `;
-        })
-        .join("");
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
     }
 
-    if (!recentTx.length) {
-      txList.innerHTML = `<div style="opacity:.8">Sin movimientos</div>`;
-    } else {
-      txList.innerHTML = recentTx
-        .map((t) => {
-          const sign = t.amount >= 0 ? "+" : "";
-          const pnlText = t.pnl ? ` | PnL: ${t.pnl >= 0 ? "+" : ""}${money(t.pnl)}` : "";
-          return `
-            <div style="margin-top:6px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.03);">
-              <div><b>${t.title}</b></div>
-              <div>${t.symbol ? `${t.symbol} | ` : ""}${t.type}</div>
-              <div>Monto: ${sign}${money(Math.abs(t.amount || 0))}${pnlText}</div>
-              <div style="opacity:.75">${new Date(t.createdAt).toLocaleString()}</div>
-            </div>
-          `;
-        })
-        .join("");
-    }
+    list.innerHTML = positions.map(p => `
+      <div style="margin-top:6px;">
+        ${p.symbol} | ${p.direction} <br>
+        $${p.amount}
+      </div>
+    `).join("");
   }
 
+  setInterval(updateFloatingTrades, 2000);
+
+  /* =========================
+     🔥 CAMBIO PANEL
+  ========================= */
   function showPanel(id) {
     showOnlyPanel(id);
 
@@ -6056,7 +5268,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       setTimeout(() => {
         window.renderSymbolsGrid?.();
         keepMarketAlive();
-        refreshPositionPrices();
       }, 300);
     }
 
@@ -6068,152 +5279,166 @@ document.addEventListener("DOMContentLoaded", async () => {
         fixTrading();
         persistAmount();
         restoreAmount();
-        refreshPositionPrices();
       }, 300);
     }
 
     if (id === "positionsPanel") {
       api.loadPositions?.();
-      renderFloatingTradesPanel();
     }
 
     if (id === "dashboardPanel") {
       api.loadAccount?.();
-      ensureWalletSummaryBox();
-      updateWalletUI();
     }
   }
 
-  document.addEventListener(
-    "click",
-    (e) => {
-      const el = e.target.closest("[data-symbol]");
-      if (!el) return;
+  /* =========================
+     🔥 CLICK SIMBOLO
+  ========================= */
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-symbol]");
+    if (!el) return;
 
-      const api = ext();
-      const symbol = el.dataset.symbol;
+    const api = ext();
 
-      setSelectedSymbol(symbol, {
-        symbol,
-        tvSymbol: el.dataset.tvSymbol || symbol,
-        label: el.dataset.label || symbol,
-        market: el.dataset.market || "",
-      });
+    api.selectSymbol?.({
+      symbol: el.dataset.symbol,
+      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
+      label: el.dataset.label || el.dataset.symbol,
+      market: el.dataset.market || ""
+    }, { openChart: true });
 
-      api.selectSymbol?.(
-        {
-          symbol,
-          tvSymbol: el.dataset.tvSymbol || symbol,
-          label: el.dataset.label || symbol,
-          market: el.dataset.market || "",
-        },
-        { openChart: true }
-      );
+    showPanel("tradingPanel");
 
-      showPanel("tradingPanel");
-    },
-    true
-  );
+  }, true);
 
-  function wireSocketEvents() {
-    const socket = window.socket || window.__LEONES_SOCKET__;
-    if (!socket || socket.__walletEventsBound) return;
-    socket.__walletEventsBound = true;
-
-    socket.on?.("wallet_updated", (payload) => {
-      if (!payload) return;
-      applyWalletSnapshot(payload);
-    });
-
-    socket.on?.("account_updated", (payload) => {
-      if (!payload) return;
-      applyWalletSnapshot(payload);
-    });
-
-    socket.on?.("transaction_created", (tx) => {
-      if (!tx) return;
-      addTransaction(tx, true);
-    });
-
-    socket.on?.("position_updated", (payload) => {
-      if (!payload) return;
-      if (Array.isArray(payload.positions)) {
-        mergePositions(payload.positions, true);
-      } else if (payload.position) {
-        mergePositions([payload.position], true);
-      }
-      renderFloatingTradesPanel();
-    });
-  }
-
-  async function syncEverything() {
-    await loadWalletSnapshot();
-    await loadPositionsSnapshot();
-    await loadTransactionsSnapshot();
-    refreshPositionPrices();
-    updateWalletUI();
-    renderFloatingTradesPanel();
-  }
-
+  /* =========================
+     🔥 INIT
+  ========================= */
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
 
-  loadSavedState();
-
   await waitForBroker();
 
-  ensureWalletSummaryBox();
-  updateWalletUI();
   bindMenuButtons();
   observeChanges();
   keepMarketAlive();
   responsiveFix();
   persistAmount();
   createFloatingTradesPanel();
-  renderFloatingTradesPanel();
-  wireSocketEvents();
 
-  document.querySelectorAll("[data-target]").forEach((btn) => {
+  document.querySelectorAll("[data-target]").forEach(btn => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
   showPanel("dashboardPanel");
 
-  await syncEverything();
-
+  /* =========================
+     🔥 REFORZAR BOTÓN FLOTANTE
+  ========================= */
   setInterval(() => {
     bindMenuButtons();
-    refreshPositionPrices();
-    renderFloatingTradesPanel();
   }, 1000);
 
-  setInterval(async () => {
-    await loadTransactionsSnapshot();
-    await loadPositionsSnapshot();
-    await loadWalletSnapshot();
-    refreshPositionPrices();
-  }, 10000);
+  /* =========================
+   🔥 FIX REAL BALANCE + POSICIONES (SAFE MODE)
+========================= */
+function safeTradingSync() {
+  const api = ext();
 
-  window.__LEONES_BROKER_STATE__ = state;
-  window.__LEONES_BROKER_SYNC__ = syncEverything;
-  window.selectSymbol = function (symbolOrObj, opts = {}) {
-    const symbol =
-      typeof symbolOrObj === "string"
-        ? symbolOrObj
-        : symbolOrObj?.symbol || symbolOrObj?.tvSymbol || null;
+  if (!api) return;
 
-    if (!symbol) return;
+  // 🔥 interceptar orden sin romper original
+  if (!api.__patchedOrder) {
+    const originalOrder = api.placeOrder;
 
-    setSelectedSymbol(symbol, typeof symbolOrObj === "object" ? symbolOrObj : { symbol });
+    api.placeOrder = function (order) {
+      try {
+        if (!order || !order.amount) return;
 
-    if (opts.openChart !== false) {
-      showPanel("tradingPanel");
-    }
-  };
+        // 🔥 validar balance antes de enviar
+        const balance = api.account?.balance || 0;
+
+        if (order.amount > balance) {
+          alert("Fondos insuficientes");
+          return;
+        }
+
+        // 🔥 ejecutar orden real
+        const result = originalOrder?.call(this, order);
+
+        // 🔥 restar balance inmediatamente (visual)
+        if (api.account) {
+          api.account.balance -= order.amount;
+        }
+
+        return result;
+
+      } catch (e) {
+        console.warn("order error", e);
+      }
+    };
+
+    api.__patchedOrder = true;
+  }
+
+  // 🔥 actualizar ganancias/pérdidas en vivo
+  setInterval(() => {
+    try {
+      const positions = api.positions || [];
+      const prices = api.prices || {};
+
+      let floating = 0;
+
+      positions.forEach(p => {
+        const price = prices[p.symbol];
+        if (!price) return;
+
+        let pnl = 0;
+
+        if (p.direction === "buy") {
+          pnl = (price - p.entryPrice) * p.amount;
+        } else {
+          pnl = (p.entryPrice - price) * p.amount;
+        }
+
+        p.pnl = pnl;
+        floating += pnl;
+      });
+
+      if (api.account) {
+        api.account.equity = (api.account.balance || 0) + floating;
+      }
+
+    } catch (e) {}
+  }, 2000);
+
+  // 🔥 historial básico (sin romper backend)
+  if (!api.__historyPatched) {
+    api.transactions = api.transactions || [];
+
+    const originalLoad = api.loadAccount;
+
+    api.loadAccount = async function () {
+      const res = await originalLoad?.call(this);
+
+      // mantener historial existente
+      api.transactions = api.transactions || [];
+
+      return res;
+    };
+
+    api.__historyPatched = true;
+  }
+}
+
+/* 🔥 ejecutar CUANDO TODO ESTÉ LISTO */
+setTimeout(() => {
+  safeTradingSync();
+}, 2000);
+
 });
 </script>
-
   
 </div>
 
