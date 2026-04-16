@@ -4966,36 +4966,31 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 VELAS MÁS FLUIDAS
   ========================= */
- let lastQuotesOk = true;
-let lastCall = 0;
+let lastQuotesOk = true;
+let updatingQuotes = false;
 
-setInterval(() => {
+setInterval(async () => {
   const api = ext();
-  const now = Date.now();
 
-  // 🔥 evita spam agresivo
-  if (now - lastCall < 4000) return;
+  // 🔥 no ejecutar si ya está corriendo
+  if (updatingQuotes) return;
 
-  lastCall = now;
+  // 🔥 no ejecutar si no existe función
+  if (!api || typeof api.loadRealQuotes !== "function") return;
+
+  updatingQuotes = true;
 
   try {
-    const res = api.loadRealQuotes?.();
-
-    // si la función devuelve promesa
-    if (res && typeof res.then === "function") {
-      res.then(() => {
-        lastQuotesOk = true;
-      }).catch(() => {
-        lastQuotesOk = false;
-      });
-    }
-
+    await api.loadRealQuotes();
+    lastQuotesOk = true;
   } catch (e) {
+    console.warn("[LEONES] loadRealQuotes error:", e);
     lastQuotesOk = false;
   }
 
-}, 1500);
+  updatingQuotes = false;
 
+}, 5000); // 🔥 cada 5 segundos (estable, sin brincos)
   /* =========================
      🔥 RESPONSIVE
   ========================= */
