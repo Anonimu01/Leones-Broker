@@ -749,10 +749,30 @@ const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
-   SERVICIO DIRECTO DE JS
-   - Sirve JS desde /js, /public/js, /public y rutas sueltas como /authGuard.js
-   - Si no existe, devuelve un JS válido para evitar HTML parseado como JS
+   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
+   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
+   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
+   - Si no existe, se devuelve un stub JS válido en vez de HTML.
    ====================================================== */
+function stripScriptWrappers(source) {
+  let text = String(source ?? "");
+
+  text = text.replace(/^\uFEFF/, "");
+
+  const trimmed = text.trim();
+
+  const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
+  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
+
+  if (startsWithScript && endsWithScript) {
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
+  }
+
+  return text;
+}
+
 function resolveJsCandidate(requestPath) {
   const clean = String(requestPath || "").split("?")[0];
   const normalized = clean.replace(/\\/g, "/");
@@ -765,7 +785,7 @@ function resolveJsCandidate(requestPath) {
   }
 
   if (normalized.startsWith("/js/")) {
-    candidates.push(path.join(jsDirPath, base));
+    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
 
@@ -778,7 +798,9 @@ function resolveJsCandidate(requestPath) {
     candidates.push(path.join(jsDirPath, base));
   }
 
-  return candidates.find((p) => {
+  const uniqueCandidates = [...new Set(candidates)];
+
+  return uniqueCandidates.find((p) => {
     try {
       return fs.existsSync(p) && fs.statSync(p).isFile();
     } catch {
@@ -787,27 +809,29 @@ function resolveJsCandidate(requestPath) {
   });
 }
 
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
-app.use("/public", express.static(staticPath));
-app.use("/js", express.static(jsDirPath));
-app.use(express.static(staticPath));
-
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
 
-  const candidate = resolveJsCandidate(pathname);
-  if (candidate) {
-    return res.sendFile(candidate);
-  }
+  try {
+    const candidate = resolveJsCandidate(pathname);
 
-  res
-    .status(404)
-    .type("application/javascript; charset=utf-8")
-    .send(`
-// Auto-generated JS stub — ${pathname} no existe en disco.
+    if (candidate) {
+      const raw = await fs.promises.readFile(candidate, "utf8");
+      const cleaned = stripScriptWrappers(raw);
+
+      res
+        .status(200)
+        .type("application/javascript; charset=utf-8")
+        .send(cleaned);
+      return;
+    }
+
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`
+// JS missing: ${pathname}
 console.error("JS missing: ${pathname}");
 
 window.CATEGORIES = window.CATEGORIES || [];
@@ -842,7 +866,18 @@ if (!window.loadRealQuotes) {
   };
 }
 `);
+  } catch (err) {
+    console.error("Error sirviendo JS:", err);
+    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+  }
 });
+
+/* ======================================================
+   STATIC FILES
+   ====================================================== */
+app.use("/public", express.static(staticPath));
+app.use("/js", express.static(jsDirPath));
+app.use(express.static(staticPath));
 
 /* ======================================================
    Fallback HTML
