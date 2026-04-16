@@ -4679,74 +4679,57 @@ if (api.placeOrder && !api.__originalPlaceOrder) {
     };
   }
 
- let __placingOrder = false;
 
-let __placingOrder = false;
+let __sendingOrder = false;
 
-function placeBrokerOrder(payload = {}) {
-  const symbol = String(payload.symbol || payload.tvSymbol || '').trim().toUpperCase();
-  const meta =
-    symbolMap().get(symbol) ||
-    getSymbols().find(x => String(x.symbol).toUpperCase() === symbol || String(x.tvSymbol).toUpperCase() === symbol) ||
-    getActiveSymbolMeta();
+function placeOrder(direction) {
 
-  if (meta) {
-    state.activeSymbol = meta.symbol;
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
-    renderSymbolDetails(meta);
-    requestRealtimeForSymbol(meta);
-    renderBottomPanels();
+  // 🔥 evitar loop infinito
+  if (__sendingOrder) {
+    console.warn("⛔ Loop bloqueado en placeOrder");
+    return;
   }
 
-  const amount = payload.amount ?? payload.positionSize ?? payload.notional ?? null;
-  const direction = String(payload.direction || payload.side || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-  const type = String(payload.type || payload.orderType || getOrderType() || 'Market');
-  const price = payload.price ?? null;
+  __sendingOrder = true;
 
-  const sizeTop = document.getElementById('brokerOrderSize');
-  const sizeBottom = document.getElementById('brokerOrderSizeBottom');
-  if (amount !== null && amount !== undefined && amount !== '') {
-    if (sizeTop) sizeTop.value = amount;
-    if (sizeBottom) sizeBottom.value = amount;
-    LAST_AMOUNT = String(amount);
-  }
+  try {
+    const api = window.__LEONES_BROKER_EXT2 || {};
 
-  const typeTop = document.getElementById('order-type');
-  const typeBottom = document.getElementById('order-type-bottom');
-  if (typeTop) typeTop.value = type;
-  if (typeBottom) typeBottom.value = type;
-  syncOrderTypeBoxes(type);
+    const symbol =
+      api.activeSymbol ||
+      window.TR?.activeSymbol;
 
-  if (price !== null && price !== undefined && price !== '') {
-    const priceTop = document.getElementById('order-price');
-    const priceBottom = document.getElementById('order-price-bottom');
-    if (priceTop) priceTop.value = price;
-    if (priceBottom) priceBottom.value = price;
-  }
+    const amount = parseFloat(
+      document.getElementById("brokerOrderSize")?.value
+    );
 
-  // 🔥 AQUÍ ESTÁ EL FIX REAL (SIN LOOP)
-  const api = window.__LEONES_BROKER_EXT2 || {};
+    if (!symbol) {
+      alert("Selecciona un símbolo");
+      return;
+    }
 
-  if (typeof api.__originalPlaceOrder === "function") {
-    return api.__originalPlaceOrder({
-      symbol: symbol,
-      amount: amount,
-      direction: direction,
-      price: price,
-      type: type
-    });
-  }
+    if (!amount || amount <= 0) {
+      alert("Monto inválido");
+      return;
+    }
 
-  // fallback seguro
-  if (typeof api.placeOrder === "function") {
-    return api.placeOrder({
-      symbol: symbol,
-      amount: amount,
-      direction: direction,
-      price: price,
-      type: type
-    });
+    const order = {
+      symbol,
+      amount,
+      direction: direction.toUpperCase()
+    };
+
+    // 🔥 LLAMAR SOLO A LA FUNCIÓN REAL
+    if (typeof api.__originalPlaceOrder === "function") {
+      return api.__originalPlaceOrder(order);
+    }
+
+    console.warn("No existe __originalPlaceOrder");
+
+  } catch (e) {
+    console.error("Error en placeOrder:", e);
+  } finally {
+    __sendingOrder = false;
   }
 }
   function bootIfLoggedIn() {
