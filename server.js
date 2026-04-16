@@ -25,7 +25,7 @@ import verificationRoutes from "./routes/verification.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import positionsRoutes from "./routes/positions.routes.js";
 import tradeRoutes from "./routes/trade.routes.js";
-import accountRoutes from "./routes/account.routes.js"; // agregado
+import accountRoutes from "./routes/account.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
@@ -55,6 +55,7 @@ dotenv.config({
 
 const app = express();
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
 // DB CONNECT
 connectDB();
@@ -100,17 +101,6 @@ app.use(mongoSanitize());
 app.use(xss());
 
 /* ======================================================
-   RATE LIMIT (basic)
-   ====================================================== */
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 200, // requests per IP per window
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use("/api", limiter);
-
-/* ======================================================
    CORS - whitelist dinámico
    ====================================================== */
 const allowedOrigins = new Set(
@@ -121,7 +111,7 @@ const allowedOrigins = new Set(
     "http://127.0.0.1:3000",
     "http://localhost:4000",
     "http://127.0.0.1:4000",
-    "https://leones-broker.onrender.com", // añadido por seguridad/compat
+    "https://leones-broker.onrender.com",
   ].filter(Boolean)
 );
 
@@ -131,14 +121,15 @@ const corsOptions = {
     if (allowedOrigins.has(origin)) return callback(null, true);
     try {
       const url = new URL(origin);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
         return callback(null, true);
+      }
     } catch (e) {}
     console.warn("CORS denied for origin:", origin);
     callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 };
 
 app.use(cors(corsOptions));
@@ -156,6 +147,20 @@ app.use((req, res, next) => {
 // body parsers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+/* ======================================================
+   RATE LIMIT
+   - Para no romper el dashboard con polling GET, limitamos
+     más fuerte solo métodos de escritura.
+   ====================================================== */
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+});
+app.use("/api", limiter);
 
 /* ======================================================
    HEALTH CHECK
@@ -176,7 +181,6 @@ app.get("/api/health", (req, res) => {
 
 /* ======================================================
    SEND EMAIL HELPER
-   - usamos el helper centralizado en ./utils/sendEmail.js
    ====================================================== */
 app.locals.sendEmail = sendEmail;
 
@@ -219,11 +223,12 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
 /* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
-  if (!to)
+  if (!to) {
     return res.status(400).json({
       ok: false,
       message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
     });
+  }
 
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
   const html =
@@ -231,15 +236,15 @@ app.post("/api/_send_test_email", async (req, res) => {
     `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
 
   try {
-    // El helper acepta sendEmail(to, subject, html) o sendEmail({ to, subject, html })
     const r = await sendEmail({ to, subject, html });
-    if (r.ok)
+    if (r.ok) {
       return res.json({
         ok: true,
         message: "Correo enviado",
         provider: r.provider,
         result: r.result || r.info || r.resp,
       });
+    }
     return res.status(500).json({
       ok: false,
       message: "No se pudo enviar correo",
@@ -256,16 +261,15 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   API ROUTES - montamos rutas principales (ingles)
+   API ROUTES - montamos rutas principales
    ====================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
 app.use("/api/wallet", walletRoutes);
-// positions + trade routes: montamos en inglés y también alias en español más abajo
 app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes); // agregado
+app.use("/api/account", accountRoutes);
 
 /* ======================================================
    SAMPLE SYMBOLS / FALLBACK
@@ -281,6 +285,90 @@ const SAMPLE_SYMBOLS = [
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
 
+function getPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeQuote(symbol, item = {}) {
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
+
+  const price =
+    toNumber(item.price) ??
+    toNumber(item.last) ??
+    toNumber(item.close) ??
+    toNumber(item.value) ??
+    toNumber(item.mark) ??
+    toNumber(item.mid);
+
+  return {
+    symbol,
+    label,
+    market: item.market || "Unknown",
+    price,
+    bid: toNumber(item.bid),
+    ask: toNumber(item.ask),
+    open: toNumber(item.open),
+    high: toNumber(item.high),
+    low: toNumber(item.low),
+    volume: toNumber(item.volume),
+    change: toNumber(item.change),
+    changePercent: toNumber(item.changePercent),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    raw: item,
+  };
+}
+
+function buildQuotesArray() {
+  const store = getPriceStore();
+  const keys = Object.keys(store);
+
+  if (keys.length) {
+    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
+  }
+
+  return SAMPLE_SYMBOLS.map((s) =>
+    normalizeQuote(s.symbol, {
+      label: s.label,
+      market: s.market,
+      price: null,
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
+function buildMarketPayload() {
+  const quotes = buildQuotesArray();
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+    symbols: quotes.map((q) => ({
+      symbol: q.symbol,
+      label: q.label,
+      market: q.market,
+    })),
+  };
+}
+
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
 );
@@ -288,7 +376,9 @@ app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
 
 /* ======================================================
    SOCKET.IO + PRICE HANDLER
@@ -314,7 +404,9 @@ const priceHandler = new PriceHandler(io);
 let polygonSocket = null;
 try {
   if (!process.env.POLYGON_API_KEY) {
-    console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse");
+    console.warn(
+      "⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse"
+    );
   } else {
     try {
       polygonSocket = new PolygonSocket({
@@ -325,13 +417,11 @@ try {
         onError: (err) => console.error("PolygonSocket error:", err),
       });
 
-      // safe connect (catch synchronous and async errors)
       try {
         const maybe = polygonSocket.connect();
         if (maybe && typeof maybe.then === "function") {
           maybe.catch((err) => {
             console.warn("PolygonSocket.connect() rejected:", err);
-            // make sure we don't leave polygonSocket in a broken state
             polygonSocket = null;
           });
         }
@@ -364,11 +454,38 @@ try {
 }
 
 /* ======================================================
-   /api/symbols endpoint dinámico
+   Fallbacks para eliminar 404 en rutas que tu frontend está llamando
    ====================================================== */
+app.get("/api/quotes", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.quotes);
+});
+
+app.get("/api/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+
+app.get("/api/market/quotes", (req, res) => {
+  return res.json(buildMarketPayload());
+});
+
+app.get("/api/market/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+
+app.get("/api/market/polygon/quotes", (req, res) => {
+  return res.json(buildMarketPayload());
+});
+
+app.get("/api/market/polygon/symbols", (req, res) => {
+  return res.json(SAMPLE_SYMBOLS);
+});
+
 app.get("/api/symbols", (req, res) => {
   try {
-    const prices = priceHandler && priceHandler.prices ? priceHandler.prices : null;
+    const prices = getPriceStore();
     if (prices && Object.keys(prices).length) {
       const arr = Object.keys(prices).map((k) => {
         return {
@@ -387,20 +504,161 @@ app.get("/api/symbols", (req, res) => {
 });
 
 /* ======================================================
+   Helper: obtener usuario desde token (si aplica)
+   ====================================================== */
+async function getUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return null;
+    }
+
+    const userId =
+      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+
+    const user = await User.findById(userId).lean().exec().catch(() => null);
+    return user || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getPositionsForUser(userId) {
+  try {
+    return await Position.find({ user: userId }).lean().exec().catch(() => []);
+  } catch {
+    return [];
+  }
+}
+
+async function getWalletForUser(userId) {
+  try {
+    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+
+  const balance = wallet?.balance ?? user.balance ?? 0;
+
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+
+/* ======================================================
+   Compat endpoints: /api/account, /api/me, /api/profile
+   ====================================================== */
+async function accountLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
+  } catch (e) {
+    console.error("accountLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+app.get("/api/account", accountLikeHandler);
+app.get("/api/me", accountLikeHandler);
+app.get("/api/profile", accountLikeHandler);
+app.get("/api/cuenta", (req, res) => {
+  return res.redirect(307, "/api/account");
+});
+
+async function positionsLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await getPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("positionsLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+app.get("/api/positions", positionsLikeHandler);
+app.get("/api/trade/positions", positionsLikeHandler);
+
+app.get("/api/wallet", async (req, res) => {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const wallet = await getWalletForUser(user._id);
+    if (wallet) return res.json(wallet);
+
+    return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
+  } catch (e) {
+    console.error("/api/wallet error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/billetera", (req, res) => {
+  return res.redirect(307, "/api/wallet");
+});
+
+/* ======================================================
+   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
+   ====================================================== */
+app.use("/api/api", (req, res) => {
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
+});
+
+/* ======================================================
    SOCKET.IO EVENTS
    ====================================================== */
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
   try {
-    socket.emit("prices_snapshot", priceHandler.prices || {});
+    socket.emit("prices_snapshot", getPriceStore() || {});
   } catch (e) {
     socket.emit("prices_snapshot", {});
   }
 
   socket.on("request_prices_snapshot", () => {
     try {
-      socket.emit("prices_snapshot", priceHandler.prices || {});
+      socket.emit("prices_snapshot", getPriceStore() || {});
     } catch (e) {
       socket.emit("prices_snapshot", {});
     }
@@ -408,17 +666,16 @@ io.on("connection", (socket) => {
 
   socket.on("request_symbols", () => {
     try {
+      const prices = getPriceStore();
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         const syms = priceHandler.getSymbols();
         socket.emit("symbols_update", syms || []);
-      } else if (priceHandler && priceHandler.prices) {
-        const arr = Object.keys(priceHandler.prices).map((k) => ({
+      } else if (prices && Object.keys(prices).length) {
+        const arr = Object.keys(prices).map((k) => ({
           symbol: k,
           label: (k.split(":").pop() || k).replace("_", "/"),
           market:
-            priceHandler.prices[k] && priceHandler.prices[k].market
-              ? priceHandler.prices[k].market
-              : "Unknown",
+            prices[k] && prices[k].market ? prices[k].market : "Unknown",
         }));
         socket.emit("symbols_update", arr);
       } else {
@@ -432,8 +689,9 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function")
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
         polygonSocket.subscribe(symbol, kind);
+      }
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -444,8 +702,9 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function")
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
         polygonSocket.unsubscribe(symbol, kind);
+      }
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -456,115 +715,6 @@ io.on("connection", (socket) => {
   socket.on("disconnect", (reason) => {
     console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
   });
-});
-
-/* ======================================================
-   Helper: obtener usuario desde token (si aplica)
-   ====================================================== */
-async function getUserFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
-    const token = String(auth).split(" ")[1];
-    if (!token) return null;
-    if (!process.env.JWT_SECRET) return null;
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (e) {
-      return null;
-    }
-    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-    const user = await User.findById(userId).lean().exec().catch(() => null);
-    return user || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-/* ======================================================
-   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
-   ====================================================== */
-app.use("/api/api", (req, res) => {
-  // Redirigir al mismo path sin duplicar /api
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
-
-/* ======================================================
-   Compat endpoints: /api/account  y /api/wallet (añado alias en español)
-   ====================================================== */
-app.get("/api/account", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    let wallet = null;
-    try {
-      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(() => null);
-    } catch (e) {
-      wallet = null;
-    }
-    let positions = [];
-    try {
-      positions = await Position.find({ user: user._id }).lean().exec().catch(() => []);
-    } catch (e) {
-      positions = [];
-    }
-
-    const account = {
-      balance: wallet?.balance ?? user.balance ?? 0,
-      equity: wallet?.balance ?? user.balance ?? 0,
-      marginUsed: 0,
-      freeMargin: wallet?.balance ?? user.balance ?? 0,
-      marginLevel: 0,
-      leverage: user.leverage ?? 100,
-      currency: user.currency || "USD",
-      positions: positions || [],
-    };
-    return res.json({ account });
-  } catch (e) {
-    console.error("/api/account error", e);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-// alias español /api/cuenta -> redirige a /api/account
-app.get("/api/cuenta", (req, res) => {
-  return res.redirect(307, "/api/account");
-});
-
-app.get("/api/wallet", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    let wallet = null;
-    try {
-      wallet = await Wallet.findOne({ user: user._id }).lean().exec().catch(() => null);
-    } catch (e) {
-      wallet = null;
-    }
-
-    if (wallet) return res.json(wallet);
-    return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
-  } catch (e) {
-    console.error("/api/wallet error", e);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-// alias español /api/billetera -> redirige a /api/wallet
-app.get("/api/billetera", (req, res) => {
-  return res.redirect(307, "/api/wallet");
-});
-
-/* ======================================================
-   404 API (único fallback para /api)
-   ====================================================== */
-app.use("/api", (req, res) => {
-  res.status(404).json({ error: "API endpoint not found" });
 });
 
 /* ======================================================
@@ -597,96 +747,59 @@ if (!staticDirName) {
 const staticPath = path.join(__dirname, staticDirName);
 
 /* ======================================================
-   AUTH GUARD JS (evita HTML en vez de JS y protege público/privado)
+   JS STUBS middleware
+   - evita que un .js ausente termine respondiendo HTML
    ====================================================== */
-app.get("/js/authGuard.js", (req, res) => {
-  const guardJs = `
-(function () {
-  "use strict";
+app.use((req, res, next) => {
+  const pathname = req.path || "";
+  if (!pathname.endsWith(".js")) return next();
 
-  const SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-  const TOKEN_KEY = "token";
-  const PRIVATE_PAGE = "/dashboard.html";
-  const PUBLIC_PAGES = ["/", "/index.html", "/login.html", "/register.html"];
-
-  function getToken() {
-    try {
-      const t1 = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("BROKER_TOKEN");
-      if (t1) return t1;
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const sess = JSON.parse(raw);
-        if (sess && sess.token) return sess.token;
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  const token = getToken();
-  const path = window.location.pathname || "/";
-
-  const isPublic = PUBLIC_PAGES.includes(path) || path === "/";
-  const isPrivate = !isPublic;
-
-  if (token && isPublic) {
-    window.location.replace(PRIVATE_PAGE);
-    return;
-  }
-
-  if (!token && isPrivate && path !== PRIVATE_PAGE) {
-    window.location.replace("/");
-    return;
-  }
-})();
-`;
-
-  res.type("application/javascript; charset=utf-8").status(200).send(guardJs);
-});
-
-/* ======================================================
-   JS STUBS middleware (evita MIME error / ReferenceError)
-   - ahora soporta /js/* para evitar que index.html sea servido como JS cuando faltan assets
-   ====================================================== */
-app.get(["/js/main.js", "/js/trading.js", "/js/*"], (req, res, next) => {
   try {
-    // resolvemos sin querystring: Express ya separa query, req.path no incluye ?
-    const requestedPath = path.join(staticPath, req.path);
-    if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
-      return next(); // si existe, que lo sirva express.static
+    const diskPath = path.join(staticPath, pathname.replace(/^\/+/, ""));
+    if (fs.existsSync(diskPath) && fs.statSync(diskPath).isFile()) {
+      return next();
     }
   } catch (e) {}
 
+  const base = path.basename(pathname);
+
   const stub = `
-/* Auto-generated JS stub — served because ${req.path} not present on disk.
-   This prevents MIME errors and provides safe placeholders for globals. */
+/* Auto-generated JS stub — served because ${pathname} is missing on disk.
+   This prevents MIME errors and avoids HTML being parsed as JavaScript. */
 window.CATEGORIES = window.CATEGORIES || [];
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 window.API = window.API || "/api";
 window.SOCKET_URL = window.SOCKET_URL || location.origin;
 window._LEONES = window._LEONES || {};
+window._LEONES_TRADING = window._LEONES_TRADING || {};
+window._LEONES_TRADING.fetchPositions = window._LEONES_TRADING.fetchPositions || (async function () { return []; });
 if (!window.loadPositions) {
-  window.loadPositions = async function() {
+  window.loadPositions = async function () {
     try {
       if (window._LEONES_TRADING && typeof window._LEONES_TRADING.fetchPositions === "function") {
         return await window._LEONES_TRADING.fetchPositions();
       }
-    } catch (e) { console.warn('loadPositions stub error', e); }
+    } catch (e) {
+      console.warn("loadPositions stub error", e);
+    }
     return null;
   };
 }
-console.log("Served JS stub for ${req.path}");
+console.log("Served JS stub for ${base}");
 `;
-
   res.type("application/javascript; charset=utf-8").status(200).send(stub);
 });
 
 app.use(express.static(staticPath));
 
+/* ======================================================
+   Fallback HTML
+   ====================================================== */
 app.get("*", (req, res) => {
-  // evitar servir index.html para rutas de API
   if (req.path.startsWith("/api/") || req.path === "/api") {
     return res.status(404).json({ error: "API endpoint not found" });
   }
+
   const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -697,11 +810,17 @@ app.get("*", (req, res) => {
 });
 
 /* ======================================================
+   404 API (único fallback para /api)
+   ====================================================== */
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "API endpoint not found" });
+});
+
+/* ======================================================
    ERROR HANDLER
    ====================================================== */
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  // En producción no mandamos detalles
   res.status(err.status || 500).json({
     error: "Server error",
     message: process.env.NODE_ENV === "development" ? err.message : undefined,
@@ -723,10 +842,12 @@ const server = httpServer.listen(PORT, () => {
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
 
-  if (!process.env.POLYGON_API_KEY)
+  if (!process.env.POLYGON_API_KEY) {
     console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY)
+  }
+  if (!process.env.RESEND_API_KEY) {
     console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  }
 });
 
 /* ======================================================
@@ -737,7 +858,6 @@ let shuttingDown = false;
 const safeClosePolygonSocket = async () => {
   if (!polygonSocket) return;
   try {
-    // call close and handle both sync throw and promise rejection
     const maybe = polygonSocket.close();
     if (maybe && typeof maybe.then === "function") {
       await maybe.catch((err) => {
