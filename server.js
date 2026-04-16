@@ -158,7 +158,8 @@ const limiter = rateLimit({
   max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+  skip: (req) =>
+    req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
 });
 app.use("/api", limiter);
 
@@ -370,7 +371,9 @@ function buildMarketPayload() {
 }
 
 app.get("/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+  res.json({
+    markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"],
+  })
 );
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
@@ -625,7 +628,10 @@ app.get("/api/wallet", async (req, res) => {
     const wallet = await getWalletForUser(user._id);
     if (wallet) return res.json(wallet);
 
-    return res.json({ balance: user.balance ?? 0, currency: user.currency || "USD" });
+    return res.json({
+      balance: user.balance ?? 0,
+      currency: user.currency || "USD",
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -773,10 +779,14 @@ window.SOCKET_URL = window.SOCKET_URL || location.origin;
 window._LEONES = window._LEONES || {};
 window._LEONES_TRADING = window._LEONES_TRADING || {};
 window._LEONES_TRADING.fetchPositions = window._LEONES_TRADING.fetchPositions || (async function () { return []; });
+
 if (!window.loadPositions) {
   window.loadPositions = async function () {
     try {
-      if (window._LEONES_TRADING && typeof window._LEONES_TRADING.fetchPositions === "function") {
+      if (
+        window._LEONES_TRADING &&
+        typeof window._LEONES_TRADING.fetchPositions === "function"
+      ) {
         return await window._LEONES_TRADING.fetchPositions();
       }
     } catch (e) {
@@ -785,6 +795,7 @@ if (!window.loadPositions) {
     return null;
   };
 }
+
 console.log("Served JS stub for ${base}");
 `;
   res.type("application/javascript; charset=utf-8").status(200).send(stub);
