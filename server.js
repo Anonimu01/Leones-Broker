@@ -93,7 +93,6 @@ mongoose.connection.on("disconnected", () => {
 
 /* ======================================================
    SECURITY MIDDLEWARES
-   - Helmet activo pero CSP desactivado para evitar bloqueos del frontend
    ====================================================== */
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
@@ -133,25 +132,21 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* ======================================================
    BASIC MIDDLEWARES
    ====================================================== */
-
-// logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} › ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// body parsers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 /* ======================================================
    RATE LIMIT
-   - Para no romper el dashboard con polling GET, limitamos
-     más fuerte solo métodos de escritura.
    ====================================================== */
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -751,27 +746,56 @@ if (!staticDirName) {
 }
 
 const staticPath = path.join(__dirname, staticDirName);
+const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
-   JS STUBS middleware
-   - evita que un .js ausente termine respondiendo HTML
+   SERVICIO DIRECTO DE JS
+   - Primero intenta servir el archivo real.
+   - Si el navegador pidió /authGuard.js o /trading.js y el archivo está en /public/js,
+     lo resuelve desde ahí.
+   - Si no existe, devuelve un stub JS válido para que nunca caiga HTML.
    ====================================================== */
+function resolveJsCandidate(requestPath) {
+  const clean = String(requestPath || "").split("?")[0];
+  const base = path.basename(clean);
+
+  const candidates = [];
+
+  if (clean.startsWith("/js/")) {
+    candidates.push(path.join(staticPath, clean.replace(/^\/+/, "")));
+  }
+
+  if (base) {
+    candidates.push(path.join(staticPath, base));
+    candidates.push(path.join(jsDirPath, base));
+  }
+
+  return candidates.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
 app.use((req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
 
-  try {
-    const diskPath = path.join(staticPath, pathname.replace(/^\/+/, ""));
-    if (fs.existsSync(diskPath) && fs.statSync(diskPath).isFile()) {
-      return next();
-    }
-  } catch (e) {}
+  const candidate = resolveJsCandidate(pathname);
+  if (candidate) {
+    return res.sendFile(candidate);
+  }
 
-  const base = path.basename(pathname);
-
-  const stub = `
+  res
+    .status(200)
+    .type("application/javascript; charset=utf-8")
+    .send(`
 /* Auto-generated JS stub — served because ${pathname} is missing on disk.
    This prevents MIME errors and avoids HTML being parsed as JavaScript. */
+console.warn("JS missing: ${pathname}");
+
 window.CATEGORIES = window.CATEGORIES || [];
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
 window.API = window.API || "/api";
@@ -796,11 +820,17 @@ if (!window.loadPositions) {
   };
 }
 
-console.log("Served JS stub for ${base}");
-`;
-  res.type("application/javascript; charset=utf-8").status(200).send(stub);
+if (!window.loadRealQuotes) {
+  window.loadRealQuotes = async function () {
+    return null;
+  };
+}
+`);
 });
 
+/* ======================================================
+   STATIC FILES
+   ====================================================== */
 app.use(express.static(staticPath));
 
 /* ======================================================
