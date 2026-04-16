@@ -4761,19 +4761,625 @@ if (window.__LEONES_BOOTED__) {
 
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
-
   const panels = document.querySelectorAll("#privateArea_full .panel");
   const ext = () => window.__LEONES_BROKER_EXT2 || {};
 
   let LAST_AMOUNT = null;
 
-  /* =========================
-     🔥 BOTÓN MENU (FIX DEFINITIVO)
-  ========================= */
-  function toggleSidebar() {
-    const sidebar = document.getElementById("sidebar");
-    if (!sidebar) return;
-    sidebar.classList.toggle("hidden");
+  window.selectedSymbol = window.selectedSymbol || null;
+  window.selectedSimbol = window.selectedSymbol || null;
+
+  const brokerState = {
+    cashBalance: 0,
+    equity: 0,
+    reserved: 0,
+    available: 0,
+    currency: "USD",
+    positions: [],
+    transactions: [],
+    seenTxIds: new Set(),
+    lastSyncAt: null,
+  };
+
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function money(value) {
+    const n = safeNumber(value, 0);
+    try {
+      return new Intl.NumberFormat("es-DO", {
+        style: "currency",
+        currency: brokerState.currency || "USD",
+        maximumFractionDigits: 2,
+      }).format(n);
+    } catch {
+      return `${n.toFixed(2)} ${brokerState.currency || "USD"}`;
+    }
+  }
+
+  function makeId(prefix = "id") {
+    return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
+  function getCurrentSymbol() {
+    const api = ext();
+    return (
+      window.selectedSymbol ||
+      api.activeSymbol ||
+      window.TR?.activeSymbol ||
+      null
+    );
+  }
+
+  function getPriceStore() {
+    const api = ext();
+    const candidates = [
+      api.prices,
+      api.quotes,
+      api.marketQuotes,
+      api.lastQuotes,
+      api.priceStore,
+      window.__LEONES_LAST_QUOTES__,
+      window.__LEONES_PRICE_STORE__,
+      window.__LEONES_QUOTES__,
+      window.__LEONES_MARKET_QUOTES__,
+    ];
+
+    for (const store of candidates) {
+      if (!store) continue;
+
+      if (store instanceof Map) {
+        const obj = Object.fromEntries(store.entries());
+        if (Object.keys(obj).length) return obj;
+      }
+
+      if (typeof store === "object" && Object.keys(store).length) return store;
+    }
+
+    return {};
+  }
+
+  function readPriceFromStore(store, symbol) {
+    if (!store || !symbol) return null;
+
+    if (store instanceof Map) {
+      const direct = store.get(symbol);
+      if (direct != null) return readPriceFromStore({ value: direct }, "value");
+      return null;
+    }
+
+    const direct = store[symbol];
+    if (direct == null) return null;
+
+    if (typeof direct === "number") return direct;
+    if (typeof direct === "string") {
+      const n = Number(direct);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    if (typeof direct === "object") {
+      const fields = [
+        direct.price,
+        direct.last,
+        direct.close,
+        direct.value,
+        direct.mid,
+        direct.mark,
+      ];
+      for (const f of fields) {
+        const n = Number(f);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+
+    return null;
+  }
+
+  function getCurrentPrice(symbol) {
+    const store = getPriceStore();
+    const direct = readPriceFromStore(store, symbol);
+    if (direct != null) return direct;
+
+    const api = ext();
+    const symbolInfo =
+      api.symbols?.find?.((s) => s.symbol === symbol) ||
+      api.symbolMap?.[symbol] ||
+      window.__LEONES_LAST_SYMBOLS__?.find?.((s) => s.symbol === symbol);
+
+    if (symbolInfo && Number.isFinite(Number(symbolInfo.price))) {
+      return Number(symbolInfo.price);
+    }
+
+    return null;
+  }
+
+  function normalizePosition(p) {
+    if (!p || typeof p !== "object") return null;
+
+    const id = p.id || p._id || makeId("pos");
+    const symbol = p.symbol || p.asset || "";
+    const direction = String(p.direction || p.side || "buy").toLowerCase();
+
+    const amount = safeNumber(p.amount ?? p.margin ?? p.stake ?? p.size, 0);
+
+    const entryPrice = Number.isFinite(Number(p.entryPrice))
+      ? Number(p.entryPrice)
+      : Number.isFinite(Number(p.openPrice))
+      ? Number(p.openPrice)
+      : Number.isFinite(Number(p.price))
+      ? Number(p.price)
+      : null;
+
+    const currentPrice = Number.isFinite(Number(p.currentPrice))
+      ? Number(p.currentPrice)
+      : entryPrice;
+
+    return {
+      id,
+      symbol,
+      direction,
+      amount,
+      entryPrice,
+      currentPrice,
+      realizedPnl: safeNumber(p.realizedPnl ?? p.pnl ?? 0, 0),
+      unrealizedPnl: safeNumber(p.unrealizedPnl ?? 0, 0),
+      status: p.status || "open",
+      openedAt: p.openedAt || p.createdAt || new Date().toISOString(),
+      closedAt: p.closedAt || null,
+      source: p.source || "backend",
+      raw: p,
+    };
+  }
+
+  function normalizeTransaction(tx) {
+    if (!tx || typeof tx !== "object") return null;
+
+    const id = tx.id || tx._id || makeId("tx");
+
+    return {
+      id,
+      type: tx.type || "adjustment",
+      title: tx.title || tx.description || tx.note || tx.type || "Movimiento",
+      symbol: tx.symbol || "",
+      direction: tx.direction || tx.side || "",
+      amount: safeNumber(tx.amount ?? tx.value ?? tx.cash ?? 0, 0),
+      pnl: safeNumber(tx.pnl ?? tx.profit ?? 0, 0),
+      balanceAfter: Number.isFinite(Number(tx.balanceAfter))
+        ? Number(tx.balanceAfter)
+        : null,
+      createdAt: tx.createdAt || tx.date || tx.timestamp || new Date().toISOString(),
+      source: tx.source || "backend",
+      raw: tx,
+    };
+  }
+
+  function isDepositTx(type) {
+    const t = String(type || "").toLowerCase();
+    return ["deposit", "depo", "credit", "admin_deposit", "wallet_deposit", "add_funds"].includes(t);
+  }
+
+  function isWithdrawalTx(type) {
+    const t = String(type || "").toLowerCase();
+    return ["withdrawal", "withdraw", "debit", "admin_withdrawal", "remove_funds"].includes(t);
+  }
+
+  function recalcBalances() {
+    const openPositions = brokerState.positions.filter((p) => p.status === "open");
+    brokerState.reserved = openPositions.reduce((sum, p) => sum + safeNumber(p.amount, 0), 0);
+
+    const floating = openPositions.reduce(
+      (sum, p) => sum + safeNumber(p.unrealizedPnl, 0),
+      0
+    );
+
+    brokerState.available = Math.max(0, brokerState.cashBalance);
+    brokerState.equity = brokerState.cashBalance + brokerState.reserved + floating;
+  }
+
+  function updateWalletUI() {
+    const balanceEls = [
+      document.getElementById("balance"),
+      document.querySelector("[data-wallet-balance]"),
+    ].filter(Boolean);
+
+    const equityEls = [
+      document.getElementById("equity"),
+      document.querySelector("[data-wallet-equity]"),
+    ].filter(Boolean);
+
+    const availableEls = [
+      document.getElementById("availableBalance"),
+      document.querySelector("[data-wallet-available]"),
+    ].filter(Boolean);
+
+    const reservedEls = [
+      document.getElementById("reservedBalance"),
+      document.querySelector("[data-wallet-reserved]"),
+    ].filter(Boolean);
+
+    const currencyEls = [
+      document.getElementById("walletCurrency"),
+      document.querySelector("[data-wallet-currency]"),
+    ].filter(Boolean);
+
+    balanceEls.forEach((el) => (el.textContent = money(brokerState.cashBalance)));
+    equityEls.forEach((el) => (el.textContent = money(brokerState.equity)));
+    availableEls.forEach((el) => (el.textContent = money(brokerState.available)));
+    reservedEls.forEach((el) => (el.textContent = money(brokerState.reserved)));
+    currencyEls.forEach((el) => (el.textContent = brokerState.currency || "USD"));
+  }
+
+  function ensureWalletSummaryBox() {
+    if (document.getElementById("walletSummaryBox")) return;
+
+    const host = document.getElementById("dashboardPanel") || document.getElementById("privateArea_full");
+    if (!host) return;
+
+    const box = document.createElement("div");
+    box.id = "walletSummaryBox";
+    box.style.cssText = `
+      background:#111;
+      color:#fff;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:12px;
+      padding:12px;
+      margin:10px 0 14px;
+      font-size:13px;
+      line-height:1.5;
+    `;
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div><b>Saldo disponible:</b> <span id="availableBalance">${money(brokerState.available)}</span></div>
+        <div><b>Balance actual:</b> <span id="balance">${money(brokerState.cashBalance)}</span></div>
+        <div><b>Equity:</b> <span id="equity">${money(brokerState.equity)}</span></div>
+        <div><b>Reservado:</b> <span id="reservedBalance">${money(brokerState.reserved)}</span></div>
+      </div>
+      <div style="margin-top:6px;color:#bbb;"><b>Moneda:</b> <span id="walletCurrency">${brokerState.currency || "USD"}</span></div>
+    `;
+    host.prepend(box);
+  }
+
+  function addTransaction(tx, applyEffect = true) {
+    const item = normalizeTransaction(tx);
+    if (!item) return null;
+
+    if (brokerState.seenTxIds.has(item.id)) return item;
+    brokerState.seenTxIds.add(item.id);
+
+    brokerState.transactions.unshift(item);
+    brokerState.transactions = brokerState.transactions.slice(0, 200);
+
+    if (applyEffect) {
+      if (isDepositTx(item.type)) {
+        brokerState.cashBalance += Math.abs(item.amount || 0);
+      } else if (isWithdrawalTx(item.type)) {
+        brokerState.cashBalance -= Math.abs(item.amount || 0);
+      }
+    }
+
+    recalcBalances();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+    return item;
+  }
+
+  function addOpenPosition(position) {
+    const pos = normalizePosition(position);
+    if (!pos) return null;
+
+    brokerState.positions.unshift(pos);
+    recalcBalances();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+    return pos;
+  }
+
+  function closeLocalPosition(positionId, currentPrice = null) {
+    const idx = brokerState.positions.findIndex((p) => String(p.id) === String(positionId));
+    if (idx === -1) return null;
+
+    const position = brokerState.positions[idx];
+    if (position.status !== "open") return null;
+
+    const price = currentPrice ?? getCurrentPrice(position.symbol) ?? position.entryPrice ?? 0;
+    const pnl = computePnL(position, price);
+
+    position.status = "closed";
+    position.closedAt = new Date().toISOString();
+    position.currentPrice = price;
+    position.realizedPnl = pnl;
+    position.unrealizedPnl = 0;
+
+    brokerState.cashBalance += safeNumber(position.amount, 0) + safeNumber(pnl, 0);
+    brokerState.positions[idx] = position;
+
+    addTransaction(
+      {
+        id: makeId("tx"),
+        type: "close_position",
+        title: `Cierre ${position.direction}`,
+        symbol: position.symbol,
+        direction: position.direction,
+        amount: position.amount,
+        pnl,
+        balanceAfter: brokerState.cashBalance,
+        createdAt: new Date().toISOString(),
+        source: "local",
+      },
+      false
+    );
+
+    recalcBalances();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+
+    return position;
+  }
+
+  function computePnL(position, currentPrice) {
+    const entry = safeNumber(position.entryPrice, 0);
+    const current = safeNumber(currentPrice, 0);
+
+    if (!entry || !current) return 0;
+
+    const diff = (current - entry) / entry;
+    const amount = safeNumber(position.amount, 0);
+    const side = String(position.direction || "buy").toLowerCase();
+
+    const pnl = side === "sell" ? amount * -diff : amount * diff;
+    return Number.isFinite(pnl) ? pnl : 0;
+  }
+
+  function refreshPositionPrices() {
+    let changed = false;
+
+    for (const position of brokerState.positions) {
+      if (position.status !== "open") continue;
+
+      const currentPrice = getCurrentPrice(position.symbol);
+      if (currentPrice != null) {
+        const pnl = computePnL(position, currentPrice);
+        position.currentPrice = currentPrice;
+        position.unrealizedPnl = pnl;
+        changed = true;
+      }
+    }
+
+    recalcBalances();
+    if (changed) {
+      updateWalletUI();
+      renderFloatingTradesPanel();
+      saveStateToLocal();
+    }
+  }
+
+  function saveStateToLocal() {
+    try {
+      localStorage.setItem(
+        "leones_broker_state_v4",
+        JSON.stringify({
+          cashBalance: brokerState.cashBalance,
+          equity: brokerState.equity,
+          reserved: brokerState.reserved,
+          available: brokerState.available,
+          currency: brokerState.currency,
+          positions: brokerState.positions,
+          transactions: brokerState.transactions,
+        })
+      );
+    } catch (e) {
+      console.warn("[LEONES] save local state error:", e);
+    }
+  }
+
+  function loadStateFromLocal() {
+    try {
+      const raw = localStorage.getItem("leones_broker_state_v4");
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return;
+
+      brokerState.cashBalance = safeNumber(parsed.cashBalance, brokerState.cashBalance);
+      brokerState.equity = safeNumber(parsed.equity, brokerState.equity);
+      brokerState.reserved = safeNumber(parsed.reserved, brokerState.reserved);
+      brokerState.available = safeNumber(parsed.available, brokerState.available);
+      brokerState.currency = parsed.currency || brokerState.currency || "USD";
+      brokerState.positions = Array.isArray(parsed.positions)
+        ? parsed.positions.map((p) => normalizePosition(p)).filter(Boolean)
+        : brokerState.positions;
+      brokerState.transactions = Array.isArray(parsed.transactions)
+        ? parsed.transactions.map((t) => normalizeTransaction(t)).filter(Boolean)
+        : brokerState.transactions;
+
+      brokerState.seenTxIds = new Set(
+        brokerState.transactions.map((t) => t.id).filter(Boolean)
+      );
+
+      recalcBalances();
+    } catch (e) {
+      console.warn("[LEONES] load local state error:", e);
+    }
+  }
+
+  async function fetchJson(url, options = {}) {
+    try {
+      const res = await fetch(url, {
+        credentials: "include",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadWalletSnapshot() {
+    const endpoints = ["/api/account", "/api/wallet", "/api/me", "/api/profile"];
+    for (const url of endpoints) {
+      const data = await fetchJson(url);
+      if (!data) continue;
+
+      const account = data.account || data;
+      brokerState.cashBalance = safeNumber(
+        account.balance ?? data.balance ?? data.wallet?.balance ?? brokerState.cashBalance,
+        brokerState.cashBalance
+      );
+      brokerState.currency =
+        account.currency || data.currency || brokerState.currency || "USD";
+
+      if (Array.isArray(data.transactions) && data.transactions.length) {
+        mergeTransactions(data.transactions, true);
+      }
+
+      recalcBalances();
+      updateWalletUI();
+      ensureWalletSummaryBox();
+      saveStateToLocal();
+      return data;
+    }
+
+    return null;
+  }
+
+  async function loadPositionsSnapshot() {
+    const endpoints = ["/api/positions", "/api/trade/positions"];
+    for (const url of endpoints) {
+      const data = await fetchJson(url);
+      if (!data) continue;
+
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data.positions)
+        ? data.positions
+        : Array.isArray(data.items)
+        ? data.items
+        : Array.isArray(data.data)
+        ? data.data
+        : [];
+
+      if (items.length) {
+        mergePositions(items, true);
+        recalcBalances();
+        updateWalletUI();
+        renderFloatingTradesPanel();
+        saveStateToLocal();
+        return items;
+      }
+    }
+
+    return [];
+  }
+
+  async function loadTransactionsSnapshot() {
+    const endpoints = [
+      "/api/transactions",
+      "/api/wallet/transactions",
+      "/api/account/transactions",
+      "/api/history/transactions",
+      "/api/movements",
+    ];
+
+    for (const url of endpoints) {
+      const data = await fetchJson(url);
+      if (!data) continue;
+
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data.transactions)
+        ? data.transactions
+        : Array.isArray(data.items)
+        ? data.items
+        : Array.isArray(data.data)
+        ? data.data
+        : [];
+
+      if (items.length) {
+        mergeTransactions(items, true);
+        saveStateToLocal();
+        renderFloatingTradesPanel();
+        return items;
+      }
+    }
+
+    return [];
+  }
+
+  function mergeTransactions(list, fromBackend = false) {
+    if (!Array.isArray(list)) return;
+
+    for (const raw of list) {
+      const tx = normalizeTransaction(raw);
+      if (!tx) continue;
+
+      if (brokerState.seenTxIds.has(tx.id)) continue;
+      brokerState.seenTxIds.add(tx.id);
+
+      brokerState.transactions.unshift(tx);
+
+      if (!fromBackend) {
+        if (isDepositTx(tx.type)) {
+          brokerState.cashBalance += Math.abs(tx.amount || 0);
+        } else if (isWithdrawalTx(tx.type)) {
+          brokerState.cashBalance -= Math.abs(tx.amount || 0);
+        }
+      }
+    }
+
+    brokerState.transactions = brokerState.transactions.slice(0, 200);
+    recalcBalances();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+  }
+
+  function mergePositions(list) {
+    if (!Array.isArray(list)) return;
+
+    const byId = new Map(
+      brokerState.positions.map((p) => [String(p.id), p])
+    );
+
+    for (const raw of list) {
+      const np = normalizePosition(raw);
+      if (!np) continue;
+
+      const existing = byId.get(String(np.id));
+      if (existing) {
+        Object.assign(existing, np, { raw });
+      } else {
+        brokerState.positions.unshift(np);
+        byId.set(String(np.id), np);
+      }
+    }
+
+    brokerState.positions = brokerState.positions.map((p) => normalizePosition(p)).filter(Boolean);
+    recalcBalances();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+  }
+
+  function setSelectedSymbol(symbol, meta = {}) {
+    window.selectedSymbol = symbol || null;
+    window.selectedSimbol = window.selectedSymbol;
+    window.TR = window.TR || {};
+    window.TR.activeSymbol = symbol || null;
+
+    const api = ext();
+    api.activeSymbol = symbol || null;
+    api.selectedSymbol = symbol || null;
+    api.lastSelectedSymbol = meta;
   }
 
   function ensureFloatingMenuButton() {
@@ -4800,6 +5406,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.visibility = "visible";
     floatingMenuBtn.style.opacity = "1";
     floatingMenuBtn.style.pointerEvents = "auto";
+  }
+
+  function toggleSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    sidebar.classList.toggle("hidden");
+    syncMenuButtons();
   }
 
   function syncMenuButtons() {
@@ -4835,35 +5448,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     ensureFloatingMenuButton();
-
-    if (typeof syncMenuButtons === "function") {
-      syncMenuButtons();
-    }
+    syncMenuButtons();
   }
 
-  document.addEventListener("click", (e) => {
-    const isMenuButton =
-      e.target.closest("#sidebarToggle") ||
-      e.target.closest("#floatingMenuBtn");
+  document.addEventListener(
+    "click",
+    (e) => {
+      const isMenuButton =
+        e.target.closest("#sidebarToggle") ||
+        e.target.closest("#floatingMenuBtn");
 
-    if (!isMenuButton) return;
+      if (!isMenuButton) return;
 
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
 
-    toggleSidebar();
-
-    if (typeof syncMenuButtons === "function") {
+      toggleSidebar();
       syncMenuButtons();
-    }
-  }, true);
+    },
+    true
+  );
 
-  /* =========================
-     🔥 BOTONES ACTIVOS DORADO
-  ========================= */
   function setActiveButton(id) {
-    document.querySelectorAll("[data-target]").forEach(btn => {
+    document.querySelectorAll("[data-target]").forEach((btn) => {
       btn.style.background = "transparent";
       btn.style.color = "#fff";
     });
@@ -4876,17 +5484,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function showOnlyPanel(id) {
-    panels.forEach(p => p.style.display = "none");
+    panels.forEach((p) => (p.style.display = "none"));
     const el = document.getElementById(id);
     if (el) el.style.display = "block";
     setActiveButton(id);
   }
 
-  /* =========================
-     🔥 ESPERAR JS2
-  ========================= */
   function waitForBroker() {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const i = setInterval(() => {
         if (window.__LEONES_BROKER_EXT2 && document.getElementById("brokerSymbolsGrid")) {
           clearInterval(i);
@@ -4896,9 +5501,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  /* =========================
-     🔥 MARKET FIX
-  ========================= */
   function keepMarketAlive() {
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
@@ -4925,24 +5527,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     const observer = new MutationObserver(() => {
       keepMarketAlive();
       bindMenuButtons();
+      updateWalletUI();
     });
 
     observer.observe(document.body, {
       childList: true,
-      subtree: true
+      subtree: true,
     });
   }
 
-  /* =========================
-     🔥 GRAFICO REAL
-  ========================= */
   function fixTrading() {
     const api = ext();
     const container = document.getElementById("tv_chart_container");
-
     if (!container) return;
 
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
+    const symbol = getCurrentSymbol();
     if (!symbol) return;
 
     if (container.dataset.chartSymbol === String(symbol)) {
@@ -4963,37 +5562,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     container.style.height = "100vh";
   }
 
-  /* =========================
-     🔥 VELAS MÁS FLUIDAS
-  ========================= */
-let lastQuotesOk = true;
-let updatingQuotes = false;
+  let lastQuotesOk = true;
+  let updatingQuotes = false;
 
-setInterval(async () => {
-  const api = ext();
+  setInterval(async () => {
+    const api = ext();
 
-  // 🔥 no ejecutar si ya está corriendo
-  if (updatingQuotes) return;
+    if (updatingQuotes) return;
+    if (!api || typeof api.loadRealQuotes !== "function") return;
 
-  // 🔥 no ejecutar si no existe función
-  if (!api || typeof api.loadRealQuotes !== "function") return;
+    updatingQuotes = true;
 
-  updatingQuotes = true;
+    try {
+      await api.loadRealQuotes();
+      lastQuotesOk = true;
+      refreshPositionPrices();
+    } catch (e) {
+      console.warn("[LEONES] loadRealQuotes error:", e);
+      lastQuotesOk = false;
+    }
 
-  try {
-    await api.loadRealQuotes();
-    lastQuotesOk = true;
-  } catch (e) {
-    console.warn("[LEONES] loadRealQuotes error:", e);
-    lastQuotesOk = false;
-  }
+    updatingQuotes = false;
+  }, 5000);
 
-  updatingQuotes = false;
-
-}, 5000); // 🔥 cada 5 segundos (estable, sin brincos)
-  /* =========================
-     🔥 RESPONSIVE
-  ========================= */
   function responsiveFix() {
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
@@ -5008,9 +5599,6 @@ setInterval(async () => {
 
   window.addEventListener("resize", responsiveFix);
 
-  /* =========================
-     🔥 MANTENER MONTO
-  ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
@@ -5037,10 +5625,51 @@ setInterval(async () => {
     }
   }
 
-  /* =========================
-     🔥 ORDEN REAL SIN ERROR
-  ========================= */
-  function forceTrade(direction) {
+  async function tryBackendOpenPosition(payload) {
+    const api = ext();
+
+    if (typeof api.placeOrder === "function") {
+      try {
+        return await api.placeOrder(payload);
+      } catch (e) {
+        console.warn("[LEONES] api.placeOrder error:", e);
+      }
+    }
+
+    if (typeof api.openPosition === "function") {
+      try {
+        return await api.openPosition(payload);
+      } catch (e) {
+        console.warn("[LEONES] api.openPosition error:", e);
+      }
+    }
+
+    return null;
+  }
+
+  async function tryBackendClosePosition(payload) {
+    const api = ext();
+
+    if (typeof api.closePosition === "function") {
+      try {
+        return await api.closePosition(payload);
+      } catch (e) {
+        console.warn("[LEONES] api.closePosition error:", e);
+      }
+    }
+
+    if (typeof api.closeTrade === "function") {
+      try {
+        return await api.closeTrade(payload);
+      } catch (e) {
+        console.warn("[LEONES] api.closeTrade error:", e);
+      }
+    }
+
+    return null;
+  }
+
+  async function forceTrade(direction) {
     const api = ext();
 
     const amountInput = document.getElementById("brokerOrderSize");
@@ -5051,40 +5680,156 @@ setInterval(async () => {
       return;
     }
 
-    const symbol = api.activeSymbol || window.TR?.activeSymbol;
+    const symbol = getCurrentSymbol();
 
     if (!symbol) {
       alert("Selecciona un símbolo");
       return;
     }
 
-    api.placeOrder?.({
+    await loadWalletSnapshot();
+
+    if (brokerState.cashBalance < amount) {
+      alert("Saldo insuficiente para abrir esta posición");
+      return;
+    }
+
+    const entryPrice = getCurrentPrice(symbol);
+    const positionId = makeId("pos");
+    const txId = makeId("tx");
+
+    const backendResult = await tryBackendOpenPosition({
       symbol,
       amount,
-      direction
+      direction,
+      entryPrice,
+      positionId,
     });
 
-    LAST_AMOUNT = amountInput.value;
+    if (backendResult && backendResult.error) {
+      alert(backendResult.error || "No se pudo abrir la posición");
+      return;
+    }
+
+    // Si el backend/EXT no actualiza inmediatamente, la UI se volverá a sincronizar
+    // con las llamadas de sync, evitando dobles descuentos o loops.
+    addOpenPosition({
+      id: positionId,
+      symbol,
+      direction,
+      amount,
+      entryPrice: entryPrice || null,
+      currentPrice: entryPrice || null,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      status: "open",
+      openedAt: new Date().toISOString(),
+      source: "local",
+    });
+
+    addTransaction(
+      {
+        id: backendResult?.transactionId || txId,
+        type: "open_position",
+        title: `Apertura ${direction}`,
+        symbol,
+        direction,
+        amount,
+        pnl: 0,
+        balanceAfter: brokerState.cashBalance,
+        createdAt: new Date().toISOString(),
+        source: "local",
+      },
+      false
+    );
+
+    LAST_AMOUNT = amountInput?.value || null;
     restoreAmount();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+
+    setTimeout(async () => {
+      await syncEverything();
+    }, 1200);
   }
 
-  document.addEventListener("click", (e) => {
-    if (e.target.matches('[data-action="buy"]')) {
-      e.preventDefault();
-      forceTrade("buy");
+  async function closePosition(positionId) {
+    const idx = brokerState.positions.findIndex((p) => String(p.id) === String(positionId));
+    if (idx === -1) return;
+
+    const position = brokerState.positions[idx];
+    if (position.status !== "open") return;
+
+    const currentPrice = getCurrentPrice(position.symbol) ?? position.entryPrice ?? 0;
+    const pnl = computePnL(position, currentPrice);
+
+    const backendResult = await tryBackendClosePosition({
+      positionId: position.id,
+      symbol: position.symbol,
+      amount: position.amount,
+      direction: position.direction,
+      entryPrice: position.entryPrice,
+      currentPrice,
+      pnl,
+    });
+
+    if (backendResult && backendResult.error) {
+      alert(backendResult.error || "No se pudo cerrar la posición");
+      return;
     }
 
-    if (e.target.matches('[data-action="sell"]')) {
-      e.preventDefault();
-      forceTrade("sell");
-    }
-  }, true);
+    closeLocalPosition(position.id, currentPrice);
 
-  /* =========================
-     🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
-  ========================= */
+    addTransaction(
+      {
+        id: backendResult?.transactionId || makeId("tx"),
+        type: "close_position",
+        title: `Cierre ${position.direction}`,
+        symbol: position.symbol,
+        direction: position.direction,
+        amount: position.amount,
+        pnl,
+        balanceAfter: brokerState.cashBalance,
+        createdAt: new Date().toISOString(),
+        source: "local",
+      },
+      false
+    );
+
+    updateWalletUI();
+    renderFloatingTradesPanel();
+    saveStateToLocal();
+
+    setTimeout(async () => {
+      await syncEverything();
+    }, 1200);
+  }
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (e.target.matches('[data-action="buy"]')) {
+        e.preventDefault();
+        forceTrade("buy");
+      }
+
+      if (e.target.matches('[data-action="sell"]')) {
+        e.preventDefault();
+        forceTrade("sell");
+      }
+
+      const closeBtn = e.target.closest("[data-close-position]");
+      if (closeBtn) {
+        e.preventDefault();
+        const id = closeBtn.getAttribute("data-close-position");
+        closePosition(id);
+      }
+    },
+    true
+  );
+
   function createFloatingTradesPanel() {
-
     const old = document.getElementById("floatingTrades");
     if (old) old.remove();
 
@@ -5094,28 +5839,39 @@ setInterval(async () => {
     const div = document.createElement("div");
     div.id = "floatingTrades";
 
-    let savedX = localStorage.getItem("trades_x");
-    let savedY = localStorage.getItem("trades_y");
+    const savedX = localStorage.getItem("trades_x");
+    const savedY = localStorage.getItem("trades_y");
 
     div.style.cssText = `
       position:fixed;
       top:${savedY ? savedY + "px" : "80px"};
       left:${savedX ? savedX + "px" : "10px"};
-      width:260px;
+      width:300px;
+      max-width:90vw;
       background:#111;
       color:#fff;
       padding:10px;
       border-radius:10px;
       z-index:999999;
       font-size:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
     `;
 
     div.innerHTML = `
-      <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
-        <b>📊 Operaciones</b>
+      <div id="dragHeader" style="display:flex;justify-content:space-between;align-items:center;cursor:grab;gap:8px;">
+        <b>📊 Operaciones y movimientos</b>
         <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
       </div>
-      <div id="floatingTradesList">Sin operaciones</div>
+
+      <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">
+        <div style="font-weight:bold;margin-bottom:6px;">Posiciones abiertas</div>
+        <div id="floatingTradesList">Sin operaciones</div>
+      </div>
+
+      <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;">
+        <div style="font-weight:bold;margin-bottom:6px;">Historial de transacciones</div>
+        <div id="floatingTransactionsList">Sin movimientos</div>
+      </div>
     `;
 
     privateArea.appendChild(div);
@@ -5171,15 +5927,23 @@ setInterval(async () => {
 
     document.addEventListener("mouseup", stopDrag);
 
-    header.addEventListener("touchstart", (e) => {
-      const t = e.touches[0];
-      startDrag(t.clientX, t.clientY);
-    }, { passive: true });
+    header.addEventListener(
+      "touchstart",
+      (e) => {
+        const t = e.touches[0];
+        startDrag(t.clientX, t.clientY);
+      },
+      { passive: true }
+    );
 
-    document.addEventListener("touchmove", (e) => {
-      const t = e.touches[0];
-      moveDrag(t.clientX, t.clientY);
-    }, { passive: false });
+    document.addEventListener(
+      "touchmove",
+      (e) => {
+        const t = e.touches[0];
+        moveDrag(t.clientX, t.clientY);
+      },
+      { passive: false }
+    );
 
     document.addEventListener("touchend", stopDrag);
 
@@ -5214,7 +5978,6 @@ setInterval(async () => {
       `;
 
       mini.innerHTML = "📊";
-
       privateArea.appendChild(mini);
 
       mini.onclick = () => {
@@ -5231,31 +5994,59 @@ setInterval(async () => {
     setInterval(checkPrivate, 500);
   }
 
-  function updateFloatingTrades() {
-    const api = ext();
+  function renderFloatingTradesPanel() {
     const list = document.getElementById("floatingTradesList");
-    if (!list) return;
+    const txList = document.getElementById("floatingTransactionsList");
+    if (!list || !txList) return;
 
-    const positions = api.positions || [];
+    const openPositions = brokerState.positions.filter((p) => p.status === "open");
+    const recentTx = brokerState.transactions.slice(0, 12);
 
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
+    if (!openPositions.length) {
+      list.innerHTML = `<div style="opacity:.8">Sin operaciones</div>`;
+    } else {
+      list.innerHTML = openPositions
+        .map((p) => {
+          const currentPrice = p.currentPrice ?? getCurrentPrice(p.symbol) ?? p.entryPrice ?? 0;
+          const pnl = safeNumber(
+            p.unrealizedPnl ?? computePnL(p, currentPrice),
+            0
+          );
+          const pnlSign = pnl >= 0 ? "+" : "";
+          return `
+            <div style="margin-top:6px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.03);">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                <div><b>${p.symbol}</b></div>
+                <button type="button" data-close-position="${p.id}" style="cursor:pointer;border:none;background:gold;color:#000;border-radius:6px;padding:4px 8px;font-weight:bold;">Cerrar</button>
+              </div>
+              <div style="margin-top:4px;">${p.direction.toUpperCase()} | Monto: ${money(p.amount)}</div>
+              <div>Entrada: ${p.entryPrice != null ? p.entryPrice : "--"} | Actual: ${currentPrice != null ? currentPrice : "--"}</div>
+              <div>PnL no realizado: <b>${pnlSign}${money(pnl)}</b></div>
+            </div>
+          `;
+        })
+        .join("");
     }
 
-    list.innerHTML = positions.map(p => `
-      <div style="margin-top:6px;">
-        ${p.symbol} | ${p.direction} <br>
-        $${p.amount}
-      </div>
-    `).join("");
+    if (!recentTx.length) {
+      txList.innerHTML = `<div style="opacity:.8">Sin movimientos</div>`;
+    } else {
+      txList.innerHTML = recentTx
+        .map((t) => {
+          const pnlText = t.pnl ? ` | PnL: ${t.pnl >= 0 ? "+" : ""}${money(t.pnl)}` : "";
+          return `
+            <div style="margin-top:6px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.03);">
+              <div><b>${t.title}</b></div>
+              <div>${t.symbol ? `${t.symbol} | ` : ""}${t.type}</div>
+              <div>Monto: ${money(Math.abs(t.amount || 0))}${pnlText}</div>
+              <div style="opacity:.75">${new Date(t.createdAt).toLocaleString()}</div>
+            </div>
+          `;
+        })
+        .join("");
+    }
   }
 
-  setInterval(updateFloatingTrades, 2000);
-
-  /* =========================
-     🔥 CAMBIO PANEL
-  ========================= */
   function showPanel(id) {
     showOnlyPanel(id);
 
@@ -5268,6 +6059,7 @@ setInterval(async () => {
       setTimeout(() => {
         window.renderSymbolsGrid?.();
         keepMarketAlive();
+        refreshPositionPrices();
       }, 300);
     }
 
@@ -5279,164 +6071,171 @@ setInterval(async () => {
         fixTrading();
         persistAmount();
         restoreAmount();
+        refreshPositionPrices();
       }, 300);
     }
 
     if (id === "positionsPanel") {
       api.loadPositions?.();
+      renderFloatingTradesPanel();
     }
 
     if (id === "dashboardPanel") {
       api.loadAccount?.();
+      ensureWalletSummaryBox();
+      updateWalletUI();
     }
   }
 
-  /* =========================
-     🔥 CLICK SIMBOLO
-  ========================= */
-  document.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-symbol]");
-    if (!el) return;
+  document.addEventListener(
+    "click",
+    (e) => {
+      const el = e.target.closest("[data-symbol]");
+      if (!el) return;
 
-    const api = ext();
+      const api = ext();
+      const symbol = el.dataset.symbol;
 
-    api.selectSymbol?.({
-      symbol: el.dataset.symbol,
-      tvSymbol: el.dataset.tvSymbol || el.dataset.symbol,
-      label: el.dataset.label || el.dataset.symbol,
-      market: el.dataset.market || ""
-    }, { openChart: true });
+      setSelectedSymbol(symbol, {
+        symbol,
+        tvSymbol: el.dataset.tvSymbol || symbol,
+        label: el.dataset.label || symbol,
+        market: el.dataset.market || "",
+      });
 
-    showPanel("tradingPanel");
+      api.selectSymbol?.(
+        {
+          symbol,
+          tvSymbol: el.dataset.tvSymbol || symbol,
+          label: el.dataset.label || symbol,
+          market: el.dataset.market || "",
+        },
+        { openChart: true }
+      );
 
-  }, true);
+      showPanel("tradingPanel");
+    },
+    true
+  );
 
-  /* =========================
-     🔥 INIT
-  ========================= */
+  async function syncEverything() {
+    await loadWalletSnapshot();
+    await loadPositionsSnapshot();
+    await loadTransactionsSnapshot();
+    refreshPositionPrices();
+    updateWalletUI();
+    renderFloatingTradesPanel();
+  }
+
+  function wireSocketEvents() {
+    const socket = window.socket || window.__LEONES_SOCKET__;
+    if (!socket || socket.__walletEventsBound) return;
+    socket.__walletEventsBound = true;
+
+    socket.on?.("wallet_updated", (payload) => {
+      if (!payload) return;
+      const account = payload.account || payload;
+      brokerState.cashBalance = safeNumber(
+        account.balance ?? payload.balance ?? brokerState.cashBalance,
+        brokerState.cashBalance
+      );
+      brokerState.currency = account.currency || payload.currency || brokerState.currency || "USD";
+      recalcBalances();
+      updateWalletUI();
+      ensureWalletSummaryBox();
+      saveStateToLocal();
+    });
+
+    socket.on?.("account_updated", (payload) => {
+      if (!payload) return;
+      const account = payload.account || payload;
+      brokerState.cashBalance = safeNumber(
+        account.balance ?? payload.balance ?? brokerState.cashBalance,
+        brokerState.cashBalance
+      );
+      brokerState.currency = account.currency || payload.currency || brokerState.currency || "USD";
+      recalcBalances();
+      updateWalletUI();
+      ensureWalletSummaryBox();
+      saveStateToLocal();
+    });
+
+    socket.on?.("transaction_created", (tx) => {
+      if (!tx) return;
+      addTransaction(tx, true);
+    });
+
+    socket.on?.("position_updated", (payload) => {
+      if (!payload) return;
+      if (Array.isArray(payload.positions)) {
+        mergePositions(payload.positions);
+      } else if (payload.position) {
+        mergePositions([payload.position]);
+      }
+      renderFloatingTradesPanel();
+    });
+  }
+
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
 
+  loadStateFromLocal();
+
   await waitForBroker();
 
+  ensureWalletSummaryBox();
+  updateWalletUI();
   bindMenuButtons();
   observeChanges();
   keepMarketAlive();
   responsiveFix();
   persistAmount();
   createFloatingTradesPanel();
+  renderFloatingTradesPanel();
+  wireSocketEvents();
 
-  document.querySelectorAll("[data-target]").forEach(btn => {
+  document.querySelectorAll("[data-target]").forEach((btn) => {
     btn.onclick = () => showPanel(btn.dataset.target);
   });
 
   showPanel("dashboardPanel");
 
-  /* =========================
-     🔥 REFORZAR BOTÓN FLOTANTE
-  ========================= */
+  await syncEverything();
+
   setInterval(() => {
     bindMenuButtons();
+    refreshPositionPrices();
+    renderFloatingTradesPanel();
   }, 1000);
 
-  /* =========================
-   🔥 FIX REAL BALANCE + POSICIONES (SAFE MODE)
-========================= */
-function safeTradingSync() {
-  const api = ext();
+  setInterval(async () => {
+    await loadWalletSnapshot();
+    await loadPositionsSnapshot();
+    await loadTransactionsSnapshot();
+    refreshPositionPrices();
+  }, 10000);
 
-  if (!api) return;
+  window.__LEONES_BROKER_STATE__ = brokerState;
+  window.__LEONES_BROKER_SYNC__ = syncEverything;
 
-  // 🔥 interceptar orden sin romper original
-  if (!api.__patchedOrder) {
-    const originalOrder = api.placeOrder;
+  window.selectSymbol = function (symbolOrObj, opts = {}) {
+    const symbol =
+      typeof symbolOrObj === "string"
+        ? symbolOrObj
+        : symbolOrObj?.symbol || symbolOrObj?.tvSymbol || null;
 
-    api.placeOrder = function (order) {
-      try {
-        if (!order || !order.amount) return;
+    if (!symbol) return;
 
-        // 🔥 validar balance antes de enviar
-        const balance = api.account?.balance || 0;
+    setSelectedSymbol(
+      symbol,
+      typeof symbolOrObj === "object" ? symbolOrObj : { symbol }
+    );
 
-        if (order.amount > balance) {
-          alert("Fondos insuficientes");
-          return;
-        }
-
-        // 🔥 ejecutar orden real
-        const result = originalOrder?.call(this, order);
-
-        // 🔥 restar balance inmediatamente (visual)
-        if (api.account) {
-          api.account.balance -= order.amount;
-        }
-
-        return result;
-
-      } catch (e) {
-        console.warn("order error", e);
-      }
-    };
-
-    api.__patchedOrder = true;
-  }
-
-  // 🔥 actualizar ganancias/pérdidas en vivo
-  setInterval(() => {
-    try {
-      const positions = api.positions || [];
-      const prices = api.prices || {};
-
-      let floating = 0;
-
-      positions.forEach(p => {
-        const price = prices[p.symbol];
-        if (!price) return;
-
-        let pnl = 0;
-
-        if (p.direction === "buy") {
-          pnl = (price - p.entryPrice) * p.amount;
-        } else {
-          pnl = (p.entryPrice - price) * p.amount;
-        }
-
-        p.pnl = pnl;
-        floating += pnl;
-      });
-
-      if (api.account) {
-        api.account.equity = (api.account.balance || 0) + floating;
-      }
-
-    } catch (e) {}
-  }, 2000);
-
-  // 🔥 historial básico (sin romper backend)
-  if (!api.__historyPatched) {
-    api.transactions = api.transactions || [];
-
-    const originalLoad = api.loadAccount;
-
-    api.loadAccount = async function () {
-      const res = await originalLoad?.call(this);
-
-      // mantener historial existente
-      api.transactions = api.transactions || [];
-
-      return res;
-    };
-
-    api.__historyPatched = true;
-  }
-}
-
-/* 🔥 ejecutar CUANDO TODO ESTÉ LISTO */
-setTimeout(() => {
-  safeTradingSync();
-}, 2000);
-
+    if (opts.openChart !== false) {
+      showPanel("tradingPanel");
+    }
+  };
 });
 </script>
   
