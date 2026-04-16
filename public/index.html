@@ -4681,9 +4681,11 @@ if (api.placeOrder && !api.__originalPlaceOrder) {
 
  let __placingOrder = false;
 
-function placeBrokerOrder(order) {
+let __placingOrder = false;
 
-  // 🔥 BLOQUEAR LOOP INFINITO
+function placeBrokerOrder(payload = {}) {
+
+  // 🔥 evitar loop infinito
   if (__placingOrder) {
     console.warn("⛔ Loop evitado en placeBrokerOrder");
     return;
@@ -4694,20 +4696,60 @@ function placeBrokerOrder(order) {
   try {
     const api = window.__LEONES_BROKER_EXT2 || {};
 
-    if (!order || !order.symbol) {
-      console.warn("Orden inválida");
+    // 🔥 obtener símbolo correcto
+    const symbol = String(
+      payload.symbol ||
+      payload.tvSymbol ||
+      api.activeSymbol ||
+      window.TR?.activeSymbol ||
+      ''
+    ).trim().toUpperCase();
+
+    if (!symbol) {
+      alert("Selecciona un símbolo");
       return;
     }
 
-    // 🔥 LLAMAR SOLO UNA VEZ (SIN RECICLARSE)
-    if (typeof api.__originalPlaceOrder === "function") {
-      return api.__originalPlaceOrder(order);
+    // 🔥 obtener monto
+    const amount =
+      payload.amount ??
+      payload.positionSize ??
+      payload.notional ??
+      parseFloat(document.getElementById('brokerOrderSize')?.value);
+
+    if (!amount || amount <= 0) {
+      alert("Coloca un monto válido");
+      return;
     }
 
-    // fallback si no existe original
-    if (typeof api.placeOrder === "function") {
-      return api.placeOrder(order);
+    // 🔥 dirección
+    const direction = String(
+      payload.direction || payload.side || "BUY"
+    ).toUpperCase() === "SELL" ? "SELL" : "BUY";
+
+    // 🔥 tipo y precio
+    const type = payload.type || "Market";
+    const price = payload.price ?? null;
+
+    // 🔥 construir orden limpia
+    const cleanOrder = {
+      symbol,
+      amount,
+      direction,
+      type,
+      price
+    };
+
+    // 🔥 ejecutar orden REAL (SIN LOOP)
+    if (typeof api.__originalPlaceOrder === "function") {
+      return api.__originalPlaceOrder(cleanOrder);
     }
+
+    if (typeof api.placeOrder === "function") {
+      return api.placeOrder(cleanOrder);
+    }
+
+    console.warn("No hay función de orden disponible");
 
   } catch (e) {
     console.error("Error colocando orden:", e);
