@@ -807,12 +807,10 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("unhandledRejection", (r) => {
   console.error("UnhandledRejection:", r);
-  // intentamos cerrar ordenadamente pero también logueamos el error para debugging
   gracefulShutdown("unhandledRejection").catch(() => {});
 });
 process.on("uncaughtException", (e) => {
   console.error("UncaughtException:", e);
-  // intentamos cerrar ordenadamente pero también logueamos el error para debugging
   gracefulShutdown("uncaughtException").catch(() => {});
 });
 
