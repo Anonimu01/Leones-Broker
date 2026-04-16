@@ -4684,77 +4684,69 @@ if (api.placeOrder && !api.__originalPlaceOrder) {
 let __placingOrder = false;
 
 function placeBrokerOrder(payload = {}) {
+  const symbol = String(payload.symbol || payload.tvSymbol || '').trim().toUpperCase();
+  const meta =
+    symbolMap().get(symbol) ||
+    getSymbols().find(x => String(x.symbol).toUpperCase() === symbol || String(x.tvSymbol).toUpperCase() === symbol) ||
+    getActiveSymbolMeta();
 
-  // 🔥 evitar loop infinito
-  if (__placingOrder) {
-    console.warn("⛔ Loop evitado en placeBrokerOrder");
-    return;
+  if (meta) {
+    state.activeSymbol = meta.symbol;
+    TR.activeSymbol = meta.symbol;
+    TR.activeMeta = meta;
+    renderSymbolDetails(meta);
+    requestRealtimeForSymbol(meta);
+    renderBottomPanels();
   }
 
-  __placingOrder = true;
+  const amount = payload.amount ?? payload.positionSize ?? payload.notional ?? null;
+  const direction = String(payload.direction || payload.side || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
+  const type = String(payload.type || payload.orderType || getOrderType() || 'Market');
+  const price = payload.price ?? null;
 
-  try {
-    const api = window.__LEONES_BROKER_EXT2 || {};
+  const sizeTop = document.getElementById('brokerOrderSize');
+  const sizeBottom = document.getElementById('brokerOrderSizeBottom');
+  if (amount !== null && amount !== undefined && amount !== '') {
+    if (sizeTop) sizeTop.value = amount;
+    if (sizeBottom) sizeBottom.value = amount;
+    LAST_AMOUNT = String(amount);
+  }
 
-    // 🔥 obtener símbolo correcto
-    const symbol = String(
-      payload.symbol ||
-      payload.tvSymbol ||
-      api.activeSymbol ||
-      window.TR?.activeSymbol ||
-      ''
-    ).trim().toUpperCase();
+  const typeTop = document.getElementById('order-type');
+  const typeBottom = document.getElementById('order-type-bottom');
+  if (typeTop) typeTop.value = type;
+  if (typeBottom) typeBottom.value = type;
+  syncOrderTypeBoxes(type);
 
-    if (!symbol) {
-      alert("Selecciona un símbolo");
-      return;
-    }
+  if (price !== null && price !== undefined && price !== '') {
+    const priceTop = document.getElementById('order-price');
+    const priceBottom = document.getElementById('order-price-bottom');
+    if (priceTop) priceTop.value = price;
+    if (priceBottom) priceBottom.value = price;
+  }
 
-    // 🔥 obtener monto
-    const amount =
-      payload.amount ??
-      payload.positionSize ??
-      payload.notional ??
-      parseFloat(document.getElementById('brokerOrderSize')?.value);
+  // 🔥 AQUÍ ESTÁ EL FIX REAL (SIN LOOP)
+  const api = window.__LEONES_BROKER_EXT2 || {};
 
-    if (!amount || amount <= 0) {
-      alert("Coloca un monto válido");
-      return;
-    }
+  if (typeof api.__originalPlaceOrder === "function") {
+    return api.__originalPlaceOrder({
+      symbol: symbol,
+      amount: amount,
+      direction: direction,
+      price: price,
+      type: type
+    });
+  }
 
-    // 🔥 dirección
-    const direction = String(
-      payload.direction || payload.side || "BUY"
-    ).toUpperCase() === "SELL" ? "SELL" : "BUY";
-
-    // 🔥 tipo y precio
-    const type = payload.type || "Market";
-    const price = payload.price ?? null;
-
-    // 🔥 construir orden limpia
-    const cleanOrder = {
-      symbol,
-      amount,
-      direction,
-      type,
-      price
-    };
-
-    // 🔥 ejecutar orden REAL (SIN LOOP)
-    if (typeof api.__originalPlaceOrder === "function") {
-      return api.__originalPlaceOrder(cleanOrder);
-    }
-
-    if (typeof api.placeOrder === "function") {
-      return api.placeOrder(cleanOrder);
-    }
-
-    console.warn("No hay función de orden disponible");
-
-  } catch (e) {
-    console.error("Error colocando orden:", e);
-  } finally {
-    __placingOrder = false;
+  // fallback seguro
+  if (typeof api.placeOrder === "function") {
+    return api.placeOrder({
+      symbol: symbol,
+      amount: amount,
+      direction: direction,
+      price: price,
+      type: type
+    });
   }
 }
   function bootIfLoggedIn() {
