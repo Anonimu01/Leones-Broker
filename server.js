@@ -750,19 +750,27 @@ const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
    SERVICIO DIRECTO DE JS
-   - Primero intenta servir el archivo real.
-   - Si el navegador pidió /authGuard.js o /trading.js y el archivo está en /public/js,
-     lo resuelve desde ahí.
-   - Si no existe, devuelve un stub JS válido para que nunca caiga HTML.
+   - Sirve JS desde /js, /public/js, /public y rutas sueltas como /authGuard.js
+   - Si no existe, devuelve un JS válido para evitar HTML parseado como JS
    ====================================================== */
 function resolveJsCandidate(requestPath) {
   const clean = String(requestPath || "").split("?")[0];
-  const base = path.basename(clean);
+  const normalized = clean.replace(/\\/g, "/");
+  const base = path.basename(normalized);
 
   const candidates = [];
 
-  if (clean.startsWith("/js/")) {
-    candidates.push(path.join(staticPath, clean.replace(/^\/+/, "")));
+  if (normalized.startsWith("/public/js/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
+  if (normalized.startsWith("/js/")) {
+    candidates.push(path.join(jsDirPath, base));
+    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
+  }
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   }
 
   if (base) {
@@ -779,6 +787,13 @@ function resolveJsCandidate(requestPath) {
   });
 }
 
+/* ======================================================
+   STATIC FILES
+   ====================================================== */
+app.use("/public", express.static(staticPath));
+app.use("/js", express.static(jsDirPath));
+app.use(express.static(staticPath));
+
 app.use((req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
@@ -789,12 +804,11 @@ app.use((req, res, next) => {
   }
 
   res
-    .status(200)
+    .status(404)
     .type("application/javascript; charset=utf-8")
     .send(`
-/* Auto-generated JS stub — served because ${pathname} is missing on disk.
-   This prevents MIME errors and avoids HTML being parsed as JavaScript. */
-console.warn("JS missing: ${pathname}");
+// Auto-generated JS stub — ${pathname} no existe en disco.
+console.error("JS missing: ${pathname}");
 
 window.CATEGORIES = window.CATEGORIES || [];
 window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
@@ -802,7 +816,9 @@ window.API = window.API || "/api";
 window.SOCKET_URL = window.SOCKET_URL || location.origin;
 window._LEONES = window._LEONES || {};
 window._LEONES_TRADING = window._LEONES_TRADING || {};
-window._LEONES_TRADING.fetchPositions = window._LEONES_TRADING.fetchPositions || (async function () { return []; });
+window._LEONES_TRADING.fetchPositions =
+  window._LEONES_TRADING.fetchPositions ||
+  (async function () { return []; });
 
 if (!window.loadPositions) {
   window.loadPositions = async function () {
@@ -827,11 +843,6 @@ if (!window.loadRealQuotes) {
 }
 `);
 });
-
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
-app.use(express.static(staticPath));
 
 /* ======================================================
    Fallback HTML
