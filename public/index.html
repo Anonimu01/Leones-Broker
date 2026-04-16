@@ -2070,6 +2070,12 @@ if (window.__LEONES_BOOTED__) {
   }
   window.__LEONES_BROKER_EXT2_REAL_SAFE__ = true;
 
+  const api = window.__LEONES_BROKER_EXT2 || {};
+
+if (api.placeOrder && !api.__originalPlaceOrder) {
+  api.__originalPlaceOrder = api.placeOrder;
+}
+
   const NS = window._LEONES = window._LEONES || {};
   const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
@@ -4673,51 +4679,42 @@ if (window.__LEONES_BOOTED__) {
     };
   }
 
-  function placeBrokerOrder(payload = {}) {
-    const symbol = String(payload.symbol || payload.tvSymbol || '').trim().toUpperCase();
-    const meta =
-      symbolMap().get(symbol) ||
-      getSymbols().find(x => String(x.symbol).toUpperCase() === symbol || String(x.tvSymbol).toUpperCase() === symbol) ||
-      getActiveSymbolMeta();
+ let __placingOrder = false;
 
-    if (meta) {
-      state.activeSymbol = meta.symbol;
-      TR.activeSymbol = meta.symbol;
-      TR.activeMeta = meta;
-      renderSymbolDetails(meta);
-      requestRealtimeForSymbol(meta);
-      renderBottomPanels();
-    }
+function placeBrokerOrder(order) {
 
-    const amount = payload.amount ?? payload.positionSize ?? payload.notional ?? null;
-    const direction = String(payload.direction || payload.side || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-    const type = String(payload.type || payload.orderType || getOrderType() || 'Market');
-    const price = payload.price ?? null;
-
-    const sizeTop = document.getElementById('brokerOrderSize');
-    const sizeBottom = document.getElementById('brokerOrderSizeBottom');
-    if (amount !== null && amount !== undefined && amount !== '') {
-      if (sizeTop) sizeTop.value = amount;
-      if (sizeBottom) sizeBottom.value = amount;
-      LAST_AMOUNT = String(amount);
-    }
-
-    const typeTop = document.getElementById('order-type');
-    const typeBottom = document.getElementById('order-type-bottom');
-    if (typeTop) typeTop.value = type;
-    if (typeBottom) typeBottom.value = type;
-    syncOrderTypeBoxes(type);
-
-    if (price !== null && price !== undefined && price !== '') {
-      const priceTop = document.getElementById('order-price');
-      const priceBottom = document.getElementById('order-price-bottom');
-      if (priceTop) priceTop.value = price;
-      if (priceBottom) priceBottom.value = price;
-    }
-
-    return placeOrder(direction);
+  // 🔥 BLOQUEAR LOOP INFINITO
+  if (__placingOrder) {
+    console.warn("⛔ Loop evitado en placeBrokerOrder");
+    return;
   }
 
+  __placingOrder = true;
+
+  try {
+    const api = window.__LEONES_BROKER_EXT2 || {};
+
+    if (!order || !order.symbol) {
+      console.warn("Orden inválida");
+      return;
+    }
+
+    // 🔥 LLAMAR SOLO UNA VEZ (SIN RECICLARSE)
+    if (typeof api.__originalPlaceOrder === "function") {
+      return api.__originalPlaceOrder(order);
+    }
+
+    // fallback si no existe original
+    if (typeof api.placeOrder === "function") {
+      return api.placeOrder(order);
+    }
+
+  } catch (e) {
+    console.error("Error colocando orden:", e);
+  } finally {
+    __placingOrder = false;
+  }
+}
   function bootIfLoggedIn() {
     if (state.booted) return;
     state.booted = true;
