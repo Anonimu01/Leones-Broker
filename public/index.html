@@ -4684,11 +4684,9 @@ async function placeOrder(input) {
   try {
     const api = window.__LEONES_BROKER_EXT2 || {};
 
-    // 🔥 detectar si viene como string o como objeto
     let side, symbol, amount, type, price;
 
     if (typeof input === "string") {
-      // 👉 caso normal (buy / sell)
       side = input;
 
       symbol =
@@ -4715,7 +4713,6 @@ async function placeOrder(input) {
       }
 
     } else {
-      // 👉 caso cuando viene como payload (desde api)
       side = input.side || input.direction;
       symbol = input.symbol;
       amount = input.amount;
@@ -4723,48 +4720,40 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-    // 🔥 VALIDACIONES
-    if (!symbol) {
-      console.warn("⚠️ Símbolo vacío");
-      return;
-    }
+    // 🔥 VALIDACIONES FUERTES
+    if (!symbol) return console.warn("⚠️ Símbolo vacío");
+    if (!amount || amount <= 0) return console.warn("⚠️ Cantidad inválida");
+    if (!side) return console.warn("⚠️ Side inválido");
 
-    if (!amount || amount <= 0) {
-      console.warn("⚠️ Cantidad inválida");
-      return;
-    }
-
-    if (!side) {
-      console.warn("⚠️ Side inválido");
-      return;
-    }
-
-    // 🔥 FIX CRÍTICO
+    // 🔥 FIX DEFINITIVO
     side = String(side).toUpperCase();
 
     const payload = {
       symbol: String(symbol).replace("/", ""),
-      side,
+      side: side, // 👈 SIEMPRE STRING
       type: String(type).toUpperCase(),
-      amount,
+      amount: amount,
       price: price || undefined
     };
 
     console.log("🚀 Enviando orden:", payload);
 
-    let res;
-
-    if (typeof api.placeOrder === "function" && input !== payload) {
-      res = await api.placeOrder(payload);
-    } else {
-      res = await fetch("/api/order", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      }).then(r => r.json());
+    // 🔥 CLAVE: FORZAR STRING ENTRANDO AL API
+    if (typeof api.placeOrder === "function") {
+      return await api.placeOrder({
+        ...payload,
+        side: String(payload.side) // 👈 doble protección
+      });
     }
+
+    // fallback
+    const res = await fetch("/api/order", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
 
     console.log("✅ Orden enviada:", res);
 
@@ -4772,7 +4761,6 @@ async function placeOrder(input) {
     console.error("❌ Error al enviar orden:", err);
   }
 }
-
   //para el rejuego
 
   document.addEventListener("click", (e) => {
