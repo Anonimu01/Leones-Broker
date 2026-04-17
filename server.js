@@ -638,6 +638,215 @@ app.get("/api/billetera", (req, res) => {
 });
 
 /* ======================================================
+   ORDERS / TRADE PLACEHOLDER
+   - Evita 404 en /api/order y /api/orders
+   - Acepta side/direction
+   - Guarda en memoria y emite por socket
+   - Intenta persistencia opcional en Position si el schema lo permite
+   ====================================================== */
+
+const ORDER_STORE =
+  globalThis.__LEONES_ORDER_STORE__ ||
+  (globalThis.__LEONES_ORDER_STORE__ = []);
+
+function getOrderStore() {
+  return globalThis.__LEONES_ORDER_STORE__ || ORDER_STORE;
+}
+
+function normalizeOrderSide(value) {
+  const s = String(value || "").trim().toUpperCase();
+  if (s === "BUY" || s === "LONG") return "BUY";
+  if (s === "SELL" || s === "SHORT") return "SELL";
+  return "";
+}
+
+function normalizeOrderType(value) {
+  const t = String(value || "Market").trim();
+  if (!t) return "Market";
+  return t;
+}
+
+function normalizeOrderAmount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeOrderPrice(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeOrderPayload(body = {}) {
+  const symbol = String(
+    body.symbol ||
+    body.tvSymbol ||
+    body.ticker ||
+    body.asset ||
+    ""
+  ).trim().toUpperCase();
+
+  const side = normalizeOrderSide(body.side ?? body.direction ?? body.action);
+  const amount = normalizeOrderAmount(
+    body.amount ?? body.positionSize ?? body.notional ?? body.quantity ?? body.qty
+  );
+  const type = normalizeOrderType(body.type ?? body.orderType);
+  const price = normalizeOrderPrice(body.price ?? body.limitPrice ?? body.stopPrice);
+
+  return {
+    symbol,
+    side,
+    amount,
+    type,
+    price,
+  };
+}
+
+function buildOrderId() {
+  return (
+    "ORD-" +
+    Date.now().toString(36).toUpperCase() +
+    "-" +
+    Math.random().toString(36).slice(2, 8).toUpperCase()
+  );
+}
+
+async function saveOrderToMemoryAndEmit(order) {
+  const store = getOrderStore();
+  store.unshift(order);
+
+  if (store.length > 500) {
+    store.length = 500;
+  }
+
+  try {
+    io.emit("orders_update", {
+      ok: true,
+      count: store.length,
+      orders: store,
+      data: store,
+      items: store,
+    });
+    io.emit("order_created", order);
+  } catch (e) {
+    console.warn("No se pudo emitir orders_update:", e?.message || e);
+  }
+}
+
+async function tryPersistOrderAsPosition(user, order) {
+  try {
+    if (!user || !Position || typeof Position.create !== "function") return null;
+
+    const doc = await Position.create({
+      user: user._id,
+      symbol: order.symbol,
+      side: order.side,
+      amount: order.amount,
+      type: order.type,
+      price: order.price,
+      status: "open",
+      source: "order-api",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return doc || null;
+  } catch (e) {
+    console.warn("Persistencia opcional en Position falló:", e?.message || e);
+    return null;
+  }
+}
+
+async function createOrderHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    const body = req.body || {};
+    const parsed = normalizeOrderPayload(body);
+
+    if (!parsed.symbol) {
+      return res.status(400).json({
+        ok: false,
+        error: "symbol_required",
+        message: "symbol es requerido",
+      });
+    }
+
+    if (!parsed.side) {
+      return res.status(400).json({
+        ok: false,
+        error: "side_required",
+        message: "side/direction debe ser BUY o SELL",
+      });
+    }
+
+    if (!parsed.amount) {
+      return res.status(400).json({
+        ok: false,
+        error: "amount_required",
+        message: "amount es requerido y debe ser mayor que 0",
+      });
+    }
+
+    const order = {
+      id: buildOrderId(),
+      symbol: parsed.symbol,
+      side: parsed.side,
+      amount: parsed.amount,
+      type: parsed.type,
+      price: parsed.price,
+      status: "accepted",
+      userId: user?._id || null,
+      authenticated: !!user,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      source: "server.js",
+    };
+
+    const persistedPosition = await tryPersistOrderAsPosition(user, order);
+    if (persistedPosition?._id) {
+      order.positionId = persistedPosition._id.toString();
+    }
+
+    await saveOrderToMemoryAndEmit(order);
+
+    return res.status(201).json({
+      ok: true,
+      message: "Orden recibida",
+      order,
+      count: getOrderStore().length,
+    });
+  } catch (e) {
+    console.error("createOrderHandler error:", e);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: e?.message || "Error interno creando la orden",
+    });
+  }
+}
+
+function listOrdersHandler(req, res) {
+  const store = getOrderStore();
+  return res.json({
+    ok: true,
+    count: store.length,
+    orders: store,
+    data: store,
+    items: store,
+  });
+}
+
+app.post("/api/order", createOrderHandler);
+app.post("/api/orders", createOrderHandler);
+app.post("/api/trade/order", createOrderHandler);
+app.post("/api/trade/orders", createOrderHandler);
+
+app.get("/api/order", listOrdersHandler);
+app.get("/api/orders", listOrdersHandler);
+app.get("/api/trade/order", listOrdersHandler);
+app.get("/api/trade/orders", listOrdersHandler);
+
+/* ======================================================
    Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
    ====================================================== */
 app.use("/api/api", (req, res) => {
