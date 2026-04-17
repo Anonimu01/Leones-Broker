@@ -4720,7 +4720,10 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-    if (!symbol) return console.warn("⚠️ Símbolo vacío");
+   if (!symbol) {
+  alert("Selecciona un símbolo primero");
+  return;
+}
     if (!amount || amount <= 0) return console.warn("⚠️ Cantidad inválida");
     if (!side) return console.warn("⚠️ Side inválido");
 
