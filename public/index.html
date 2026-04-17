@@ -4680,59 +4680,73 @@ if (window.__LEONES_BOOTED__) {
     };
   }
 
- async function placeOrder(side) {
+async function placeOrder(input) {
   try {
     const api = window.__LEONES_BROKER_EXT2 || {};
 
-    // 🔹 símbolo FIX REAL
-    const symbol =
-      window.selectedSymbol ||
-      window.selectedSimbol ||
-      api.activeSymbol ||
-      document.getElementById("tradingSymbol")?.textContent?.trim() ||
-      document.getElementById("op-symbol")?.textContent?.trim();
+    // 🔥 detectar si viene como string o como objeto
+    let side, symbol, amount, type, price;
 
+    if (typeof input === "string") {
+      // 👉 caso normal (buy / sell)
+      side = input;
+
+      symbol =
+        window.selectedSymbol ||
+        window.selectedSimbol ||
+        api.activeSymbol ||
+        document.getElementById("tradingSymbol")?.textContent?.trim() ||
+        document.getElementById("op-symbol")?.textContent?.trim();
+
+      const sizeInput = document.getElementById("brokerOrderSize");
+      amount = parseFloat(sizeInput?.value);
+
+      type =
+        document.getElementById("order-type")?.value ||
+        document.getElementById("order-type-bottom")?.value ||
+        "Market";
+
+      if (type !== "Market") {
+        const priceInput =
+          document.getElementById("order-price") ||
+          document.getElementById("order-price-bottom");
+
+        price = parseFloat(priceInput?.value);
+      }
+
+    } else {
+      // 👉 caso cuando viene como payload (desde api)
+      side = input.side || input.direction;
+      symbol = input.symbol;
+      amount = input.amount;
+      type = input.type || "Market";
+      price = input.price;
+    }
+
+    // 🔥 VALIDACIONES
     if (!symbol) {
       console.warn("⚠️ Símbolo vacío");
       return;
     }
-
-    // 🔹 cantidad
-    const sizeInput = document.getElementById("brokerOrderSize");
-    const amount = parseFloat(sizeInput?.value);
 
     if (!amount || amount <= 0) {
       console.warn("⚠️ Cantidad inválida");
       return;
     }
 
-    // 🔹 tipo
-    const type =
-      document.getElementById("order-type")?.value ||
-      document.getElementById("order-type-bottom")?.value ||
-      "Market";
-
-    // 🔹 precio
-    let price = null;
-
-    if (type !== "Market") {
-      const priceInput =
-        document.getElementById("order-price") ||
-        document.getElementById("order-price-bottom");
-
-      price = parseFloat(priceInput?.value);
-
-      if (!price || price <= 0) {
-        console.warn("⚠️ Precio inválido");
-        return;
-      }
+    if (!side) {
+      console.warn("⚠️ Side inválido");
+      return;
     }
 
+    // 🔥 FIX CRÍTICO
+    side = String(side).toUpperCase();
+
     const payload = {
-      symbol: symbol.replace("/", ""),
-      side: side.toUpperCase(),
-      type: type.toUpperCase(),
-      amount: amount,
+      symbol: String(symbol).replace("/", ""),
+      side,
+      type: String(type).toUpperCase(),
+      amount,
       price: price || undefined
     };
 
@@ -4740,7 +4754,7 @@ if (window.__LEONES_BOOTED__) {
 
     let res;
 
-    if (typeof api.placeOrder === "function") {
+    if (typeof api.placeOrder === "function" && input !== payload) {
       res = await api.placeOrder(payload);
     } else {
       res = await fetch("/api/order", {
