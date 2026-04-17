@@ -4707,12 +4707,20 @@ function placeBrokerOrder(payload = {}) {
 
   console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
 
-  // 🔥 BUSCAR DINÁMICAMENTE LA FUNCIÓN REAL
-  const realFn =
-    api.placeOrder ||
-    api.__originalPlaceOrder ||
-    window.placeOrder ||
-    window.__LEONES_PLACE_ORDER__;
+  // 🔥 EVITAR LOOP INFINITO
+  if (payload.__fromBroker) {
+    console.warn("⛔ Evitando loop de orden");
+    return;
+  }
+
+  // 🔥 BUSCAR FUNCIÓN REAL PERO QUE NO SEA ESTA MISMA
+  let realFn = null;
+
+  if (api.placeOrder && api.placeOrder !== placeBrokerOrder) {
+    realFn = api.placeOrder;
+  } else if (window.placeOrder && window.placeOrder !== placeBrokerOrder) {
+    realFn = window.placeOrder;
+  }
 
   if (typeof realFn === "function") {
     return realFn({
@@ -4720,7 +4728,8 @@ function placeBrokerOrder(payload = {}) {
       amount,
       direction,
       price,
-      type
+      type,
+      __fromBroker: true // 🔥 MARCA PARA NO VOLVER A ENTRAR
     });
   }
 
