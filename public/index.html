@@ -4680,12 +4680,15 @@ if (window.__LEONES_BOOTED__) {
     };
   }
 
-  async function placeOrder(side) {
+ async function placeOrder(side) {
   try {
     const api = window.__LEONES_BROKER_EXT2 || {};
 
-    // 🔹 tomar símbolo actual
+    // 🔹 símbolo FIX REAL
     const symbol =
+      window.selectedSymbol ||
+      window.selectedSimbol ||
+      api.activeSymbol ||
       document.getElementById("tradingSymbol")?.textContent?.trim() ||
       document.getElementById("op-symbol")?.textContent?.trim();
 
@@ -4703,13 +4706,13 @@ if (window.__LEONES_BOOTED__) {
       return;
     }
 
-    // 🔹 tipo de orden
+    // 🔹 tipo
     const type =
       document.getElementById("order-type")?.value ||
       document.getElementById("order-type-bottom")?.value ||
       "Market";
 
-    // 🔹 precio (si aplica)
+    // 🔹 precio
     let price = null;
 
     if (type !== "Market") {
@@ -4725,10 +4728,9 @@ if (window.__LEONES_BOOTED__) {
       }
     }
 
-    // 🔥 payload limpio (esto evita el error que tienes)
     const payload = {
       symbol: symbol.replace("/", ""),
-      side: side.toUpperCase(), // BUY / SELL
+      side: side.toUpperCase(),
       type: type.toUpperCase(),
       amount: amount,
       price: price || undefined
@@ -4736,13 +4738,11 @@ if (window.__LEONES_BOOTED__) {
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔹 enviar orden
     let res;
 
     if (typeof api.placeOrder === "function") {
       res = await api.placeOrder(payload);
     } else {
-      // fallback directo a API
       res = await fetch("/api/order", {
         method: "POST",
         headers: {
