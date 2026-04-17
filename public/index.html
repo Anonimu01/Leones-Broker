@@ -4707,8 +4707,15 @@ function placeBrokerOrder(payload = {}) {
 
   console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
 
-  if (typeof api.__originalPlaceOrder === "function") {
-    return api.__originalPlaceOrder({
+  // 🔥 BUSCAR DINÁMICAMENTE LA FUNCIÓN REAL
+  const realFn =
+    api.placeOrder ||
+    api.__originalPlaceOrder ||
+    window.placeOrder ||
+    window.__LEONES_PLACE_ORDER__;
+
+  if (typeof realFn === "function") {
+    return realFn({
       symbol,
       amount,
       direction,
@@ -4717,8 +4724,7 @@ function placeBrokerOrder(payload = {}) {
     });
   }
 
-  console.warn("❌ No existe __originalPlaceOrder");
-  return;
+  console.error("❌ No hay función real de orden disponible");
 }
   function bootIfLoggedIn() {
     if (state.booted) return;
