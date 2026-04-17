@@ -2072,9 +2072,11 @@ if (window.__LEONES_BOOTED__) {
 
   const api = window.__LEONES_BROKER_EXT2 || {};
 
-if (api.placeOrder && !api.__originalPlaceOrder) {
-  api.__originalPlaceOrder = api.placeOrder;
-}
+  // 🔥 CAPTURA REAL SEGURA (NO SE PIERDE)
+  const ORIGINAL_PLACE_ORDER =
+    typeof api.__originalPlaceOrder === 'function'
+      ? api.__originalPlaceOrder
+      : (typeof api.placeOrder === 'function' ? api.placeOrder.bind(api) : null);
 
   const NS = window._LEONES = window._LEONES || {};
   const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
@@ -2098,7 +2100,6 @@ if (api.placeOrder && !api.__originalPlaceOrder) {
     Stocks: '🏢',
     Commodities: '⛏️'
   };
-
   const SYMBOL_LABELS = {
     EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
     NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
