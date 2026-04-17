@@ -4681,70 +4681,52 @@ if (api.placeOrder && !api.__originalPlaceOrder) {
 
 
 function placeBrokerOrder(payload = {}) {
-  const symbol = String(payload.symbol || payload.tvSymbol || '').trim().toUpperCase();
-  const meta =
-    symbolMap().get(symbol) ||
-    getSymbols().find(x => String(x.symbol).toUpperCase() === symbol || String(x.tvSymbol).toUpperCase() === symbol) ||
-    getActiveSymbolMeta();
 
-  if (meta) {
-    state.activeSymbol = meta.symbol;
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
-    renderSymbolDetails(meta);
-    requestRealtimeForSymbol(meta);
-    renderBottomPanels();
-  }
-
-  const amount = payload.amount ?? payload.positionSize ?? payload.notional ?? null;
-  const direction = String(payload.direction || payload.side || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-  const type = String(payload.type || payload.orderType || getOrderType() || 'Market');
-  const price = payload.price ?? null;
-
-  const sizeTop = document.getElementById('brokerOrderSize');
-  const sizeBottom = document.getElementById('brokerOrderSizeBottom');
-  if (amount !== null && amount !== undefined && amount !== '') {
-    if (sizeTop) sizeTop.value = amount;
-    if (sizeBottom) sizeBottom.value = amount;
-    LAST_AMOUNT = String(amount);
-  }
-
-  const typeTop = document.getElementById('order-type');
-  const typeBottom = document.getElementById('order-type-bottom');
-  if (typeTop) typeTop.value = type;
-  if (typeBottom) typeBottom.value = type;
-  syncOrderTypeBoxes(type);
-
-  if (price !== null && price !== undefined && price !== '') {
-    const priceTop = document.getElementById('order-price');
-    const priceBottom = document.getElementById('order-price-bottom');
-    if (priceTop) priceTop.value = price;
-    if (priceBottom) priceBottom.value = price;
-  }
-
-  // 🔥 AQUÍ ESTÁ EL FIX REAL (SIN LOOP)
   const api = window.__LEONES_BROKER_EXT2 || {};
 
+  const symbol = String(payload.symbol || payload.tvSymbol || '').trim().toUpperCase();
+
+  if (!symbol) {
+    console.warn("⚠️ Símbolo vacío");
+    return;
+  }
+
+  const amount = payload.amount ?? payload.positionSize ?? payload.notional;
+  if (!amount || amount <= 0) {
+    console.warn("⚠️ Monto inválido");
+    return;
+  }
+
+  const direction = String(payload.direction || payload.side || 'BUY').toUpperCase() === 'SELL'
+    ? 'SELL'
+    : 'BUY';
+
+  const type = payload.type || 'Market';
+  const price = payload.price ?? null;
+
+  // 🔥 AQUÍ ESTÁ LA CLAVE (SIN LOOP)
   if (typeof api.__originalPlaceOrder === "function") {
     return api.__originalPlaceOrder({
-      symbol: symbol,
-      amount: amount,
-      direction: direction,
-      price: price,
-      type: type
+      symbol,
+      amount,
+      direction,
+      price,
+      type
     });
   }
 
   // fallback seguro
   if (typeof api.placeOrder === "function") {
     return api.placeOrder({
-      symbol: symbol,
-      amount: amount,
-      direction: direction,
-      price: price,
-      type: type
+      symbol,
+      amount,
+      direction,
+      price,
+      type
     });
   }
+
+  console.warn("❌ No hay función de orden disponible");
 }
   function bootIfLoggedIn() {
     if (state.booted) return;
