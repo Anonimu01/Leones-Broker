@@ -4720,30 +4720,25 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-    // 🔥 VALIDACIONES FUERTES
     if (!symbol) return console.warn("⚠️ Símbolo vacío");
     if (!amount || amount <= 0) return console.warn("⚠️ Cantidad inválida");
     if (!side) return console.warn("⚠️ Side inválido");
 
-    // 🔥 FIX DEFINITIVO
     side = String(side).toUpperCase();
 
     const payload = {
       symbol: String(symbol).replace("/", ""),
-      side: side, // 👈 SIEMPRE STRING
+      side,
       type: String(type).toUpperCase(),
-      amount: amount,
+      amount,
       price: price || undefined
     };
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔥 CLAVE: FORZAR STRING ENTRANDO AL API
-    if (typeof api.placeOrder === "function") {
-      return await api.placeOrder({
-        ...payload,
-        side: String(payload.side) // 👈 doble protección
-      });
+    // 🔥 AQUÍ ESTÁ EL FIX REAL
+    if (typeof api.placeBrokerOrder === "function") {
+      return await api.placeBrokerOrder(payload);
     }
 
     // fallback
