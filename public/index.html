@@ -4680,6 +4680,100 @@ if (window.__LEONES_BOOTED__) {
     };
   }
 
+  async function placeOrder(side) {
+  try {
+    const api = window.__LEONES_BROKER_EXT2 || {};
+
+    // 🔹 tomar símbolo actual
+    const symbol =
+      document.getElementById("tradingSymbol")?.textContent?.trim() ||
+      document.getElementById("op-symbol")?.textContent?.trim();
+
+    if (!symbol) {
+      console.warn("⚠️ Símbolo vacío");
+      return;
+    }
+
+    // 🔹 cantidad
+    const sizeInput = document.getElementById("brokerOrderSize");
+    const amount = parseFloat(sizeInput?.value);
+
+    if (!amount || amount <= 0) {
+      console.warn("⚠️ Cantidad inválida");
+      return;
+    }
+
+    // 🔹 tipo de orden
+    const type =
+      document.getElementById("order-type")?.value ||
+      document.getElementById("order-type-bottom")?.value ||
+      "Market";
+
+    // 🔹 precio (si aplica)
+    let price = null;
+
+    if (type !== "Market") {
+      const priceInput =
+        document.getElementById("order-price") ||
+        document.getElementById("order-price-bottom");
+
+      price = parseFloat(priceInput?.value);
+
+      if (!price || price <= 0) {
+        console.warn("⚠️ Precio inválido");
+        return;
+      }
+    }
+
+    // 🔥 payload limpio (esto evita el error que tienes)
+    const payload = {
+      symbol: symbol.replace("/", ""),
+      side: side.toUpperCase(), // BUY / SELL
+      type: type.toUpperCase(),
+      amount: amount,
+      price: price || undefined
+    };
+
+    console.log("🚀 Enviando orden:", payload);
+
+    // 🔹 enviar orden
+    let res;
+
+    if (typeof api.placeOrder === "function") {
+      res = await api.placeOrder(payload);
+    } else {
+      // fallback directo a API
+      res = await fetch("/api/order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+    }
+
+    console.log("✅ Orden enviada:", res);
+
+  } catch (err) {
+    console.error("❌ Error al enviar orden:", err);
+  }
+}
+
+  //para el rejuego
+
+  document.addEventListener("click", (e) => {
+  const action = e.target?.dataset?.action;
+
+  if (!action) return;
+
+  if (action === "buy") {
+    placeOrder("buy");
+  }
+
+  if (action === "sell") {
+    placeOrder("sell");
+  }
+});
 
 function placeBrokerOrder(payload = {}) {
 
