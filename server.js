@@ -39,6 +39,9 @@ import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
+// Controllers/helpers
+import { openTrade as executeTradeOrder } from "./controllers/trade.controller.js";
+
 // Send email helper (centralizado: Resend SDK / HTTP / SMTP fallback)
 import sendEmail from "./utils/sendEmail.js";
 
@@ -551,15 +554,20 @@ async function buildAccountForUser(user) {
   const wallet = await getWalletForUser(user._id);
   const positions = await getPositionsForUser(user._id);
 
-  const balance = wallet?.balance ?? user.balance ?? 0;
+  const balance = wallet?.balanceOwn ?? wallet?.balance ?? user.balance ?? 0;
+  const marginUsed = wallet?.marginUsed ?? 0;
+  const equity = wallet?.equity ?? balance;
+  const freeMargin = Math.max(equity - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
   return {
     account: {
       balance,
-      equity: balance,
-      marginUsed: 0,
-      freeMargin: balance,
-      marginLevel: 0,
+      balanceOwn: balance,
+      equity,
+      marginUsed,
+      freeMargin,
+      marginLevel,
       leverage: user.leverage ?? 100,
       currency: user.currency || "USD",
       positions: positions || [],
@@ -621,10 +629,16 @@ app.get("/api/wallet", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const wallet = await getWalletForUser(user._id);
-    if (wallet) return res.json(wallet);
+    if (wallet) {
+      return res.json({
+        ...wallet,
+        balance: wallet.balanceOwn ?? wallet.balance ?? 0,
+      });
+    }
 
     return res.json({
       balance: user.balance ?? 0,
+      balanceOwn: user.balance ?? 0,
       currency: user.currency || "USD",
     });
   } catch (e) {
@@ -638,71 +652,62 @@ app.get("/api/billetera", (req, res) => {
 });
 
 /* ======================================================
-   ORDERS / TRADE PLACEHOLDER
+   ORDERS / TRADE COMPATIBILITY
    - Evita 404 en /api/order y /api/orders
-   - Acepta side/direction
-   - Guarda en memoria y emite por socket
-   - Intenta persistencia opcional en Position si el schema lo permite
+   - Usa el mismo motor real del controller trade.openTrade
    ====================================================== */
 
-const ORDER_STORE =
+const LEGACY_ORDER_STORE =
   globalThis.__LEONES_ORDER_STORE__ ||
   (globalThis.__LEONES_ORDER_STORE__ = []);
 
-function getOrderStore() {
-  return globalThis.__LEONES_ORDER_STORE__ || ORDER_STORE;
+function getLegacyOrderStore() {
+  return globalThis.__LEONES_ORDER_STORE__ || LEGACY_ORDER_STORE;
 }
 
-function normalizeOrderSide(value) {
+function normalizeLegacySide(value) {
   const s = String(value || "").trim().toUpperCase();
   if (s === "BUY" || s === "LONG") return "BUY";
   if (s === "SELL" || s === "SHORT") return "SELL";
   return "";
 }
 
-function normalizeOrderType(value) {
-  const t = String(value || "Market").trim();
-  if (!t) return "Market";
-  return t;
-}
-
-function normalizeOrderAmount(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizeOrderPrice(value) {
-  if (value === undefined || value === null || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizeOrderPayload(body = {}) {
-  const symbol = String(
-    body.symbol ||
-    body.tvSymbol ||
-    body.ticker ||
-    body.asset ||
-    ""
-  ).trim().toUpperCase();
-
-  const side = normalizeOrderSide(body.side ?? body.direction ?? body.action);
-  const amount = normalizeOrderAmount(
-    body.amount ?? body.positionSize ?? body.notional ?? body.quantity ?? body.qty
+function normalizeLegacyAmount(body = {}) {
+  const n = Number(
+    body.quantity ??
+      body.amount ??
+      body.positionSize ??
+      body.notional ??
+      body.qty ??
+      body.size
   );
-  const type = normalizeOrderType(body.type ?? body.orderType);
-  const price = normalizeOrderPrice(body.price ?? body.limitPrice ?? body.stopPrice);
-
-  return {
-    symbol,
-    side,
-    amount,
-    type,
-    price,
-  };
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function buildOrderId() {
+function normalizeLegacyPrice(body = {}) {
+  if (body.price === undefined || body.price === null || body.price === "") {
+    return null;
+  }
+  const n = Number(body.price);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizeLegacyOrder(body = {}) {
+  const symbol = String(
+    body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const side = normalizeLegacySide(body.side ?? body.direction ?? body.action);
+  const amount = normalizeLegacyAmount(body);
+  const type = String(body.type || body.orderType || "Market").trim();
+  const price = normalizeLegacyPrice(body);
+
+  return { symbol, side, amount, type, price };
+}
+
+function buildLegacyOrderId() {
   return (
     "ORD-" +
     Date.now().toString(36).toUpperCase() +
@@ -711,57 +716,18 @@ function buildOrderId() {
   );
 }
 
-async function saveOrderToMemoryAndEmit(order) {
-  const store = getOrderStore();
-  store.unshift(order);
-
-  if (store.length > 500) {
-    store.length = 500;
-  }
-
-  try {
-    io.emit("orders_update", {
-      ok: true,
-      count: store.length,
-      orders: store,
-      data: store,
-      items: store,
-    });
-    io.emit("order_created", order);
-  } catch (e) {
-    console.warn("No se pudo emitir orders_update:", e?.message || e);
-  }
-}
-
-async function tryPersistOrderAsPosition(user, order) {
-  try {
-    if (!user || !Position || typeof Position.create !== "function") return null;
-
-    const doc = await Position.create({
-      user: user._id,
-      symbol: order.symbol,
-      side: order.side,
-      amount: order.amount,
-      type: order.type,
-      price: order.price,
-      status: "open",
-      source: "order-api",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    return doc || null;
-  } catch (e) {
-    console.warn("Persistencia opcional en Position falló:", e?.message || e);
-    return null;
-  }
-}
-
-async function createOrderHandler(req, res) {
+async function legacyCreateOrderHandler(req, res) {
   try {
     const user = await getUserFromBearer(req);
-    const body = req.body || {};
-    const parsed = normalizeOrderPayload(body);
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized",
+        message: "Token inválido o ausente",
+      });
+    }
+
+    const parsed = normalizeLegacyOrder(req.body || {});
 
     if (!parsed.symbol) {
       return res.status(400).json({
@@ -788,7 +754,7 @@ async function createOrderHandler(req, res) {
     }
 
     const order = {
-      id: buildOrderId(),
+      id: buildLegacyOrderId(),
       symbol: parsed.symbol,
       side: parsed.side,
       amount: parsed.amount,
@@ -796,27 +762,59 @@ async function createOrderHandler(req, res) {
       price: parsed.price,
       status: "accepted",
       userId: user?._id || null,
-      authenticated: !!user,
+      authenticated: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       source: "server.js",
     };
 
-    const persistedPosition = await tryPersistOrderAsPosition(user, order);
-    if (persistedPosition?._id) {
-      order.positionId = persistedPosition._id.toString();
+    const result = await executeTradeOrder({
+      user,
+      order: {
+        symbol: parsed.symbol,
+        side: parsed.side,
+        type: parsed.type,
+        quantity: parsed.amount,
+        price: parsed.price,
+      },
+    });
+
+    if (!result || !result.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: result?.error || "Trade failed",
+      });
     }
 
-    await saveOrderToMemoryAndEmit(order);
+    order.positionId = result?.data?.positionId || null;
+    order.status = "filled";
+
+    const store = getLegacyOrderStore();
+    store.unshift(order);
+    if (store.length > 500) store.length = 500;
+
+    try {
+      io.emit("orders_update", {
+        ok: true,
+        count: store.length,
+        orders: store,
+        data: store,
+        items: store,
+      });
+      io.emit("order_created", order);
+    } catch (e) {
+      console.warn("No se pudo emitir orders_update:", e?.message || e);
+    }
 
     return res.status(201).json({
       ok: true,
       message: "Orden recibida",
       order,
-      count: getOrderStore().length,
+      data: result.data,
+      count: store.length,
     });
   } catch (e) {
-    console.error("createOrderHandler error:", e);
+    console.error("legacyCreateOrderHandler error:", e);
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -825,8 +823,8 @@ async function createOrderHandler(req, res) {
   }
 }
 
-function listOrdersHandler(req, res) {
-  const store = getOrderStore();
+function listLegacyOrdersHandler(req, res) {
+  const store = getLegacyOrderStore();
   return res.json({
     ok: true,
     count: store.length,
@@ -836,15 +834,15 @@ function listOrdersHandler(req, res) {
   });
 }
 
-app.post("/api/order", createOrderHandler);
-app.post("/api/orders", createOrderHandler);
-app.post("/api/trade/order", createOrderHandler);
-app.post("/api/trade/orders", createOrderHandler);
+app.post("/api/order", legacyCreateOrderHandler);
+app.post("/api/orders", legacyCreateOrderHandler);
+app.post("/api/trade/order", legacyCreateOrderHandler);
+app.post("/api/trade/orders", legacyCreateOrderHandler);
 
-app.get("/api/order", listOrdersHandler);
-app.get("/api/orders", listOrdersHandler);
-app.get("/api/trade/order", listOrdersHandler);
-app.get("/api/trade/orders", listOrdersHandler);
+app.get("/api/order", listLegacyOrdersHandler);
+app.get("/api/orders", listLegacyOrdersHandler);
+app.get("/api/trade/order", listLegacyOrdersHandler);
+app.get("/api/trade/orders", listLegacyOrdersHandler);
 
 /* ======================================================
    Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
@@ -959,9 +957,6 @@ const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
    RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
-   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
-   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
-   - Si no existe, se devuelve un stub JS válido en vez de HTML.
    ====================================================== */
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
