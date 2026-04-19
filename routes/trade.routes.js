@@ -1,12 +1,16 @@
 // routes/trade.js
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
-import { openTrade } from "../controllers/trade.controller.js";
+import { openTrade, getPositions } from "../controllers/trade.controller.js";
 
 const router = express.Router();
 
+// 🔥 CACHE IDEMPOTENCIA (temporal)
 const idempotencyCache = new Map();
 
+/**
+ * VALIDACIÓN
+ */
 function validateOrderBody(body) {
   if (!body || typeof body !== "object") return "body must be an object";
 
@@ -27,6 +31,9 @@ function validateOrderBody(body) {
   return null;
 }
 
+/**
+ * 🚀 ABRIR TRADE
+ */
 router.post("/open", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
@@ -35,17 +42,16 @@ router.post("/open", authMiddleware, async (req, res) => {
     const error = validateOrderBody(req.body);
     if (error) return res.status(400).json({ ok: false, error });
 
-    const idemKey = req.headers["idempotency-key"] || req.body.clientOrderId;
+    const idemKeyRaw = req.headers["idempotency-key"] || req.body.clientOrderId || null;
+    const idemKey = idemKeyRaw ? `${user._id}::${idemKeyRaw}` : null;
 
-    if (idemKey) {
-      const key = `${user._id}::${idemKey}`;
-      if (idempotencyCache.has(key)) {
-        return res.json({
-          ok: true,
-          data: idempotencyCache.get(key),
-          idempotent: true
-        });
-      }
+    // 🔥 IDEMPOTENCIA
+    if (idemKey && idempotencyCache.has(idemKey)) {
+      return res.json({
+        ok: true,
+        data: idempotencyCache.get(idemKey),
+        idempotent: true
+      });
     }
 
     const order = {
@@ -56,7 +62,9 @@ router.post("/open", authMiddleware, async (req, res) => {
       price: req.body.price ? Number(req.body.price) : null
     };
 
-    // 🔥 AQUÍ SE EJECUTA TODO (LO IMPORTANTE)
+    console.log("📩 Orden recibida:", order);
+
+    // 🔥 EJECUCIÓN REAL (CONTROLLER)
     const result = await openTrade({ user, order });
 
     if (!result || !result.ok) {
@@ -66,9 +74,9 @@ router.post("/open", authMiddleware, async (req, res) => {
       });
     }
 
+    // 🔥 GUARDAR RESPUESTA PARA IDEMPOTENCIA
     if (idemKey) {
-      const key = `${user._id}::${idemKey}`;
-      idempotencyCache.set(key, result.data);
+      idempotencyCache.set(idemKey, result.data);
     }
 
     return res.json({
@@ -81,5 +89,10 @@ router.post("/open", authMiddleware, async (req, res) => {
     return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
+
+/**
+ * 🔥 OBTENER POSICIONES (ESTO ERA LO QUE TE FALTABA)
+ */
+router.get("/positions", authMiddleware, getPositions);
 
 export default router;
