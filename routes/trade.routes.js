@@ -1,20 +1,17 @@
 // routes/trade.js
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
-import { openTrade, getPositions } from "../controllers/trade.controller.js";
+import { openTrade } from "../controllers/trade.controller.js";
+import { getPositions } from "../controllers/positions.controller.js"; // 🔥 AQUÍ EL FIX
 
 const router = express.Router();
 
-// 🔥 CACHE IDEMPOTENCIA (temporal)
 const idempotencyCache = new Map();
 
-/**
- * VALIDACIÓN
- */
 function validateOrderBody(body) {
   if (!body || typeof body !== "object") return "body must be an object";
 
-  const { symbol, side, type, quantity, price } = body;
+  const { symbol, side, type, quantity, price };
 
   if (!symbol || typeof symbol !== "string") return "symbol required";
   if (!["buy", "sell"].includes(String(side).toLowerCase())) return "invalid side";
@@ -31,9 +28,6 @@ function validateOrderBody(body) {
   return null;
 }
 
-/**
- * 🚀 ABRIR TRADE
- */
 router.post("/open", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
@@ -45,7 +39,6 @@ router.post("/open", authMiddleware, async (req, res) => {
     const idemKeyRaw = req.headers["idempotency-key"] || req.body.clientOrderId || null;
     const idemKey = idemKeyRaw ? `${user._id}::${idemKeyRaw}` : null;
 
-    // 🔥 IDEMPOTENCIA
     if (idemKey && idempotencyCache.has(idemKey)) {
       return res.json({
         ok: true,
@@ -64,7 +57,6 @@ router.post("/open", authMiddleware, async (req, res) => {
 
     console.log("📩 Orden recibida:", order);
 
-    // 🔥 EJECUCIÓN REAL (CONTROLLER)
     const result = await openTrade({ user, order });
 
     if (!result || !result.ok) {
@@ -74,7 +66,6 @@ router.post("/open", authMiddleware, async (req, res) => {
       });
     }
 
-    // 🔥 GUARDAR RESPUESTA PARA IDEMPOTENCIA
     if (idemKey) {
       idempotencyCache.set(idemKey, result.data);
     }
@@ -90,9 +81,7 @@ router.post("/open", authMiddleware, async (req, res) => {
   }
 });
 
-/**
- * 🔥 OBTENER POSICIONES (ESTO ERA LO QUE TE FALTABA)
- */
+// 🔥 ESTA ES LA CLAVE PARA QUE APAREZCAN LAS POSICIONES
 router.get("/positions", authMiddleware, getPositions);
 
 export default router;
