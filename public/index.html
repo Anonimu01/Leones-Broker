@@ -3914,25 +3914,61 @@ if (window.__LEONES_BOOTED__) {
     return null;
   }
 
-  async function loadPositions() {
-    const endpoints = ['/positions', '/trade/positions', '/api/positions', '/api/trade/positions'];
-    for (const ep of endpoints) {
-      try {
-        const res = await apiFetch(ep).catch(() => null);
-        if (!res) continue;
-        const list = asArrayResponse(res);
-        state.positions = list;
-        TR.positions = list;
-        renderPositions();
-        renderBottomPanels();
-        return list;
-      } catch (e) {}
+ async function loadPositions() {
+  const endpoints = ['/positions', '/trade/positions', '/api/positions', '/api/trade/positions'];
+
+  for (const ep of endpoints) {
+    try {
+      const res = await apiFetch(ep).catch(() => null);
+      if (!res) continue;
+
+      // 🔥 SOPORTE PARA TODOS LOS FORMATOS POSIBLES
+      let list = [];
+
+      if (Array.isArray(res)) {
+        list = res;
+      } else if (Array.isArray(res.data)) {
+        list = res.data;
+      } else if (Array.isArray(res.positions)) {
+        list = res.positions;
+      } else if (res.data && Array.isArray(res.data.positions)) {
+        list = res.data.positions;
+      }
+
+      // 🔥 NORMALIZAR DATOS (CLAVE PARA QUE LA UI FUNCIONE)
+      list = list.map(p => ({
+        id: p._id || p.id || p.positionId || p.tradeId,
+        symbol: p.symbol,
+        side: p.side || p.direction,
+        qty: p.qty || p.quantity || p.amount,
+        entryPrice: p.entryPrice || p.price || 0,
+        currentPrice: p.currentPrice || p.price || 0,
+        profit: p.profit || 0,
+        status: p.status || "OPEN"
+      }));
+
+      // 🔥 GUARDAR EN ESTADO GLOBAL
+      state.positions = list;
+      TR.positions = list;
+
+      // 🔥 RENDER
+      renderPositions();
+      renderBottomPanels();
+
+      return list;
+
+    } catch (e) {
+      console.warn("❌ Error en endpoint:", ep);
     }
-    state.positions = [];
-    TR.positions = [];
-    renderPositions();
-    return [];
   }
+
+  // fallback
+  state.positions = [];
+  TR.positions = [];
+  renderPositions();
+
+  return [];
+}
 
   async function loadMarketsAndQuotes() {
     await loadRealMarkets();
@@ -4691,7 +4727,6 @@ async function placeOrder(input) {
 
       symbol =
         window.selectedSymbol ||
-        window.selectedSimbol ||
         api.activeSymbol ||
         document.getElementById("tradingSymbol")?.textContent?.trim() ||
         document.getElementById("op-symbol")?.textContent?.trim();
@@ -4720,18 +4755,26 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-   if (!symbol) {
-  alert("Selecciona un símbolo primero");
-  return;
-}
-    if (!amount || amount <= 0) return console.warn("⚠️ Cantidad inválida");
-    if (!side) return console.warn("⚠️ Side inválido");
+    if (!symbol) {
+      alert("Selecciona un símbolo primero");
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      console.warn("⚠️ Cantidad inválida");
+      return;
+    }
+
+    if (!side) {
+      console.warn("⚠️ Side inválido");
+      return;
+    }
 
     side = String(side).toUpperCase();
 
     const payload = {
       symbol: String(symbol).replace("/", ""),
-      side,
+      direction: side, // 🔥 IMPORTANTE
       type: String(type).toUpperCase(),
       amount,
       price: price || undefined
@@ -4739,21 +4782,9 @@ async function placeOrder(input) {
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔥 AQUÍ ESTÁ EL FIX REAL
     if (typeof api.placeBrokerOrder === "function") {
       return await api.placeBrokerOrder(payload);
     }
-
-    // fallback
-    const res = await fetch("/api/order", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    }).then(r => r.json());
-
-    console.log("✅ Orden enviada:", res);
 
   } catch (err) {
     console.error("❌ Error al enviar orden:", err);
@@ -4775,11 +4806,11 @@ async function placeOrder(input) {
   }
 });
 
-function placeBrokerOrder(payload = {}) {
+async function placeBrokerOrder(payload = {}) {
 
   const symbol = String(payload.symbol || '').trim().toUpperCase();
   const amount = payload.amount;
-  const direction = (payload.direction || 'BUY').toUpperCase();
+  const direction = (payload.direction || payload.side || 'BUY').toUpperCase();
   const type = payload.type || 'Market';
   const price = payload.price ?? null;
 
@@ -4790,28 +4821,50 @@ function placeBrokerOrder(payload = {}) {
 
   console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
 
-  return fetch('/api/orders', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
-    },
-    body: JSON.stringify({
-      symbol,
-      amount,
-      side: direction,
-      type,
-      price
-    })
-  })
-  .then(res => res.json())
-  .then(data => {
+  try {
+    const res = await fetch('/api/trade/open', {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+      },
+      body: JSON.stringify({
+        symbol,
+        side: direction.toLowerCase(),
+        type: type.toLowerCase(),
+        quantity: amount,
+        price
+      })
+    });
+
+    const data = await res.json();
+
     console.log("✅ Orden enviada:", data);
-    return data;
-  })
-  .catch(err => {
+
+    if (!data.ok) {
+      alert(data.msg || "Error abriendo operación");
+      return;
+    }
+
+    // 🔥 ESPERAR A QUE EL BACKEND GUARDE
+    await new Promise(r => setTimeout(r, 300));
+
+    // 🔥 RECARGAR TODO DESDE BACKEND
+    if (window.__LEONES_BROKER_EXT2) {
+      const api = window.__LEONES_BROKER_EXT2;
+
+      await api.loadPositions();
+      await api.loadAccount();
+      await api.loadRealQuotes();
+
+      // 🔥 FORZAR REFRESCO VISUAL
+      if (typeof renderBottomPanels === "function") renderBottomPanels();
+      if (typeof updateFloatingTrades === "function") updateFloatingTrades();
+    }
+
+  } catch (err) {
     console.error("❌ Error enviando orden:", err);
-  });
+  }
 }
   function bootIfLoggedIn() {
     if (state.booted) return;
