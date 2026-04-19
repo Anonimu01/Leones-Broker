@@ -4809,13 +4809,28 @@ async function placeOrder(input) {
 async function placeBrokerOrder(payload = {}) {
 
   const symbol = String(payload.symbol || '').trim().toUpperCase();
-  const amount = payload.amount;
-  const direction = (payload.direction || payload.side || 'BUY').toUpperCase();
-  const type = payload.type || 'Market';
+  const amount = Number(payload.amount);
+  const direction = (payload.direction || payload.side || 'BUY').toLowerCase();
+  const type = String(payload.type || 'market').toLowerCase();
   const price = payload.price ?? null;
 
-  if (!symbol || !amount) {
-    console.warn("⚠️ Datos inválidos");
+  if (!symbol) {
+    alert("Símbolo inválido");
+    return;
+  }
+
+  if (!isFinite(amount) || amount <= 0) {
+    alert("Cantidad inválida");
+    return;
+  }
+
+  if (!["buy", "sell"].includes(direction)) {
+    alert("Dirección inválida");
+    return;
+  }
+
+  if (!["market", "limit"].includes(type)) {
+    alert("Tipo inválido");
     return;
   }
 
@@ -4830,8 +4845,8 @@ async function placeBrokerOrder(payload = {}) {
       },
       body: JSON.stringify({
         symbol,
-        side: direction.toLowerCase(),
-        type: type.toLowerCase(),
+        side: direction,
+        type,
         quantity: amount,
         price
       })
@@ -4839,28 +4854,15 @@ async function placeBrokerOrder(payload = {}) {
 
     const data = await res.json();
 
-    console.log("✅ Orden enviada:", data);
+    console.log("📩 RESPUESTA BACKEND:", data);
 
     if (!data.ok) {
-      alert(data.msg || "Error abriendo operación");
+      alert(data.error || data.msg || "Error abriendo operación");
       return;
     }
 
-    // 🔥 ESPERAR A QUE EL BACKEND GUARDE
-    await new Promise(r => setTimeout(r, 300));
-
-    // 🔥 RECARGAR TODO DESDE BACKEND
-    if (window.__LEONES_BROKER_EXT2) {
-      const api = window.__LEONES_BROKER_EXT2;
-
-      await api.loadPositions();
-      await api.loadAccount();
-      await api.loadRealQuotes();
-
-      // 🔥 FORZAR REFRESCO VISUAL
-      if (typeof renderBottomPanels === "function") renderBottomPanels();
-      if (typeof updateFloatingTrades === "function") updateFloatingTrades();
-    }
+    // 🔥 REFRESH REAL
+    await requestBackendRefresh();
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
