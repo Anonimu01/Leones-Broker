@@ -5117,6 +5117,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, true);
 
+  /* =========================
+     🔥 BOTONES ACTIVOS DORADO
+  ========================= */
   function setActiveButton(id) {
     document.querySelectorAll("[data-target]").forEach(btn => {
       btn.style.background = "transparent";
@@ -5137,6 +5140,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     setActiveButton(id);
   }
 
+  /* =========================
+     🔥 ESPERAR JS2
+  ========================= */
   function waitForBroker() {
     return new Promise(resolve => {
       const i = setInterval(() => {
@@ -5148,6 +5154,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  /* =========================
+     🔥 MARKET FIX
+  ========================= */
   function keepMarketAlive() {
     const target = document.getElementById("marketPanel");
     const source = document.getElementById("brokerSymbolsPanel");
@@ -5182,6 +5191,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  /* =========================
+     🔥 GRAFICO REAL
+  ========================= */
   function fixTrading() {
     const api = ext();
     const container = document.getElementById("tv_chart_container");
@@ -5209,6 +5221,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     container.style.height = "100vh";
   }
 
+  /* =========================
+     🔥 VELAS MÁS FLUIDAS
+  ========================= */
   let lastQuotesOk = true;
   let updatingQuotes = false;
 
@@ -5232,6 +5247,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   }, 5000);
 
+  /* =========================
+     🔥 RESPONSIVE
+  ========================= */
   function responsiveFix() {
     const cols = document.getElementById("brokerColumns");
     if (!cols) return;
@@ -5246,6 +5264,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   window.addEventListener("resize", responsiveFix);
 
+  /* =========================
+     🔥 MANTENER MONTO
+  ========================= */
   function persistAmount() {
     const input = document.getElementById("brokerOrderSize");
     if (!input) return;
@@ -5272,6 +5293,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  /* =========================
+     🔥 ORDEN REAL SIN ERROR
+  ========================= */
   function forceTrade(direction) {
     const api = ext();
 
@@ -5312,62 +5336,260 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, true);
 
-  /* =========================
-     🔥 PANEL FLOTANTE FIX (SIN PARPADEO + INICIA CERRADO)
+ /* =========================
+     🔥 PANEL FLOTANTE TRADES — NIVEL DIOS
   ========================= */
-  function createFloatingTradesPanel() {
+function createFloatingTradesPanel() {
 
-    const old = document.getElementById("floatingTrades");
-    if (old) old.remove();
+  const old = document.getElementById("floatingTrades");
+  if (old) old.remove();
 
-    const privateArea = document.getElementById("privateArea_full");
-    if (!privateArea) return;
+  const privateArea = document.getElementById("privateArea_full");
+  if (!privateArea) return;
 
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
+  const div = document.createElement("div");
+  div.id = "floatingTrades";
 
-    div.style.display = "none"; // 🔥 inicia cerrado
+  let savedX = parseInt(localStorage.getItem("trades_x"));
+  let savedY = parseInt(localStorage.getItem("trades_y"));
 
-    div.innerHTML = `
-      <div id="dragHeader"><b>📊 Operaciones</b></div>
-      <div id="floatingTradesList">Cargando...</div>
-    `;
+  div.style.cssText = `
+    position:fixed;
+    top:${!isNaN(savedY) ? savedY + "px" : "80px"};
+    left:${!isNaN(savedX) ? savedX + "px" : "10px"};
+    width:300px;
+    background:#111;
+    color:#fff;
+    padding:10px;
+    border-radius:12px;
+    z-index:999999;
+    font-size:12px;
+    user-select:none;
+    touch-action:none;
+  `;
 
-    privateArea.appendChild(div);
+  div.innerHTML = `
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+      <b>📊 Operaciones</b>
+      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
+    </div>
 
-    function showMini() {
-      let mini = document.getElementById("floatingTradesMini");
-      if (mini) return;
+    <div id="floatingTradesList">Cargando...</div>
 
-      mini = document.createElement("div");
-      mini.id = "floatingTradesMini";
-      mini.style.cssText = `
-        position:fixed;
-        bottom:100px;
-        left:10px;
-        width:45px;
-        height:45px;
-        background:#111;
-        color:#fff;
-        border-radius:50%;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        z-index:999999;
-        cursor:pointer;
-      `;
-      mini.innerHTML = "📊";
+    <div id="floatingTradesChart" style="display:none;margin-top:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span id="chartSymbol">--</span>
+        <button id="backToList">←</button>
+      </div>
+      <div id="miniChartContainer" style="height:200px;"></div>
+    </div>
+  `;
 
-      document.body.appendChild(mini);
+  privateArea.appendChild(div);
 
-      mini.onclick = () => {
-        div.style.display = "block";
-        mini.remove();
-      };
+  let isDragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+  let isMinimized = false;
+
+  const header = div.querySelector("#dragHeader");
+  const list = div.querySelector("#floatingTradesList");
+  const chart = div.querySelector("#floatingTradesChart");
+
+  /* =========================
+     🔥 DRAG
+  ========================= */
+  function startDrag(x, y) {
+    isDragging = true;
+    offsetX = x - div.offsetLeft;
+    offsetY = y - div.offsetTop;
+    header.style.cursor = "grabbing";
+  }
+
+  function moveDrag(x, y) {
+    if (!isDragging) return;
+
+    let newX = x - offsetX;
+    let newY = y - offsetY;
+
+    newX = Math.max(0, Math.min(newX, window.innerWidth - div.offsetWidth));
+    newY = Math.max(0, Math.min(newY, window.innerHeight - div.offsetHeight));
+
+    div.style.left = newX + "px";
+    div.style.top = newY + "px";
+
+    localStorage.setItem("trades_x", newX);
+    localStorage.setItem("trades_y", newY);
+  }
+
+  function stopDrag() {
+    isDragging = false;
+    header.style.cursor = "grab";
+  }
+
+  header.onmousedown = e => startDrag(e.clientX, e.clientY);
+  document.onmousemove = e => moveDrag(e.clientX, e.clientY);
+  document.onmouseup = stopDrag;
+
+  header.ontouchstart = e => startDrag(e.touches[0].clientX, e.touches[0].clientY);
+  document.ontouchmove = e => moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+  document.ontouchend = stopDrag;
+
+  /* =========================
+     🔥 CHART
+  ========================= */
+  function openChart(p) {
+    list.style.display = "none";
+    chart.style.display = "block";
+
+    document.getElementById("chartSymbol").textContent = p.symbol;
+
+    const api = ext();
+    const container = document.getElementById("miniChartContainer");
+    container.innerHTML = "";
+
+    api.openTradingView?.({ symbol: p.symbol }, "miniChartContainer");
+  }
+
+  div.querySelector("#backToList").onclick = () => {
+    chart.style.display = "none";
+    list.style.display = "block";
+  };
+
+  /* =========================
+     🔥 CERRAR TRADE
+  ========================= */
+  function closeTrade(symbol) {
+    const api = ext();
+    api.closePosition?.({ symbol });
+  }
+
+  /* =========================
+     🔥 UPDATE PRO
+  ========================= */
+  async function updateFloatingTradesPanel() {
+    try {
+      const res = await fetch("/api/positions", {
+        headers: {
+          "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+        }
+      });
+
+      const data = await res.json();
+      const positions = data.positions || data || [];
+
+      if (!positions.length) {
+        list.innerHTML = "Sin operaciones";
+        return;
+      }
+
+      list.innerHTML = positions.map(p => {
+
+        const price = p.currentPrice || p.price || 0;
+        const entry = p.entryPrice || 0;
+        const pnl = ((price - entry) * (p.qty || 1)) * (p.side === "sell" ? -1 : 1);
+
+        const color = pnl >= 0 ? "#00ff88" : "#ff4d4d";
+
+        return `
+          <div class="tradeItem" data-symbol="${p.symbol}" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.1);cursor:pointer;">
+            
+            <div style="display:flex;justify-content:space-between;">
+              <b>${p.symbol}</b>
+              <span style="color:${color}">${pnl.toFixed(2)}</span>
+            </div>
+
+            <div>Side: ${p.side}</div>
+            <div>Entry: ${entry}</div>
+            <div>Price: ${price}</div>
+
+            <button data-close="${p.symbol}" style="margin-top:4px;background:#222;color:#fff;border:none;padding:4px 6px;cursor:pointer;">
+              ❌ Cerrar
+            </button>
+
+          </div>
+        `;
+      }).join("");
+
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  /* =========================
+     🔥 CLICK EVENTS
+  ========================= */
+  div.addEventListener("click", (e) => {
+
+    const closeBtn = e.target.closest("[data-close]");
+    if (closeBtn) {
+      e.stopPropagation();
+      closeTrade(closeBtn.dataset.close);
+      return;
     }
 
+    const row = e.target.closest(".tradeItem");
+    if (!row) return;
+
+    openChart({ symbol: row.dataset.symbol });
+  });
+
+  /* =========================
+     🔥 MINIMIZAR
+  ========================= */
+  div.querySelector("#closeFloatingTrades").onclick = () => {
+    div.style.display = "none";
+    isMinimized = true;
     showMini();
+  };
+
+  function showMini() {
+    let mini = document.getElementById("floatingTradesMini");
+    if (mini) return;
+
+    mini = document.createElement("div");
+    mini.id = "floatingTradesMini";
+
+    mini.style.cssText = `
+      position:fixed;
+      top:${localStorage.getItem("trades_y") || 80}px;
+      left:${localStorage.getItem("trades_x") || 10}px;
+      width:45px;
+      height:45px;
+      background:#111;
+      color:#fff;
+      border-radius:12px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:999999;
+      cursor:pointer;
+    `;
+
+    mini.innerHTML = "📊";
+    privateArea.appendChild(mini);
+
+    mini.onclick = () => {
+      div.style.display = "block";
+      isMinimized = false;
+      mini.remove();
+    };
   }
+
+  /* =========================
+     🔥 VISIBILIDAD
+  ========================= */
+  function checkPrivate() {
+    if (isMinimized) return;
+    const visible = privateArea.offsetParent !== null;
+    div.style.display = visible ? "block" : "none";
+  }
+
+  setInterval(checkPrivate, 500);
+
+  updateFloatingTradesPanel();
+  setInterval(updateFloatingTradesPanel, 2000);
+}
 
   function updateFloatingTrades() {
     const api = ext();
@@ -5391,6 +5613,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   setInterval(updateFloatingTrades, 2000);
 
+  /* =========================
+     🔥 CAMBIO PANEL
+  ========================= */
   function showPanel(id) {
     showOnlyPanel(id);
 
@@ -5426,6 +5651,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  /* =========================
+     🔥 CLICK SIMBOLO
+  ========================= */
   document.addEventListener("click", (e) => {
     const el = e.target.closest("[data-symbol]");
     if (!el) return;
@@ -5453,6 +5681,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   }, true);
 
+  /* =========================
+     🔥 INIT
+  ========================= */
   if (window.startBrokerUI) {
     await window.startBrokerUI();
   }
@@ -5472,6 +5703,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   showPanel("dashboardPanel");
 
+  /* =========================
+     🔥 REFORZAR BOTÓN FLOTANTE
+  ========================= */
   setInterval(() => {
     bindMenuButtons();
   }, 1000);
