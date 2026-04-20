@@ -4967,6 +4967,12 @@ setInterval(() => {
 log('EXT2 real loaded');
 })();
 </script>
+
+
+
+
+
+  
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
 
@@ -5289,217 +5295,89 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, true);
 
-/* =========================
-   🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO FIX)
-========================= */
-function createFloatingTradesPanel() {
-
-  const old = document.getElementById("floatingTrades");
-  if (old) old.remove();
-
-  const privateArea = document.getElementById("privateArea_full");
-  if (!privateArea) return;
-
-  const div = document.createElement("div");
-  div.id = "floatingTrades";
-
-  let savedX = parseInt(localStorage.getItem("trades_x"));
-  let savedY = parseInt(localStorage.getItem("trades_y"));
-
-  div.style.cssText = `
-    position:fixed;
-    top:${!isNaN(savedY) ? savedY + "px" : "80px"};
-    left:${!isNaN(savedX) ? savedX + "px" : "10px"};
-    width:260px;
-    background:#111;
-    color:#fff;
-    padding:10px;
-    border-radius:10px;
-    z-index:999999;
-    font-size:12px;
-    user-select:none;
-    touch-action:none;
-  `;
-
-  div.innerHTML = `
-    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
-      <b>📊 Operaciones</b>
-      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
-    </div>
-    <div id="floatingTradesList">Cargando...</div>
-  `;
-
-  privateArea.appendChild(div);
-
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  const header = div.querySelector("#dragHeader");
-
-  function startDrag(clientX, clientY) {
-    isDragging = true;
-    offsetX = clientX - div.offsetLeft;
-    offsetY = clientY - div.offsetTop;
-    header.style.cursor = "grabbing";
-  }
-
-  function moveDrag(clientX, clientY) {
-    if (!isDragging) return;
-
-    let x = clientX - offsetX;
-    let y = clientY - offsetY;
-
-    const maxX = window.innerWidth - div.offsetWidth;
-    const maxY = window.innerHeight - div.offsetHeight;
-
-    x = Math.max(0, Math.min(x, maxX));
-    y = Math.max(0, Math.min(y, maxY));
-
-    div.style.left = x + "px";
-    div.style.top = y + "px";
-    div.style.bottom = "auto";
-
-    localStorage.setItem("trades_x", x);
-    localStorage.setItem("trades_y", y);
-  }
-
-  function stopDrag() {
-    isDragging = false;
-    header.style.cursor = "grab";
-  }
-
   /* =========================
-     🔥 EVENTOS DRAG (PC + MOBILE)
+     🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO FIX)
   ========================= */
-  header.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    startDrag(e.clientX, e.clientY);
-  });
+  function createFloatingTradesPanel() {
 
-  document.addEventListener("mousemove", (e) => {
-    moveDrag(e.clientX, e.clientY);
-  });
+    const old = document.getElementById("floatingTrades");
+    if (old) old.remove();
 
-  document.addEventListener("mouseup", stopDrag);
+    const privateArea = document.getElementById("privateArea_full");
+    if (!privateArea) return;
 
-  header.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    startDrag(t.clientX, t.clientY);
-  }, { passive: true });
+    const div = document.createElement("div");
+    div.id = "floatingTrades";
 
-  document.addEventListener("touchmove", (e) => {
-    if (!isDragging) return;
-    const t = e.touches[0];
-    moveDrag(t.clientX, t.clientY);
-  }, { passive: false });
+    let savedX = parseInt(localStorage.getItem("trades_x"));
+    let savedY = parseInt(localStorage.getItem("trades_y"));
 
-  document.addEventListener("touchend", stopDrag);
-
-  /* =========================
-     🔥 ACTUALIZAR PANEL (FIX REAL)
-  ========================= */
-  async function updateFloatingTradesPanel() {
-    try {
-      const res = await fetch("/api/positions", {
-        headers: {
-          "Authorization": "Bearer " + (localStorage.getItem("token") || "")
-        }
-      });
-
-      if (!res.ok) throw new Error("Error backend");
-
-      const data = await res.json();
-
-      const list = document.getElementById("floatingTradesList");
-      if (!list) return;
-
-      const positions = data.positions || data.data || data || [];
-
-      if (!positions.length) {
-        list.innerHTML = "Sin operaciones";
-        return;
-      }
-
-      list.innerHTML = positions.map(p => `
-        <div style="border-bottom:1px solid rgba(255,255,255,.1);padding:6px 0;">
-          <div><b>${p.symbol || "--"}</b> (${p.side || "--"})</div>
-          <div>Size: ${p.qty || p.quantity || 0}</div>
-          <div>Entry: ${p.entryPrice || p.price || 0}</div>
-        </div>
-      `).join("");
-
-    } catch (err) {
-      console.warn("Error cargando floating trades:", err);
-    }
-  }
-
-  /* =========================
-     🔥 AUTO REFRESH
-  ========================= */
-  updateFloatingTradesPanel();
-  setInterval(updateFloatingTradesPanel, 3000);
-
-  /* =========================
-     🔥 CERRAR / MINIMIZAR
-  ========================= */
-  const closeBtn = div.querySelector("#closeFloatingTrades");
-
-  closeBtn.onclick = () => {
-    div.style.display = "none";
-    showMini();
-  };
-
-  function showMini() {
-    let mini = document.getElementById("floatingTradesMini");
-    if (mini) return;
-
-    mini = document.createElement("div");
-    mini.id = "floatingTradesMini";
-
-    mini.style.cssText = `
+    div.style.cssText = `
       position:fixed;
-      top:${localStorage.getItem("trades_y") || 80}px;
-      left:${localStorage.getItem("trades_x") || 10}px;
-      width:40px;
-      height:40px;
+      top:${!isNaN(savedY) ? savedY + "px" : "80px"};
+      left:${!isNaN(savedX) ? savedX + "px" : "10px"};
+      width:260px;
       background:#111;
       color:#fff;
+      padding:10px;
       border-radius:10px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
       z-index:999999;
-      cursor:pointer;
+      font-size:12px;
+      user-select:none;
+      touch-action:none;
     `;
 
-    mini.innerHTML = "📊";
+    div.innerHTML = `
+      <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+        <b>📊 Operaciones</b>
+        <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
+      </div>
+      <div id="floatingTradesList">Cargando...</div>
+    `;
 
-    privateArea.appendChild(mini);
+    privateArea.appendChild(div);
 
-    mini.onclick = () => {
-      div.style.display = "block";
-      mini.remove();
-    };
-  }
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
 
-  /* =========================
-     🔥 SOLO EN ÁREA PRIVADA
-  ========================= */
-  function checkPrivate() {
-    const isVisible = privateArea.offsetParent !== null;
-    div.style.display = isVisible ? "block" : "none";
-  }
+    const header = div.querySelector("#dragHeader");
 
-  setInterval(checkPrivate, 500);
-}
-               
+    function startDrag(clientX, clientY) {
+      isDragging = true;
+      offsetX = clientX - div.offsetLeft;
+      offsetY = clientY - div.offsetTop;
+      header.style.cursor = "grabbing";
+    }
+
+    function moveDrag(clientX, clientY) {
+      if (!isDragging) return;
+
+      let x = clientX - offsetX;
+      let y = clientY - offsetY;
+
+      const maxX = window.innerWidth - div.offsetWidth;
+      const maxY = window.innerHeight - div.offsetHeight;
+
+      x = Math.max(0, Math.min(x, maxX));
+      y = Math.max(0, Math.min(y, maxY));
+
+      div.style.left = x + "px";
+      div.style.top = y + "px";
+      div.style.bottom = "auto";
+
+      localStorage.setItem("trades_x", x);
+      localStorage.setItem("trades_y", y);
+    }
 
     function stopDrag() {
       isDragging = false;
       header.style.cursor = "grab";
     }
 
+    /* =========================
+       🔥 EVENTOS DRAG (PC + MOBILE)
+    ========================= */
     header.addEventListener("mousedown", (e) => {
       e.preventDefault();
       startDrag(e.clientX, e.clientY);
@@ -5517,12 +5395,60 @@ function createFloatingTradesPanel() {
     }, { passive: true });
 
     document.addEventListener("touchmove", (e) => {
+      if (!isDragging) return;
       const t = e.touches[0];
       moveDrag(t.clientX, t.clientY);
     }, { passive: false });
 
     document.addEventListener("touchend", stopDrag);
 
+    /* =========================
+       🔥 ACTUALIZAR PANEL (FIX REAL)
+    ========================= */
+    async function updateFloatingTradesPanel() {
+      try {
+        const res = await fetch("/api/positions", {
+          headers: {
+            "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+          }
+        });
+
+        if (!res.ok) throw new Error("Error backend");
+
+        const data = await res.json();
+
+        const list = document.getElementById("floatingTradesList");
+        if (!list) return;
+
+        const positions = data.positions || data.data || data || [];
+
+        if (!positions.length) {
+          list.innerHTML = "Sin operaciones";
+          return;
+        }
+
+        list.innerHTML = positions.map(p => `
+          <div style="border-bottom:1px solid rgba(255,255,255,.1);padding:6px 0;">
+            <div><b>${p.symbol || "--"}</b> (${p.side || "--"})</div>
+            <div>Size: ${p.qty || p.quantity || 0}</div>
+            <div>Entry: ${p.entryPrice || p.price || 0}</div>
+          </div>
+        `).join("");
+
+      } catch (err) {
+        console.warn("Error cargando floating trades:", err);
+      }
+    }
+
+    /* =========================
+       🔥 AUTO REFRESH
+    ========================= */
+    updateFloatingTradesPanel();
+    setInterval(updateFloatingTradesPanel, 3000);
+
+    /* =========================
+       🔥 CERRAR / MINIMIZAR
+    ========================= */
     const closeBtn = div.querySelector("#closeFloatingTrades");
 
     closeBtn.onclick = () => {
@@ -5563,6 +5489,9 @@ function createFloatingTradesPanel() {
       };
     }
 
+    /* =========================
+       🔥 SOLO EN ÁREA PRIVADA
+    ========================= */
     function checkPrivate() {
       const isVisible = privateArea.offsetParent !== null;
       div.style.display = isVisible ? "block" : "none";
