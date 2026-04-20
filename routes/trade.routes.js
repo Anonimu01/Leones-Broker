@@ -45,6 +45,7 @@ router.post("/open", authMiddleware, async (req, res) => {
 
     const idemKey = req.headers["idempotency-key"] || body.clientOrderId;
 
+    // 🔁 IDEMPOTENCIA
     if (idemKey) {
       const key = `${user._id}::${idemKey}`;
       if (idempotencyCache.has(key)) {
@@ -66,7 +67,22 @@ router.post("/open", authMiddleware, async (req, res) => {
 
     console.log("🚀 ORDER BACKEND:", order);
 
-    const result = await openTrade({ user, order });
+    let result;
+
+    // 🔥 RETRY AUTOMÁTICO PARA WRITE CONFLICT
+    for (let i = 0; i < 3; i++) {
+      try {
+        result = await openTrade({ user, order });
+        break;
+      } catch (err) {
+        if (err.message?.includes("Write conflict")) {
+          console.warn(`⚠️ Write conflict, retry ${i + 1}`);
+          await new Promise(r => setTimeout(r, 120));
+        } else {
+          throw err;
+        }
+      }
+    }
 
     if (!result || !result.ok) {
       return res.status(400).json({
@@ -75,6 +91,7 @@ router.post("/open", authMiddleware, async (req, res) => {
       });
     }
 
+    // 💾 GUARDAR EN CACHE IDEMPOTENTE
     if (idemKey) {
       const key = `${user._id}::${idemKey}`;
       idempotencyCache.set(key, result.data);
@@ -83,14 +100,15 @@ router.post("/open", authMiddleware, async (req, res) => {
     return res.json({
       ok: true,
       msg: "Operación abierta",
-      data: result.data   // 🔥 AQUÍ ESTÁ EL FIX PARA TU FRONT
+      data: result.data
     });
 
   } catch (err) {
     console.error("Trade error:", err);
+
     return res.status(500).json({
       ok: false,
-      error: "server_error"
+      error: err.message || "server_error"
     });
   }
 });
