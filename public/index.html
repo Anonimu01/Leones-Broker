@@ -3914,62 +3914,56 @@ if (window.__LEONES_BOOTED__) {
     return null;
   }
 
- async function loadPositions() {
-  const endpoints = ['/positions', '/trade/positions', '/api/positions', '/api/trade/positions'];
+async function loadPositions() {
+  const endpoints = [
+    '/positions',
+    '/trade/positions',
+    '/api/positions',
+    '/api/trade/positions'
+  ];
 
   for (const ep of endpoints) {
     try {
       const res = await apiFetch(ep).catch(() => null);
       if (!res) continue;
 
-      // 🔥 SOPORTE PARA TODOS LOS FORMATOS POSIBLES
+      // 🔥 NORMALIZADOR REAL
       let list = [];
 
       if (Array.isArray(res)) {
         list = res;
-      } else if (Array.isArray(res.data)) {
-        list = res.data;
       } else if (Array.isArray(res.positions)) {
         list = res.positions;
-      } else if (res.data && Array.isArray(res.data.positions)) {
-        list = res.data.positions;
+      } else if (Array.isArray(res.data)) {
+        list = res.data;
+      } else if (Array.isArray(res.items)) {
+        list = res.items;
       }
 
-      // 🔥 NORMALIZAR DATOS (CLAVE PARA QUE LA UI FUNCIONE)
-      list = list.map(p => ({
-        id: p._id || p.id || p.positionId || p.tradeId,
-        symbol: p.symbol,
-        side: p.side || p.direction,
-        qty: p.qty || p.quantity || p.amount,
-        entryPrice: p.entryPrice || p.price || 0,
-        currentPrice: p.currentPrice || p.price || 0,
-        profit: p.profit || 0,
-        status: p.status || "OPEN"
-      }));
+      console.log("📊 POSITIONS RAW:", res);
+      console.log("📊 POSITIONS NORMALIZED:", list);
 
-      // 🔥 GUARDAR EN ESTADO GLOBAL
       state.positions = list;
       TR.positions = list;
 
-      // 🔥 RENDER
       renderPositions();
       renderBottomPanels();
 
       return list;
 
     } catch (e) {
-      console.warn("❌ Error en endpoint:", ep);
+      console.warn("loadPositions error:", e);
     }
   }
 
-  // fallback
   state.positions = [];
   TR.positions = [];
+
   renderPositions();
+  renderBottomPanels();
 
   return [];
 }
-
   async function loadMarketsAndQuotes() {
     await loadRealMarkets();
     await loadRealQuotes();
@@ -5304,6 +5298,41 @@ document.addEventListener("DOMContentLoaded", async () => {
       localStorage.setItem("trades_x", x);
       localStorage.setItem("trades_y", y);
     }
+
+    /* =========================
+   🔥 ACTUALIZAR PANEL FLOTANTE
+========================= */
+async function updateFloatingTradesPanel() {
+  try {
+    const res = await fetch("/api/positions");
+    const data = await res.json();
+
+    const list = document.getElementById("floatingTradesList");
+    if (!list) return;
+
+    const positions = data.positions || data.data || data || [];
+
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
+    }
+
+    list.innerHTML = positions.map(p => {
+      return `
+        <div style="border-bottom:1px solid rgba(255,255,255,.1);padding:6px 0;">
+          <div><b>${p.symbol}</b> (${p.side})</div>
+          <div>Size: ${p.qty || p.quantity || 0}</div>
+          <div>Entry: ${p.entryPrice || 0}</div>
+        </div>
+      `;
+    }).join("");
+
+  } catch (err) {
+    console.warn("Error cargando floating trades:", err);
+  }
+}
+
+               
 
     function stopDrag() {
       isDragging = false;
