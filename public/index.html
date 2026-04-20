@@ -3927,7 +3927,7 @@ async function loadPositions() {
       const res = await apiFetch(ep).catch(() => null);
       if (!res) continue;
 
-      // 🔥 NORMALIZADOR REAL
+      // 🔥 NORMALIZADOR REAL MEJORADO
       let list = [];
 
       if (Array.isArray(res)) {
@@ -3938,7 +3938,27 @@ async function loadPositions() {
         list = res.data;
       } else if (Array.isArray(res.items)) {
         list = res.items;
+      } else if (res.data && Array.isArray(res.data.positions)) {
+        list = res.data.positions;
       }
+
+      // 🔥 LIMPIEZA Y NORMALIZACIÓN
+      list = list.map(p => ({
+        id: p.id || p._id || p.positionId || p.tradeId || null,
+        symbol: String(p.symbol || p.tvSymbol || '').toUpperCase(),
+        side: String(p.side || p.direction || 'BUY').toUpperCase(),
+        qty: Number(p.qty ?? p.quantity ?? p.amount ?? p.size ?? 0),
+        entryPrice: Number(p.entryPrice ?? p.price ?? p.openPrice ?? 0),
+        currentPrice: Number(
+          p.currentPrice ??
+          TR.symbolPrices?.[p.symbol]?.price ??
+          p.entryPrice ??
+          0
+        ),
+        pnl: Number(p.pnl ?? p.unrealizedPnl ?? 0),
+        status: String(p.status || 'open').toLowerCase(),
+        raw: p
+      }));
 
       console.log("📊 POSITIONS RAW:", res);
       console.log("📊 POSITIONS NORMALIZED:", list);
@@ -3946,8 +3966,17 @@ async function loadPositions() {
       state.positions = list;
       TR.positions = list;
 
+      // 🔥 ACTUALIZA TODO LO VISUAL Y MÉTRICAS
+      if (typeof updateLivePortfolioMetrics === "function") {
+        updateLivePortfolioMetrics();
+      }
+
       renderPositions();
       renderBottomPanels();
+
+      if (typeof updateFloatingTradesPanel === "function") {
+        updateFloatingTradesPanel();
+      }
 
       return list;
 
@@ -3956,11 +3985,20 @@ async function loadPositions() {
     }
   }
 
+  // 🔥 FALLBACK LIMPIO
   state.positions = [];
   TR.positions = [];
 
+  if (typeof updateLivePortfolioMetrics === "function") {
+    updateLivePortfolioMetrics();
+  }
+
   renderPositions();
   renderBottomPanels();
+
+  if (typeof updateFloatingTradesPanel === "function") {
+    updateFloatingTradesPanel();
+  }
 
   return [];
 }
@@ -4716,6 +4754,7 @@ async function placeOrder(input) {
 
     let side, symbol, amount, type, price;
 
+    // 🔥 INPUT FLEXIBLE
     if (typeof input === "string") {
       side = input;
 
@@ -4725,7 +4764,10 @@ async function placeOrder(input) {
         document.getElementById("tradingSymbol")?.textContent?.trim() ||
         document.getElementById("op-symbol")?.textContent?.trim();
 
-      const sizeInput = document.getElementById("brokerOrderSize");
+      const sizeInput =
+        document.getElementById("brokerOrderSize") ||
+        document.getElementById("brokerOrderSizeBottom");
+
       amount = parseFloat(sizeInput?.value);
 
       type =
@@ -4749,65 +4791,77 @@ async function placeOrder(input) {
       price = input.price;
     }
 
+    // 🔥 VALIDACIONES REALES
     if (!symbol) {
       alert("Selecciona un símbolo primero");
       return;
     }
 
     if (!amount || amount <= 0) {
-      console.warn("⚠️ Cantidad inválida");
+      alert("Cantidad inválida");
       return;
     }
 
     if (!side) {
-      console.warn("⚠️ Side inválido");
+      alert("Dirección inválida");
       return;
     }
 
-    side = String(side).toUpperCase();
+    side = String(side).toLowerCase();
 
     const payload = {
       symbol: String(symbol).replace("/", ""),
-      direction: side, // 🔥 IMPORTANTE
-      type: String(type).toUpperCase(),
+      direction: side,
+      type: String(type).toLowerCase(),
       amount,
       price: price || undefined
     };
 
     console.log("🚀 Enviando orden:", payload);
 
+    // 🔥 PRIORIDAD: API INTERNA
     if (typeof api.placeBrokerOrder === "function") {
       return await api.placeBrokerOrder(payload);
     }
+
+    // 🔥 FALLBACK DIRECTO
+    return await placeBrokerOrder(payload);
 
   } catch (err) {
     console.error("❌ Error al enviar orden:", err);
   }
 }
-  //para el rejuego
 
-  document.addEventListener("click", (e) => {
+/* =========================
+   🔥 CLICK GLOBAL (SIN DUPLICADOS)
+========================= */
+document.addEventListener("click", (e) => {
   const action = e.target?.dataset?.action;
-
   if (!action) return;
 
   if (action === "buy") {
+    e.preventDefault();
     placeOrder("buy");
   }
 
   if (action === "sell") {
+    e.preventDefault();
     placeOrder("sell");
   }
 });
 
+/* =========================
+   🔥 ORDEN REAL BACKEND
+========================= */
 async function placeBrokerOrder(payload = {}) {
 
   const symbol = String(payload.symbol || '').trim().toUpperCase();
   const amount = Number(payload.amount);
-  const direction = (payload.direction || payload.side || 'BUY').toLowerCase();
+  const direction = (payload.direction || payload.side || 'buy').toLowerCase();
   const type = String(payload.type || 'market').toLowerCase();
   const price = payload.price ?? null;
 
+  // 🔥 VALIDACIONES
   if (!symbol) {
     alert("Símbolo inválido");
     return;
@@ -4850,56 +4904,67 @@ async function placeBrokerOrder(payload = {}) {
 
     console.log("📩 RESPUESTA BACKEND:", data);
 
-    if (!data.ok) {
-      alert(data.error || data.msg || "Error abriendo operación");
+    if (!res.ok || !data || data.error) {
+      alert(data?.error || data?.msg || "Error abriendo operación");
       return;
     }
 
-    // 🔥 REFRESH REAL
-    await requestBackendRefresh();
+    // 🔥 REFRESH REAL FORZADO
+    if (typeof requestBackendRefresh === "function") {
+      await requestBackendRefresh();
+    }
+
+    return data;
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
   }
 }
-  function bootIfLoggedIn() {
-    if (state.booted) return;
-    state.booted = true;
 
-    if (isLoggedIn() && getPrivateHost()) {
-      initTradingUI().catch(e => warn('boot initTradingUI', e));
-    }
+/* =========================
+   🔥 BOOT SISTEMA
+========================= */
+function bootIfLoggedIn() {
+  if (state.booted) return;
+  state.booted = true;
+
+  if (isLoggedIn() && getPrivateHost()) {
+    initTradingUI().catch(e => warn('boot initTradingUI', e));
   }
+}
 
-  exposeAPI();
-  attachLoginEventBridge();
+exposeAPI();
+attachLoginEventBridge();
 
-  if (document.readyState !== 'loading') {
+if (document.readyState !== 'loading') {
+  bootIfLoggedIn();
+} else {
+  document.addEventListener('DOMContentLoaded', () => {
+    injectUiStyles();
     bootIfLoggedIn();
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      injectUiStyles();
-      bootIfLoggedIn();
-    });
-  }
-
-  window.addEventListener('load', () => {
-    try {
-      if (isLoggedIn()) {
-        initTradingUI().catch(() => {});
-      }
-    } catch (e) {}
   });
+}
 
-  setInterval(() => {
-    try {
-      renderBottomPanelsWrapper();
-      syncOrderFields();
-      updateFloatingTrades();
-    } catch (e) {}
-  }, 5000);
+window.addEventListener('load', () => {
+  try {
+    if (isLoggedIn()) {
+      initTradingUI().catch(() => {});
+    }
+  } catch (e) {}
+});
 
-  log('EXT2 real loaded');
+/* =========================
+   🔥 REFRESH GLOBAL
+========================= */
+setInterval(() => {
+  try {
+    renderBottomPanelsWrapper();
+    syncOrderFields();
+    updateFloatingTrades();
+  } catch (e) {}
+}, 5000);
+
+log('EXT2 real loaded');
 })();
 </script>
 <script>
@@ -5224,114 +5289,210 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, true);
 
+/* =========================
+   🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO FIX)
+========================= */
+function createFloatingTradesPanel() {
+
+  const old = document.getElementById("floatingTrades");
+  if (old) old.remove();
+
+  const privateArea = document.getElementById("privateArea_full");
+  if (!privateArea) return;
+
+  const div = document.createElement("div");
+  div.id = "floatingTrades";
+
+  let savedX = parseInt(localStorage.getItem("trades_x"));
+  let savedY = parseInt(localStorage.getItem("trades_y"));
+
+  div.style.cssText = `
+    position:fixed;
+    top:${!isNaN(savedY) ? savedY + "px" : "80px"};
+    left:${!isNaN(savedX) ? savedX + "px" : "10px"};
+    width:260px;
+    background:#111;
+    color:#fff;
+    padding:10px;
+    border-radius:10px;
+    z-index:999999;
+    font-size:12px;
+    user-select:none;
+    touch-action:none;
+  `;
+
+  div.innerHTML = `
+    <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
+      <b>📊 Operaciones</b>
+      <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
+    </div>
+    <div id="floatingTradesList">Cargando...</div>
+  `;
+
+  privateArea.appendChild(div);
+
+  let isDragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  const header = div.querySelector("#dragHeader");
+
+  function startDrag(clientX, clientY) {
+    isDragging = true;
+    offsetX = clientX - div.offsetLeft;
+    offsetY = clientY - div.offsetTop;
+    header.style.cursor = "grabbing";
+  }
+
+  function moveDrag(clientX, clientY) {
+    if (!isDragging) return;
+
+    let x = clientX - offsetX;
+    let y = clientY - offsetY;
+
+    const maxX = window.innerWidth - div.offsetWidth;
+    const maxY = window.innerHeight - div.offsetHeight;
+
+    x = Math.max(0, Math.min(x, maxX));
+    y = Math.max(0, Math.min(y, maxY));
+
+    div.style.left = x + "px";
+    div.style.top = y + "px";
+    div.style.bottom = "auto";
+
+    localStorage.setItem("trades_x", x);
+    localStorage.setItem("trades_y", y);
+  }
+
+  function stopDrag() {
+    isDragging = false;
+    header.style.cursor = "grab";
+  }
+
   /* =========================
-     🔥 PANEL FLOTANTE TRADES (DRAG + GUARDADO)
+     🔥 EVENTOS DRAG (PC + MOBILE)
   ========================= */
-  function createFloatingTradesPanel() {
+  header.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
+  });
 
-    const old = document.getElementById("floatingTrades");
-    if (old) old.remove();
+  document.addEventListener("mousemove", (e) => {
+    moveDrag(e.clientX, e.clientY);
+  });
 
-    const privateArea = document.getElementById("privateArea_full");
-    if (!privateArea) return;
+  document.addEventListener("mouseup", stopDrag);
 
-    const div = document.createElement("div");
-    div.id = "floatingTrades";
+  header.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: true });
 
-    let savedX = localStorage.getItem("trades_x");
-    let savedY = localStorage.getItem("trades_y");
+  document.addEventListener("touchmove", (e) => {
+    if (!isDragging) return;
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
 
-    div.style.cssText = `
+  document.addEventListener("touchend", stopDrag);
+
+  /* =========================
+     🔥 ACTUALIZAR PANEL (FIX REAL)
+  ========================= */
+  async function updateFloatingTradesPanel() {
+    try {
+      const res = await fetch("/api/positions", {
+        headers: {
+          "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+        }
+      });
+
+      if (!res.ok) throw new Error("Error backend");
+
+      const data = await res.json();
+
+      const list = document.getElementById("floatingTradesList");
+      if (!list) return;
+
+      const positions = data.positions || data.data || data || [];
+
+      if (!positions.length) {
+        list.innerHTML = "Sin operaciones";
+        return;
+      }
+
+      list.innerHTML = positions.map(p => `
+        <div style="border-bottom:1px solid rgba(255,255,255,.1);padding:6px 0;">
+          <div><b>${p.symbol || "--"}</b> (${p.side || "--"})</div>
+          <div>Size: ${p.qty || p.quantity || 0}</div>
+          <div>Entry: ${p.entryPrice || p.price || 0}</div>
+        </div>
+      `).join("");
+
+    } catch (err) {
+      console.warn("Error cargando floating trades:", err);
+    }
+  }
+
+  /* =========================
+     🔥 AUTO REFRESH
+  ========================= */
+  updateFloatingTradesPanel();
+  setInterval(updateFloatingTradesPanel, 3000);
+
+  /* =========================
+     🔥 CERRAR / MINIMIZAR
+  ========================= */
+  const closeBtn = div.querySelector("#closeFloatingTrades");
+
+  closeBtn.onclick = () => {
+    div.style.display = "none";
+    showMini();
+  };
+
+  function showMini() {
+    let mini = document.getElementById("floatingTradesMini");
+    if (mini) return;
+
+    mini = document.createElement("div");
+    mini.id = "floatingTradesMini";
+
+    mini.style.cssText = `
       position:fixed;
-      top:${savedY ? savedY + "px" : "80px"};
-      left:${savedX ? savedX + "px" : "10px"};
-      width:260px;
+      top:${localStorage.getItem("trades_y") || 80}px;
+      left:${localStorage.getItem("trades_x") || 10}px;
+      width:40px;
+      height:40px;
       background:#111;
       color:#fff;
-      padding:10px;
       border-radius:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       z-index:999999;
-      font-size:12px;
+      cursor:pointer;
     `;
 
-    div.innerHTML = `
-      <div id="dragHeader" style="display:flex;justify-content:space-between;cursor:grab;">
-        <b>📊 Operaciones</b>
-        <span id="closeFloatingTrades" style="cursor:pointer;">✖</span>
-      </div>
-      <div id="floatingTradesList">Sin operaciones</div>
-    `;
+    mini.innerHTML = "📊";
 
-    privateArea.appendChild(div);
+    privateArea.appendChild(mini);
 
-    let isDragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    const header = div.querySelector("#dragHeader");
-
-    function startDrag(clientX, clientY) {
-      isDragging = true;
-      offsetX = clientX - div.offsetLeft;
-      offsetY = clientY - div.offsetTop;
-      header.style.cursor = "grabbing";
-    }
-
-    function moveDrag(clientX, clientY) {
-      if (!isDragging) return;
-
-      let x = clientX - offsetX;
-      let y = clientY - offsetY;
-
-      const maxX = window.innerWidth - div.offsetWidth;
-      const maxY = window.innerHeight - div.offsetHeight;
-
-      if (x < 0) x = 0;
-      if (y < 0) y = 0;
-      if (x > maxX) x = maxX;
-      if (y > maxY) y = maxY;
-
-      div.style.left = x + "px";
-      div.style.top = y + "px";
-      div.style.bottom = "auto";
-
-      localStorage.setItem("trades_x", x);
-      localStorage.setItem("trades_y", y);
-    }
-
-    /* =========================
-   🔥 ACTUALIZAR PANEL FLOTANTE
-========================= */
-async function updateFloatingTradesPanel() {
-  try {
-    const res = await fetch("/api/positions");
-    const data = await res.json();
-
-    const list = document.getElementById("floatingTradesList");
-    if (!list) return;
-
-    const positions = data.positions || data.data || data || [];
-
-    if (!positions.length) {
-      list.innerHTML = "Sin operaciones";
-      return;
-    }
-
-    list.innerHTML = positions.map(p => {
-      return `
-        <div style="border-bottom:1px solid rgba(255,255,255,.1);padding:6px 0;">
-          <div><b>${p.symbol}</b> (${p.side})</div>
-          <div>Size: ${p.qty || p.quantity || 0}</div>
-          <div>Entry: ${p.entryPrice || 0}</div>
-        </div>
-      `;
-    }).join("");
-
-  } catch (err) {
-    console.warn("Error cargando floating trades:", err);
+    mini.onclick = () => {
+      div.style.display = "block";
+      mini.remove();
+    };
   }
-}
 
+  /* =========================
+     🔥 SOLO EN ÁREA PRIVADA
+  ========================= */
+  function checkPrivate() {
+    const isVisible = privateArea.offsetParent !== null;
+    div.style.display = isVisible ? "block" : "none";
+  }
+
+  setInterval(checkPrivate, 500);
+}
                
 
     function stopDrag() {
