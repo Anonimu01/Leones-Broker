@@ -5313,7 +5313,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     alert("Selecciona un símbolo");
     return;
   }
+  // 🔥 PRECIO ACTUAL (CLAVE PARA QUE PNL FUNCIONE)
+  const price =
+    api?.prices?.[symbol] ||
+    api?.lastPrice ||
+    0;
 
+  if (!price) {
+    alert("No hay precio disponible aún");
+    return;
+  }
+
+  const payload = {
+    symbol: symbol,
+    side: direction,   // 👈 backend espera "side"
+    qty: amount,       // 👈 backend espera "qty"
+    entryPrice: price  // 👈 esto arregla el PnL
+  };
+
+  console.log("🚀 Enviando orden:", payload);
+
+  api.placeOrder?.(payload);
+
+  LAST_AMOUNT = amountInput.value;
+  restoreAmount();
+}
   /* =========================
      🔥 ORDEN REAL FIX (BACKEND)
   ========================= */
@@ -5494,55 +5518,86 @@ function createFloatingTradesPanel() {
   /* =========================
      🔥 UPDATE PRO
   ========================= */
-  async function updateFloatingTradesPanel() {
-    try {
-      const res = await fetch("/api/positions", {
-        headers: {
-          "Authorization": "Bearer " + (localStorage.getItem("token") || "")
-        }
-      });
-
-      const data = await res.json();
-      const positions = data.positions || data || [];
-
-      if (!positions.length) {
-        list.innerHTML = "Sin operaciones";
-        return;
+ async function updateFloatingTradesPanel() {
+  try {
+    const res = await fetch("/api/positions", {
+      headers: {
+        "Authorization": "Bearer " + (localStorage.getItem("token") || "")
       }
+    });
 
-      list.innerHTML = positions.map(p => {
+    const data = await res.json();
+    const positions = data.positions || data || [];
 
-        const price = p.currentPrice || p.price || 0;
-        const entry = p.entryPrice || 0;
-        const pnl = ((price - entry) * (p.qty || 1)) * (p.side === "sell" ? -1 : 1);
-
-        const color = pnl >= 0 ? "#00ff88" : "#ff4d4d";
-
-        return `
-          <div class="tradeItem" data-symbol="${p.symbol}" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.1);cursor:pointer;">
-            
-            <div style="display:flex;justify-content:space-between;">
-              <b>${p.symbol}</b>
-              <span style="color:${color}">${pnl.toFixed(2)}</span>
-            </div>
-
-            <div>Side: ${p.side}</div>
-            <div>Entry: ${entry}</div>
-            <div>Price: ${price}</div>
-
-            <button data-close="${p.symbol}" style="margin-top:4px;background:#222;color:#fff;border:none;padding:4px 6px;cursor:pointer;">
-              ❌ Cerrar
-            </button>
-
-          </div>
-        `;
-      }).join("");
-
-    } catch (e) {
-      console.warn(e);
+    if (!positions.length) {
+      list.innerHTML = "Sin operaciones";
+      return;
     }
-  }
 
+    list.innerHTML = positions.map(p => {
+
+      // 🔥 FIX REAL PRECIO
+      const price =
+        p.currentPrice ||
+        p.markPrice ||
+        p.lastPrice ||
+        p.price ||
+        p.entryPrice ||
+        0;
+
+      const entry = p.entryPrice || p.price || 0;
+
+      const qty = p.qty || p.quantity || p.amount || 1;
+
+      const pnl = ((price - entry) * qty) * (p.side === "sell" ? -1 : 1);
+
+      const color = pnl >= 0 ? "#00ff88" : "#ff4d4d";
+
+      return `
+        <div class="tradeItem" data-symbol="${p.symbol}" style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.1);cursor:pointer;">
+          
+          <div style="display:flex;justify-content:space-between;">
+            <b>${p.symbol}</b>
+            <span style="color:${color}">${pnl.toFixed(2)}</span>
+          </div>
+
+          <div>Side: ${p.side || "--"}</div>
+          <div>Entry: ${entry}</div>
+          <div>Price: ${price}</div>
+
+          <button data-close="${p.symbol}" style="margin-top:4px;background:#222;color:#fff;border:none;padding:4px 6px;cursor:pointer;">
+            ❌ Cerrar
+          </button>
+
+        </div>
+      `;
+    }).join("");
+
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+
+  async function closeTrade(symbol) {
+  try {
+    const res = await fetch("/api/trade/close", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+      },
+      body: JSON.stringify({ symbol })
+    });
+
+    const data = await res.json();
+
+    console.log("✅ CERRADO:", data);
+
+  } catch (err) {
+    console.error("❌ Error cerrando:", err);
+  }
+}
   /* =========================
      🔥 CLICK EVENTS
   ========================= */
@@ -5618,7 +5673,7 @@ function createFloatingTradesPanel() {
   setInterval(updateFloatingTradesPanel, 2000);
 }
 
-  function updateFloatingTrades() {
+ /* function updateFloatingTrades() {
     const api = ext();
     const list = document.getElementById("floatingTradesList");
     if (!list) return;
@@ -5638,7 +5693,7 @@ function createFloatingTradesPanel() {
     `).join("");
   }
 
-  setInterval(updateFloatingTrades, 2000);
+  setInterval(updateFloatingTrades, 2000); */
 
   /* =========================
      🔥 CAMBIO PANEL
