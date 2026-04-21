@@ -547,380 +547,26 @@ async function getWalletForUser(userId) {
   }
 }
 
-/* ======================================================
-   FINANCIAL SYNC: depósitos, retiros, PnL e historial
-   ====================================================== */
-const transactionSchema = new mongoose.Schema(
-  {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    type: {
-      type: String,
-      enum: ["deposit", "withdraw", "trade_profit", "trade_loss", "adjustment"],
-      required: true,
-    },
-    amount: { type: Number, required: true },
-    balanceBefore: { type: Number, default: null },
-    balanceAfter: { type: Number, default: null },
-    referenceId: { type: String, default: null },
-    source: { type: String, default: "system" },
-    description: { type: String, default: "" },
-    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
-    status: {
-      type: String,
-      enum: ["completed", "pending", "failed"],
-      default: "completed",
-    },
-  },
-  { timestamps: true }
-);
-
-const Transaction =
-  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
-
-const financialSyncState =
-  globalThis.__LEONES_FINANCIAL_SYNC__ ||
-  (globalThis.__LEONES_FINANCIAL_SYNC__ = {
-    walletBalances: new Map(),
-    positionStates: new Map(),
-    userPositionSigs: new Map(),
-    watcher: null,
-  });
-
-function toSafeNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function isClosedPositionDoc(p = {}) {
-  const status = String(
-    p.status || p.state || p.positionStatus || ""
-  ).toLowerCase();
-  return (
-    status.includes("close") ||
-    status === "closed" ||
-    !!p.closedAt ||
-    !!p.closed_at
-  );
-}
-
-function getPositionSide(pos = {}) {
-  return String(pos.side || pos.direction || pos.action || "")
-    .trim()
-    .toLowerCase();
-}
-
-function getPositionQty(pos = {}) {
-  const qty =
-    pos.qty ??
-    pos.quantity ??
-    pos.amount ??
-    pos.positionSize ??
-    pos.size ??
-    0;
-  return Math.max(toSafeNumber(qty), 0);
-}
-
-function getPositionEntryPrice(pos = {}) {
-  return toSafeNumber(pos.entryPrice ?? pos.openPrice ?? pos.price ?? 0);
-}
-
-function getCurrentPriceForPosition(pos = {}, quotes = {}) {
-  const symbol = String(pos.symbol || "").toUpperCase();
-  const quotePrice = quotes?.[symbol]?.price;
-  return toSafeNumber(
-    pos.currentPrice ?? quotePrice ?? pos.entryPrice ?? pos.price ?? 0
-  );
-}
-
-function calcPositionPnL(pos = {}, quotes = {}) {
-  const entry = getPositionEntryPrice(pos);
-  const current = getCurrentPriceForPosition(pos, quotes);
-  const qty = getPositionQty(pos);
-  const side = getPositionSide(pos);
-
-  const sign = side === "sell" || side === "short" ? -1 : 1;
-  const pnl = (current - entry) * qty * sign;
-
-  return Number.isFinite(pnl) ? pnl : 0;
-}
-
-function enrichPositionWithPnL(pos = {}, quotes = {}) {
-  const entryPrice = getPositionEntryPrice(pos);
-  const currentPrice = getCurrentPriceForPosition(pos, quotes);
-  const qty = getPositionQty(pos);
-  const pnl = calcPositionPnL(pos, quotes);
-
-  return {
-    ...pos,
-    entryPrice,
-    currentPrice,
-    qty,
-    quantity: pos.quantity ?? qty,
-    amount: pos.amount ?? qty,
-    pnl,
-    unrealizedPnl: pnl,
-    realizedPnl: toSafeNumber(pos.realizedPnl ?? 0),
-  };
-}
-
-function buildUserPositionSignature(userId, positions = []) {
-  const rows = (positions || [])
-    .filter((p) => String(p.user || "") === String(userId))
-    .map((p) => ({
-      id: String(p._id || p.id || p.positionId || ""),
-      closed: isClosedPositionDoc(p) ? 1 : 0,
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
-
-  return JSON.stringify(rows);
-}
-
-async function primeFinancialSnapshots() {
-  try {
-    const wallets = await Wallet.find({})
-      .select("user balance balanceOwn equity marginUsed")
-      .lean()
-      .exec();
-
-    for (const w of wallets) {
-      const userId = String(w.user || "");
-      if (!userId) continue;
-      const current = toSafeNumber(w.balanceOwn ?? w.balance ?? 0);
-      financialSyncState.walletBalances.set(userId, current);
-    }
-
-    const positions = await Position.find({})
-      .select(
-        "user status state positionStatus realizedPnl closedAt closed_at symbol side qty quantity amount positionSize entryPrice currentPrice"
-      )
-      .lean()
-      .exec();
-
-    const userGroups = new Map();
-
-    for (const p of positions) {
-      const key = `${String(p.user || "")}:${String(p._id || "")}`;
-      financialSyncState.positionStates.set(key, {
-        closed: isClosedPositionDoc(p),
-        realizedPnl: toSafeNumber(p.realizedPnl ?? 0),
-      });
-
-      const uid = String(p.user || "");
-      if (!uid) continue;
-      if (!userGroups.has(uid)) userGroups.set(uid, []);
-      userGroups.get(uid).push(p);
-    }
-
-    for (const [userId, userPositions] of userGroups.entries()) {
-      financialSyncState.userPositionSigs.set(
-        userId,
-        buildUserPositionSignature(userId, userPositions)
-      );
-    }
-  } catch (err) {
-    console.warn("primeFinancialSnapshots error:", err?.message || err);
-  }
-}
-
-async function syncFinancialHistory() {
-  try {
-    const quotes = getPriceStore();
-
-    const wallets = await Wallet.find({})
-      .select("user balance balanceOwn equity marginUsed")
-      .lean()
-      .exec();
-
-    const positions = await Position.find({})
-      .select(
-        "user status state positionStatus realizedPnl closedAt closed_at symbol side qty quantity amount positionSize entryPrice currentPrice"
-      )
-      .lean()
-      .exec();
-
-    const positionsByUser = new Map();
-    for (const p of positions) {
-      const uid = String(p.user || "");
-      if (!uid) continue;
-      if (!positionsByUser.has(uid)) positionsByUser.set(uid, []);
-      positionsByUser.get(uid).push(p);
-    }
-
-    const closedDeltaByUser = new Map();
-    const tradeEventByUser = new Map();
-
-    for (const p of positions) {
-      const key = `${String(p.user || "")}:${String(p._id || "")}`;
-      const currentClosed = isClosedPositionDoc(p);
-      const prev = financialSyncState.positionStates.get(key) || null;
-
-      const realizedPnl = toSafeNumber(
-        p.realizedPnl ?? calcPositionPnL(p, quotes)
-      );
-
-      if (prev && !prev.closed && currentClosed) {
-        const txType = realizedPnl >= 0 ? "trade_profit" : "trade_loss";
-
-        await Transaction.create({
-          user: p.user,
-          type: txType,
-          amount: Math.abs(realizedPnl),
-          balanceBefore: null,
-          balanceAfter: null,
-          referenceId: String(p._id || ""),
-          source: "position_close",
-          description:
-            txType === "trade_profit"
-              ? "Ganancia por cierre de operación"
-              : "Pérdida por cierre de operación",
-          meta: {
-            symbol: p.symbol,
-            side: p.side,
-            realizedPnl,
-          },
-          status: "completed",
-        });
-
-        const userKey = String(p.user || "");
-        closedDeltaByUser.set(
-          userKey,
-          toSafeNumber(closedDeltaByUser.get(userKey)) + realizedPnl
-        );
-        tradeEventByUser.set(userKey, true);
-      }
-
-      financialSyncState.positionStates.set(key, {
-        closed: currentClosed,
-        realizedPnl,
-      });
-    }
-
-    for (const [userId, userPositions] of positionsByUser.entries()) {
-      const sig = buildUserPositionSignature(userId, userPositions);
-      const prevSig = financialSyncState.userPositionSigs.get(userId) || "";
-      if (sig !== prevSig) {
-        tradeEventByUser.set(userId, true);
-      }
-      financialSyncState.userPositionSigs.set(userId, sig);
-    }
-
-    for (const w of wallets) {
-      const userId = String(w.user || "");
-      if (!userId) continue;
-
-      const current = toSafeNumber(w.balanceOwn ?? w.balance ?? 0);
-
-      if (!financialSyncState.walletBalances.has(userId)) {
-        financialSyncState.walletBalances.set(userId, current);
-        continue;
-      }
-
-      const previous = financialSyncState.walletBalances.get(userId);
-      const delta = current - previous;
-      const tradeRelatedDelta = toSafeNumber(closedDeltaByUser.get(userId));
-      const hasTradeEvent = !!tradeEventByUser.get(userId);
-
-      const deltaMatchesTradeClose =
-        Math.abs(delta - tradeRelatedDelta) < 0.01;
-
-      if (
-        Math.abs(delta) >= 0.01 &&
-        !deltaMatchesTradeClose &&
-        !hasTradeEvent
-      ) {
-        await Transaction.create({
-          user: w.user,
-          type: delta > 0 ? "deposit" : "withdraw",
-          amount: Math.abs(delta),
-          balanceBefore: previous,
-          balanceAfter: current,
-          source: "wallet_sync",
-          description:
-            delta > 0
-              ? "Depósito detectado desde administración"
-              : "Retiro detectado desde administración",
-          meta: {
-            previous,
-            current,
-          },
-          status: "completed",
-        });
-      }
-
-      financialSyncState.walletBalances.set(userId, current);
-    }
-
-    try {
-      io.emit("wallet_synced", {
-        ok: true,
-        count: wallets.length,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (e) {}
-
-  } catch (err) {
-    console.warn("syncFinancialHistory error:", err?.message || err);
-  }
-}
-
-function startFinancialWatcher() {
-  if (financialSyncState.watcher) return;
-  primeFinancialSnapshots().catch(() => {});
-
-  financialSyncState.watcher = setInterval(() => {
-    syncFinancialHistory().catch((err) => {
-      console.warn("financial watcher error:", err?.message || err);
-    });
-  }, Number(process.env.FINANCIAL_WATCHER_MS) || 10000);
-}
-
-function stopFinancialWatcher() {
-  if (financialSyncState.watcher) {
-    clearInterval(financialSyncState.watcher);
-    financialSyncState.watcher = null;
-  }
-}
-
 async function buildAccountForUser(user) {
   const wallet = await getWalletForUser(user._id);
   const positions = await getPositionsForUser(user._id);
-  const quotes = getPriceStore();
 
-  const enrichedPositions = (positions || []).map((p) =>
-    enrichPositionWithPnL(p, quotes)
-  );
-
-  const balance = toSafeNumber(
-    wallet?.balanceOwn ?? wallet?.balance ?? user.balance ?? 0
-  );
-  const marginUsed = toSafeNumber(wallet?.marginUsed ?? 0);
-
-  const openPnL = enrichedPositions.reduce((sum, pos) => {
-    const isClosed = isClosedPositionDoc(pos);
-    if (isClosed) return sum;
-    return sum + toSafeNumber(pos.pnl ?? pos.unrealizedPnl ?? 0);
-  }, 0);
-
-  const equity = balance + openPnL;
-  const freeMargin = Math.max(equity - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+  const balance = wallet?.balance ?? user.balance ?? 0;
 
   return {
     account: {
       balance,
-      balanceOwn: balance,
-      equity,
-      marginUsed,
-      freeMargin,
-      marginLevel,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
       leverage: user.leverage ?? 100,
       currency: user.currency || "USD",
-      pnl: openPnL,
-      positions: enrichedPositions,
+      positions: positions || [],
     },
     user,
     wallet,
-    positions: enrichedPositions,
+    positions,
   };
 }
 
@@ -953,18 +599,12 @@ async function positionsLikeHandler(req, res) {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const positions = await getPositionsForUser(user._id);
-    const quotes = getPriceStore();
-
-    const enriched = (positions || []).map((p) =>
-      enrichPositionWithPnL(p, quotes)
-    );
-
     return res.json({
       ok: true,
-      positions: enriched,
-      data: enriched,
-      items: enriched,
-      count: enriched.length,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
     });
   } catch (e) {
     console.error("positionsLikeHandler error", e);
@@ -981,40 +621,11 @@ app.get("/api/wallet", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const wallet = await getWalletForUser(user._id);
-    const positions = await getPositionsForUser(user._id);
-    const quotes = getPriceStore();
-
-    const enrichedPositions = (positions || []).map((p) =>
-      enrichPositionWithPnL(p, quotes)
-    );
-
-    const balance = toSafeNumber(
-      wallet?.balanceOwn ?? wallet?.balance ?? user.balance ?? 0
-    );
-    const marginUsed = toSafeNumber(wallet?.marginUsed ?? 0);
-
-    const openPnL = enrichedPositions.reduce((sum, pos) => {
-      const isClosed = isClosedPositionDoc(pos);
-      if (isClosed) return sum;
-      return sum + toSafeNumber(pos.pnl ?? pos.unrealizedPnl ?? 0);
-    }, 0);
-
-    const equity = balance + openPnL;
-    const freeMargin = Math.max(equity - marginUsed, 0);
-    const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+    if (wallet) return res.json(wallet);
 
     return res.json({
-      ok: true,
-      balance,
-      balanceOwn: balance,
-      equity,
-      marginUsed,
-      freeMargin,
-      marginLevel,
-      currency: wallet?.currency || user.currency || "USD",
-      leverage: user.leverage ?? 100,
-      pnl: openPnL,
-      wallet,
+      balance: user.balance ?? 0,
+      currency: user.currency || "USD",
     });
   } catch (e) {
     console.error("/api/wallet error", e);
@@ -1024,75 +635,6 @@ app.get("/api/wallet", async (req, res) => {
 
 app.get("/api/billetera", (req, res) => {
   return res.redirect(307, "/api/wallet");
-});
-
-app.get("/api/transactions", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const transactions = await Transaction.find({ user: user._id })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
-
-    return res.json({
-      ok: true,
-      transactions,
-      data: transactions,
-      items: transactions,
-      count: transactions.length,
-    });
-  } catch (err) {
-    console.error("/api/transactions error", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-app.get("/api/wallet/transactions", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const transactions = await Transaction.find({ user: user._id })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
-
-    return res.json({
-      ok: true,
-      transactions,
-      data: transactions,
-      items: transactions,
-      count: transactions.length,
-    });
-  } catch (err) {
-    console.error("/api/wallet/transactions error", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-app.get("/api/history", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const transactions = await Transaction.find({ user: user._id })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
-
-    return res.json({
-      ok: true,
-      transactions,
-      data: transactions,
-      items: transactions,
-      count: transactions.length,
-    });
-  } catch (err) {
-    console.error("/api/history error", err);
-    return res.status(500).json({ error: "Server error" });
-  }
 });
 
 /* ======================================================
@@ -1208,6 +750,9 @@ const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
    RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
+   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
+   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
+   - Si no existe, se devuelve un stub JS válido en vez de HTML.
    ====================================================== */
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
@@ -1390,7 +935,6 @@ const server = httpServer.listen(PORT, () => {
   if (!process.env.RESEND_API_KEY) {
     console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
   }
-  startFinancialWatcher();
 });
 
 /* ======================================================
@@ -1436,12 +980,6 @@ const gracefulShutdown = async (signal) => {
       await safeClosePolygonSocket();
     } catch (e) {
       console.warn("Error cerrando polygonSocket (await):", e);
-    }
-
-    try {
-      stopFinancialWatcher();
-    } catch (e) {
-      console.warn("Error deteniendo financial watcher:", e);
     }
 
     try {
