@@ -399,7 +399,7 @@ function annotatePosition(position = {}) {
   };
 }
 
-async function getUserDocFromBearer(req) {
+async function getUserFromBearer(req) {
   try {
     const auth = req.headers.authorization || req.headers.Authorization || null;
     if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
@@ -419,7 +419,7 @@ async function getUserDocFromBearer(req) {
       payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
 
-    const user = await User.findById(userId).catch(() => null);
+    const user = await User.findById(userId).lean().exec().catch(() => null);
     return user || null;
   } catch {
     return null;
@@ -645,7 +645,7 @@ async function requireAdmin(req, res, next) {
       return next();
     }
 
-    const user = await getUserDocFromBearer(req);
+    const user = await getUserFromBearer(req);
     if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
       req.user = user;
       return next();
@@ -940,67 +940,6 @@ app.get("/api/symbols", (req, res) => {
 });
 
 /* ======================================================
-   Helper: obtener usuario desde token (si aplica)
-   ====================================================== */
-async function getUserFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
-
-    const token = String(auth).split(" ")[1];
-    if (!token) return null;
-    if (!process.env.JWT_SECRET) return null;
-
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (e) {
-      return null;
-    }
-
-    const userId =
-      payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-
-    const user = await User.findById(userId).lean().exec().catch(() => null);
-    return user || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function getPositionsForUser(userId) {
-  try {
-    return await Position.find({ user: userId }).lean().exec().catch(() => []);
-  } catch {
-    return [];
-  }
-}
-
-async function buildAccountForUser(user) {
-  const wallet = await getWalletForUser(user._id);
-  const positions = await getPositionsForUser(user._id);
-
-  const balance = wallet?.balance ?? user.balance ?? 0;
-
-  return {
-    account: {
-      balance,
-      equity: balance,
-      marginUsed: 0,
-      freeMargin: balance,
-      marginLevel: 0,
-      leverage: user.leverage ?? 100,
-      currency: user.currency || "USD",
-      positions: positions || [],
-    },
-    user,
-    wallet,
-    positions,
-  };
-}
-
-/* ======================================================
    Compat endpoints: /api/account, /api/me, /api/profile
    ====================================================== */
 async function accountLikeHandler(req, res) {
@@ -1028,7 +967,7 @@ async function positionsLikeHandler(req, res) {
     const user = await getUserFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const positions = await getPositionsForUser(user._id);
+    const positions = await loadOpenPositionsForUser(user._id);
     return res.json({
       ok: true,
       positions,
@@ -1045,17 +984,44 @@ async function positionsLikeHandler(req, res) {
 app.get("/api/positions", positionsLikeHandler);
 app.get("/api/trade/positions", positionsLikeHandler);
 
+app.get("/api/positions/all", async (req, res) => {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await loadAllPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/positions/all error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/wallet", async (req, res) => {
   try {
     const user = await getUserFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const wallet = await getWalletForUser(user._id);
-    if (wallet) return res.json(wallet);
-
+    const payload = await buildAccountForUser(user);
     return res.json({
-      balance: user.balance ?? 0,
-      currency: user.currency || "USD",
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
     });
   } catch (e) {
     console.error("/api/wallet error", e);
@@ -1068,246 +1034,12 @@ app.get("/api/billetera", (req, res) => {
 });
 
 /* ======================================================
-   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
+   Redirección para /api/api/* -> /api/*
    ====================================================== */
 app.use("/api/api", (req, res) => {
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
 });
-
-/* ======================================================
-   SOCKET.IO EVENTS
-   ====================================================== */
-io.on("connection", (socket) => {
-  console.log("📡 Cliente conectado:", socket.id);
-
-  try {
-    socket.emit("prices_snapshot", getPriceStore() || {});
-  } catch (e) {
-    socket.emit("prices_snapshot", {});
-  }
-
-  socket.on("request_prices_snapshot", () => {
-    try {
-      socket.emit("prices_snapshot", getPriceStore() || {});
-    } catch (e) {
-      socket.emit("prices_snapshot", {});
-    }
-  });
-
-  socket.on("request_symbols", () => {
-    try {
-      const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") {
-        const syms = priceHandler.getSymbols();
-        socket.emit("symbols_update", syms || []);
-      } else if (prices && Object.keys(prices).length) {
-        const arr = Object.keys(prices).map((k) => ({
-          symbol: k,
-          label: (k.split(":").pop() || k).replace("_", "/"),
-          market:
-            prices[k] && prices[k].market ? prices[k].market : "Unknown",
-        }));
-        socket.emit("symbols_update", arr);
-      } else {
-        socket.emit("symbols_update", SAMPLE_SYMBOLS);
-      }
-    } catch (e) {
-      socket.emit("symbols_update", SAMPLE_SYMBOLS);
-    }
-  });
-
-  socket.on("subscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
-    try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
-        polygonSocket.subscribe(symbol, kind);
-      }
-      socket.join(symbol);
-      console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("subscribe error:", e);
-    }
-  });
-
-  socket.on("unsubscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
-    try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
-        polygonSocket.unsubscribe(symbol, kind);
-      }
-      socket.leave(symbol);
-      console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("unsubscribe error:", e);
-    }
-  });
-
-  socket.on("disconnect", (reason) => {
-    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
-  });
-});
-
-/* ======================================================
-   STATIC FRONTEND
-   ====================================================== */
-const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
-let staticDirName = null;
-
-for (const cand of staticCandidates) {
-  const p = path.join(__dirname, cand);
-  try {
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
-      staticDirName = cand;
-      break;
-    }
-  } catch (e) {}
-}
-
-if (!staticDirName) {
-  staticDirName = "public";
-  console.warn(
-    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
-      ", "
-    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
-  );
-} else {
-  console.log(`Static folder detected: '${staticDirName}'`);
-}
-
-const staticPath = path.join(__dirname, staticDirName);
-const jsDirPath = path.join(staticPath, "js");
-
-/* ======================================================
-   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
-   ====================================================== */
-function stripScriptWrappers(source) {
-  let text = String(source ?? "");
-
-  text = text.replace(/^\uFEFF/, "");
-
-  const trimmed = text.trim();
-
-  const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
-  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
-
-  if (startsWithScript && endsWithScript) {
-    text = trimmed
-      .replace(/^<script\b[^>]*>/i, "")
-      .replace(/<\/script>\s*$/i, "");
-  }
-
-  return text;
-}
-
-function resolveJsCandidate(requestPath) {
-  const clean = String(requestPath || "").split("?")[0];
-  const normalized = clean.replace(/\\/g, "/");
-  const base = path.basename(normalized);
-
-  const candidates = [];
-
-  if (normalized.startsWith("/public/js/")) {
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
-  }
-
-  if (normalized.startsWith("/js/")) {
-    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
-    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
-  }
-
-  if (normalized.startsWith("/public/")) {
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
-  }
-
-  if (base) {
-    candidates.push(path.join(staticPath, base));
-    candidates.push(path.join(jsDirPath, base));
-  }
-
-  const uniqueCandidates = [...new Set(candidates)];
-
-  return uniqueCandidates.find((p) => {
-    try {
-      return fs.existsSync(p) && fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
-}
-
-app.use(async (req, res, next) => {
-  const pathname = req.path || "";
-  if (!pathname.endsWith(".js")) return next();
-
-  try {
-    const candidate = resolveJsCandidate(pathname);
-
-    if (candidate) {
-      const raw = await fs.promises.readFile(candidate, "utf8");
-      const cleaned = stripScriptWrappers(raw);
-
-      res
-        .status(200)
-        .type("application/javascript; charset=utf-8")
-        .send(cleaned);
-      return;
-    }
-
-    res
-      .status(404)
-      .type("application/javascript; charset=utf-8")
-      .send(`
-// JS missing: ${pathname}
-console.error("JS missing: ${pathname}");
-
-window.CATEGORIES = window.CATEGORIES || [];
-window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-window.API = window.API || "/api";
-window.SOCKET_URL = window.SOCKET_URL || location.origin;
-window._LEONES = window._LEONES || {};
-window._LEONES_TRADING = window._LEONES_TRADING || {};
-window._LEONES_TRADING.fetchPositions =
-  window._LEONES_TRADING.fetchPositions ||
-  (async function () { return []; });
-
-if (!window.loadPositions) {
-  window.loadPositions = async function () {
-    try {
-      if (
-        window._LEONES_TRADING &&
-        typeof window._LEONES_TRADING.fetchPositions === "function"
-      ) {
-        return await window._LEONES_TRADING.fetchPositions();
-      }
-    } catch (e) {
-      console.warn("loadPositions stub error", e);
-    }
-    return null;
-  };
-}
-
-if (!window.loadRealQuotes) {
-  window.loadRealQuotes = async function () {
-    return null;
-  };
-}
-`);
-  } catch (err) {
-    console.error("Error sirviendo JS:", err);
-    res
-      .status(500)
-      .type("application/javascript; charset=utf-8")
-      .send(`console.error("JS server error");`);
-  }
-});
-
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
-app.use("/public", express.static(staticPath));
-app.use("/js", express.static(jsDirPath));
-app.use(express.static(staticPath));
 
 /* ======================================================
    ADMIN: DEPOSITS / HISTORY / ACCOUNT UPDATE
@@ -1425,28 +1157,6 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
-  }
-});
-
-/* ======================================================
-   POSITIONS / OPEN PnL / HISTORY
-   ====================================================== */
-app.get("/api/positions/all", async (req, res) => {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const positions = await loadAllPositionsForUser(user._id);
-    return res.json({
-      ok: true,
-      positions,
-      data: positions,
-      items: positions,
-      count: positions.length,
-    });
-  } catch (e) {
-    console.error("/api/positions/all error", e);
-    return res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -1979,6 +1689,164 @@ io.on("connection", (socket) => {
     console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
   });
 });
+
+/* ======================================================
+   STATIC FRONTEND
+   ====================================================== */
+const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+let staticDirName = null;
+
+for (const cand of staticCandidates) {
+  const p = path.join(__dirname, cand);
+  try {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
+  } catch (e) {}
+}
+
+if (!staticDirName) {
+  staticDirName = "public";
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
+  );
+} else {
+  console.log(`Static folder detected: '${staticDirName}'`);
+}
+
+const staticPath = path.join(__dirname, staticDirName);
+const jsDirPath = path.join(staticPath, "js");
+
+/* ======================================================
+   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
+   ====================================================== */
+function stripScriptWrappers(source) {
+  let text = String(source ?? "");
+
+  text = text.replace(/^\uFEFF/, "");
+
+  const trimmed = text.trim();
+
+  const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
+  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
+
+  if (startsWithScript && endsWithScript) {
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
+  }
+
+  return text;
+}
+
+function resolveJsCandidate(requestPath) {
+  const clean = String(requestPath || "").split("?")[0];
+  const normalized = clean.replace(/\\/g, "/");
+  const base = path.basename(normalized);
+
+  const candidates = [];
+
+  if (normalized.startsWith("/public/js/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
+  if (normalized.startsWith("/js/")) {
+    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
+    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
+  }
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
+  if (base) {
+    candidates.push(path.join(staticPath, base));
+    candidates.push(path.join(jsDirPath, base));
+  }
+
+  const uniqueCandidates = [...new Set(candidates)];
+
+  return uniqueCandidates.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
+app.use(async (req, res, next) => {
+  const pathname = req.path || "";
+  if (!pathname.endsWith(".js")) return next();
+
+  try {
+    const candidate = resolveJsCandidate(pathname);
+
+    if (candidate) {
+      const raw = await fs.promises.readFile(candidate, "utf8");
+      const cleaned = stripScriptWrappers(raw);
+
+      res
+        .status(200)
+        .type("application/javascript; charset=utf-8")
+        .send(cleaned);
+      return;
+    }
+
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`
+// JS missing: ${pathname}
+console.error("JS missing: ${pathname}");
+
+window.CATEGORIES = window.CATEGORIES || [];
+window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+window.API = window.API || "/api";
+window.SOCKET_URL = window.SOCKET_URL || location.origin;
+window._LEONES = window._LEONES || {};
+window._LEONES_TRADING = window._LEONES_TRADING || {};
+window._LEONES_TRADING.fetchPositions =
+  window._LEONES_TRADING.fetchPositions ||
+  (async function () { return []; });
+
+if (!window.loadPositions) {
+  window.loadPositions = async function () {
+    try {
+      if (
+        window._LEONES_TRADING &&
+        typeof window._LEONES_TRADING.fetchPositions === "function"
+      ) {
+        return await window._LEONES_TRADING.fetchPositions();
+      }
+    } catch (e) {
+      console.warn("loadPositions stub error", e);
+    }
+    return null;
+  };
+}
+
+if (!window.loadRealQuotes) {
+  window.loadRealQuotes = async function () {
+    return null;
+  };
+}
+`);
+  } catch (err) {
+    console.error("Error sirviendo JS:", err);
+    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+  }
+});
+
+/* ======================================================
+   STATIC FILES
+   ====================================================== */
+app.use("/public", express.static(staticPath));
+app.use("/js", express.static(jsDirPath));
+app.use(express.static(staticPath));
 
 /* ======================================================
    FALLBACK HTML
