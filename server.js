@@ -34,18 +34,17 @@ import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
 
-// Models (used for account/wallet endpoints fallback)
+// Models
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
-// Send email helper (centralizado: Resend SDK / HTTP / SMTP fallback)
+// Email helper
 import sendEmail from "./utils/sendEmail.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ENV
 dotenv.config({
   path:
     process.env.NODE_ENV === "production"
@@ -60,7 +59,6 @@ app.disable("x-powered-by");
 // DB CONNECT
 connectDB();
 
-// Mongoose listeners (logging + start jobs after DB ready)
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 
@@ -69,11 +67,7 @@ mongoose.connection.on("connected", () => {
     const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
     const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
 
-    startRiskWatcher({
-      intervalMs,
-      alertThreshold,
-      closeThreshold,
-    });
+    startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
 
     console.log(
       `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
@@ -100,7 +94,7 @@ app.use(mongoSanitize());
 app.use(xss());
 
 /* ======================================================
-   CORS - whitelist dinámico
+   CORS
    ====================================================== */
 const allowedOrigins = new Set(
   [
@@ -123,7 +117,7 @@ const corsOptions = {
       if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
         return callback(null, true);
       }
-    } catch (e) {}
+    } catch {}
     console.warn("CORS denied for origin:", origin);
     callback(new Error("Not allowed by CORS"));
   },
@@ -159,6 +153,24 @@ const limiter = rateLimit({
 app.use("/api", limiter);
 
 /* ======================================================
+   SOCKET.IO + PRICE HANDLER
+   ====================================================== */
+const httpServer = createServer(app);
+
+const io = new IOServer(httpServer, {
+  cors: {
+    origin:
+      Array.from(allowedOrigins).length
+        ? Array.from(allowedOrigins)
+        : process.env.CLIENT_URL || "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+const priceHandler = new PriceHandler(io);
+
+/* ======================================================
    HEALTH CHECK
    ====================================================== */
 app.get("/api/health", (req, res) => {
@@ -183,12 +195,8 @@ app.locals.sendEmail = sendEmail;
 app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
   try {
     const to = user?.email || user?.address || user;
-    if (!to) {
-      return { ok: false, error: "missing_recipient" };
-    }
-    if (!verificationLink) {
-      return { ok: false, error: "missing_verification_link" };
-    }
+    if (!to) return { ok: false, error: "missing_recipient" };
+    if (!verificationLink) return { ok: false, error: "missing_verification_link" };
 
     const name = user?.name || "usuario";
 
@@ -216,7 +224,6 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
   }
 };
 
-/* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
   if (!to) {
@@ -241,11 +248,7 @@ app.post("/api/_send_test_email", async (req, res) => {
         result: r.result || r.info || r.resp,
       });
     }
-    return res.status(500).json({
-      ok: false,
-      message: "No se pudo enviar correo",
-      error: r.error,
-    });
+    return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
     return res.status(500).json({
@@ -257,29 +260,69 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   API ROUTES - montamos rutas principales
+   MODELOS AUXILIARES: TRANSACCIONES
    ====================================================== */
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes);
-app.use("/api/positions", positionsRoutes);
-app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes);
+const transactionSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+    userId: { type: String, index: true },
+    type: { type: String, index: true }, // deposit | withdrawal | trade_open | trade_close | adjustment
+    amount: { type: Number, default: 0 },
+    status: { type: String, default: "completed" },
+    note: { type: String, default: "" },
+    balanceBefore: { type: Number, default: 0 },
+    balanceAfter: { type: Number, default: 0 },
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+    source: { type: String, default: "server.js" },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { minimize: false }
+);
+
+const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 /* ======================================================
-   SAMPLE SYMBOLS / FALLBACK
+   HELPERS DE NEGOCIO / CUENTA
    ====================================================== */
-const SAMPLE_SYMBOLS = [
-  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
-  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
-  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
-  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
-];
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeSide(value) {
+  const s = String(value || "").trim().toUpperCase();
+  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
+  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
+  return "";
+}
+
+function normalizeQty(body = {}) {
+  const n = Number(
+    body.qty ??
+      body.quantity ??
+      body.amount ??
+      body.positionSize ??
+      body.notional ??
+      body.size
+  );
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizePrice(body = {}) {
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    null;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 function getPriceStore() {
   try {
@@ -299,10 +342,7 @@ function toNumber(value) {
 }
 
 function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label ||
-    item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
+  const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
 
   const price =
     toNumber(item.price) ??
@@ -333,10 +373,7 @@ function normalizeQuote(symbol, item = {}) {
 function buildQuotesArray() {
   const store = getPriceStore();
   const keys = Object.keys(store);
-
-  if (keys.length) {
-    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
-  }
+  if (keys.length) return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
 
   return SAMPLE_SYMBOLS.map((s) =>
     normalizeQuote(s.symbol, {
@@ -357,154 +394,72 @@ function buildMarketPayload() {
     data: quotes,
     items: quotes,
     latest: quotes[0] || null,
-    symbols: quotes.map((q) => ({
-      symbol: q.symbol,
-      label: q.label,
-      market: q.market,
-    })),
+    symbols: quotes.map((q) => ({ symbol: q.symbol, label: q.label, market: q.market })),
   };
 }
 
-app.get("/api/markets", (req, res) =>
-  res.json({
-    markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"],
-  })
-);
-app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
-);
+function getCurrentPriceForSymbol(symbol) {
+  const target = compactSymbol(symbol);
+  if (!target) return null;
 
-/* ======================================================
-   SOCKET.IO + PRICE HANDLER
-   ====================================================== */
-const httpServer = createServer(app);
-
-const io = new IOServer(httpServer, {
-  cors: {
-    origin:
-      Array.from(allowedOrigins).length
-        ? Array.from(allowedOrigins)
-        : process.env.CLIENT_URL || "*",
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
-
-const priceHandler = new PriceHandler(io);
-
-/* ======================================================
-   POLYGON SOCKET (realtime provider)
-   ====================================================== */
-let polygonSocket = null;
-try {
-  if (!process.env.POLYGON_API_KEY) {
-    console.warn(
-      "⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse"
-    );
-  } else {
-    try {
-      polygonSocket = new PolygonSocket({
-        apiKey: process.env.POLYGON_API_KEY,
-        onPrice: (data) => priceHandler.handle(data),
-        onOpen: () => console.log("PolygonSocket abierto"),
-        onClose: () => console.log("PolygonSocket cerrado"),
-        onError: (err) => console.error("PolygonSocket error:", err),
-      });
-
-      try {
-        const maybe = polygonSocket.connect();
-        if (maybe && typeof maybe.then === "function") {
-          maybe.catch((err) => {
-            console.warn("PolygonSocket.connect() rejected:", err);
-            polygonSocket = null;
-          });
-        }
-        console.log("🔌 Intentando conectar PolygonSocket...");
-      } catch (err) {
-        console.error("Error iniciando PolygonSocket.connect():", err);
-        polygonSocket = null;
-      }
-    } catch (err) {
-      console.error("Error inicializando PolygonSocket instance:", err);
-      polygonSocket = null;
-    }
-  }
-} catch (err) {
-  console.error("Error inicializando PolygonSocket:", err);
-  polygonSocket = null;
-}
-
-/* ======================================================
-   MARKET ROUTES (factory)
-   ====================================================== */
-try {
-  if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
-  } else {
-    app.use("/api/market", marketRoutesFactory);
-  }
-} catch (e) {
-  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
-}
-
-/* ======================================================
-   Fallbacks para eliminar 404 en rutas que tu frontend está llamando
-   ====================================================== */
-app.get("/api/quotes", (req, res) => {
-  const payload = buildMarketPayload();
-  return res.json(payload.quotes);
-});
-
-app.get("/api/latest", (req, res) => {
-  const payload = buildMarketPayload();
-  return res.json(payload.latest || {});
-});
-
-app.get("/api/market/quotes", (req, res) => {
-  return res.json(buildMarketPayload());
-});
-
-app.get("/api/market/latest", (req, res) => {
-  const payload = buildMarketPayload();
-  return res.json(payload.latest || {});
-});
-
-app.get("/api/market/polygon/quotes", (req, res) => {
-  return res.json(buildMarketPayload());
-});
-
-app.get("/api/market/polygon/symbols", (req, res) => {
-  return res.json(SAMPLE_SYMBOLS);
-});
-
-app.get("/api/symbols", (req, res) => {
   try {
-    const prices = getPriceStore();
-    if (prices && Object.keys(prices).length) {
-      const arr = Object.keys(prices).map((k) => {
-        return {
-          symbol: k,
-          label: (k.split(":").pop() || k).replace("_", "/"),
-          market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
-        };
-      });
-      return res.json(arr);
-    }
-    return res.json(SAMPLE_SYMBOLS);
-  } catch (err) {
-    console.error("api/symbols error:", err);
-    return res.json(SAMPLE_SYMBOLS);
-  }
-});
+    const store = getPriceStore();
+    for (const [key, item] of Object.entries(store)) {
+      const candidates = [
+        key,
+        key.split(":").pop(),
+        item?.symbol,
+        item?.tvSymbol,
+        item?.ticker,
+        item?.name,
+        item?.label,
+        item?.marketSymbol,
+      ];
 
-/* ======================================================
-   Helper: obtener usuario desde token (si aplica)
-   ====================================================== */
-async function getUserFromBearer(req) {
+      if (candidates.some((c) => compactSymbol(c) === target)) {
+        const px = Number(item?.price ?? item?.last ?? item?.close ?? item?.value ?? item?.mark ?? item?.mid ?? item?.lp);
+        return Number.isFinite(px) && px > 0 ? px : null;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+function isClosedPosition(p = {}) {
+  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
+}
+
+function computePositionPnl(position = {}, currentPrice = null) {
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
+  const sign = side === "SELL" ? -1 : 1;
+  return (px - entry) * qty * sign;
+}
+
+function annotatePosition(position = {}) {
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const currentPrice = Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) || entryPrice;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const pnl = isClosedPosition(position)
+    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
+}
+
+async function getUserDocFromBearer(req) {
   try {
     const auth = req.headers.authorization || req.headers.Authorization || null;
     if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
@@ -516,116 +471,335 @@ async function getUserFromBearer(req) {
     let payload;
     try {
       payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (e) {
+    } catch {
       return null;
     }
 
-    const userId =
-      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
 
-    const user = await User.findById(userId).lean().exec().catch(() => null);
+    const user = await User.findById(userId).catch(() => null);
     return user || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function getPositionsForUser(userId) {
-  try {
-    return await Position.find({ user: userId }).lean().exec().catch(() => []);
-  } catch {
-    return [];
-  }
-}
-
-async function getWalletForUser(userId) {
-  try {
-    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
   } catch {
     return null;
   }
 }
 
-async function buildAccountForUser(user) {
-  const wallet = await getWalletForUser(user._id);
-  const positions = await getPositionsForUser(user._id);
+async function getWalletDocForUser(userId) {
+  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+  if (!wallet) {
+    wallet = new Wallet({
+      user: userId,
+      balanceOwn: 0,
+      balance: 0,
+      credit: 0,
+      marginUsed: 0,
+      leverageFactor: 1,
+      equity: 0,
+      freeMargin: 0,
+      marginLevel: 0,
+    });
+  }
+  return wallet;
+}
 
-  const balance = wallet?.balance ?? user.balance ?? 0;
+function normalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
+  const credit = Number(wallet?.credit ?? 0) || 0;
+  const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
   return {
-    account: {
-      balance,
-      equity: balance,
-      marginUsed: 0,
-      freeMargin: balance,
-      marginLevel: 0,
-      leverage: user.leverage ?? 100,
-      currency: user.currency || "USD",
-      positions: positions || [],
-    },
-    user,
-    wallet,
-    positions,
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
   };
 }
 
-/* ======================================================
-   Compat endpoints: /api/account, /api/me, /api/profile
-   ====================================================== */
-async function accountLikeHandler(req, res) {
+async function recordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
   try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const payload = {
+      user: user?._id || null,
+      userId: String(user?._id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date(),
+    };
 
+    const tx = await Transaction.create(payload);
+    return tx.toObject ? tx.toObject() : tx;
+  } catch (err) {
+    console.warn("recordTransaction fallback:", err?.message || err);
+    return {
+      userId: String(user?._id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+async function loadTransactionsForUser(userId, limit = 50) {
+  return await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean()
+    .exec()
+    .catch(() => []);
+}
+
+async function loadOpenPositionsForUser(userId) {
+  const rows = await Position.find({
+    user: userId,
+    status: { $in: ["OPEN", "open", "Open"] },
+  })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
+
+  return (rows || []).map(annotatePosition);
+}
+
+async function loadAllPositionsForUser(userId) {
+  const rows = await Position.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
+
+  return (rows || []).map(annotatePosition);
+}
+
+async function buildAccountForUser(userDoc) {
+  const wallet = await getWalletDocForUser(userDoc._id);
+  const openPositions = await loadOpenPositionsForUser(userDoc._id);
+  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
+
+  const openPnl = openPositions.reduce((sum, p) => sum + (Number(p.pnl ?? 0) || 0), 0);
+  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+
+  return {
+    account: {
+      ...normalizedWallet,
+      leverage: Number(userDoc.leverage ?? wallet.leverageFactor ?? 100) || 100,
+      currency: userDoc.currency || wallet.currency || "USD",
+      positions: openPositions,
+      openPositions,
+      recentTransactions,
+      transactions: recentTransactions,
+    },
+    user: userDoc.toObject ? userDoc.toObject() : userDoc,
+    wallet: wallet.toObject ? wallet.toObject() : wallet,
+    positions: openPositions,
+    transactions: recentTransactions,
+  };
+}
+
+function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
+  try {
+    io.emit("wallet_update", { userId, account: accountPayload?.account || accountPayload });
+    io.emit("account_update", { userId, account: accountPayload?.account || accountPayload });
+    if (Array.isArray(positions)) io.emit("positions_update", { userId, positions });
+    if (transaction) io.emit("transactions_update", { userId, transaction });
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e?.message || e);
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+
+    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
+
+    const user = await getUserDocFromBearer(req);
+    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
+      req.user = user;
+      return next();
+    }
+
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  } catch {
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  }
+}
+
+/* ======================================================
+   SAMPLE SYMBOLS / MARKET ROUTES / FALLBACKS
+   ====================================================== */
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
+];
+
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
+app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+
+try {
+  if (typeof marketRoutesFactory === "function") {
+    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
+} catch (e) {
+  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
+}
+
+app.get("/api/quotes", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.quotes);
+});
+
+app.get("/api/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+
+app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
+app.get("/api/market/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
+app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+
+app.get("/api/symbols", (req, res) => {
+  try {
+    const prices = getPriceStore();
+    if (prices && Object.keys(prices).length) {
+      const arr = Object.keys(prices).map((k) => ({
+        symbol: k,
+        label: (k.split(":").pop() || k).replace("_", "/"),
+        market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
+      }));
+      return res.json(arr);
+    }
+    return res.json(SAMPLE_SYMBOLS);
+  } catch (err) {
+    console.error("api/symbols error:", err);
+    return res.json(SAMPLE_SYMBOLS);
+  }
+});
+
+/* ======================================================
+   AUTH / ACCOUNT / WALLET / POSITIONS / TRANSACTIONS
+   ====================================================== */
+app.get("/api/account", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
     return res.json(payload);
   } catch (e) {
-    console.error("accountLikeHandler error", e);
+    console.error("account error", e);
     return res.status(500).json({ error: "Server error" });
   }
-}
-
-app.get("/api/account", accountLikeHandler);
-app.get("/api/me", accountLikeHandler);
-app.get("/api/profile", accountLikeHandler);
-app.get("/api/cuenta", (req, res) => {
-  return res.redirect(307, "/api/account");
 });
 
-async function positionsLikeHandler(req, res) {
+app.get("/api/me", async (req, res) => {
   try {
-    const user = await getUserFromBearer(req);
+    const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const positions = await getPositionsForUser(user._id);
-    return res.json({
-      ok: true,
-      positions,
-      data: positions,
-      items: positions,
-      count: positions.length,
-    });
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
   } catch (e) {
-    console.error("positionsLikeHandler error", e);
+    console.error("me error", e);
     return res.status(500).json({ error: "Server error" });
   }
-}
+});
 
-app.get("/api/positions", positionsLikeHandler);
-app.get("/api/trade/positions", positionsLikeHandler);
+app.get("/api/profile", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
+  } catch (e) {
+    console.error("profile error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
+
+app.get("/api/transactions", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
+    const transactions = await loadTransactionsForUser(user._id, limit);
+
+    return res.json({ ok: true, count: transactions.length, transactions, data: transactions, items: transactions });
+  } catch (e) {
+    console.error("/api/transactions error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 app.get("/api/wallet", async (req, res) => {
   try {
-    const user = await getUserFromBearer(req);
+    const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const wallet = await getWalletForUser(user._id);
-    if (wallet) return res.json(wallet);
-
+    const payload = await buildAccountForUser(user);
     return res.json({
-      balance: user.balance ?? 0,
-      currency: user.currency || "USD",
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
     });
   } catch (e) {
     console.error("/api/wallet error", e);
@@ -633,12 +807,529 @@ app.get("/api/wallet", async (req, res) => {
   }
 });
 
-app.get("/api/billetera", (req, res) => {
-  return res.redirect(307, "/api/wallet");
+app.get("/api/billetera", (req, res) => res.redirect(307, "/api/wallet"));
+
+app.get("/api/positions", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await loadOpenPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/positions error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/positions/all", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await loadAllPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/positions/all error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
 });
 
 /* ======================================================
-   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
+   ADMIN: DEPÓSITO / RETIRO / HISTORIAL TIPO BANCO
+   ====================================================== */
+app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const amount = Number(body.amount ?? body.depositAmount ?? body.balance ?? 0);
+    const leverage = body.leverage !== undefined ? Number(body.leverage) : null;
+    const note = String(body.note || body.description || "Admin deposit").trim();
+    const currency = String(body.currency || "USD").trim();
+
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
+
+    const user = await User.findById(userId).catch(() => null);
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
+
+    const wallet = await getWalletDocForUser(user._id);
+    const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+
+    wallet.balanceOwn = balanceBefore + amount;
+    wallet.balance = wallet.balanceOwn;
+    wallet.currency = currency || wallet.currency || "USD";
+
+    if (Number.isFinite(leverage) && leverage > 0) {
+      wallet.leverageFactor = leverage;
+      user.leverage = leverage;
+    }
+
+    wallet.equity = wallet.balanceOwn;
+    wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.balance = wallet.balanceOwn;
+    user.currency = currency || user.currency || "USD";
+    if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
+    await user.save();
+
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: {
+        source: "admin-panel",
+        method: body.method || "deposit",
+        currency,
+        leverage: wallet.leverageFactor,
+      },
+      source: "api/admin/deposit",
+    });
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, tx);
+
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet },
+    });
+  } catch (err) {
+    console.error("/api/admin/deposit error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const amount = Number(body.amount ?? body.withdrawAmount ?? 0);
+    const note = String(body.note || body.description || "Admin withdrawal").trim();
+
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
+
+    const user = await User.findById(userId).catch(() => null);
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
+
+    const wallet = await getWalletDocForUser(user._id);
+    const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+
+    if (balanceBefore < amount) {
+      return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+    }
+
+    wallet.balanceOwn = balanceBefore - amount;
+    wallet.balance = wallet.balanceOwn;
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = Math.max(wallet.equity - (Number(wallet.marginUsed ?? 0) || 0), 0);
+    wallet.marginLevel = (Number(wallet.marginUsed ?? 0) || 0) > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.balance = wallet.balanceOwn;
+    await user.save();
+
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, tx);
+
+    return res.json({
+      ok: true,
+      msg: "Retiro aplicado",
+      data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet },
+    });
+  } catch (err) {
+    console.error("/api/admin/withdraw error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
+  try {
+    const userId = req.query.userId || null;
+    const limit = Math.min(Number(req.query.limit || 100) || 100, 500);
+
+    const txs = userId
+      ? await loadTransactionsForUser(userId, limit)
+      : await Transaction.find({}).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []);
+
+    return res.json({ ok: true, count: txs.length, transactions: txs, data: txs, items: txs });
+  } catch (err) {
+    console.error("/api/admin/transactions error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+/* ======================================================
+   TRADING CORE: OPEN / CLOSE / CLOSE-ALL
+   ====================================================== */
+app.post("/api/trade/open", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const body = req.body || {};
+    const symbol = String(body.symbol || body.tvSymbol || "").trim().toUpperCase();
+    const side = normalizeSide(body.side ?? body.direction ?? body.action);
+    const qty = normalizeQty(body);
+    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+
+    if (!symbol) return res.status(400).json({ ok: false, error: "symbol_required" });
+    if (!side) return res.status(400).json({ ok: false, error: "side_required" });
+    if (!qty) return res.status(400).json({ ok: false, error: "quantity_required" });
+
+    const wallet = await getWalletDocForUser(user._id);
+    const leverage = Math.max(Number(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+
+    const marketPrice = getCurrentPriceForSymbol(symbol);
+    const requestedPrice = normalizePrice(body);
+    const entryPrice = type === "limit" && requestedPrice ? requestedPrice : (marketPrice || requestedPrice || normalizePrice(body) || null);
+
+    if (!entryPrice || entryPrice <= 0) {
+      return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para este símbolo" });
+    }
+
+    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+    const credit = Number(wallet.credit ?? 0) || 0;
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    const notional = Math.abs(qty * entryPrice);
+    const requiredMargin = notional / leverage;
+
+    if (freeMargin < requiredMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds",
+        message: "Fondos insuficientes para abrir la operación",
+        freeMargin,
+        requiredMargin,
+      });
+    }
+
+    wallet.balanceOwn = balanceOwn;
+    wallet.balance = balanceOwn;
+    wallet.marginUsed = marginUsed + requiredMargin;
+    wallet.equity = balanceOwn;
+    wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.leverageFactor = leverage;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.balance = balanceOwn;
+    user.leverage = leverage;
+    await user.save();
+
+    const position = await Position.create({
+      user: user._id,
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      currentPrice: entryPrice,
+      marginReserved: requiredMargin,
+      leverage,
+      status: "OPEN",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const tx = await recordTransaction({
+      user,
+      type: "trade_open",
+      amount: requiredMargin,
+      status: "reserved",
+      note: `${side} ${symbol}`,
+      balanceBefore: balanceOwn,
+      balanceAfter: balanceOwn,
+      meta: {
+        symbol,
+        side,
+        qty,
+        leverage,
+        entryPrice,
+        currentPrice: entryPrice,
+        marginReserved: requiredMargin,
+      },
+      source: "api/trade/open",
+    });
+
+    const account = await buildAccountForUser(user);
+    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+
+    emitStateUpdates(user._id, account, [annotatedPosition], tx);
+
+    return res.status(201).json({
+      ok: true,
+      msg: "Operación abierta",
+      data: {
+        positionId: position._id,
+        status: "OPEN",
+        symbol: annotatedPosition.symbol,
+        side: annotatedPosition.side,
+        qty: annotatedPosition.qty,
+        entryPrice: annotatedPosition.entryPrice,
+        currentPrice: annotatedPosition.currentPrice,
+        marginReserved: requiredMargin,
+        leverage,
+        account: account.account,
+        wallet: account.wallet,
+        position: annotatedPosition,
+        transaction: tx,
+      },
+    });
+  } catch (err) {
+    console.error("/api/trade/open error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+app.post("/api/trade/close", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const body = req.body || {};
+    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
+    const symbol = String(body.symbol || "").trim().toUpperCase();
+
+    let position = null;
+    if (positionId) {
+      position = await Position.findOne({ _id: positionId, user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).catch(() => null);
+    }
+
+    if (!position && symbol) {
+      position = await Position.findOne({ user: user._id, symbol, status: { $in: ["OPEN", "open", "Open"] } })
+        .sort({ createdAt: -1 })
+        .catch(() => null);
+    }
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
+    }
+
+    const currentPrice = Number(body.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? position.currentPrice ?? position.entryPrice ?? 0) || 0;
+    const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+    const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
+    const side = normalizeSide(position.side || position.direction);
+    const sign = side === "SELL" ? -1 : 1;
+    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+
+    const wallet = await getWalletDocForUser(user._id);
+    const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+    const reservedMargin = Number(position.marginReserved ?? 0) || 0;
+    const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
+
+    wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
+    wallet.balanceOwn = balanceBefore + realizedPnl;
+    wallet.balance = wallet.balanceOwn;
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.balance = wallet.balanceOwn;
+    await user.save();
+
+    position.status = "CLOSED";
+    position.currentPrice = currentPrice;
+    position.closePrice = currentPrice;
+    position.realizedPnl = realizedPnl;
+    position.pnl = realizedPnl;
+    position.closedAt = new Date();
+    position.updatedAt = new Date();
+    await position.save();
+
+    const tx = await recordTransaction({
+      user,
+      type: "trade_close",
+      amount: realizedPnl,
+      status: "completed",
+      note: `${side} ${position.symbol}`,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: {
+        positionId: String(position._id),
+        symbol: position.symbol,
+        side,
+        qty,
+        entryPrice,
+        closePrice: currentPrice,
+        marginReleased: reservedMargin,
+        realizedPnl,
+      },
+      source: "api/trade/close",
+    });
+
+    const account = await buildAccountForUser(user);
+    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+
+    emitStateUpdates(user._id, account, [annotatedPosition], tx);
+
+    return res.json({
+      ok: true,
+      msg: "Posición cerrada",
+      data: {
+        positionId: position._id,
+        symbol: annotatedPosition.symbol,
+        side: annotatedPosition.side,
+        qty: annotatedPosition.qty,
+        entryPrice,
+        currentPrice,
+        realizedPnl,
+        balance: wallet.balanceOwn,
+        account: account.account,
+        wallet: account.wallet,
+        position: annotatedPosition,
+        transaction: tx,
+      },
+    });
+  } catch (err) {
+    console.error("/api/trade/close error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+app.post("/api/trade/close-all", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const body = req.body || {};
+    const openPositions = await Position.find({ user: user._id, status: { $in: ["OPEN", "open", "Open"] } })
+      .sort({ createdAt: -1 })
+      .catch(() => []);
+
+    if (!openPositions.length) {
+      return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
+    }
+
+    let totalRealized = 0;
+    const closed = [];
+
+    for (const pos of openPositions) {
+      const currentPrice = Number(body.currentPrice ?? getCurrentPriceForSymbol(pos.symbol) ?? pos.currentPrice ?? pos.entryPrice ?? 0) || 0;
+      const entryPrice = Number(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) || 0;
+      const qty = Number(pos.qty ?? pos.quantity ?? pos.amount ?? 0) || 0;
+      const side = normalizeSide(pos.side || pos.direction);
+      const sign = side === "SELL" ? -1 : 1;
+      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+
+      const wallet = await getWalletDocForUser(user._id);
+      const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+      const reservedMargin = Number(pos.marginReserved ?? 0) || 0;
+
+      wallet.marginUsed = Math.max((Number(wallet.marginUsed ?? 0) || 0) - reservedMargin, 0);
+      wallet.balanceOwn = balanceBefore + realizedPnl;
+      wallet.balance = wallet.balanceOwn;
+      wallet.equity = wallet.balanceOwn;
+      wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+      wallet.updatedAt = new Date();
+      await wallet.save();
+
+      user.balance = wallet.balanceOwn;
+      await user.save();
+
+      pos.status = "CLOSED";
+      pos.currentPrice = currentPrice;
+      pos.closePrice = currentPrice;
+      pos.realizedPnl = realizedPnl;
+      pos.pnl = realizedPnl;
+      pos.closedAt = new Date();
+      pos.updatedAt = new Date();
+      await pos.save();
+
+      const tx = await recordTransaction({
+        user,
+        type: "trade_close",
+        amount: realizedPnl,
+        status: "completed",
+        note: `${side} ${pos.symbol}`,
+        balanceBefore,
+        balanceAfter: wallet.balanceOwn,
+        meta: {
+          positionId: String(pos._id),
+          symbol: pos.symbol,
+          side,
+          qty,
+          entryPrice,
+          closePrice: currentPrice,
+          marginReleased: reservedMargin,
+          realizedPnl,
+        },
+        source: "api/trade/close-all",
+      });
+
+      totalRealized += realizedPnl;
+      closed.push({ positionId: pos._id, symbol: pos.symbol, realizedPnl, transaction: tx });
+    }
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, closed, null);
+
+    return res.json({
+      ok: true,
+      msg: "Posiciones cerradas",
+      closed: closed.length,
+      totalRealized,
+      data: { closed, totalRealized, account: account.account, wallet: account.wallet },
+    });
+  } catch (err) {
+    console.error("/api/trade/close-all error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+// Mantener compatibilidad con rutas legacy del frontend/route module
+app.get("/api/trade/positions", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const positions = await loadOpenPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/trade/positions error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ======================================================
+   API ROUTES - montamos rutas principales
+   ====================================================== */
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/wallet", walletRoutes);
+app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
+app.use("/api/account", accountRoutes);
+
+/* ======================================================
+   Redirección para /api/api/* -> /api/*
    ====================================================== */
 app.use("/api/api", (req, res) => {
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
@@ -653,14 +1344,14 @@ io.on("connection", (socket) => {
 
   try {
     socket.emit("prices_snapshot", getPriceStore() || {});
-  } catch (e) {
+  } catch {
     socket.emit("prices_snapshot", {});
   }
 
   socket.on("request_prices_snapshot", () => {
     try {
       socket.emit("prices_snapshot", getPriceStore() || {});
-    } catch (e) {
+    } catch {
       socket.emit("prices_snapshot", {});
     }
   });
@@ -675,14 +1366,13 @@ io.on("connection", (socket) => {
         const arr = Object.keys(prices).map((k) => ({
           symbol: k,
           label: (k.split(":").pop() || k).replace("_", "/"),
-          market:
-            prices[k] && prices[k].market ? prices[k].market : "Unknown",
+          market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
         }));
         socket.emit("symbols_update", arr);
       } else {
         socket.emit("symbols_update", SAMPLE_SYMBOLS);
       }
-    } catch (e) {
+    } catch {
       socket.emit("symbols_update", SAMPLE_SYMBOLS);
     }
   });
@@ -719,6 +1409,46 @@ io.on("connection", (socket) => {
 });
 
 /* ======================================================
+   POLYGON SOCKET
+   ====================================================== */
+let polygonSocket = null;
+try {
+  if (!process.env.POLYGON_API_KEY) {
+    console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado no podrá conectarse");
+  } else {
+    try {
+      polygonSocket = new PolygonSocket({
+        apiKey: process.env.POLYGON_API_KEY,
+        onPrice: (data) => priceHandler.handle(data),
+        onOpen: () => console.log("PolygonSocket abierto"),
+        onClose: () => console.log("PolygonSocket cerrado"),
+        onError: (err) => console.error("PolygonSocket error:", err),
+      });
+
+      try {
+        const maybe = polygonSocket.connect();
+        if (maybe && typeof maybe.then === "function") {
+          maybe.catch((err) => {
+            console.warn("PolygonSocket.connect() rejected:", err);
+            polygonSocket = null;
+          });
+        }
+        console.log("🔌 Intentando conectar PolygonSocket...");
+      } catch (err) {
+        console.error("Error iniciando PolygonSocket.connect():", err);
+        polygonSocket = null;
+      }
+    } catch (err) {
+      console.error("Error inicializando PolygonSocket instance:", err);
+      polygonSocket = null;
+    }
+  }
+} catch (err) {
+  console.error("Error inicializando PolygonSocket:", err);
+  polygonSocket = null;
+}
+
+/* ======================================================
    STATIC FRONTEND
    ====================================================== */
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
@@ -731,7 +1461,7 @@ for (const cand of staticCandidates) {
       staticDirName = cand;
       break;
     }
-  } catch (e) {}
+  } catch {}
 }
 
 if (!staticDirName) {
@@ -748,28 +1478,15 @@ if (!staticDirName) {
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
-/* ======================================================
-   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
-   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
-   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
-   - Si no existe, se devuelve un stub JS válido en vez de HTML.
-   ====================================================== */
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
-
   text = text.replace(/^\uFEFF/, "");
-
   const trimmed = text.trim();
-
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/i.test(trimmed);
-
   if (startsWithScript && endsWithScript) {
-    text = trimmed
-      .replace(/^<script\b[^>]*>/i, "")
-      .replace(/<\/script>\s*$/i, "");
+    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/i, "");
   }
-
   return text;
 }
 
@@ -779,27 +1496,22 @@ function resolveJsCandidate(requestPath) {
   const base = path.basename(normalized);
 
   const candidates = [];
-
   if (normalized.startsWith("/public/js/")) {
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   }
-
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-
   if (normalized.startsWith("/public/")) {
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   }
-
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
 
   const uniqueCandidates = [...new Set(candidates)];
-
   return uniqueCandidates.find((p) => {
     try {
       return fs.existsSync(p) && fs.statSync(p).isFile();
@@ -815,15 +1527,10 @@ app.use(async (req, res, next) => {
 
   try {
     const candidate = resolveJsCandidate(pathname);
-
     if (candidate) {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
-
-      res
-        .status(200)
-        .type("application/javascript; charset=utf-8")
-        .send(cleaned);
+      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
 
@@ -872,15 +1579,12 @@ if (!window.loadRealQuotes) {
   }
 });
 
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
 app.use("/public", express.static(staticPath));
 app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
 
 /* ======================================================
-   Fallback HTML
+   FALLBACK HTML / API 404
    ====================================================== */
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
@@ -896,32 +1600,16 @@ app.get("*", (req, res) => {
   });
 });
 
-/* ======================================================
-   404 API (único fallback para /api)
-   ====================================================== */
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
-});
-
-/* ======================================================
-   ERROR HANDLER
-   ====================================================== */
-app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(err.status || 500).json({
-    error: "Server error",
-    message: process.env.NODE_ENV === "development" ? err.message : undefined,
-  });
 });
 
 /* ======================================================
    START SERVER
    ====================================================== */
 const PORT = process.env.PORT || 3000;
-
 const server = httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on ${PORT}`);
-
   console.log("ENV STATUS:");
   console.log("RESEND:", !!process.env.RESEND_API_KEY);
   console.log("SENDER:", !!process.env.SENDER_EMAIL);
