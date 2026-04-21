@@ -185,6 +185,7 @@ app.use("/api/api", (req, res) => {
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
 });
+
 /* ======================================================
    SOCKET.IO + PRICE HANDLER
    ====================================================== */
@@ -427,6 +428,10 @@ async function getUserFromBearer(req) {
     if (!userId) return null;
 
     const user = await User.findById(userId).lean().exec().catch(() => null);
+
+    if (!user) return null;
+    if (user.blocked === true || user.isBlocked === true) return null;
+
     return user || null;
   } catch {
     return null;
@@ -651,7 +656,7 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
 }
 
 /* ======================================================
-   ADMIN AUTH
+   ADMIN AUTH + CONTROL PANEL ENDPOINTS
    ====================================================== */
 async function requireAdmin(req, res, next) {
   try {
@@ -678,9 +683,195 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-/* ======================================================
-   HEALTH CHECK
-   ====================================================== */
+async function adminLoadUserAndWallet(userId) {
+  const user = await User.findById(userId).catch(() => null);
+  if (!user) return { user: null, wallet: null };
+  const wallet = await getWalletDocForUser(user._id);
+  return { user, wallet };
+}
+
+app.post("/api/admin/user/balance", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const amount = Number(body.amount ?? body.balance ?? body.depositAmount ?? 0);
+    const mode = String(body.mode || "set").toLowerCase().trim(); // set | add
+    const note = String(body.note || body.description || "Admin balance update").trim();
+    const currency = String(body.currency || "USD").trim();
+
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: "userId_required" });
+    }
+
+    if (!Number.isFinite(amount)) {
+      return res.status(400).json({ ok: false, error: "amount_required" });
+    }
+
+    const { user, wallet } = await adminLoadUserAndWallet(userId);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "user_not_found" });
+    }
+
+    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceAfter = mode === "add" ? balanceBefore + amount : amount;
+
+    wallet.balanceOwn = balanceAfter;
+    wallet.balance = balanceAfter;
+    wallet.currency = currency || wallet.currency || "USD";
+    wallet.equity = balanceAfter;
+    wallet.marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.balance = balanceAfter;
+    user.currency = currency || user.currency || "USD";
+    user.updatedAt = new Date();
+    await user.save();
+
+    const tx = await recordTransaction({
+      user,
+      type: "adjustment",
+      amount: balanceAfter - balanceBefore,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter,
+      meta: {
+        source: "admin-panel",
+        action: "balance_update",
+        mode,
+        currency,
+      },
+      source: "api/admin/user/balance",
+    });
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, tx);
+
+    return res.json({
+      ok: true,
+      msg: "Saldo actualizado",
+      data: {
+        balanceBefore,
+        balanceAfter,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+        user: account.user,
+      },
+    });
+  } catch (err) {
+    console.error("/api/admin/user/balance error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
+
+app.post("/api/admin/user/leverage", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const leverage = Number(body.leverage ?? body.leverageFactor ?? 0);
+
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: "userId_required" });
+    }
+
+    if (!Number.isFinite(leverage) || leverage <= 0) {
+      return res.status(400).json({ ok: false, error: "leverage_required" });
+    }
+
+    const { user, wallet } = await adminLoadUserAndWallet(userId);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "user_not_found" });
+    }
+
+    wallet.leverageFactor = leverage;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.leverage = leverage;
+    user.updatedAt = new Date();
+    await user.save();
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, null);
+
+    return res.json({
+      ok: true,
+      msg: "Apalancamiento actualizado",
+      data: {
+        leverage,
+        account: account.account,
+        wallet: account.wallet,
+        user: account.user,
+      },
+    });
+  } catch (err) {
+    console.error("/api/admin/user/leverage error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
+
+app.post("/api/admin/user/block", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const blocked = !!body.blocked;
+
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: "userId_required" });
+    }
+
+    const user = await User.findById(userId).catch(() => null);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "user_not_found" });
+    }
+
+    user.blocked = blocked;
+    user.isBlocked = blocked;
+    user.adminBlocked = blocked;
+    if (blocked) {
+      user.status = "blocked";
+    } else if (user.status === "blocked") {
+      user.status = "active";
+    }
+    user.updatedAt = new Date();
+    await user.save();
+
+    const wallet = await getWalletDocForUser(user._id);
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, null);
+
+    return res.json({
+      ok: true,
+      msg: blocked ? "Usuario bloqueado" : "Usuario desbloqueado",
+      data: {
+        blocked,
+        account: account.account,
+        wallet: account.wallet,
+        user: account.user,
+      },
+    });
+  } catch (err) {
+    console.error("/api/admin/user/block error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
+
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
@@ -886,7 +1077,6 @@ try {
   console.error("Error inicializando PolygonSocket:", err);
   polygonSocket = null;
 }
-
 
 /* ======================================================
    Fallbacks para eliminar 404 en rutas que tu frontend está llamando
@@ -1724,7 +1914,6 @@ io.on("connection", (socket) => {
   });
 });
 
-
 /* ======================================================
    MARKET ROUTES (factory)
    ====================================================== */
@@ -1737,6 +1926,7 @@ try {
 } catch (e) {
   console.warn("No se pudo montar /api/market:", e?.message || e);
 }
+
 /* ======================================================
    STATIC FRONTEND
    ====================================================== */
