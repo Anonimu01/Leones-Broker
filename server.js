@@ -29,17 +29,14 @@ import accountRoutes from "./routes/account.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
-// Realtime
 import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
 
-// Models
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
-// Send email helper
 import sendEmail from "./utils/sendEmail.js";
 
 const transactionSchema = new mongoose.Schema(
@@ -65,7 +62,6 @@ const Transaction =
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ENV
 dotenv.config({
   path:
     process.env.NODE_ENV === "production"
@@ -77,10 +73,8 @@ const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-// DB CONNECT
 connectDB();
 
-// Mongoose listeners
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
 
@@ -112,16 +106,16 @@ mongoose.connection.on("disconnected", () => {
 });
 
 /* ======================================================
-   SECURITY MIDDLEWARES
-   ====================================================== */
+   SECURITY
+====================================================== */
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
 
 /* ======================================================
-   CORS - whitelist dinámico
-   ====================================================== */
+   CORS
+====================================================== */
 const allowedOrigins = new Set(
   [
     process.env.CLIENT_URL,
@@ -156,7 +150,7 @@ app.options("*", cors(corsOptions));
 
 /* ======================================================
    BASIC MIDDLEWARES
-   ====================================================== */
+====================================================== */
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} › ${req.method} ${req.originalUrl}`);
   next();
@@ -167,7 +161,7 @@ app.use(express.urlencoded({ extended: true }));
 
 /* ======================================================
    RATE LIMIT
-   ====================================================== */
+====================================================== */
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5000,
@@ -180,7 +174,7 @@ app.use("/api", limiter);
 
 /* ======================================================
    FIX CRÍTICO: SI EL FRONT LLAMA /api/api/*
-   ====================================================== */
+====================================================== */
 app.use("/api/api", (req, res) => {
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
@@ -188,7 +182,7 @@ app.use("/api/api", (req, res) => {
 
 /* ======================================================
    SOCKET.IO + PRICE HANDLER
-   ====================================================== */
+====================================================== */
 const httpServer = createServer(app);
 
 const io = new IOServer(httpServer, {
@@ -206,7 +200,7 @@ const priceHandler = new PriceHandler(io);
 
 /* ======================================================
    HELPERS
-   ====================================================== */
+====================================================== */
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -428,9 +422,8 @@ async function getUserFromBearer(req) {
     if (!userId) return null;
 
     const user = await User.findById(userId).lean().exec().catch(() => null);
-
     if (!user) return null;
-    if (user.blocked === true || user.isBlocked === true) return null;
+    if (user.blocked === true || user.isBlocked === true || user.status === "blocked") return null;
 
     return user || null;
   } catch {
@@ -485,6 +478,7 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const equity = balanceOwn + openPnl;
   const freeMargin = Math.max(equity + credit - marginUsed, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+  const leverageFactor = toNumber(wallet?.leverageFactor ?? wallet?.leverage ?? 1) ?? 1;
 
   return {
     balance: balanceOwn,
@@ -494,7 +488,8 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     marginUsed,
     freeMargin,
     marginLevel,
-    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    leverageFactor,
+    leverage: leverageFactor,
     currency: wallet?.currency || "USD",
     openPnl,
   };
@@ -553,7 +548,6 @@ async function loadTransactionsForUser(userId, limit = 50) {
       .lean()
       .exec()
       .catch(() => []);
-
     return rows || [];
   } catch {
     return [];
@@ -585,7 +579,6 @@ async function loadOpenPositionsForUser(userId) {
       .lean()
       .exec()
       .catch(() => []);
-
     return (rows || []).map(annotatePosition);
   } catch {
     return [];
@@ -616,19 +609,27 @@ async function buildAccountForUser(userDoc) {
   );
 
   const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+  const userObj = userDoc.toObject ? userDoc.toObject() : userDoc;
+  const walletObj = wallet.toObject ? wallet.toObject() : wallet;
 
   return {
     account: {
       ...normalizedWallet,
-      leverage: toNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
-      currency: userDoc.currency || wallet.currency || "USD",
+      leverage: normalizedWallet.leverageFactor,
+      currency: userObj.currency || walletObj.currency || "USD",
       positions: openPositions,
       openPositions,
       recentTransactions,
       transactions: recentTransactions,
     },
-    user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet.toObject ? wallet.toObject() : wallet,
+    user: userObj,
+    wallet: {
+      ...walletObj,
+      ...normalizedWallet,
+      balance: normalizedWallet.balance,
+      balanceOwn: normalizedWallet.balanceOwn,
+      leverage: normalizedWallet.leverageFactor,
+    },
     positions: openPositions,
     transactions: recentTransactions,
   };
@@ -656,8 +657,8 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
 }
 
 /* ======================================================
-   ADMIN AUTH + CONTROL PANEL ENDPOINTS
-   ====================================================== */
+   ADMIN AUTH + CONTROL PANEL
+====================================================== */
 async function requireAdmin(req, res, next) {
   try {
     const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
@@ -665,14 +666,17 @@ async function requireAdmin(req, res, next) {
       return next();
     }
 
-    const user = await getUserFromBearer(req);
-    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
-      req.user = user;
+    const authUser = await getUserFromBearer(req);
+    if (
+      authUser &&
+      (authUser.role === "admin" || authUser.isAdmin === true || authUser.admin === true)
+    ) {
+      req.user = authUser;
       return next();
     }
 
-    if (!process.env.ADMIN_API_KEY && user) {
-      req.user = user;
+    if (!process.env.ADMIN_API_KEY && authUser) {
+      req.user = authUser;
       return next();
     }
 
@@ -699,18 +703,11 @@ app.post("/api/admin/user/balance", requireAdmin, async (req, res) => {
     const note = String(body.note || body.description || "Admin balance update").trim();
     const currency = String(body.currency || "USD").trim();
 
-    if (!userId) {
-      return res.status(400).json({ ok: false, error: "userId_required" });
-    }
-
-    if (!Number.isFinite(amount)) {
-      return res.status(400).json({ ok: false, error: "amount_required" });
-    }
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
+    if (!Number.isFinite(amount)) return res.status(400).json({ ok: false, error: "amount_required" });
 
     const { user, wallet } = await adminLoadUserAndWallet(userId);
-    if (!user) {
-      return res.status(404).json({ ok: false, error: "user_not_found" });
-    }
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
 
     const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     const balanceAfter = mode === "add" ? balanceBefore + amount : amount;
@@ -778,20 +775,16 @@ app.post("/api/admin/user/leverage", requireAdmin, async (req, res) => {
     const userId = body.userId || body.user || body.clientId || null;
     const leverage = Number(body.leverage ?? body.leverageFactor ?? 0);
 
-    if (!userId) {
-      return res.status(400).json({ ok: false, error: "userId_required" });
-    }
-
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
     if (!Number.isFinite(leverage) || leverage <= 0) {
       return res.status(400).json({ ok: false, error: "leverage_required" });
     }
 
     const { user, wallet } = await adminLoadUserAndWallet(userId);
-    if (!user) {
-      return res.status(404).json({ ok: false, error: "user_not_found" });
-    }
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
 
     wallet.leverageFactor = leverage;
+    wallet.leverage = leverage;
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -828,27 +821,19 @@ app.post("/api/admin/user/block", requireAdmin, async (req, res) => {
     const userId = body.userId || body.user || body.clientId || null;
     const blocked = !!body.blocked;
 
-    if (!userId) {
-      return res.status(400).json({ ok: false, error: "userId_required" });
-    }
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
 
     const user = await User.findById(userId).catch(() => null);
-    if (!user) {
-      return res.status(404).json({ ok: false, error: "user_not_found" });
-    }
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
 
     user.blocked = blocked;
     user.isBlocked = blocked;
     user.adminBlocked = blocked;
-    if (blocked) {
-      user.status = "blocked";
-    } else if (user.status === "blocked") {
-      user.status = "active";
-    }
+    if (blocked) user.status = "blocked";
+    else if (user.status === "blocked") user.status = "active";
     user.updatedAt = new Date();
     await user.save();
 
-    const wallet = await getWalletDocForUser(user._id);
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, null);
 
@@ -872,6 +857,9 @@ app.post("/api/admin/user/block", requireAdmin, async (req, res) => {
   }
 });
 
+/* ======================================================
+   HEALTH CHECK
+====================================================== */
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
@@ -888,18 +876,14 @@ app.get("/api/health", (req, res) => {
 
 /* ======================================================
    SEND EMAIL HELPER
-   ====================================================== */
+====================================================== */
 app.locals.sendEmail = sendEmail;
 
 app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
   try {
     const to = user?.email || user?.address || user;
-    if (!to) {
-      return { ok: false, error: "missing_recipient" };
-    }
-    if (!verificationLink) {
-      return { ok: false, error: "missing_verification_link" };
-    }
+    if (!to) return { ok: false, error: "missing_recipient" };
+    if (!verificationLink) return { ok: false, error: "missing_verification_link" };
 
     const name = user?.name || "usuario";
 
@@ -927,7 +911,6 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
   }
 };
 
-/* Endpoint de prueba para enviar correo */
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
   if (!to) {
@@ -968,8 +951,8 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   API ROUTES - montamos rutas principales
-   ====================================================== */
+   API ROUTES
+====================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
@@ -980,7 +963,7 @@ app.use("/api/account", accountRoutes);
 
 /* ======================================================
    SAMPLE SYMBOLS / FALLBACK
-   ====================================================== */
+====================================================== */
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
@@ -1036,10 +1019,9 @@ app.get("/api/api/markets", (req, res) =>
 );
 
 /* ======================================================
-   POLYGON SOCKET (realtime provider)
-   ====================================================== */
+   POLYGON SOCKET
+====================================================== */
 let polygonSocket = null;
-
 try {
   if (!process.env.POLYGON_API_KEY) {
     console.warn(
@@ -1079,8 +1061,8 @@ try {
 }
 
 /* ======================================================
-   Fallbacks para eliminar 404 en rutas que tu frontend está llamando
-   ====================================================== */
+   Fallbacks para eliminar 404
+====================================================== */
 app.get("/api/quotes", (req, res) => {
   const payload = buildMarketPayload();
   return res.json(payload.quotes);
@@ -1112,13 +1094,11 @@ app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
     if (prices && Object.keys(prices).length) {
-      const arr = Object.keys(prices).map((k) => {
-        return {
-          symbol: k,
-          label: (k.split(":").pop() || k).replace("_", "/"),
-          market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
-        };
-      });
+      const arr = Object.keys(prices).map((k) => ({
+        symbol: k,
+        label: (k.split(":").pop() || k).replace("_", "/"),
+        market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
+      }));
       return res.json(arr);
     }
     return res.json(SAMPLE_SYMBOLS);
@@ -1130,7 +1110,7 @@ app.get("/api/symbols", (req, res) => {
 
 /* ======================================================
    ACCOUNT / WALLET / TRANSACTIONS
-   ====================================================== */
+====================================================== */
 async function accountLikeHandler(req, res) {
   try {
     const user = await getUserFromBearer(req);
@@ -1147,9 +1127,7 @@ async function accountLikeHandler(req, res) {
 app.get("/api/account", accountLikeHandler);
 app.get("/api/me", accountLikeHandler);
 app.get("/api/profile", accountLikeHandler);
-app.get("/api/cuenta", (req, res) => {
-  return res.redirect(307, "/api/account");
-});
+app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
 
 async function walletLikeHandler(req, res) {
   try {
@@ -1168,6 +1146,7 @@ async function walletLikeHandler(req, res) {
       freeMargin: payload.account.freeMargin,
       marginLevel: payload.account.marginLevel,
       leverageFactor: payload.account.leverageFactor,
+      leverage: payload.account.leverageFactor,
       currency: payload.account.currency,
       transactions: payload.transactions,
     });
@@ -1178,9 +1157,7 @@ async function walletLikeHandler(req, res) {
 }
 
 app.get("/api/wallet", walletLikeHandler);
-app.get("/api/billetera", (req, res) => {
-  return res.redirect(307, "/api/wallet");
-});
+app.get("/api/billetera", (req, res) => res.redirect(307, "/api/wallet"));
 
 app.get("/api/transactions", async (req, res) => {
   try {
@@ -1223,8 +1200,8 @@ app.get("/api/account/transactions", async (req, res) => {
 });
 
 /* ======================================================
-   ADMIN: DEPOSITS / HISTORY / ACCOUNT UPDATE
-   ====================================================== */
+   ADMIN: DEPOSITS / HISTORY / BLOCK / LEVERAGE
+====================================================== */
 app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
@@ -1256,6 +1233,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
 
     if (Number.isFinite(leverage) && leverage > 0) {
       wallet.leverageFactor = leverage;
+      wallet.leverage = leverage;
       user.leverage = leverage;
     }
 
@@ -1272,6 +1250,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     if (Number.isFinite(leverage) && leverage > 0) {
       user.leverage = leverage;
     }
+    user.updatedAt = new Date();
     await user.save();
 
     const tx = await recordTransaction({
@@ -1315,6 +1294,94 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/user/leverage", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const leverage = Number(body.leverage ?? body.leverageFactor ?? 0);
+
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
+    if (!Number.isFinite(leverage) || leverage <= 0) {
+      return res.status(400).json({ ok: false, error: "leverage_required" });
+    }
+
+    const { user, wallet } = await adminLoadUserAndWallet(userId);
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
+
+    wallet.leverageFactor = leverage;
+    wallet.leverage = leverage;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    user.leverage = leverage;
+    user.updatedAt = new Date();
+    await user.save();
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, null);
+
+    return res.json({
+      ok: true,
+      msg: "Apalancamiento actualizado",
+      data: {
+        leverage,
+        account: account.account,
+        wallet: account.wallet,
+        user: account.user,
+      },
+    });
+  } catch (err) {
+    console.error("/api/admin/user/leverage error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
+
+app.post("/api/admin/user/block", requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = body.userId || body.user || body.clientId || null;
+    const blocked = !!body.blocked;
+
+    if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
+
+    const user = await User.findById(userId).catch(() => null);
+    if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
+
+    user.blocked = blocked;
+    user.isBlocked = blocked;
+    user.adminBlocked = blocked;
+    if (blocked) user.status = "blocked";
+    else if (user.status === "blocked") user.status = "active";
+    user.updatedAt = new Date();
+    await user.save();
+
+    const account = await buildAccountForUser(user);
+    emitStateUpdates(user._id, account, null, null);
+
+    return res.json({
+      ok: true,
+      msg: blocked ? "Usuario bloqueado" : "Usuario desbloqueado",
+      data: {
+        blocked,
+        account: account.account,
+        wallet: account.wallet,
+        user: account.user,
+      },
+    });
+  } catch (err) {
+    console.error("/api/admin/user/block error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
+
 app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
   try {
     const userId = req.query.userId || null;
@@ -1341,7 +1408,7 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 
 /* ======================================================
    POSITIONS / OPEN PnL / HISTORY
-   ====================================================== */
+====================================================== */
 app.get("/api/positions", async (req, res) => {
   try {
     const user = await getUserFromBearer(req);
@@ -1401,13 +1468,11 @@ app.get("/api/positions/all", async (req, res) => {
 
 /* ======================================================
    TRADE OPEN / CLOSE / CLOSE ALL
-   ====================================================== */
+====================================================== */
 async function tradeOpenHandler(req, res) {
   try {
     const user = await getUserFromBearer(req);
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
     const symbol = String(
@@ -1496,6 +1561,7 @@ async function tradeOpenHandler(req, res) {
     wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.leverageFactor = leverage;
+    wallet.leverage = leverage;
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -1574,13 +1640,10 @@ async function tradeOpenHandler(req, res) {
 async function tradeCloseHandler(req, res) {
   try {
     const user = await getUserFromBearer(req);
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-    const positionId =
-      body.positionId || body.id || body._id || body.tradeId || null;
+    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
     const symbol = String(body.symbol || "").trim().toUpperCase();
 
     let position = null;
@@ -1620,15 +1683,13 @@ async function tradeCloseHandler(req, res) {
 
     const currentPrice = toNumber(currentPriceRaw) ?? 0;
     const entryPrice =
-      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-      0;
-    const qty =
-      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
+      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
+    const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
 
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
 
@@ -1751,7 +1812,7 @@ async function tradeCloseAllHandler(req, res) {
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
       const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
@@ -1835,7 +1896,6 @@ app.post("/api/trade/open", tradeOpenHandler);
 app.post("/api/trade/close", tradeCloseHandler);
 app.post("/api/trade/close-all", tradeCloseAllHandler);
 
-// compatibility aliases
 app.post("/api/order", tradeOpenHandler);
 app.post("/api/orders", tradeOpenHandler);
 app.post("/api/trade/order", tradeOpenHandler);
@@ -1843,7 +1903,7 @@ app.post("/api/trade/orders", tradeOpenHandler);
 
 /* ======================================================
    SOCKET.IO EVENTS
-   ====================================================== */
+====================================================== */
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1915,8 +1975,8 @@ io.on("connection", (socket) => {
 });
 
 /* ======================================================
-   MARKET ROUTES (factory)
-   ====================================================== */
+   MARKET ROUTES
+====================================================== */
 try {
   if (typeof marketRoutesFactory === "function") {
     app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
@@ -1929,7 +1989,7 @@ try {
 
 /* ======================================================
    STATIC FRONTEND
-   ====================================================== */
+====================================================== */
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
 
@@ -1948,7 +2008,7 @@ if (!staticDirName) {
   console.warn(
     `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
       ", "
-    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
+    )}. Usando fallback '${staticDirName}'.`
   );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
@@ -1957,9 +2017,6 @@ if (!staticDirName) {
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
-/* ======================================================
-   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
-   ====================================================== */
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
   text = text.replace(/^\uFEFF/, "");
@@ -2024,68 +2081,24 @@ app.use(async (req, res, next) => {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
 
-      res
-        .status(200)
-        .type("application/javascript; charset=utf-8")
-        .send(cleaned);
+      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
 
     res
       .status(404)
       .type("application/javascript; charset=utf-8")
-      .send(`
-// JS missing: ${pathname}
-console.error("JS missing: ${pathname}");
-
-window.CATEGORIES = window.CATEGORIES || [];
-window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-window.API = window.API || "/api";
-window.SOCKET_URL = window.SOCKET_URL || location.origin;
-window._LEONES = window._LEONES || {};
-window._LEONES_TRADING = window._LEONES_TRADING || {};
-window._LEONES_TRADING.fetchPositions =
-  window._LEONES_TRADING.fetchPositions ||
-  (async function () { return []; });
-
-if (!window.loadPositions) {
-  window.loadPositions = async function () {
-    try {
-      if (
-        window._LEONES_TRADING &&
-        typeof window._LEONES_TRADING.fetchPositions === "function"
-      ) {
-        return await window._LEONES_TRADING.fetchPositions();
-      }
-    } catch (e) {
-      console.warn("loadPositions stub error", e);
-    }
-    return null;
-  };
-}
-
-if (!window.loadRealQuotes) {
-  window.loadRealQuotes = async function () {
-    return null;
-  };
-}
-`);
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
     res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
   }
 });
 
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
 app.use("/public", express.static(staticPath));
 app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
 
-/* ======================================================
-   FALLBACK HTML
-   ====================================================== */
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
     return res.status(404).json({ error: "API endpoint not found" });
@@ -2100,16 +2113,10 @@ app.get("*", (req, res) => {
   });
 });
 
-/* ======================================================
-   404 API
-   ====================================================== */
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
 });
 
-/* ======================================================
-   ERROR HANDLER
-   ====================================================== */
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({
@@ -2120,7 +2127,7 @@ app.use((err, req, res, next) => {
 
 /* ======================================================
    START SERVER
-   ====================================================== */
+====================================================== */
 const PORT = process.env.PORT || 3000;
 
 const server = httpServer.listen(PORT, () => {
@@ -2143,7 +2150,7 @@ const server = httpServer.listen(PORT, () => {
 
 /* ======================================================
    GRACEFUL SHUTDOWN
-   ====================================================== */
+====================================================== */
 let shuttingDown = false;
 
 const safeClosePolygonSocket = async () => {
