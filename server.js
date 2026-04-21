@@ -2232,4 +2232,122 @@ process.on("uncaughtException", (e) => {
   gracefulShutdown("uncaughtException").catch(() => {});
 });
 
+
+/* ======================================================
+   TRUST PROXY (IMPORTANTE EN HOSTING)
+====================================================== */
+app.set("trust proxy", 1);
+
+/* ======================================================
+   CORS (PERMITE ADMIN / LOCAL / FRONTEND)
+====================================================== */
+const allowedOrigins = new Set(
+  [
+    process.env.CLIENT_URL,
+    process.env.BASE_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+    "https://leones-broker.onrender.com",
+  ].filter(Boolean)
+);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.has(origin)) return callback(null, true);
+
+    try {
+      const url = new URL(origin);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        return callback(null, true);
+      }
+    } catch (e) {}
+
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
+/* ======================================================
+   BODY PARSER (OBLIGATORIO PARA ADMIN FETCH)
+====================================================== */
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
+
+/* ======================================================
+   LOG DE PETICIONES (DEBUG ADMIN)
+====================================================== */
+app.use((req, res, next) => {
+  console.log(`➡️ ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+/* ======================================================
+   FIX CRÍTICO: DUPLICADO /api/api
+   (MUY IMPORTANTE PARA PANEL ADMIN)
+====================================================== */
+app.use("/api/api", (req, res) => {
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
+});
+
+/* ======================================================
+   RATE LIMIT (NO BLOQUEA ADMIN NI LECTURAS)
+====================================================== */
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5000,
+  skip: (req) =>
+    req.method === "GET" ||
+    req.method === "HEAD" ||
+    req.method === "OPTIONS",
+});
+
+app.use("/api", limiter);
+
+/* ======================================================
+   HELPER AUTH (SI EL ADMIN USA TOKEN)
+====================================================== */
+import jwt from "jsonwebtoken";
+
+async function getUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith("Bearer ")) return null;
+
+    const token = auth.split(" ")[1];
+    if (!token) return null;
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    return payload || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ======================================================
+   ADMIN CHECK SIMPLE (OPCIONAL)
+====================================================== */
+function requireAdmin(req, res, next) {
+  const key = req.headers["x-admin-key"];
+
+  if (!process.env.ADMIN_API_KEY) {
+    return next(); // si no está activado, deja pasar
+  }
+
+  if (key !== process.env.ADMIN_API_KEY) {
+    return res.status(403).json({ error: "Forbidden (admin only)" });
+  }
+
+  next();
+}
+
 export default app;
