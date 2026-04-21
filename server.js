@@ -880,18 +880,6 @@ try {
   polygonSocket = null;
 }
 
-/* ======================================================
-   MARKET ROUTES (factory)
-   ====================================================== */
-try {
-  if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
-  } else {
-    app.use("/api/market", marketRoutesFactory);
-  }
-} catch (e) {
-  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
-}
 
 /* ======================================================
    Fallbacks para eliminar 404 en rutas que tu frontend está llamando
@@ -1729,6 +1717,19 @@ io.on("connection", (socket) => {
   });
 });
 
+
+/* ======================================================
+   MARKET ROUTES (factory)
+   ====================================================== */
+try {
+  if (typeof marketRoutesFactory === "function") {
+    app.use("/api/market", marketRoutesFactory({ polygonSocket, priceHandler }));
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
+} catch (e) {
+  console.warn("No se pudo montar /api/market:", e?.message || e);
+}
 /* ======================================================
    STATIC FRONTEND
    ====================================================== */
