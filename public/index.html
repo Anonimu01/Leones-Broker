@@ -2239,6 +2239,15 @@ if (window.__LEONES_BOOTED__) {
     }
   }
 
+  function getToken() {
+  try {
+    const user = safeParseJSON(localStorage.getItem(SESSION_KEY), null);
+    return user?.token || null;
+  } catch {
+    return null;
+  }
+}
+
   function formatNumber(n, d = 6) {
     const num = Number(n);
     if (!isFinite(num)) return '--';
@@ -4927,21 +4936,21 @@ async function placeBrokerOrder(payload = {}) {
 
   try {
     const res = await fetch('/api/trade/open', {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + (localStorage.getItem("token") || "")
-      },
-      body: JSON.stringify({
-        symbol,
-        side: direction,
-        type,
-        quantity: amount,
-        price
-      })
-    });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + (getUser()?.token || "")
+  },
+  body: JSON.stringify({
+    symbol,
+    side: direction,
+    type,
+    quantity: amount,
+    price
+  })
+});
 
-    const data = await res.json();
+const data = await res.json();
 
     console.log("📩 RESPUESTA BACKEND:", data);
 
