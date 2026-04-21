@@ -5296,46 +5296,73 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 ORDEN REAL SIN ERROR
   ========================= */
-  function forceTrade(direction) {
-    const api = ext();
+ function forceTrade(direction) {
+  const api = ext();
 
-    const amountInput = document.getElementById("brokerOrderSize");
-    const amount = parseFloat(amountInput?.value);
+  const amountInput = document.getElementById("brokerOrderSize");
+  const amount = parseFloat(amountInput?.value);
 
-    if (!amount || amount <= 0) {
-      alert("Coloca un monto válido");
-      return;
-    }
-
-    const symbol = window.selectedSymbol || api.activeSymbol || window.TR?.activeSymbol;
-
-    if (!symbol) {
-      alert("Selecciona un símbolo");
-      return;
-    }
-
-    api.placeOrder?.({
-      symbol,
-      amount,
-      direction
-    });
-
-    LAST_AMOUNT = amountInput.value;
-    restoreAmount();
+  if (!amount || amount <= 0) {
+    alert("Coloca un monto válido");
+    return;
   }
 
-  document.addEventListener("click", (e) => {
-    if (e.target.matches('[data-action="buy"]')) {
-      e.preventDefault();
-      forceTrade("buy");
+  const symbol = window.selectedSymbol || api.activeSymbol || window.TR?.activeSymbol;
+
+  if (!symbol) {
+    alert("Selecciona un símbolo");
+    return;
+  }
+
+  /* =========================
+     🔥 ORDEN REAL FIX (BACKEND)
+  ========================= */
+  fetch("/api/trade/open", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+    },
+    body: JSON.stringify({
+      symbol: symbol,
+      side: direction,   // 🔥 IMPORTANTE
+      qty: amount        // 🔥 IMPORTANTE
+    })
+  })
+  .then(async res => {
+    const data = await res.json();
+    console.log("📩 RESPUESTA BACKEND:", data);
+
+    if (!res.ok) {
+      console.error("❌ ERROR 400:", data);
+      alert(data?.message || "Error al abrir la operación");
+      return;
     }
 
-    if (e.target.matches('[data-action="sell"]')) {
-      e.preventDefault();
-      forceTrade("sell");
-    }
-  }, true);
+    console.log("✅ ORDEN ABIERTA CORRECTAMENTE");
+  })
+  .catch(err => {
+    console.error("❌ ERROR FETCH:", err);
+  });
 
+  LAST_AMOUNT = amountInput.value;
+  restoreAmount();
+}
+
+/* =========================
+   🔥 BOTONES BUY / SELL
+========================= */
+document.addEventListener("click", (e) => {
+  if (e.target.matches('[data-action="buy"]')) {
+    e.preventDefault();
+    forceTrade("buy");
+  }
+
+  if (e.target.matches('[data-action="sell"]')) {
+    e.preventDefault();
+    forceTrade("sell");
+  }
+}, true);
  /* =========================
      🔥 PANEL FLOTANTE TRADES — NIVEL DIOS
   ========================= */
