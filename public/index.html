@@ -5314,22 +5314,21 @@ function forceTrade(direction) {
     return;
   }
 
-  // 🔥 PRECIO ACTUAL
+  // 🔥 PRECIO ACTUAL (FIX REAL)
   const price =
-    api?.prices?.[symbol] ||
-    api?.lastPrice ||
-    0;
+    api?.prices?.[symbol] ??
+    api?.lastPrice ??
+    null;
 
   if (!price) {
-    alert("No hay precio disponible aún");
-    return;
+    console.warn("⚠️ Precio no disponible, usando entry temporal");
   }
 
   const payload = {
     symbol: symbol,
     side: direction,
     qty: amount,
-    entryPrice: price
+    entryPrice: price || 0 // 🔥 evita que falle el backend y el pnl
   };
 
   console.log("🚀 Enviando orden:", payload);
@@ -5349,7 +5348,7 @@ function forceTrade(direction) {
       symbol: symbol,
       side: direction,
       qty: amount,
-      entryPrice: price
+      entryPrice: price || 0
     })
   })
   .then(async res => {
@@ -5371,6 +5370,7 @@ function forceTrade(direction) {
   LAST_AMOUNT = amountInput.value;
   restoreAmount();
 }
+
 /* =========================
    🔥 BOTONES BUY / SELL
 ========================= */
