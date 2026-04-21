@@ -179,6 +179,13 @@ const limiter = rateLimit({
 app.use("/api", limiter);
 
 /* ======================================================
+   FIX CRÍTICO: SI EL FRONT LLAMA /api/api/*
+   ====================================================== */
+app.use("/api/api", (req, res) => {
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
+});
+/* ======================================================
    SOCKET.IO + PRICE HANDLER
    ====================================================== */
 const httpServer = createServer(app);
