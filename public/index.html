@@ -5296,7 +5296,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 ORDEN REAL SIN ERROR
   ========================= */
- function forceTrade(direction) {
+function forceTrade(direction) {
   const api = ext();
 
   const amountInput = document.getElementById("brokerOrderSize");
@@ -5313,7 +5313,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     alert("Selecciona un símbolo");
     return;
   }
-  // 🔥 PRECIO ACTUAL (CLAVE PARA QUE PNL FUNCIONE)
+
+  // 🔥 PRECIO ACTUAL
   const price =
     api?.prices?.[symbol] ||
     api?.lastPrice ||
@@ -5326,20 +5327,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const payload = {
     symbol: symbol,
-    side: direction,   // 👈 backend espera "side"
-    qty: amount,       // 👈 backend espera "qty"
-    entryPrice: price  // 👈 esto arregla el PnL
+    side: direction,
+    qty: amount,
+    entryPrice: price
   };
 
   console.log("🚀 Enviando orden:", payload);
 
   api.placeOrder?.(payload);
 
-  LAST_AMOUNT = amountInput.value;
-  restoreAmount();
-}
   /* =========================
-     🔥 ORDEN REAL FIX (BACKEND)
+     🔥 FETCH CORRECTO (AQUÍ DENTRO)
   ========================= */
   fetch("/api/trade/open", {
     method: "POST",
@@ -5349,8 +5347,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     },
     body: JSON.stringify({
       symbol: symbol,
-      side: direction,   // 🔥 IMPORTANTE
-      qty: amount        // 🔥 IMPORTANTE
+      side: direction,
+      qty: amount,
+      entryPrice: price
     })
   })
   .then(async res => {
@@ -5372,7 +5371,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   LAST_AMOUNT = amountInput.value;
   restoreAmount();
 }
-
 /* =========================
    🔥 BOTONES BUY / SELL
 ========================= */
