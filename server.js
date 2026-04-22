@@ -976,7 +976,7 @@ const server = httpServer.listen(PORT, () => {
 /* ======================================================
    POSITIONS / OPEN PnL / HISTORY
    ====================================================== */
-async function positionsLikeHandler(req, res) {
+async function positionsLikeHandlerLive(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
@@ -990,13 +990,13 @@ async function positionsLikeHandler(req, res) {
       count: positions.length,
     });
   } catch (e) {
-    console.error("positionsLikeHandler error", e);
+    console.error("positionsLikeHandlerLive error", e);
     return res.status(500).json({ error: "Server error" });
   }
 }
 
-app.get("/api/positions", positionsLikeHandler);
-app.get("/api/trade/positions", positionsLikeHandler);
+app.get("/api/positions", positionsLikeHandlerLive);
+app.get("/api/trade/positions", positionsLikeHandlerLive);
 
 app.get("/api/positions/all", async (req, res) => {
   try {
@@ -1020,7 +1020,7 @@ app.get("/api/positions/all", async (req, res) => {
 /* ======================================================
    TRADE OPEN / CLOSE / CLOSE ALL
    ====================================================== */
-async function tradeOpenHandler(req, res) {
+async function tradeOpenHandlerLive(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) {
@@ -1036,7 +1036,9 @@ async function tradeOpenHandler(req, res) {
 
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+    const type = String(body.type ?? body.orderType ?? "market")
+      .trim()
+      .toLowerCase();
 
     if (!symbol) {
       return res.status(400).json({
@@ -1064,15 +1066,21 @@ async function tradeOpenHandler(req, res) {
 
     const wallet = await getWalletDocForUser(user._id);
     const leverage = Math.max(
-      toNumber(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) ||
-        1,
+      toNumber(
+        body.leverage ??
+          body.leverageFactor ??
+          wallet.leverageFactor ??
+          user.leverage ??
+          1
+      ) || 1,
       1
     );
 
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
 
-    let entryPrice = type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
+    let entryPrice =
+      type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
 
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
       return res.status(400).json({
@@ -1105,7 +1113,8 @@ async function tradeOpenHandler(req, res) {
     wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.leverageFactor = leverage;
     wallet.updatedAt = new Date();
     await wallet.save();
@@ -1149,7 +1158,9 @@ async function tradeOpenHandler(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1182,7 +1193,7 @@ async function tradeOpenHandler(req, res) {
   }
 }
 
-async function tradeCloseHandler(req, res) {
+async function tradeCloseHandlerLive(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) {
@@ -1190,8 +1201,7 @@ async function tradeCloseHandler(req, res) {
     }
 
     const body = req.body || {};
-    const positionId =
-      body.positionId || body.id || body._id || body.tradeId || null;
+    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
     const symbol = String(body.symbol || "").trim().toUpperCase();
 
     let position = null;
@@ -1231,19 +1241,19 @@ async function tradeCloseHandler(req, res) {
 
     const currentPrice = toNumber(currentPriceRaw) ?? 0;
     const entryPrice =
-      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-      0;
+      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
     const qty =
       toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
 
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceBefore =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     const marginUsedBefore = toNumber(wallet.marginUsed ?? 0) ?? 0;
     const reservedMargin = toNumber(position.marginReserved ?? 0) ?? 0;
 
@@ -1252,7 +1262,8 @@ async function tradeCloseHandler(req, res) {
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -1290,7 +1301,9 @@ async function tradeCloseHandler(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1322,7 +1335,7 @@ async function tradeCloseHandler(req, res) {
   }
 }
 
-async function tradeCloseAllHandler(req, res) {
+async function tradeCloseAllHandlerLive(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
@@ -1361,10 +1374,11 @@ async function tradeCloseAllHandler(req, res) {
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
-      const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+      const balanceBefore =
+        toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
       const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
 
       wallet.marginUsed = Math.max(
@@ -1375,7 +1389,8 @@ async function tradeCloseAllHandler(req, res) {
       wallet.balance = wallet.balanceOwn;
       wallet.equity = wallet.balanceOwn;
       wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+      wallet.marginLevel =
+        wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
       wallet.updatedAt = new Date();
       await wallet.save();
 
@@ -1413,7 +1428,12 @@ async function tradeCloseAllHandler(req, res) {
       });
 
       totalRealized += realizedPnl;
-      closed.push({ positionId: pos._id, symbol: pos.symbol, realizedPnl, transaction: tx });
+      closed.push({
+        positionId: pos._id,
+        symbol: pos.symbol,
+        realizedPnl,
+        transaction: tx,
+      });
     }
 
     const account = await buildAccountForUser(user);
@@ -1441,15 +1461,14 @@ async function tradeCloseAllHandler(req, res) {
   }
 }
 
-app.post("/api/trade/open", tradeOpenHandler);
-app.post("/api/trade/close", tradeCloseHandler);
-app.post("/api/trade/close-all", tradeCloseAllHandler);
+app.post("/api/trade/open", tradeOpenHandlerLive);
+app.post("/api/trade/close", tradeCloseHandlerLive);
+app.post("/api/trade/close-all", tradeCloseAllHandlerLive);
 
 // compatibility aliases
-app.post("/api/order", tradeOpenHandler);
-app.post("/api/orders", tradeOpenHandler);
-app.post("/api/trade/order", tradeOpenHandler);
-app.post("/api/trade/orders", tradeOpenHandler);
-
+app.post("/api/order", tradeOpenHandlerLive);
+app.post("/api/orders", tradeOpenHandlerLive);
+app.post("/api/trade/order", tradeOpenHandlerLive);
+app.post("/api/trade/orders", tradeOpenHandlerLive);
 
 export default app;
