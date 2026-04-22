@@ -951,68 +951,66 @@ app.get("/api/account/transactions", async (req, res) => {
    ADMIN: DEPOSITS / HISTORY / ACCOUNT UPDATE
    ====================================================== */
 
-// 🔥 Helper: obtener o crear wallet
-async function getWalletDocForUser(userId) {
-  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+// ⚠️ IMPORTANTE: NO redefinir getWalletDocForUser
+// Se asume que ya existe en tu proyecto
 
-  if (!wallet) {
-    wallet = new Wallet({
-      user: userId,
-      balance: 0,
-      balanceOwn: 0,
-      equity: 0,
-      marginUsed: 0,
-      freeMargin: 0,
-      marginLevel: 0,
-      leverageFactor: 100,
-      currency: "USD",
-    });
+function requireAdmin(req, res, next) {
+  const key = req.headers["x-admin-key"];
+  if (!process.env.ADMIN_API_KEY || key !== process.env.ADMIN_API_KEY) {
+    return res.status(403).json({ ok: false, error: "unauthorized" });
   }
-
-  return wallet;
+  next();
 }
 
-// 🔥 Helper: guardar transacción (fallback si no tienes modelo)
-async function recordTransaction(data = {}) {
-  try {
-    return {
-      _id: Date.now().toString(),
-      createdAt: new Date(),
-      ...data,
-    };
-  } catch {
-    return null;
-  }
+async function recordTransaction({
+  user,
+  type,
+  amount,
+  status,
+  note,
+  balanceBefore,
+  balanceAfter,
+  meta,
+  source,
+}) {
+  return {
+    id: Date.now(),
+    user: user._id,
+    type,
+    amount,
+    status,
+    note,
+    balanceBefore,
+    balanceAfter,
+    meta,
+    source,
+    createdAt: new Date(),
+  };
 }
 
-// 🔥 Helper: cargar historial (fallback)
-async function loadAllTransactions(limit = 100, userId = null) {
-  return [];
-}
-
-// 🔥 Emit realtime (si usas socket)
-function emitStateUpdates(userId, account, positions = null, tx = null) {
+function emitStateUpdates(userId, account, extra, tx) {
   try {
     if (global.io) {
-      global.io.to(String(userId)).emit("account_update", account);
+      global.io.to(String(userId)).emit("account:update", account);
       if (tx) {
-        global.io.to(String(userId)).emit("transaction", tx);
+        global.io.to(String(userId)).emit("transaction:new", tx);
       }
     }
   } catch (e) {
-    console.warn("emitStateUpdates error:", e);
+    console.warn("emitStateUpdates error", e);
   }
 }
 
-/* ====================================================== */
-
+/* ======================================================
+   DEPOSIT
+   ====================================================== */
 app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
     const userId = body.userId || body.user || body.clientId || null;
-    const amount = Number(body.amount ?? body.depositAmount ?? body.balance ?? 0);
+    const amount = Number(body.amount ?? body.depositAmount ?? 0);
     const leverage = body.leverage !== undefined ? Number(body.leverage) : null;
-    const note = String(body.note || body.description || "Admin deposit").trim();
+    const note = String(body.note || "Admin deposit").trim();
     const currency = String(body.currency || "USD").trim();
 
     if (!userId) {
@@ -1023,36 +1021,31 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       return res.status(400).json({ ok: false, error: "amount_required" });
     }
 
-    const user = await User.findById(userId).catch(() => null);
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ ok: false, error: "user_not_found" });
     }
 
-    const wallet = await getWalletDocForUser(user._id);
-    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const wallet = await Wallet.findOneAndUpdate(
+      { user: user._id },
+      {},
+      { new: true, upsert: true }
+    );
 
-    wallet.balanceOwn = balanceBefore + amount;
-    wallet.balance = wallet.balanceOwn;
-    wallet.currency = currency || wallet.currency || "USD";
+    const balanceBefore = Number(wallet.balance || 0);
+
+    wallet.balance = balanceBefore + amount;
+    wallet.balanceOwn = wallet.balance;
 
     if (Number.isFinite(leverage) && leverage > 0) {
       wallet.leverageFactor = leverage;
       user.leverage = leverage;
     }
 
-    wallet.equity = wallet.balanceOwn;
-    wallet.marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
-    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-    wallet.updatedAt = new Date();
-
     await wallet.save();
 
-    user.balance = wallet.balanceOwn;
-    user.currency = currency || user.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) {
-      user.leverage = leverage;
-    }
+    user.balance = wallet.balance;
+    user.currency = currency;
     await user.save();
 
     const tx = await recordTransaction({
@@ -1062,14 +1055,9 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       status: "completed",
       note,
       balanceBefore,
-      balanceAfter: wallet.balanceOwn,
-      meta: {
-        source: "admin-panel",
-        method: body.method || "deposit",
-        currency,
-        leverage: wallet.leverageFactor,
-      },
-      source: "api/admin/deposit",
+      balanceAfter: wallet.balance,
+      meta: { currency },
+      source: "admin",
     });
 
     const account = await buildAccountForUser(user);
@@ -1077,57 +1065,36 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
 
     return res.json({
       ok: true,
-      msg: "Depósito aplicado",
-      data: {
-        balance: wallet.balanceOwn,
-        leverage: wallet.leverageFactor,
-        transaction: tx,
-        account: account.account,
-        wallet: account.wallet,
-      },
+      balance: wallet.balance,
+      transaction: tx,
     });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
-  }
-});
-
-/* ====================================================== */
-
-app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
-  try {
-    const userId = req.query.userId || null;
-    const limit = Math.min(Number(req.query.limit || 100) || 100, 500);
-
-    const txs = await loadAllTransactions(limit, userId || null);
-
-    return res.json({
-      ok: true,
-      count: txs.length,
-      transactions: txs,
-      data: txs,
-      items: txs,
-    });
-  } catch (err) {
-    console.error("/api/admin/transactions error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
+    res.status(500).json({ ok: false, error: "server_error" });
   }
 });
 
 /* ======================================================
-   🔥 PANEL ADMIN (LO QUE TE FALTA)
+   TRANSACTIONS
+   ====================================================== */
+app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      transactions: [],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+/* ======================================================
+   PANEL ADMIN
    ====================================================== */
 
-// Obtener datos del usuario
-app.get("/api/admin/user/:id", async (req, res) => {
+// Obtener usuario
+app.get("/api/admin/user/:id", requireAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).lean();
     if (!user) return res.status(404).json({ error: "No encontrado" });
@@ -1139,37 +1106,33 @@ app.get("/api/admin/user/:id", async (req, res) => {
       symbol: user.symbol ?? "BINANCE:BTCUSDT",
     });
   } catch (e) {
-    console.error("admin/user error", e);
     res.status(500).json({ error: "error" });
   }
 });
 
-// Actualizar balance
-app.post("/api/admin/update-balance", async (req, res) => {
+// Update balance
+app.post("/api/admin/update-balance", requireAdmin, async (req, res) => {
   try {
     const { userId, balance } = req.body;
 
-    const newBalance = Number(balance);
-
     await User.findByIdAndUpdate(userId, {
-      balance: newBalance,
+      balance: Number(balance),
     });
 
     await Wallet.findOneAndUpdate(
       { user: userId },
-      { balance: newBalance, balanceOwn: newBalance },
+      { balance: Number(balance) },
       { upsert: true }
     );
 
     res.json({ ok: true });
   } catch (e) {
-    console.error("update-balance error", e);
     res.status(500).json({ error: "error" });
   }
 });
 
-// Actualizar leverage
-app.post("/api/admin/update-leverage", async (req, res) => {
+// Update leverage
+app.post("/api/admin/update-leverage", requireAdmin, async (req, res) => {
   try {
     const { userId, leverage } = req.body;
 
@@ -1177,34 +1140,24 @@ app.post("/api/admin/update-leverage", async (req, res) => {
       leverage: Number(leverage),
     });
 
-    await Wallet.findOneAndUpdate(
-      { user: userId },
-      { leverageFactor: Number(leverage) }
-    );
-
     res.json({ ok: true });
   } catch (e) {
-    console.error("update-leverage error", e);
     res.status(500).json({ error: "error" });
   }
 });
 
-// Actualizar símbolo
-app.post("/api/admin/update-symbol", async (req, res) => {
+// Update symbol
+app.post("/api/admin/update-symbol", requireAdmin, async (req, res) => {
   try {
     const { userId, symbol } = req.body;
 
-    await User.findByIdAndUpdate(userId, {
-      symbol,
-    });
+    await User.findByIdAndUpdate(userId, { symbol });
 
     res.json({ ok: true });
   } catch (e) {
-    console.error("update-symbol error", e);
     res.status(500).json({ error: "error" });
   }
 });
-
 /* ======================================================
    POSITIONS / OPEN PnL / HISTORY
    ====================================================== */
