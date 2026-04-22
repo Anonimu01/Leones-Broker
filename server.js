@@ -339,14 +339,26 @@ function isClosedPosition(p = {}) {
 }
 
 function computePositionPnl(position = {}, currentPrice = null) {
-  const entry = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
-  const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
-  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const entry =
+    toNumber(
+      position.entryPrice ?? position.price ?? position.openPrice ?? 0
+    ) ?? 0;
+  const qty =
+    toNumber(
+      position.qty ??
+        position.quantity ??
+        position.amount ??
+        position.positionSize ??
+        0
+    ) ?? 0;
+  const side = normalizeSide(
+    position.side || position.direction || position.positionSide
+  );
 
   const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
   const sign = side === "SELL" ? -1 : 1;
 
-  return ((px - entry) * qty) * sign;
+  return (px - entry) * qty * sign;
 }
 
 function annotatePosition(position = {}) {
@@ -418,7 +430,7 @@ async function getWalletDocForUser(userId) {
   try {
     let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
 
-    // 🔥 FIX CRÍTICO: crear y GUARDAR en BD si no existe
+    // FIX CRÍTICO: crear y guardar en BD si no existe
     if (!wallet) {
       wallet = new Wallet({
         user: userId,
@@ -432,7 +444,7 @@ async function getWalletDocForUser(userId) {
         marginLevel: 0,
       });
 
-      await wallet.save(); // 🔥 IMPORTANTE
+      await wallet.save();
     }
 
     return wallet;
@@ -441,6 +453,7 @@ async function getWalletDocForUser(userId) {
     return null;
   }
 }
+
 function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
   const credit = toNumber(wallet?.credit ?? 0) ?? 0;
@@ -975,7 +988,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       return res.status(404).json({ ok: false, error: "user_not_found" });
     }
 
-    // 🔥 FIX APLICADO AQUÍ
+    // FIX APLICADO AQUÍ
     let wallet = await getWalletDocForUser(user._id);
 
     if (!wallet) {
@@ -1002,7 +1015,6 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
 
     await wallet.save();
 
-    // 🔥 FIX EXTRA PARA ASEGURAR GUARDADO REAL
     await Wallet.updateOne(
       { user: user._id },
       { $set: wallet.toObject() },
@@ -1347,7 +1359,7 @@ async function tradeCloseHandler(req, res) {
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
 
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
 
@@ -1469,7 +1481,7 @@ async function tradeCloseAllHandler(req, res) {
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
       const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
