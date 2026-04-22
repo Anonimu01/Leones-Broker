@@ -272,20 +272,24 @@ app.use("/api/account", accountRoutes);
    ====================================================== */
 
 // OPEN TRADE
-app.post("/api/trade/open", tradeBalanceGuard, liveOpenRouteHandler());
+app.post(
+  "/api/trade/open",
+  tradeBalanceGuard,
+  liveOpenRouteHandler()
+);
 
 // CLOSE TRADE
 app.post(
   "/api/trade/close",
   tradeBalanceGuard,
-  liveCloseRouteHandler()
+  liveCloseRouteHandler
 );
 
 // CLOSE ALL TRADES
 app.post(
   "/api/trade/close-all",
   tradeBalanceGuard,
-  liveCloseAllRouteHandler()
+  liveCloseAllRouteHandler
 );
 
 /* ======================================================
