@@ -950,6 +950,62 @@ app.get("/api/account/transactions", async (req, res) => {
 /* ======================================================
    ADMIN: DEPOSITS / HISTORY / ACCOUNT UPDATE
    ====================================================== */
+
+// 🔥 Helper: obtener o crear wallet
+async function getWalletDocForUser(userId) {
+  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+
+  if (!wallet) {
+    wallet = new Wallet({
+      user: userId,
+      balance: 0,
+      balanceOwn: 0,
+      equity: 0,
+      marginUsed: 0,
+      freeMargin: 0,
+      marginLevel: 0,
+      leverageFactor: 100,
+      currency: "USD",
+    });
+  }
+
+  return wallet;
+}
+
+// 🔥 Helper: guardar transacción (fallback si no tienes modelo)
+async function recordTransaction(data = {}) {
+  try {
+    return {
+      _id: Date.now().toString(),
+      createdAt: new Date(),
+      ...data,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// 🔥 Helper: cargar historial (fallback)
+async function loadAllTransactions(limit = 100, userId = null) {
+  return [];
+}
+
+// 🔥 Emit realtime (si usas socket)
+function emitStateUpdates(userId, account, positions = null, tx = null) {
+  try {
+    if (global.io) {
+      global.io.to(String(userId)).emit("account_update", account);
+      if (tx) {
+        global.io.to(String(userId)).emit("transaction", tx);
+      }
+    }
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e);
+  }
+}
+
+/* ====================================================== */
+
 app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
@@ -1040,6 +1096,8 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   }
 });
 
+/* ====================================================== */
+
 app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
   try {
     const userId = req.query.userId || null;
@@ -1068,7 +1126,7 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
    🔥 PANEL ADMIN (LO QUE TE FALTA)
    ====================================================== */
 
-// Obtener datos del usuario para el panel
+// Obtener datos del usuario
 app.get("/api/admin/user/:id", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).lean();
@@ -1093,16 +1151,14 @@ app.post("/api/admin/update-balance", async (req, res) => {
 
     const newBalance = Number(balance);
 
-    // Actualiza User
     await User.findByIdAndUpdate(userId, {
       balance: newBalance,
     });
 
-    // 🔥 ACTUALIZA TAMBIÉN WALLET (AQUÍ ESTÁ LA CLAVE)
     await Wallet.findOneAndUpdate(
       { user: userId },
-      { balance: newBalance },
-      { upsert: true } // lo crea si no existe
+      { balance: newBalance, balanceOwn: newBalance },
+      { upsert: true }
     );
 
     res.json({ ok: true });
@@ -1121,6 +1177,11 @@ app.post("/api/admin/update-leverage", async (req, res) => {
       leverage: Number(leverage),
     });
 
+    await Wallet.findOneAndUpdate(
+      { user: userId },
+      { leverageFactor: Number(leverage) }
+    );
+
     res.json({ ok: true });
   } catch (e) {
     console.error("update-leverage error", e);
@@ -1128,7 +1189,7 @@ app.post("/api/admin/update-leverage", async (req, res) => {
   }
 });
 
-// Actualizar símbolo del gráfico
+// Actualizar símbolo
 app.post("/api/admin/update-symbol", async (req, res) => {
   try {
     const { userId, symbol } = req.body;
