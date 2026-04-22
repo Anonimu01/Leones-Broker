@@ -344,6 +344,30 @@ setInterval(() => {
   } catch (e) {}
 }, 60000);
 /* ======================================================
+   STATIC PATH FIX (VARIABLES SEGURAS)
+   ====================================================== */
+
+const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+
+let staticDirName = null;
+
+for (const cand of staticCandidates) {
+  const p = path.join(__dirname, cand);
+  try {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
+  } catch (e) {}
+}
+
+if (!staticDirName) {
+  staticDirName = "public";
+}
+
+const staticPath = path.join(__dirname, staticDirName);
+const jsDirPath = path.join(staticPath, "js");
+/* ======================================================
    GRACEFUL SHUTDOWN
    ====================================================== */
 let shuttingDown = false;
