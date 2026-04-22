@@ -275,10 +275,18 @@ app.use("/api/account", accountRoutes);
 app.post("/api/trade/open", tradeBalanceGuard, liveOpenRouteHandler());
 
 // CLOSE TRADE
-app.post("/api/trade/close", tradeBalanceGuard, liveCloseRouteHandler);
+app.post(
+  "/api/trade/close",
+  tradeBalanceGuard,
+  liveCloseRouteHandler()
+);
 
 // CLOSE ALL TRADES
-app.post("/api/trade/close-all", tradeBalanceGuard, liveCloseAllRouteHandler);
+app.post(
+  "/api/trade/close-all",
+  tradeBalanceGuard,
+  liveCloseAllRouteHandler()
+);
 
 /* ======================================================
    COMPATIBILIDAD FRONTEND (alias de órdenes)
