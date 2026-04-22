@@ -1,4 +1,4 @@
-// server.js (CSP desactivado — versión limpia + depósitos admin + historial + balance real + PnL)
+// server.js (CSP desactivado — versión limpia + Resend/SMTP sendEmail helper)
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -24,6 +24,7 @@ import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import positionsRoutes from "./routes/positions.routes.js";
+import tradeRoutes from "./routes/trade.routes.js";
 import accountRoutes from "./routes/account.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
@@ -33,34 +34,13 @@ import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
 
-// Models
+// Models (used for account/wallet endpoints fallback)
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
-// Send email helper
+// Send email helper (centralizado: Resend SDK / HTTP / SMTP fallback)
 import sendEmail from "./utils/sendEmail.js";
-
-const transactionSchema = new mongoose.Schema(
-  {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-    userId: { type: String, index: true },
-    type: { type: String, index: true }, // deposit | trade_open | trade_close | adjustment
-    amount: { type: Number, default: 0 },
-    status: { type: String, default: "completed" },
-    note: { type: String, default: "" },
-    balanceBefore: { type: Number, default: 0 },
-    balanceAfter: { type: Number, default: 0 },
-    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
-    source: { type: String, default: "server.js" },
-    createdAt: { type: Date, default: Date.now },
-  },
-  { minimize: false }
-);
-
-const Transaction =
-  mongoose.models.Transaction ||
-  mongoose.model("Transaction", transactionSchema);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -918,209 +898,6 @@ app.get("*", (req, res) => {
 
 /* ======================================================
    404 API (único fallback para /api)
-   ====================================================== */
-app.use("/api", (req, res) => {
-  res.status(404).json({ error: "API endpoint not found" });
-});
-
-/* ======================================================
-   ERROR HANDLER
-   ====================================================== */
-app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(err.status || 500).json({
-    error: "Server error",
-    message: process.env.NODE_ENV === "development" ? err.message : undefined,
-  });
-});
-
-/* ======================================================
-   START SERVER
-   ====================================================== */
-const PORT = process.env.PORT || 3000;
-
-const server = httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on ${PORT}`);
-
-  console.log("ENV STATUS:");
-  console.log("RESEND:", !!process.env.RESEND_API_KEY);
-  console.log("SENDER:", !!process.env.SENDER_EMAIL);
-  console.log("MONGO:", !!process.env.MONGO_URI);
-  console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
-  console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-
-  if (!process.env.POLYGON_API_KEY) {
-    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  }
-  if (!process.env.RESEND_API_KEY) {
-    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
-  }
-});
-
-/* ======================================================
-   GRACEFUL SHUTDOWN
-   ====================================================== */
-let shuttingDown = false;
-
-const safeClosePolygonSocket = async () => {
-  if (!polygonSocket) return;
-  try {
-    const maybe = polygonSocket.close();
-    if (maybe && typeof maybe.then === "function") {
-      await maybe.catch((err) => {
-        console.warn("polygonSocket.close() rejected:", err);
-      });
-    }
-  } catch (e) {
-    console.warn("polygonSocket.close() threw:", e);
-  }
-};
-
-const gracefulShutdown = async (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`📴 ${signal} recibido. Cerrando...`);
-
-  const timeout = setTimeout(() => {
-    console.warn("Forzando cierre...");
-    process.exit(1);
-  }, 30000);
-  timeout.unref();
-
-  try {
-    await new Promise((resolve, reject) => {
-      server.close((err) => {
-        if (err) return reject(err);
-        console.log("HTTP cerrado");
-        resolve();
-      });
-    });
-
-    try {
-      await safeClosePolygonSocket();
-    } catch (e) {
-      console.warn("Error cerrando polygonSocket (await):", e);
-    }
-
-    try {
-      if (typeof global?.stopRiskWatcher === "function") {
-        try {
-          global.stopRiskWatcher();
-        } catch (e) {
-          console.warn("stopRiskWatcher threw:", e);
-        }
-      }
-    } catch (e) {
-      console.warn("Error deteniendo risk watcher:", e);
-    }
-
-    try {
-      await mongoose.disconnect();
-      console.log("Mongo cerrado");
-    } catch (e) {
-      console.warn("Error desconectando Mongo:", e);
-    }
-
-    clearTimeout(timeout);
-    process.exit(0);
-  } catch (err) {
-    console.error("Shutdown error:", err);
-    clearTimeout(timeout);
-    process.exit(1);
-  }
-};
-app.use(async (req, res, next) => {
-  const pathname = req.path || "";
-  if (!pathname.endsWith(".js")) return next();
-
-  try {
-    const candidate = resolveJsCandidate(pathname);
-
-    if (candidate) {
-      const raw = await fs.promises.readFile(candidate, "utf8");
-      const cleaned = stripScriptWrappers(raw);
-
-      res
-        .status(200)
-        .type("application/javascript; charset=utf-8")
-        .send(cleaned);
-      return;
-    }
-
-    res
-      .status(404)
-      .type("application/javascript; charset=utf-8")
-      .send(`
-// JS missing: ${pathname}
-console.error("JS missing: ${pathname}");
-
-window.CATEGORIES = window.CATEGORIES || [];
-window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
-window.API = window.API || "/api";
-window.SOCKET_URL = window.SOCKET_URL || location.origin;
-window._LEONES = window._LEONES || {};
-window._LEONES_TRADING = window._LEONES_TRADING || {};
-window._LEONES_TRADING.fetchPositions =
-  window._LEONES_TRADING.fetchPositions ||
-  (async function () { return []; });
-
-if (!window.loadPositions) {
-  window.loadPositions = async function () {
-    try {
-      if (
-        window._LEONES_TRADING &&
-        typeof window._LEONES_TRADING.fetchPositions === "function"
-      ) {
-        return await window._LEONES_TRADING.fetchPositions();
-      }
-    } catch (e) {
-      console.warn("loadPositions stub error", e);
-    }
-    return null;
-  };
-}
-
-if (!window.loadRealQuotes) {
-  window.loadRealQuotes = async function () {
-    return null;
-  };
-}
-`);
-  } catch (err) {
-    console.error("Error sirviendo JS:", err);
-    res
-      .status(500)
-      .type("application/javascript; charset=utf-8")
-      .send(`console.error("JS server error");`);
-  }
-});
-
-/* ======================================================
-   STATIC FILES
-   ====================================================== */
-app.use("/public", express.static(staticPath));
-app.use("/js", express.static(jsDirPath));
-app.use(express.static(staticPath));
-
-/* ======================================================
-   FALLBACK HTML
-   ====================================================== */
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") {
-    return res.status(404).json({ error: "API endpoint not found" });
-  }
-
-  const indexPath = path.join(staticPath, "index.html");
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
-    }
-  });
-});
-
-/* ======================================================
-   404 API
    ====================================================== */
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
