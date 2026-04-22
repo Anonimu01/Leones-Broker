@@ -282,14 +282,14 @@ app.post(
 app.post(
   "/api/trade/close",
   tradeBalanceGuard,
-  liveCloseRouteHandler
+  liveCloseRouteHandler()
 );
 
 // CLOSE ALL TRADES
 app.post(
   "/api/trade/close-all",
   tradeBalanceGuard,
-  liveCloseAllRouteHandler
+  liveCloseAllRouteHandler()
 );
 
 /* ======================================================
