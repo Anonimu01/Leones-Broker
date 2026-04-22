@@ -266,6 +266,13 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 app.use("/api/account", accountRoutes);
+app.post("/api/trade/open", tradeBalanceGuard, liveOpenRouteHandler());
+app.post("/api/trade/close", tradeBalanceGuard, liveCloseRouteHandler);
+app.post("/api/trade/close-all", tradeBalanceGuard, liveCloseAllRouteHandler);
+app.post("/api/order", tradeBalanceGuard, liveOpenRouteHandler());
+app.post("/api/orders", tradeBalanceGuard, liveOpenRouteHandler());
+app.post("/api/trade/order", tradeBalanceGuard, liveOpenRouteHandler());
+app.post("/api/trade/orders", tradeBalanceGuard, liveOpenRouteHandler());
 
 /* ======================================================
    SAMPLE SYMBOLS / FALLBACK
