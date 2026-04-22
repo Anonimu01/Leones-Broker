@@ -1091,9 +1091,19 @@ app.post("/api/admin/update-balance", async (req, res) => {
   try {
     const { userId, balance } = req.body;
 
+    const newBalance = Number(balance);
+
+    // Actualiza User
     await User.findByIdAndUpdate(userId, {
-      balance: Number(balance),
+      balance: newBalance,
     });
+
+    // 🔥 ACTUALIZA TAMBIÉN WALLET (AQUÍ ESTÁ LA CLAVE)
+    await Wallet.findOneAndUpdate(
+      { user: userId },
+      { balance: newBalance },
+      { upsert: true } // lo crea si no existe
+    );
 
     res.json({ ok: true });
   } catch (e) {
