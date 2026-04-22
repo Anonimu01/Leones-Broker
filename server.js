@@ -1251,6 +1251,31 @@ function liveOpenRouteHandler() {
     }
   };
 }
+/* =========================
+   CLOSE ROUTES FIX
+========================= */
+
+function liveCloseRouteHandler(req, res) {
+  try {
+    return res.status(200).json({
+      ok: true,
+      msg: "close route placeholder ejecutado",
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "server_error" });
+  }
+}
+
+function liveCloseAllRouteHandler(req, res) {
+  try {
+    return res.status(200).json({
+      ok: true,
+      msg: "close-all route placeholder ejecutado",
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "server_error" });
+  }
+}
                             
 
 /* ======================================================
