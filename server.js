@@ -329,6 +329,7 @@ function normalizeQuote(symbol, item = {}) {
     raw: item,
   };
 }
+
 function buildQuotesArray() {
   const store = getPriceStore();
   const keys = Object.keys(store);
@@ -451,7 +452,7 @@ try {
 }
 
 /* ======================================================
-   Fallbacks para eliminar 404
+   Fallbacks para eliminar 404 en rutas que tu frontend está llamando
    ====================================================== */
 app.get("/api/quotes", (req, res) => {
   const payload = buildMarketPayload();
@@ -488,7 +489,7 @@ app.get("/api/symbols", (req, res) => {
         return {
           symbol: k,
           label: (k.split(":").pop() || k).replace("_", "/"),
-          market: prices[k]?.market || "Unknown",
+          market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
         };
       });
       return res.json(arr);
@@ -501,47 +502,416 @@ app.get("/api/symbols", (req, res) => {
 });
 
 /* ======================================================
-   SOCKET EVENTS
+   Helper: obtener usuario desde token (si aplica)
+   ====================================================== */
+async function getUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return null;
+    }
+
+    const userId =
+      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+
+    const user = await User.findById(userId).lean().exec().catch(() => null);
+    return user || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getPositionsForUser(userId) {
+  try {
+    return await Position.find({ user: userId }).lean().exec().catch(() => []);
+  } catch {
+    return [];
+  }
+}
+
+async function getWalletForUser(userId) {
+  try {
+    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+
+  const balance = wallet?.balance ?? user.balance ?? 0;
+
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+
+/* ======================================================
+   Compat endpoints: /api/account, /api/me, /api/profile
+   ====================================================== */
+async function accountLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
+  } catch (e) {
+    console.error("accountLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+app.get("/api/account", accountLikeHandler);
+app.get("/api/me", accountLikeHandler);
+app.get("/api/profile", accountLikeHandler);
+app.get("/api/cuenta", (req, res) => {
+  return res.redirect(307, "/api/account");
+});
+
+async function positionsLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await getPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("positionsLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+app.get("/api/positions", positionsLikeHandler);
+app.get("/api/trade/positions", positionsLikeHandler);
+
+app.get("/api/wallet", async (req, res) => {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const wallet = await getWalletForUser(user._id);
+    if (wallet) return res.json(wallet);
+
+    return res.json({
+      balance: user.balance ?? 0,
+      currency: user.currency || "USD",
+    });
+  } catch (e) {
+    console.error("/api/wallet error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/billetera", (req, res) => {
+  return res.redirect(307, "/api/wallet");
+});
+
+/* ======================================================
+   Redirección para /api/api/* -> /api/* (si frontend duplica prefijo)
+   ====================================================== */
+app.use("/api/api", (req, res) => {
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
+});
+
+/* ======================================================
+   SOCKET.IO EVENTS
    ====================================================== */
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
-  socket.emit("prices_snapshot", getPriceStore() || {});
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch (e) {
+    socket.emit("prices_snapshot", {});
+  }
 
   socket.on("request_prices_snapshot", () => {
-    socket.emit("prices_snapshot", getPriceStore() || {});
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch (e) {
+      socket.emit("prices_snapshot", {});
+    }
+  });
+
+  socket.on("request_symbols", () => {
+    try {
+      const prices = getPriceStore();
+      if (priceHandler && typeof priceHandler.getSymbols === "function") {
+        const syms = priceHandler.getSymbols();
+        socket.emit("symbols_update", syms || []);
+      } else if (prices && Object.keys(prices).length) {
+        const arr = Object.keys(prices).map((k) => ({
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market:
+            prices[k] && prices[k].market ? prices[k].market : "Unknown",
+        }));
+        socket.emit("symbols_update", arr);
+      } else {
+        socket.emit("symbols_update", SAMPLE_SYMBOLS);
+      }
+    } catch (e) {
+      socket.emit("symbols_update", SAMPLE_SYMBOLS);
+    }
   });
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      polygonSocket?.subscribe?.(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
+        polygonSocket.subscribe(symbol, kind);
+      }
       socket.join(symbol);
-    } catch {}
+      console.log("subscribe:", socket.id, symbol, kind || "trades");
+    } catch (e) {
+      console.warn("subscribe error:", e);
+    }
   });
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      polygonSocket?.unsubscribe?.(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
+        polygonSocket.unsubscribe(symbol, kind);
+      }
       socket.leave(symbol);
-    } catch {}
+      console.log("unsubscribe:", socket.id, symbol, kind || "trades");
+    } catch (e) {
+      console.warn("unsubscribe error:", e);
+    }
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ Cliente desconectado:", socket.id);
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
   });
 });
 
 /* ======================================================
-   STATIC + SERVER
+   STATIC FRONTEND
    ====================================================== */
-const staticPath = path.join(__dirname, "public");
+const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+let staticDirName = null;
 
+for (const cand of staticCandidates) {
+  const p = path.join(__dirname, cand);
+  try {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
+  } catch (e) {}
+}
+
+if (!staticDirName) {
+  staticDirName = "public";
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
+  );
+} else {
+  console.log(`Static folder detected: '${staticDirName}'`);
+}
+
+const staticPath = path.join(__dirname, staticDirName);
+const jsDirPath = path.join(staticPath, "js");
+
+/* ======================================================
+   RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
+   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
+   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
+   - Si no existe, se devuelve un stub JS válido en vez de HTML.
+   ====================================================== */
+function stripScriptWrappers(source) {
+  let text = String(source ?? "");
+
+  text = text.replace(/^\uFEFF/, "");
+
+  const trimmed = text.trim();
+
+  const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
+  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
+
+  if (startsWithScript && endsWithScript) {
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
+  }
+
+  return text;
+}
+
+function resolveJsCandidate(requestPath) {
+  const clean = String(requestPath || "").split("?")[0];
+  const normalized = clean.replace(/\\/g, "/");
+  const base = path.basename(normalized);
+
+  const candidates = [];
+
+  if (normalized.startsWith("/public/js/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
+  if (normalized.startsWith("/js/")) {
+    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
+    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
+  }
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
+  if (base) {
+    candidates.push(path.join(staticPath, base));
+    candidates.push(path.join(jsDirPath, base));
+  }
+
+  const uniqueCandidates = [...new Set(candidates)];
+
+  return uniqueCandidates.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
+app.use(async (req, res, next) => {
+  const pathname = req.path || "";
+  if (!pathname.endsWith(".js")) return next();
+
+  try {
+    const candidate = resolveJsCandidate(pathname);
+
+    if (candidate) {
+      const raw = await fs.promises.readFile(candidate, "utf8");
+      const cleaned = stripScriptWrappers(raw);
+
+      res
+        .status(200)
+        .type("application/javascript; charset=utf-8")
+        .send(cleaned);
+      return;
+    }
+
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`
+// JS missing: ${pathname}
+console.error("JS missing: ${pathname}");
+
+window.CATEGORIES = window.CATEGORIES || [];
+window.SESSION_KEY = window.SESSION_KEY || "BROKERPRO_SESSION_USER";
+window.API = window.API || "/api";
+window.SOCKET_URL = window.SOCKET_URL || location.origin;
+window._LEONES = window._LEONES || {};
+window._LEONES_TRADING = window._LEONES_TRADING || {};
+window._LEONES_TRADING.fetchPositions =
+  window._LEONES_TRADING.fetchPositions ||
+  (async function () { return []; });
+
+if (!window.loadPositions) {
+  window.loadPositions = async function () {
+    try {
+      if (
+        window._LEONES_TRADING &&
+        typeof window._LEONES_TRADING.fetchPositions === "function"
+      ) {
+        return await window._LEONES_TRADING.fetchPositions();
+      }
+    } catch (e) {
+      console.warn("loadPositions stub error", e);
+    }
+    return null;
+  };
+}
+
+if (!window.loadRealQuotes) {
+  window.loadRealQuotes = async function () {
+    return null;
+  };
+}
+`);
+  } catch (err) {
+    console.error("Error sirviendo JS:", err);
+    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+  }
+});
+
+/* ======================================================
+   STATIC FILES
+   ====================================================== */
+app.use("/public", express.static(staticPath));
+app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
 
+/* ======================================================
+   Fallback HTML
+   ====================================================== */
 app.get("*", (req, res) => {
-  res.sendFile(path.join(staticPath, "index.html"));
+  if (req.path.startsWith("/api/") || req.path === "/api") {
+    return res.status(404).json({ error: "API endpoint not found" });
+  }
+
+  const indexPath = path.join(staticPath, "index.html");
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error("Error sirviendo index.html:", err);
+      res.status(err.status || 500).send("Error loading app");
+    }
+  });
+});
+
+/* ======================================================
+   404 API (único fallback para /api)
+   ====================================================== */
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "API endpoint not found" });
+});
+
+/* ======================================================
+   ERROR HANDLER
+   ====================================================== */
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(err.status || 500).json({
+    error: "Server error",
+    message: process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
 });
 
 /* ======================================================
@@ -551,12 +921,104 @@ const PORT = process.env.PORT || 3000;
 
 const server = httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on ${PORT}`);
+
+  console.log("ENV STATUS:");
+  console.log("RESEND:", !!process.env.RESEND_API_KEY);
+  console.log("SENDER:", !!process.env.SENDER_EMAIL);
+  console.log("MONGO:", !!process.env.MONGO_URI);
+  console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
+  console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
+
+  if (!process.env.POLYGON_API_KEY) {
+    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  }
+  if (!process.env.RESEND_API_KEY) {
+    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  }
 });
 
 /* ======================================================
-   SHUTDOWN
+   GRACEFUL SHUTDOWN
    ====================================================== */
-process.on("SIGINT", () => process.exit());
-process.on("SIGTERM", () => process.exit());
+let shuttingDown = false;
+
+const safeClosePolygonSocket = async () => {
+  if (!polygonSocket) return;
+  try {
+    const maybe = polygonSocket.close();
+    if (maybe && typeof maybe.then === "function") {
+      await maybe.catch((err) => {
+        console.warn("polygonSocket.close() rejected:", err);
+      });
+    }
+  } catch (e) {
+    console.warn("polygonSocket.close() threw:", e);
+  }
+};
+
+const gracefulShutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`📴 ${signal} recibido. Cerrando...`);
+
+  const timeout = setTimeout(() => {
+    console.warn("Forzando cierre...");
+    process.exit(1);
+  }, 30000);
+  timeout.unref();
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) return reject(err);
+        console.log("HTTP cerrado");
+        resolve();
+      });
+    });
+
+    try {
+      await safeClosePolygonSocket();
+    } catch (e) {
+      console.warn("Error cerrando polygonSocket (await):", e);
+    }
+
+    try {
+      if (typeof global?.stopRiskWatcher === "function") {
+        try {
+          global.stopRiskWatcher();
+        } catch (e) {
+          console.warn("stopRiskWatcher threw:", e);
+        }
+      }
+    } catch (e) {
+      console.warn("Error deteniendo risk watcher:", e);
+    }
+
+    try {
+      await mongoose.disconnect();
+      console.log("Mongo cerrado");
+    } catch (e) {
+      console.warn("Error desconectando Mongo:", e);
+    }
+
+    clearTimeout(timeout);
+    process.exit(0);
+  } catch (err) {
+    console.error("Shutdown error:", err);
+    clearTimeout(timeout);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("unhandledRejection", (r) => {
+  console.error("UnhandledRejection:", r);
+  gracefulShutdown("unhandledRejection").catch(() => {});
+});
+process.on("uncaughtException", (e) => {
+  console.error("UncaughtException:", e);
+  gracefulShutdown("uncaughtException").catch(() => {});
+});
 
 export default app;
