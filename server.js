@@ -264,6 +264,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
 app.use("/api/account", accountRoutes);
 
 /* ======================================================
@@ -280,53 +281,6 @@ const SAMPLE_SYMBOLS = [
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
 
-function toNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function compactSymbol(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
-
-function normalizeSide(value) {
-  const s = String(value || "").trim().toUpperCase();
-  if (!s) return "";
-  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
-  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
-  return "";
-}
-
-function normalizeQty(body = {}) {
-  const n = Number(
-    body.qty ??
-      body.quantity ??
-      body.amount ??
-      body.positionSize ??
-      body.notional ??
-      body.size
-  );
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizePrice(body = {}) {
-  const raw =
-    body.price ??
-    body.entryPrice ??
-    body.currentPrice ??
-    body.limitPrice ??
-    body.stopPrice ??
-    body.openPrice ??
-    null;
-
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
@@ -337,6 +291,11 @@ function getPriceStore() {
   } catch {
     return {};
   }
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function normalizeQuote(symbol, item = {}) {
@@ -438,900 +397,6 @@ const io = new IOServer(httpServer, {
 const priceHandler = new PriceHandler(io);
 
 /* ======================================================
-   LIVE TRADE / PnL / BALANCE GUARD
-   - No toca admin balance
-   - Solo controla apertura/cierre de trades
-   ====================================================== */
-const liveTradeTransactionSchema = new mongoose.Schema(
-  {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-    userId: { type: String, index: true },
-    type: { type: String, index: true }, // trade_open | trade_close | pnl_update | liquidation
-    amount: { type: Number, default: 0 },
-    status: { type: String, default: "completed" },
-    note: { type: String, default: "" },
-    balanceBefore: { type: Number, default: 0 },
-    balanceAfter: { type: Number, default: 0 },
-    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
-    source: { type: String, default: "server.js" },
-    createdAt: { type: Date, default: Date.now },
-  },
-  { minimize: false }
-);
-
-const LiveTradeTransaction =
-  mongoose.models.LiveTradeTransaction ||
-  mongoose.model("LiveTradeTransaction", liveTradeTransactionSchema);
-
-function liveToNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function liveCompactSymbol(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
-
-function liveNormalizeSide(value) {
-  const s = String(value || "").trim().toUpperCase();
-  if (!s) return "";
-  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
-  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
-  return "";
-}
-
-function liveNormalizeQty(body = {}) {
-  const n = Number(
-    body.qty ??
-      body.quantity ??
-      body.amount ??
-      body.positionSize ??
-      body.notional ??
-      body.size
-  );
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function liveNormalizePrice(body = {}) {
-  const raw =
-    body.price ??
-    body.entryPrice ??
-    body.currentPrice ??
-    body.limitPrice ??
-    body.stopPrice ??
-    body.openPrice ??
-    null;
-
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function liveGetPriceStore() {
-  try {
-    const raw = priceHandler?.prices;
-    if (!raw) return {};
-    if (raw instanceof Map) return Object.fromEntries(raw.entries());
-    if (typeof raw === "object") return raw;
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-function liveGetCurrentPriceForSymbol(symbol) {
-  const target = liveCompactSymbol(symbol);
-  if (!target) return null;
-
-  const store = liveGetPriceStore();
-  const entries = Object.entries(store);
-
-  for (const [key, item] of entries) {
-    const candidates = [
-      key,
-      key.split(":").pop(),
-      item?.symbol,
-      item?.tvSymbol,
-      item?.ticker,
-      item?.name,
-      item?.label,
-      item?.marketSymbol,
-    ];
-
-    if (candidates.some((c) => liveCompactSymbol(c) === target)) {
-      return (
-        liveToNumber(
-          item?.price ??
-            item?.last ??
-            item?.close ??
-            item?.value ??
-            item?.mark ??
-            item?.mid ??
-            item?.lp
-        ) ?? null
-      );
-    }
-  }
-
-  return null;
-}
-
-function liveGetPriceSymbolFromData(data = {}) {
-  const candidates = [
-    data.symbol,
-    data.tvSymbol,
-    data.ticker,
-    data.s,
-    data.marketSymbol,
-    data.asset,
-    data.name,
-    data.id,
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate) return String(candidate);
-  }
-
-  return "";
-}
-
-function liveGetPriceValueFromData(data = {}) {
-  return (
-    liveToNumber(
-      data.price ??
-        data.last ??
-        data.close ??
-        data.value ??
-        data.mark ??
-        data.mid ??
-        data.lp
-    ) ?? null
-  );
-}
-
-function liveIsClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "")
-    .toLowerCase()
-    .trim();
-  return (
-    status.includes("close") ||
-    status === "closed" ||
-    !!p.closedAt ||
-    !!p.closed_at
-  );
-}
-
-function liveComputePositionPnl(position = {}, currentPrice = null) {
-  const entry =
-    liveToNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-    0;
-
-  const qty =
-    liveToNumber(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) ?? 0;
-
-  const side = liveNormalizeSide(
-    position.side || position.direction || position.positionSide
-  );
-
-  const px = liveToNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
-  const sign = side === "SELL" ? -1 : 1;
-
-  return (px - entry) * qty * sign;
-}
-
-async function liveGetUserFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
-
-    const token = String(auth).split(" ")[1];
-    if (!token) return null;
-    if (!process.env.JWT_SECRET) return null;
-
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch {
-      return null;
-    }
-
-    const userId =
-      payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-
-    const user = await User.findById(userId).catch(() => null);
-    return user || null;
-  } catch {
-    return null;
-  }
-}
-
-async function liveGetWalletForUser(userId) {
-  try {
-    let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
-
-    if (!wallet) {
-      wallet = new Wallet({
-        user: userId,
-        balanceOwn: 0,
-        balance: 0,
-        credit: 0,
-        marginUsed: 0,
-        leverageFactor: 1,
-        equity: 0,
-        freeMargin: 0,
-        marginLevel: 0,
-      });
-    }
-
-    return wallet;
-  } catch {
-    return null;
-  }
-}
-
-async function liveGetPositionsForUser(userId) {
-  try {
-    return await Position.find({ user: userId }).lean().exec().catch(() => []);
-  } catch {
-    return [];
-  }
-}
-
-async function liveGetOpenPositionsForUser(userId) {
-  try {
-    const rows = await Position.find({
-      user: userId,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec()
-      .catch(() => []);
-    return rows || [];
-  } catch {
-    return [];
-  }
-}
-
-function liveNormalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = liveToNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
-  const credit = liveToNumber(wallet?.credit ?? 0) ?? 0;
-  const marginUsed = Math.max(liveToNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
-  const equity = balanceOwn + openPnl;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-  return {
-    balance: equity,
-    balanceOwn,
-    credit,
-    equity,
-    marginUsed,
-    freeMargin,
-    marginLevel,
-    leverageFactor: liveToNumber(wallet?.leverageFactor ?? 1) ?? 1,
-    currency: wallet?.currency || "USD",
-    openPnl,
-  };
-}
-
-async function liveBuildAccountForUser(userDoc) {
-  const wallet = await liveGetWalletForUser(userDoc._id);
-  const positions = await liveGetPositionsForUser(userDoc._id);
-  const openPositions = positions.filter((p) => !liveIsClosedPosition(p));
-
-  const openPnl = openPositions.reduce(
-    (sum, p) => sum + (liveToNumber(p.pnl ?? 0) || 0),
-    0
-  );
-
-  const normalizedWallet = liveNormalizeWalletSnapshot(wallet, openPnl);
-
-  return {
-    account: {
-      ...normalizedWallet,
-      leverage: liveToNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
-      currency: userDoc.currency || wallet.currency || "USD",
-      positions,
-      openPositions,
-      hasBalance: normalizedWallet.balanceOwn > 0 || normalizedWallet.credit > 0,
-      canOpenTrade:
-        normalizedWallet.balanceOwn + normalizedWallet.credit - normalizedWallet.marginUsed >
-        0,
-    },
-    user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet.toObject ? wallet.toObject() : wallet,
-    positions,
-  };
-}
-
-async function liveRecordTransaction({
-  user,
-  type,
-  amount = 0,
-  status = "completed",
-  note = "",
-  balanceBefore = 0,
-  balanceAfter = 0,
-  meta = {},
-  source = "server.js",
-}) {
-  try {
-    const payload = {
-      user: user?._id || user?.user || user?.id || null,
-      userId: String(user?._id || user?.user || user?.id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date(),
-    };
-
-    const tx = await LiveTradeTransaction.create(payload);
-    return tx.toObject ? tx.toObject() : tx;
-  } catch (err) {
-    console.warn("liveRecordTransaction fallback:", err?.message || err);
-    return {
-      userId: String(user?._id || user?.user || user?.id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date().toISOString(),
-    };
-  }
-}
-
-function liveEmitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
-  try {
-    io.emit("wallet_update", {
-      userId,
-      account: accountPayload?.account || accountPayload,
-    });
-    io.emit("account_update", {
-      userId,
-      account: accountPayload?.account || accountPayload,
-    });
-    if (Array.isArray(positions)) {
-      io.emit("positions_update", { userId, positions });
-    }
-    if (transaction) {
-      io.emit("transactions_update", { userId, transaction });
-    }
-  } catch (e) {
-    console.warn("liveEmitStateUpdates error:", e?.message || e);
-  }
-}
-
-async function liveClosePositionDocument(positionDoc, closePrice, { auto = false } = {}) {
-  const userId = positionDoc.user;
-  const wallet = await liveGetWalletForUser(userId);
-
-  const balanceBefore = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? 0) ?? 0;
-  const marginUsedBefore = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
-  const reservedMargin = liveToNumber(positionDoc.marginReserved ?? 0) ?? 0;
-  const entryPrice =
-    liveToNumber(positionDoc.entryPrice ?? positionDoc.price ?? positionDoc.openPrice ?? 0) ??
-    0;
-  const qty =
-    liveToNumber(
-      positionDoc.qty ??
-        positionDoc.quantity ??
-        positionDoc.amount ??
-        positionDoc.positionSize ??
-        0
-    ) ?? 0;
-  const side = liveNormalizeSide(positionDoc.side || positionDoc.direction);
-  const sign = side === "SELL" ? -1 : 1;
-  const currentPrice = liveToNumber(closePrice) ?? entryPrice;
-  const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
-
-  wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-  wallet.balanceOwn = balanceBefore + realizedPnl;
-  wallet.balance = wallet.balanceOwn;
-  wallet.equity = wallet.balanceOwn;
-  wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-  wallet.updatedAt = new Date();
-  await wallet.save();
-
-  positionDoc.status = "CLOSED";
-  positionDoc.currentPrice = currentPrice;
-  positionDoc.closePrice = currentPrice;
-  positionDoc.realizedPnl = realizedPnl;
-  positionDoc.pnl = realizedPnl;
-  positionDoc.closedAt = new Date();
-  positionDoc.updatedAt = new Date();
-  await positionDoc.save();
-
-  const user = await User.findById(userId).catch(() => null);
-  if (user) {
-    user.balance = wallet.balanceOwn;
-    await user.save();
-  }
-
-  const tx = await liveRecordTransaction({
-    user: user || { _id: userId },
-    type: "trade_close",
-    amount: realizedPnl,
-    status: auto ? "liquidated" : "completed",
-    note: `${side} ${positionDoc.symbol}`,
-    balanceBefore,
-    balanceAfter: wallet.balanceOwn,
-    meta: {
-      positionId: String(positionDoc._id),
-      symbol: positionDoc.symbol,
-      side,
-      qty,
-      entryPrice,
-      closePrice: currentPrice,
-      marginReleased: reservedMargin,
-      realizedPnl,
-      auto,
-    },
-    source: auto ? "api/trade/auto-close" : "api/trade/close",
-  });
-
-  const account = user ? await liveBuildAccountForUser(user) : null;
-  const annotated = positionDoc.toObject ? positionDoc.toObject() : positionDoc;
-
-  liveEmitStateUpdates(userId, account, [annotated], tx);
-
-  return {
-    ok: true,
-    positionId: positionDoc._id,
-    symbol: positionDoc.symbol,
-    side,
-    qty,
-    entryPrice,
-    currentPrice,
-    realizedPnl,
-    balance: wallet.balanceOwn,
-    account: account?.account || null,
-    wallet: account?.wallet || (wallet.toObject ? wallet.toObject() : wallet),
-    position: annotated,
-    transaction: tx,
-  };
-}
-
-async function liveSyncPnLForSymbol(rawSymbol, currentPrice) {
-  const target = liveCompactSymbol(rawSymbol);
-  if (!target || !Number.isFinite(Number(currentPrice))) return;
-
-  const openPositions = await Position.find({
-    status: { $in: ["OPEN", "open", "Open"] },
-  }).catch(() => []);
-
-  const touchedUsers = new Set();
-
-  for (const pos of openPositions) {
-    const candidates = [
-      pos.symbol,
-      pos.tvSymbol,
-      pos.ticker,
-      pos.marketSymbol,
-      pos.asset,
-      pos.name,
-    ];
-
-    if (!candidates.some((c) => liveCompactSymbol(c) === target)) continue;
-
-    pos.currentPrice = currentPrice;
-    pos.pnl = liveComputePositionPnl(pos, currentPrice);
-    pos.unrealizedPnl = pos.pnl;
-    pos.updatedAt = new Date();
-
-    const marginReserved = liveToNumber(pos.marginReserved ?? 0) ?? 0;
-    const shouldLiquidate = marginReserved > 0 && pos.pnl <= -marginReserved;
-
-    if (shouldLiquidate) {
-      await liveClosePositionDocument(pos, currentPrice, { auto: true });
-    } else {
-      await pos.save();
-    }
-
-    touchedUsers.add(String(pos.user));
-  }
-
-  for (const userId of touchedUsers) {
-    const user = await User.findById(userId).catch(() => null);
-    if (!user) continue;
-
-    const account = await liveBuildAccountForUser(user);
-    liveEmitStateUpdates(userId, account, account.positions || [], null);
-  }
-}
-
-function livePatchPriceHandler(handler) {
-  if (!handler || handler.__livePnLPatchApplied) return;
-
-  const originalHandle =
-    typeof handler.handle === "function" ? handler.handle.bind(handler) : null;
-
-  handler.handle = async (data) => {
-    const result = originalHandle ? await originalHandle(data) : undefined;
-
-    try {
-      const symbol = String(
-        data?.symbol ?? data?.tvSymbol ?? data?.ticker ?? data?.s ?? data?.marketSymbol ?? ""
-      );
-      const price = liveToNumber(
-        data?.price ??
-          data?.last ??
-          data?.close ??
-          data?.value ??
-          data?.mark ??
-          data?.mid ??
-          data?.lp
-      );
-
-      if (symbol && price !== null) {
-        await liveSyncPnLForSymbol(symbol, price);
-      }
-    } catch (e) {
-      console.warn("livePnL sync error:", e?.message || e);
-    }
-
-    return result;
-  };
-
-  handler.__livePnLPatchApplied = true;
-}
-
-async function tradeBalanceGuard(req, res, next) {
-  try {
-    const user = await liveGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const wallet = await liveGetWalletForUser(user._id);
-    const balanceOwn = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
-    const credit = liveToNumber(wallet.credit ?? 0) ?? 0;
-    const marginUsed = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
-    const freeMargin = balanceOwn + credit - marginUsed;
-
-    if (balanceOwn + credit <= 0) {
-      return res.status(403).json({
-        ok: false,
-        error: "no_balance",
-        message: "La cuenta no tiene balance disponible para abrir operaciones",
-      });
-    }
-
-    if (freeMargin <= 0) {
-      return res.status(403).json({
-        ok: false,
-        error: "no_free_margin",
-        message: "No hay margen libre para abrir operaciones",
-      });
-    }
-
-    req.liveUser = user;
-    req.liveWallet = wallet;
-    next();
-  } catch (err) {
-    console.error("tradeBalanceGuard error:", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-}
-
-async function liveOpenRouteHandler(req, res) {
-  try {
-    const user = req.liveUser || (await liveGetUserFromBearer(req));
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
-    const body = req.body || {};
-    const symbol = String(
-      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
-    )
-      .trim()
-      .toUpperCase();
-
-    const side = liveNormalizeSide(body.side ?? body.direction ?? body.action);
-    const qty = liveNormalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
-
-    if (!symbol) {
-      return res.status(400).json({
-        ok: false,
-        error: "symbol_required",
-        message: "symbol es requerido",
-      });
-    }
-
-    if (!side) {
-      return res.status(400).json({
-        ok: false,
-        error: "side_required",
-        message: "side/direction debe ser BUY o SELL",
-      });
-    }
-
-    if (!qty) {
-      return res.status(400).json({
-        ok: false,
-        error: "quantity_required",
-        message: "qty/quantity/amount es requerido y debe ser mayor que 0",
-      });
-    }
-
-    const wallet = await liveGetWalletForUser(user._id);
-    const balanceOwn = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
-    const credit = liveToNumber(wallet.credit ?? 0) ?? 0;
-    const marginUsed = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
-    const freeMargin = balanceOwn + credit - marginUsed;
-
-    const leverage = Math.max(
-      liveToNumber(
-        body.leverage ??
-          body.leverageFactor ??
-          wallet.leverageFactor ??
-          user.leverage ??
-          1
-      ) || 1,
-      1
-    );
-
-    const marketPrice = liveGetCurrentPriceForSymbol(symbol);
-    const requestedPrice = liveNormalizePrice(body);
-
-    let entryPrice =
-      type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
-
-    if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "price_unavailable",
-        message: "No hay precio disponible para este símbolo",
-      });
-    }
-
-    const notional = Math.abs(qty * entryPrice);
-    const requiredMargin = notional / leverage;
-
-    if (freeMargin < requiredMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_funds",
-        message: "Fondos insuficientes para abrir la operación",
-        freeMargin,
-        requiredMargin,
-      });
-    }
-
-    wallet.balanceOwn = balanceOwn;
-    wallet.balance = balanceOwn;
-    wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = balanceOwn;
-    wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-    wallet.leverageFactor = leverage;
-    wallet.updatedAt = new Date();
-    await wallet.save();
-
-    user.balance = balanceOwn;
-    user.leverage = leverage;
-    await user.save();
-
-    const position = await Position.create({
-      user: user._id,
-      symbol,
-      side,
-      qty,
-      entryPrice,
-      currentPrice: entryPrice,
-      marginReserved: requiredMargin,
-      leverage,
-      status: "OPEN",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const tx = await liveRecordTransaction({
-      user,
-      type: "trade_open",
-      amount: requiredMargin,
-      status: "reserved",
-      note: `${side} ${symbol}`,
-      balanceBefore: balanceOwn,
-      balanceAfter: balanceOwn,
-      meta: {
-        symbol,
-        side,
-        qty,
-        leverage,
-        entryPrice,
-        currentPrice: entryPrice,
-        marginReserved: requiredMargin,
-      },
-      source: "api/trade/open",
-    });
-
-    const account = await liveBuildAccountForUser(user);
-    const annotatedPosition = position.toObject ? position.toObject() : position;
-
-    liveEmitStateUpdates(user._id, account, [annotatedPosition], tx);
-
-    return res.status(201).json({
-      ok: true,
-      msg: "Operación abierta",
-      data: {
-        positionId: position._id,
-        status: "OPEN",
-        symbol,
-        side,
-        qty,
-        entryPrice,
-        currentPrice: entryPrice,
-        marginReserved: requiredMargin,
-        leverage,
-        account: account.account,
-        wallet: account.wallet,
-        position: annotatedPosition,
-        transaction: tx,
-      },
-    });
-  } catch (err) {
-    console.error("/api/trade/open error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
-  }
-}
-
-async function liveCloseRouteHandler(req, res) {
-  try {
-    const user = req.liveUser || (await liveGetUserFromBearer(req));
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
-    const body = req.body || {};
-    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
-    const symbol = String(body.symbol || "").trim().toUpperCase();
-
-    let position = null;
-
-    if (positionId) {
-      position = await Position.findOne({
-        _id: positionId,
-        user: user._id,
-        status: { $in: ["OPEN", "open", "Open"] },
-      }).catch(() => null);
-    }
-
-    if (!position && symbol) {
-      position = await Position.findOne({
-        user: user._id,
-        symbol,
-        status: { $in: ["OPEN", "open", "Open"] },
-      })
-        .sort({ createdAt: -1 })
-        .catch(() => null);
-    }
-
-    if (!position) {
-      return res.status(404).json({
-        ok: false,
-        error: "position_not_found",
-        message: "Posición no encontrada",
-      });
-    }
-
-    const currentPriceRaw =
-      body.currentPrice ??
-      liveGetCurrentPriceForSymbol(position.symbol) ??
-      position.currentPrice ??
-      position.entryPrice ??
-      0;
-
-    const summary = await liveClosePositionDocument(position, currentPriceRaw, {
-      auto: false,
-    });
-
-    return res.json({
-      ok: true,
-      msg: "Posición cerrada",
-      data: summary,
-    });
-  } catch (err) {
-    console.error("/api/trade/close error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
-  }
-}
-
-async function liveCloseAllRouteHandler(req, res) {
-  try {
-    const user = req.liveUser || (await liveGetUserFromBearer(req));
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-    const openPositions = await Position.find({
-      user: user._id,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .catch(() => []);
-
-    if (!openPositions.length) {
-      return res.json({
-        ok: true,
-        msg: "No hay posiciones abiertas",
-        closed: 0,
-        totalRealized: 0,
-      });
-    }
-
-    let totalRealized = 0;
-    const closed = [];
-
-    for (const pos of openPositions) {
-      const currentPrice =
-        liveToNumber(
-          req.body?.currentPrice ??
-            liveGetCurrentPriceForSymbol(pos.symbol) ??
-            pos.currentPrice ??
-            pos.entryPrice ??
-            0
-        ) ?? 0;
-
-      const summary = await liveClosePositionDocument(pos, currentPrice, {
-        auto: false,
-      });
-      totalRealized += summary.realizedPnl;
-      closed.push(summary);
-    }
-
-    const account = await liveBuildAccountForUser(user);
-    liveEmitStateUpdates(user._id, account, closed, null);
-
-    return res.json({
-      ok: true,
-      msg: "Posiciones cerradas",
-      closed: closed.length,
-      totalRealized,
-      data: {
-        closed,
-        totalRealized,
-        account: account.account,
-        wallet: account.wallet,
-      },
-    });
-  } catch (err) {
-    console.error("/api/trade/close-all error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
-  }
-}
-
-/* ======================================================
    POLYGON SOCKET (realtime provider)
    ====================================================== */
 let polygonSocket = null;
@@ -1372,8 +437,6 @@ try {
   console.error("Error inicializando PolygonSocket:", err);
   polygonSocket = null;
 }
-
-livePatchPriceHandler(priceHandler);
 
 /* ======================================================
    MARKET ROUTES (factory)
@@ -1487,40 +550,19 @@ async function getWalletForUser(userId) {
 async function buildAccountForUser(user) {
   const wallet = await getWalletForUser(user._id);
   const positions = await getPositionsForUser(user._id);
-  const openPositions = (positions || []).filter((p) => !liveIsClosedPosition(p));
 
-  const balanceOwn = wallet?.balanceOwn ?? wallet?.balance ?? user.balance ?? 0;
-
-  const openPnl = openPositions.reduce((sum, p) => {
-    const entry = Number(p.entryPrice ?? p.price ?? p.openPrice ?? 0) || 0;
-    const current = Number(p.currentPrice ?? p.lastPrice ?? p.price ?? entry) || entry;
-    const qty = Number(p.qty ?? p.quantity ?? p.amount ?? p.positionSize ?? 0) || 0;
-    const side = String(p.side || p.direction || p.positionSide || "").toUpperCase();
-    const sign = side === "SELL" ? -1 : 1;
-    return sum + ((current - entry) * qty * sign);
-  }, 0);
-
-  const equity = balanceOwn + openPnl;
-  const marginUsed = Number(wallet?.marginUsed ?? 0) || 0;
-  const credit = Number(wallet?.credit ?? 0) || 0;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+  const balance = wallet?.balance ?? user.balance ?? 0;
 
   return {
     account: {
-      balance: equity,
-      balanceOwn,
-      equity,
-      openPnl,
-      marginUsed,
-      freeMargin,
-      marginLevel,
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
       leverage: user.leverage ?? 100,
       currency: user.currency || "USD",
       positions: positions || [],
-      openPositions,
-      hasBalance: balanceOwn > 0 || credit > 0,
-      canOpenTrade: balanceOwn + credit - marginUsed > 0,
     },
     user,
     wallet,
@@ -1578,22 +620,12 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const payload = await buildAccountForUser(user);
+    const wallet = await getWalletForUser(user._id);
+    if (wallet) return res.json(wallet);
+
     return res.json({
-      ok: true,
-      wallet: payload.wallet,
-      account: payload.account,
-      balance: payload.account.balance,
-      balanceOwn: payload.account.balanceOwn,
-      equity: payload.account.equity,
-      marginUsed: payload.account.marginUsed,
-      freeMargin: payload.account.freeMargin,
-      marginLevel: payload.account.marginLevel,
-      leverageFactor: payload.account.leverageFactor,
-      currency: payload.account.currency,
-      hasBalance: payload.account.hasBalance,
-      canOpenTrade: payload.account.canOpenTrade,
-      positions: payload.positions,
+      balance: user.balance ?? 0,
+      currency: user.currency || "USD",
     });
   } catch (e) {
     console.error("/api/wallet error", e);
@@ -1612,19 +644,6 @@ app.use("/api/api", (req, res) => {
   const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
   return res.redirect(307, newUrl);
 });
-
-/* ======================================================
-   CUSTOM TRADE ROUTES (antes del router original)
-   ====================================================== */
-app.post("/api/trade/open", tradeBalanceGuard, liveOpenRouteHandler);
-app.post("/api/trade/close", tradeBalanceGuard, liveCloseRouteHandler);
-app.post("/api/trade/close-all", tradeBalanceGuard, liveCloseAllRouteHandler);
-app.post("/api/order", tradeBalanceGuard, liveOpenRouteHandler);
-app.post("/api/orders", tradeBalanceGuard, liveOpenRouteHandler);
-app.post("/api/trade/order", tradeBalanceGuard, liveOpenRouteHandler);
-app.post("/api/trade/orders", tradeBalanceGuard, liveOpenRouteHandler);
-
-app.use("/api/trade", tradeRoutes);
 
 /* ======================================================
    SOCKET.IO EVENTS
@@ -1919,6 +938,880 @@ const server = httpServer.listen(PORT, () => {
 });
 
 /* ======================================================
+   LIVE TRADE / PnL / BALANCE GUARD
+   - No toca admin balance
+   - Solo controla apertura/cierre de trades
+   ====================================================== */
+const liveTradeTransactionSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+    userId: { type: String, index: true },
+    type: { type: String, index: true }, // trade_open | trade_close | pnl_update | liquidation
+    amount: { type: Number, default: 0 },
+    status: { type: String, default: "completed" },
+    note: { type: String, default: "" },
+    balanceBefore: { type: Number, default: 0 },
+    balanceAfter: { type: Number, default: 0 },
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+    source: { type: String, default: "server.js" },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { minimize: false }
+);
+
+const LiveTradeTransaction =
+  mongoose.models.LiveTradeTransaction ||
+  mongoose.model("LiveTradeTransaction", liveTradeTransactionSchema);
+
+function liveToNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function liveCompactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function liveNormalizeSide(value) {
+  const s = String(value || "").trim().toUpperCase();
+  if (!s) return "";
+  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
+  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
+  return "";
+}
+
+function liveNormalizeQty(body = {}) {
+  const n = Number(
+    body.qty ??
+      body.quantity ??
+      body.amount ??
+      body.positionSize ??
+      body.notional ??
+      body.size
+  );
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function liveNormalizePrice(body = {}) {
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    null;
+
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function liveGetPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function liveGetCurrentPriceForSymbol(symbol) {
+  const target = liveCompactSymbol(symbol);
+  if (!target) return null;
+
+  const store = liveGetPriceStore();
+  const entries = Object.entries(store);
+
+  for (const [key, item] of entries) {
+    const candidates = [
+      key,
+      key.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
+    ];
+
+    if (candidates.some((c) => liveCompactSymbol(c) === target)) {
+      return (
+        liveToNumber(
+          item?.price ??
+            item?.last ??
+            item?.close ??
+            item?.value ??
+            item?.mark ??
+            item?.mid ??
+            item?.lp
+        ) ?? null
+      );
+    }
+  }
+
+  return null;
+}
+
+function liveIsClosedPosition(p = {}) {
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
+
+  return (
+    status.includes("close") ||
+    status === "closed" ||
+    !!p.closedAt ||
+    !!p.closed_at
+  );
+}
+
+function liveComputePositionPnl(position = {}, currentPrice = null) {
+  const entry =
+    liveToNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
+    0;
+
+  const qty =
+    liveToNumber(
+      position.qty ??
+        position.quantity ??
+        position.amount ??
+        position.positionSize ??
+        0
+    ) ?? 0;
+
+  const side = liveNormalizeSide(
+    position.side || position.direction || position.positionSide
+  );
+
+  const px = liveToNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
+  const sign = side === "SELL" ? -1 : 1;
+
+  return (px - entry) * qty * sign;
+}
+
+async function liveGetUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+      return null;
+    }
+
+    const userId =
+      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+
+    const user = await User.findById(userId).catch(() => null);
+    return user || null;
+  } catch {
+    return null;
+  }
+}
+
+async function liveGetWalletForUser(userId) {
+  try {
+    let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+
+    if (!wallet) {
+      wallet = new Wallet({
+        user: userId,
+        balanceOwn: 0,
+        balance: 0,
+        credit: 0,
+        marginUsed: 0,
+        leverageFactor: 1,
+        equity: 0,
+        freeMargin: 0,
+        marginLevel: 0,
+      });
+    }
+
+    return wallet;
+  } catch {
+    return null;
+  }
+}
+
+async function liveLoadOpenPositions(userId) {
+  try {
+    const rows = await Position.find({
+      user: userId,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+function liveNormalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = liveToNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
+  const credit = liveToNumber(wallet?.credit ?? 0) ?? 0;
+  const marginUsed = Math.max(liveToNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  return {
+    balance: equity,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: liveToNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
+}
+
+async function liveBuildAccountForUser(userDoc) {
+  const wallet = await liveGetWalletForUser(userDoc._id);
+  const openPositions = await liveLoadOpenPositions(userDoc._id);
+
+  const openPnl = openPositions.reduce(
+    (sum, p) => sum + (liveToNumber(p.pnl ?? 0) || 0),
+    0
+  );
+
+  const normalizedWallet = liveNormalizeWalletSnapshot(wallet, openPnl);
+
+  return {
+    account: {
+      ...normalizedWallet,
+      leverage: liveToNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
+      currency: userDoc.currency || wallet.currency || "USD",
+      positions: openPositions,
+      openPositions,
+      hasBalance: normalizedWallet.balanceOwn > 0 || normalizedWallet.credit > 0,
+      canOpenTrade:
+        normalizedWallet.balanceOwn + normalizedWallet.credit - normalizedWallet.marginUsed >
+        0,
+    },
+    user: userDoc.toObject ? userDoc.toObject() : userDoc,
+    wallet: wallet.toObject ? wallet.toObject() : wallet,
+    positions: openPositions,
+  };
+}
+
+async function liveRecordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
+  try {
+    const payload = {
+      user: user?._id || user?.user || user?.id || null,
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date(),
+    };
+
+    const tx = await LiveTradeTransaction.create(payload);
+    return tx.toObject ? tx.toObject() : tx;
+  } catch (err) {
+    console.warn("liveRecordTransaction fallback:", err?.message || err);
+    return {
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+async function liveEmitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
+  try {
+    io.emit("wallet_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
+    io.emit("account_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
+    if (Array.isArray(positions)) {
+      io.emit("positions_update", { userId, positions });
+    }
+    if (transaction) {
+      io.emit("transactions_update", { userId, transaction });
+    }
+  } catch (e) {
+    console.warn("liveEmitStateUpdates error:", e?.message || e);
+  }
+}
+
+async function liveRecalcAndSaveWalletForUser(userId) {
+  const wallet = await liveGetWalletForUser(userId);
+  const positions = await liveLoadOpenPositions(userId);
+  const openPnl = positions.reduce((sum, p) => sum + (liveToNumber(p.pnl ?? 0) || 0), 0);
+  const snap = liveNormalizeWalletSnapshot(wallet, openPnl);
+
+  wallet.balanceOwn = snap.balanceOwn;
+  wallet.balance = snap.balance;
+  wallet.equity = snap.equity;
+  wallet.freeMargin = snap.freeMargin;
+  wallet.marginLevel = snap.marginLevel;
+  wallet.openPnl = snap.openPnl;
+  wallet.updatedAt = new Date();
+  await wallet.save();
+
+  return { wallet, positions, snap };
+}
+
+async function liveClosePositionDocument(positionDoc, closePrice, { auto = false } = {}) {
+  const userId = positionDoc.user;
+  const wallet = await liveGetWalletForUser(userId);
+
+  const balanceBefore = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? 0) ?? 0;
+  const marginUsedBefore = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
+  const reservedMargin = liveToNumber(positionDoc.marginReserved ?? 0) ?? 0;
+  const entryPrice =
+    liveToNumber(positionDoc.entryPrice ?? positionDoc.price ?? positionDoc.openPrice ?? 0) ??
+    0;
+  const qty =
+    liveToNumber(
+      positionDoc.qty ??
+        positionDoc.quantity ??
+        positionDoc.amount ??
+        positionDoc.positionSize ??
+        0
+    ) ?? 0;
+  const side = liveNormalizeSide(positionDoc.side || positionDoc.direction);
+  const sign = side === "SELL" ? -1 : 1;
+  const currentPrice = liveToNumber(closePrice) ?? entryPrice;
+  const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+
+  wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
+  wallet.balanceOwn = balanceBefore + realizedPnl;
+  wallet.balance = wallet.balanceOwn;
+  wallet.equity = wallet.balanceOwn;
+  wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+  wallet.updatedAt = new Date();
+  await wallet.save();
+
+  positionDoc.status = "CLOSED";
+  positionDoc.currentPrice = currentPrice;
+  positionDoc.closePrice = currentPrice;
+  positionDoc.realizedPnl = realizedPnl;
+  positionDoc.pnl = realizedPnl;
+  positionDoc.closedAt = new Date();
+  positionDoc.updatedAt = new Date();
+  await positionDoc.save();
+
+  const user = await User.findById(userId).catch(() => null);
+  if (user) {
+    user.balance = wallet.balanceOwn;
+    await user.save();
+  }
+
+  const tx = await liveRecordTransaction({
+    user: user || { _id: userId },
+    type: "trade_close",
+    amount: realizedPnl,
+    status: auto ? "liquidated" : "completed",
+    note: `${side} ${positionDoc.symbol}`,
+    balanceBefore,
+    balanceAfter: wallet.balanceOwn,
+    meta: {
+      positionId: String(positionDoc._id),
+      symbol: positionDoc.symbol,
+      side,
+      qty,
+      entryPrice,
+      closePrice: currentPrice,
+      marginReleased: reservedMargin,
+      realizedPnl,
+      auto,
+    },
+    source: auto ? "api/trade/auto-close" : "api/trade/close",
+  });
+
+  const account = user ? await liveBuildAccountForUser(user) : null;
+  const annotated = positionDoc.toObject ? positionDoc.toObject() : positionDoc;
+
+  liveEmitStateUpdates(userId, account, [annotated], tx);
+
+  return {
+    ok: true,
+    positionId: positionDoc._id,
+    symbol: positionDoc.symbol,
+    side,
+    qty,
+    entryPrice,
+    currentPrice,
+    realizedPnl,
+    balance: wallet.balanceOwn,
+    account: account?.account || null,
+    wallet: account?.wallet || (wallet.toObject ? wallet.toObject() : wallet),
+    position: annotated,
+    transaction: tx,
+  };
+}
+
+async function liveSyncPnLForSymbol(rawSymbol, currentPrice) {
+  const target = liveCompactSymbol(rawSymbol);
+  if (!target || !Number.isFinite(Number(currentPrice))) return;
+
+  const openPositions = await Position.find({
+    status: { $in: ["OPEN", "open", "Open"] },
+  }).catch(() => []);
+
+  const touchedUsers = new Set();
+
+  for (const pos of openPositions) {
+    const candidates = [
+      pos.symbol,
+      pos.tvSymbol,
+      pos.ticker,
+      pos.marketSymbol,
+      pos.asset,
+      pos.name,
+    ];
+
+    if (!candidates.some((c) => liveCompactSymbol(c) === target)) continue;
+
+    pos.currentPrice = currentPrice;
+    pos.pnl = liveComputePositionPnl(pos, currentPrice);
+    pos.unrealizedPnl = pos.pnl;
+    pos.updatedAt = new Date();
+
+    const marginReserved = liveToNumber(pos.marginReserved ?? 0) ?? 0;
+    const shouldLiquidate = marginReserved > 0 && pos.pnl <= -marginReserved;
+
+    if (shouldLiquidate) {
+      await liveClosePositionDocument(pos, currentPrice, { auto: true });
+    } else {
+      await pos.save();
+    }
+
+    touchedUsers.add(String(pos.user));
+  }
+
+  for (const userId of touchedUsers) {
+    const user = await User.findById(userId).catch(() => null);
+    if (!user) continue;
+
+    const account = await liveBuildAccountForUser(user);
+    liveEmitStateUpdates(userId, account, account.positions || [], null);
+  }
+}
+
+function livePatchPriceHandler(handler) {
+  if (!handler || handler.__livePnLPatchApplied) return;
+
+  const originalHandle =
+    typeof handler.handle === "function" ? handler.handle.bind(handler) : null;
+
+  handler.handle = async (data) => {
+    const result = originalHandle ? await originalHandle(data) : undefined;
+
+    try {
+      const symbol = String(
+        data?.symbol ?? data?.tvSymbol ?? data?.ticker ?? data?.s ?? data?.marketSymbol ?? ""
+      );
+      const price = liveToNumber(
+        data?.price ??
+          data?.last ??
+          data?.close ??
+          data?.value ??
+          data?.mark ??
+          data?.mid ??
+          data?.lp
+      );
+
+      if (symbol && price !== null) {
+        await liveSyncPnLForSymbol(symbol, price);
+      }
+    } catch (e) {
+      console.warn("livePnL sync error:", e?.message || e);
+    }
+
+    return result;
+  };
+
+  handler.__livePnLPatchApplied = true;
+}
+
+async function tradeBalanceGuard(req, res, next) {
+  try {
+    const user = await liveGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const wallet = await liveGetWalletForUser(user._id);
+    const balanceOwn = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const credit = liveToNumber(wallet.credit ?? 0) ?? 0;
+    const marginUsed = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    if (balanceOwn + credit <= 0) {
+      return res.status(403).json({
+        ok: false,
+        error: "no_balance",
+        message: "La cuenta no tiene balance disponible para abrir operaciones",
+      });
+    }
+
+    if (freeMargin <= 0) {
+      return res.status(403).json({
+        ok: false,
+        error: "no_free_margin",
+        message: "No hay margen libre para abrir operaciones",
+      });
+    }
+
+    req.liveUser = user;
+    req.liveWallet = wallet;
+    next();
+  } catch (err) {
+    console.error("tradeBalanceGuard error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+function liveOpenRouteHandler() {
+  return async (req, res) => {
+    try {
+      const user = req.liveUser || (await liveGetUserFromBearer(req));
+      if (!user) {
+        return res.status(401).json({ ok: false, error: "Unauthorized" });
+      }
+
+      const body = req.body || {};
+      const symbol = String(
+        body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+      )
+        .trim()
+        .toUpperCase();
+
+      const side = liveNormalizeSide(body.side ?? body.direction ?? body.action);
+      const qty = liveNormalizeQty(body);
+      const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+
+      if (!symbol) {
+        return res.status(400).json({
+          ok: false,
+          error: "symbol_required",
+          message: "symbol es requerido",
+        });
+      }
+
+      if (!side) {
+        return res.status(400).json({
+          ok: false,
+          error: "side_required",
+          message: "side/direction debe ser BUY o SELL",
+        });
+      }
+
+      if (!qty) {
+        return res.status(400).json({
+          ok: false,
+          error: "quantity_required",
+          message: "qty/quantity/amount es requerido y debe ser mayor que 0",
+        });
+      }
+
+      const wallet = await liveGetWalletForUser(user._id);
+      const balanceOwn = liveToNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+      const credit = liveToNumber(wallet.credit ?? 0) ?? 0;
+      const marginUsed = liveToNumber(wallet.marginUsed ?? 0) ?? 0;
+      const freeMargin = balanceOwn + credit - marginUsed;
+
+      const leverage = Math.max(
+        liveToNumber(
+          body.leverage ??
+            body.leverageFactor ??
+            wallet.leverageFactor ??
+            user.leverage ??
+            1
+        ) || 1,
+        1
+      );
+
+      const marketPrice = liveGetCurrentPriceForSymbol(symbol);
+      const requestedPrice = liveNormalizePrice(body);
+
+      let entryPrice =
+        type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
+
+      if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "price_unavailable",
+          message: "No hay precio disponible para este símbolo",
+        });
+      }
+
+      const notional = Math.abs(qty * entryPrice);
+      const requiredMargin = notional / leverage;
+
+      if (freeMargin < requiredMargin) {
+        return res.status(400).json({
+          ok: false,
+          error: "insufficient_funds",
+          message: "Fondos insuficientes para abrir la operación",
+          freeMargin,
+          requiredMargin,
+        });
+      }
+
+      wallet.balanceOwn = balanceOwn;
+      wallet.balance = balanceOwn;
+      wallet.marginUsed = marginUsed + requiredMargin;
+      wallet.equity = balanceOwn;
+      wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
+      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+      wallet.leverageFactor = leverage;
+      wallet.updatedAt = new Date();
+      await wallet.save();
+
+      user.balance = balanceOwn;
+      user.leverage = leverage;
+      await user.save();
+
+      const position = await Position.create({
+        user: user._id,
+        symbol,
+        side,
+        qty,
+        entryPrice,
+        currentPrice: entryPrice,
+        marginReserved: requiredMargin,
+        leverage,
+        status: "OPEN",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const tx = await liveRecordTransaction({
+        user,
+        type: "trade_open",
+        amount: requiredMargin,
+        status: "reserved",
+        note: `${side} ${symbol}`,
+        balanceBefore: balanceOwn,
+        balanceAfter: balanceOwn,
+        meta: {
+          symbol,
+          side,
+          qty,
+          leverage,
+          entryPrice,
+          currentPrice: entryPrice,
+          marginReserved: requiredMargin,
+        },
+        source: "api/trade/open",
+      });
+
+      const account = await liveBuildAccountForUser(user);
+      const annotatedPosition = position.toObject ? position.toObject() : position;
+
+      liveEmitStateUpdates(user._id, account, [annotatedPosition], tx);
+
+      return res.status(201).json({
+        ok: true,
+        msg: "Operación abierta",
+        data: {
+          positionId: position._id,
+          status: "OPEN",
+          symbol,
+          side,
+          qty,
+          entryPrice,
+          currentPrice: entryPrice,
+          marginReserved: requiredMargin,
+          leverage,
+          account: account.account,
+          wallet: account.wallet,
+          position: annotatedPosition,
+          transaction: tx,
+        },
+      });
+    } catch (err) {
+      console.error("/api/trade/open error:", err);
+      return res.status(500).json({
+        ok: false,
+        error: "server_error",
+        message: err?.message || "Error interno",
+      });
+    }
+  };
+}
+
+async function liveCloseRouteHandler(req, res) {
+  try {
+    const user = req.liveUser || (await liveGetUserFromBearer(req));
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
+    const symbol = String(body.symbol || "").trim().toUpperCase();
+
+    let position = null;
+
+    if (positionId) {
+      position = await Position.findOne({
+        _id: positionId,
+        user: user._id,
+        status: { $in: ["OPEN", "open", "Open"] },
+      }).catch(() => null);
+    }
+
+    if (!position && symbol) {
+      position = await Position.findOne({
+        user: user._id,
+        symbol,
+        status: { $in: ["OPEN", "open", "Open"] },
+      })
+        .sort({ createdAt: -1 })
+        .catch(() => null);
+    }
+
+    if (!position) {
+      return res.status(404).json({
+        ok: false,
+        error: "position_not_found",
+        message: "Posición no encontrada",
+      });
+    }
+
+    const currentPriceRaw =
+      body.currentPrice ??
+      liveGetCurrentPriceForSymbol(position.symbol) ??
+      position.currentPrice ??
+      position.entryPrice ??
+      0;
+
+    const summary = await liveClosePositionDocument(position, currentPriceRaw, {
+      auto: false,
+    });
+
+    return res.json({
+      ok: true,
+      msg: "Posición cerrada",
+      data: summary,
+    });
+  } catch (err) {
+    console.error("/api/trade/close error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+}
+
+async function liveCloseAllRouteHandler(req, res) {
+  try {
+    const user = req.liveUser || (await liveGetUserFromBearer(req));
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const openPositions = await Position.find({
+      user: user._id,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .catch(() => []);
+
+    if (!openPositions.length) {
+      return res.json({
+        ok: true,
+        msg: "No hay posiciones abiertas",
+        closed: 0,
+        totalRealized: 0,
+      });
+    }
+
+    let totalRealized = 0;
+    const closed = [];
+
+    for (const pos of openPositions) {
+      const currentPrice =
+        liveToNumber(
+          req.body?.currentPrice ??
+            liveGetCurrentPriceForSymbol(pos.symbol) ??
+            pos.currentPrice ??
+            pos.entryPrice ??
+            0
+        ) ?? 0;
+
+      const summary = await liveClosePositionDocument(pos, currentPrice, {
+        auto: false,
+      });
+      totalRealized += summary.realizedPnl;
+      closed.push(summary);
+    }
+
+    const account = await liveBuildAccountForUser(user);
+    liveEmitStateUpdates(user._id, account, closed, null);
+
+    return res.json({
+      ok: true,
+      msg: "Posiciones cerradas",
+      closed: closed.length,
+      totalRealized,
+      data: {
+        closed,
+        totalRealized,
+        account: account.account,
+        wallet: account.wallet,
+      },
+    });
+  } catch (err) {
+    console.error("/api/trade/close-all error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+}
+                            
+
+/* ======================================================
    GRACEFUL SHUTDOWN
    ====================================================== */
 let shuttingDown = false;
@@ -2001,5 +1894,7 @@ process.on("uncaughtException", (e) => {
   console.error("UncaughtException:", e);
   gracefulShutdown("uncaughtException").catch(() => {});
 });
+
+
 
 export default app;
