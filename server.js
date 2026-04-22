@@ -950,67 +950,13 @@ app.get("/api/account/transactions", async (req, res) => {
 /* ======================================================
    ADMIN: DEPOSITS / HISTORY / ACCOUNT UPDATE
    ====================================================== */
-
-// ⚠️ IMPORTANTE: NO redefinir getWalletDocForUser
-// Se asume que ya existe en tu proyecto
-
-function requireAdmin(req, res, next) {
-  const key = req.headers["x-admin-key"];
-  if (!process.env.ADMIN_API_KEY || key !== process.env.ADMIN_API_KEY) {
-    return res.status(403).json({ ok: false, error: "unauthorized" });
-  }
-  next();
-}
-
-async function recordTransaction({
-  user,
-  type,
-  amount,
-  status,
-  note,
-  balanceBefore,
-  balanceAfter,
-  meta,
-  source,
-}) {
-  return {
-    id: Date.now(),
-    user: user._id,
-    type,
-    amount,
-    status,
-    note,
-    balanceBefore,
-    balanceAfter,
-    meta,
-    source,
-    createdAt: new Date(),
-  };
-}
-
-function emitStateUpdates(userId, account, extra, tx) {
-  try {
-    if (global.io) {
-      global.io.to(String(userId)).emit("account:update", account);
-      if (tx) {
-        global.io.to(String(userId)).emit("transaction:new", tx);
-      }
-    }
-  } catch (e) {
-    console.warn("emitStateUpdates error", e);
-  }
-}
-
-/* ======================================================
-   DEPOSIT
-   ====================================================== */
 app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
     const userId = body.userId || body.user || body.clientId || null;
-    const amount = Number(body.amount ?? body.depositAmount ?? 0);
+    const amount = Number(body.amount ?? body.depositAmount ?? body.balance ?? 0);
     const leverage = body.leverage !== undefined ? Number(body.leverage) : null;
-    const note = String(body.note || "Admin deposit").trim();
+    const note = String(body.note || body.description || "Admin deposit").trim();
     const currency = String(body.currency || "USD").trim();
 
     if (!userId) {
@@ -1021,31 +967,36 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       return res.status(400).json({ ok: false, error: "amount_required" });
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).catch(() => null);
     if (!user) {
       return res.status(404).json({ ok: false, error: "user_not_found" });
     }
 
-    const wallet = await Wallet.findOneAndUpdate(
-      { user: user._id },
-      {},
-      { new: true, upsert: true }
-    );
+    const wallet = await getWalletDocForUser(user._id);
+    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
 
-    const balanceBefore = Number(wallet.balance || 0);
-
-    wallet.balance = balanceBefore + amount;
-    wallet.balanceOwn = wallet.balance;
+    wallet.balanceOwn = balanceBefore + amount;
+    wallet.balance = wallet.balanceOwn;
+    wallet.currency = currency || wallet.currency || "USD";
 
     if (Number.isFinite(leverage) && leverage > 0) {
       wallet.leverageFactor = leverage;
       user.leverage = leverage;
     }
 
+    wallet.equity = wallet.balanceOwn;
+    wallet.marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.updatedAt = new Date();
+
     await wallet.save();
 
-    user.balance = wallet.balance;
-    user.currency = currency;
+    user.balance = wallet.balanceOwn;
+    user.currency = currency || user.currency || "USD";
+    if (Number.isFinite(leverage) && leverage > 0) {
+      user.leverage = leverage;
+    }
     await user.save();
 
     const tx = await recordTransaction({
@@ -1055,9 +1006,14 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       status: "completed",
       note,
       balanceBefore,
-      balanceAfter: wallet.balance,
-      meta: { currency },
-      source: "admin",
+      balanceAfter: wallet.balanceOwn,
+      meta: {
+        source: "admin-panel",
+        method: body.method || "deposit",
+        currency,
+        leverage: wallet.leverageFactor,
+      },
+      source: "api/admin/deposit",
     });
 
     const account = await buildAccountForUser(user);
@@ -1065,35 +1021,54 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
 
     return res.json({
       ok: true,
-      balance: wallet.balance,
-      transaction: tx,
+      msg: "Depósito aplicado",
+      data: {
+        balance: wallet.balanceOwn,
+        leverage: wallet.leverageFactor,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+      },
     });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
-    res.status(500).json({ ok: false, error: "server_error" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   }
 });
 
-/* ======================================================
-   TRANSACTIONS
-   ====================================================== */
 app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
   try {
+    const userId = req.query.userId || null;
+    const limit = Math.min(Number(req.query.limit || 100) || 100, 500);
+
+    const txs = await loadAllTransactions(limit, userId || null);
+
     return res.json({
       ok: true,
-      transactions: [],
+      count: txs.length,
+      transactions: txs,
+      data: txs,
+      items: txs,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false });
+    console.error("/api/admin/transactions error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   }
 });
 
 /* ======================================================
-   PANEL ADMIN
+   🔥 PANEL ADMIN (LO QUE TE FALTA)
    ====================================================== */
 
-// Obtener usuario
+// Obtener datos del usuario para el panel
 app.get("/api/admin/user/:id", requireAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).lean();
@@ -1106,55 +1081,109 @@ app.get("/api/admin/user/:id", requireAdmin, async (req, res) => {
       symbol: user.symbol ?? "BINANCE:BTCUSDT",
     });
   } catch (e) {
+    console.error("admin/user error", e);
     res.status(500).json({ error: "error" });
   }
 });
 
-// Update balance
+// Actualizar balance
 app.post("/api/admin/update-balance", requireAdmin, async (req, res) => {
   try {
     const { userId, balance } = req.body;
+    const newBalance = Number(balance);
+
+    if (!userId || !Number.isFinite(newBalance)) {
+      return res.status(400).json({ ok: false, error: "userId_or_balance_invalid" });
+    }
+
+    // Actualiza User
+    await User.findByIdAndUpdate(userId, {
+      balance: newBalance,
+    });
+
+    // 🔥 ACTUALIZA TAMBIÉN WALLET (AQUÍ ESTÁ LA CLAVE)
+    await Wallet.findOneAndUpdate(
+      { user: userId },
+      {
+        $set: {
+          balance: newBalance,
+          balanceOwn: newBalance,
+          equity: newBalance,
+          freeMargin: newBalance,
+          marginUsed: 0,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    const updatedUser = await User.findById(userId).catch(() => null);
+    if (updatedUser) {
+      const account = await buildAccountForUser(updatedUser);
+      emitStateUpdates(userId, account, null, null);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("update-balance error", e);
+    res.status(500).json({ error: "error" });
+  }
+});
+
+// Actualizar leverage
+app.post("/api/admin/update-leverage", requireAdmin, async (req, res) => {
+  try {
+    const { userId, leverage } = req.body;
+    const newLeverage = Number(leverage);
+
+    if (!userId || !Number.isFinite(newLeverage)) {
+      return res.status(400).json({ ok: false, error: "userId_or_leverage_invalid" });
+    }
 
     await User.findByIdAndUpdate(userId, {
-      balance: Number(balance),
+      leverage: newLeverage,
     });
 
     await Wallet.findOneAndUpdate(
       { user: userId },
-      { balance: Number(balance) },
-      { upsert: true }
+      {
+        $set: {
+          leverageFactor: newLeverage,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true }
     );
 
+    const updatedUser = await User.findById(userId).catch(() => null);
+    if (updatedUser) {
+      const account = await buildAccountForUser(updatedUser);
+      emitStateUpdates(userId, account, null, null);
+    }
+
     res.json({ ok: true });
   } catch (e) {
+    console.error("update-leverage error", e);
     res.status(500).json({ error: "error" });
   }
 });
 
-// Update leverage
-app.post("/api/admin/update-leverage", requireAdmin, async (req, res) => {
-  try {
-    const { userId, leverage } = req.body;
-
-    await User.findByIdAndUpdate(userId, {
-      leverage: Number(leverage),
-    });
-
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: "error" });
-  }
-});
-
-// Update symbol
+// Actualizar símbolo del gráfico
 app.post("/api/admin/update-symbol", requireAdmin, async (req, res) => {
   try {
     const { userId, symbol } = req.body;
 
-    await User.findByIdAndUpdate(userId, { symbol });
+    if (!userId || !symbol) {
+      return res.status(400).json({ ok: false, error: "userId_or_symbol_invalid" });
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      symbol,
+    });
 
     res.json({ ok: true });
   } catch (e) {
+    console.error("update-symbol error", e);
     res.status(500).json({ error: "error" });
   }
 });
@@ -1932,35 +1961,15 @@ let shuttingDown = false;
 
 const safeClosePolygonSocket = async () => {
   if (!polygonSocket) return;
-
   try {
-    // 🔥 Validar si existe conexión real antes de cerrar
-    if (polygonSocket.ws) {
-      const state = polygonSocket.ws.readyState;
-
-      // 0 = CONNECTING
-      // 1 = OPEN
-      // 2 = CLOSING
-      // 3 = CLOSED
-
-      if (state === 0 || state === 1) {
-        try {
-          const maybe = polygonSocket.close();
-
-          if (maybe && typeof maybe.then === "function") {
-            await maybe.catch((err) => {
-              console.warn("polygonSocket.close() rejected:", err);
-            });
-          }
-        } catch (err) {
-          console.warn("Error cerrando polygonSocket:", err.message);
-        }
-      } else {
-        console.log("PolygonSocket ya estaba cerrado");
-      }
+    const maybe = polygonSocket.close();
+    if (maybe && typeof maybe.then === "function") {
+      await maybe.catch((err) => {
+        console.warn("polygonSocket.close() rejected:", err);
+      });
     }
   } catch (e) {
-    console.warn("safeClosePolygonSocket error:", e.message);
+    console.warn("polygonSocket.close() threw:", e);
   }
 };
 
