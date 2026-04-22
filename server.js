@@ -24,7 +24,6 @@ import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import positionsRoutes from "./routes/positions.routes.js";
-import tradeRoutes from "./routes/trade.routes.js";
 import accountRoutes from "./routes/account.routes.js";
 
 import { startRiskWatcher } from "./jobs/risk.job.js";
@@ -166,6 +165,13 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
   if (!s) return "";
@@ -211,13 +217,6 @@ function getPriceStore() {
   } catch {
     return {};
   }
-}
-
-function compactSymbol(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
 }
 
 function normalizeQuote(symbol, item = {}) {
@@ -310,7 +309,9 @@ function computePositionPnl(position = {}, currentPrice = null) {
       position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0
     ) ?? 0;
 
-  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const side = normalizeSide(
+    position.side || position.direction || position.positionSide
+  );
 
   const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
   const sign = side === "SELL" ? -1 : 1;
@@ -399,26 +400,86 @@ async function getWalletForUser(userId) {
   }
 }
 
+function normalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
+  const credit = toNumber(wallet?.credit ?? 0) ?? 0;
+  const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
+}
+
+async function loadOpenPositionsForUser(userId) {
+  try {
+    const rows = await Position.find({
+      user: userId,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
+    return (rows || []).map(annotatePosition);
+  } catch {
+    return [];
+  }
+}
+
+async function loadAllPositionsForUser(userId) {
+  try {
+    const rows = await Position.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
+    return (rows || []).map(annotatePosition);
+  } catch {
+    return [];
+  }
+}
+
 async function buildAccountForUser(user) {
   const wallet = await getWalletForUser(user._id);
   const positions = await getPositionsForUser(user._id);
+  const openPositions = positions.filter(
+    (p) => !isClosedPosition(p) && String(p.status || "").toUpperCase() !== "CLOSED"
+  );
 
-  const balance = wallet?.balance ?? user.balance ?? 0;
+  const openPnl = openPositions.reduce(
+    (sum, p) => sum + (toNumber(p.pnl ?? 0) || 0),
+    0
+  );
+
+  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+  const recentTransactions = await loadTransactionsForUser(user._id, 20);
 
   return {
     account: {
-      balance,
-      equity: balance,
-      marginUsed: 0,
-      freeMargin: balance,
-      marginLevel: 0,
-      leverage: user.leverage ?? 100,
-      currency: user.currency || "USD",
-      positions: positions || [],
+      ...normalizedWallet,
+      leverage: toNumber(user.leverage ?? wallet?.leverageFactor ?? 100) ?? 100,
+      currency: user.currency || wallet?.currency || "USD",
+      positions: openPositions,
+      openPositions,
+      recentTransactions,
+      transactions: recentTransactions,
     },
-    user,
-    wallet,
-    positions,
+    user: user.toObject ? user.toObject() : user,
+    wallet: wallet?.toObject ? wallet.toObject() : wallet,
+    positions: openPositions,
+    transactions: recentTransactions,
   };
 }
 
@@ -516,35 +577,6 @@ async function loadAllTransactions(limit = 200, userId = null) {
   }
 }
 
-async function loadOpenPositionsForUser(userId) {
-  try {
-    const rows = await Position.find({
-      user: userId,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec()
-      .catch(() => []);
-    return (rows || []).map(annotatePosition);
-  } catch {
-    return [];
-  }
-}
-
-async function loadAllPositionsForUser(userId) {
-  try {
-    const rows = await Position.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec()
-      .catch(() => []);
-    return (rows || []).map(annotatePosition);
-  } catch {
-    return [];
-  }
-}
-
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
   try {
     io.emit("wallet_update", {
@@ -571,13 +603,18 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
    ====================================================== */
 async function requireAdmin(req, res, next) {
   try {
-    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+    const key = String(
+      req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || ""
+    );
     if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) {
       return next();
     }
 
     const user = await getUserDocFromBearer(req);
-    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
+    if (
+      user &&
+      (user.role === "admin" || user.isAdmin === true || user.admin === true)
+    ) {
       req.user = user;
       return next();
     }
@@ -693,7 +730,7 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   MARKET SAMPLE / FALLBACK
+   SAMPLE SYMBOLS / FALLBACK
    ====================================================== */
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
@@ -815,18 +852,11 @@ try {
 }
 
 /* ======================================================
-   Helper: obtener usuario desde token (si aplica)
-   ====================================================== */
-async function getUserFromBearer(req) {
-  return getUserDocFromBearer(req);
-}
-
-/* ======================================================
    Compat endpoints: /api/account, /api/me, /api/profile
    ====================================================== */
 async function accountLikeHandler(req, res) {
   try {
-    const user = await getUserFromBearer(req);
+    const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const payload = await buildAccountForUser(user);
@@ -931,7 +961,7 @@ async function tradeBalanceGuard(req, res, next) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
-    const wallet = await getWalletDocForUser(user._id);
+    const wallet = await getWalletForUser(user._id);
 
     if (!wallet) {
       return res.status(404).json({ ok: false, error: "Wallet not found" });
@@ -1019,7 +1049,7 @@ async function tradeOpenHandlerLive(req, res) {
     }
 
     const wallet =
-      req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+      req.liveWallet || req.wallet || (await getWalletForUser(user._id));
 
     const leverage = Math.max(
       toNumber(
@@ -1115,7 +1145,9 @@ async function tradeOpenHandlerLive(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1205,7 +1237,8 @@ async function tradeCloseHandlerLive(req, res) {
     const sign = side === "SELL" ? -1 : 1;
     const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
-    const wallet = req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+    const wallet =
+      req.liveWallet || req.wallet || (await getWalletForUser(user._id));
 
     const balanceBefore =
       toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
@@ -1256,7 +1289,9 @@ async function tradeCloseHandlerLive(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1329,7 +1364,8 @@ async function tradeCloseAllHandlerLive(req, res) {
       const sign = side === "SELL" ? -1 : 1;
       const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
-      const wallet = req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+      const wallet =
+        req.liveWallet || req.wallet || (await getWalletForUser(user._id));
       const balanceBefore =
         toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
       const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
@@ -1438,6 +1474,51 @@ app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
 );
+
+app.get("/api/quotes", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.quotes);
+});
+
+app.get("/api/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+
+app.get("/api/market/quotes", (req, res) => {
+  return res.json(buildMarketPayload());
+});
+
+app.get("/api/market/latest", (req, res) => {
+  const payload = buildMarketPayload();
+  return res.json(payload.latest || {});
+});
+
+app.get("/api/market/polygon/quotes", (req, res) => {
+  return res.json(buildMarketPayload());
+});
+
+app.get("/api/market/polygon/symbols", (req, res) => {
+  return res.json(SAMPLE_SYMBOLS);
+});
+
+app.get("/api/symbols", (req, res) => {
+  try {
+    const prices = getPriceStore();
+    if (prices && Object.keys(prices).length) {
+      const arr = Object.keys(prices).map((k) => ({
+        symbol: k,
+        label: (k.split(":").pop() || k).replace("_", "/"),
+        market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
+      }));
+      return res.json(arr);
+    }
+    return res.json(SAMPLE_SYMBOLS);
+  } catch (err) {
+    console.error("api/symbols error:", err);
+    return res.json(SAMPLE_SYMBOLS);
+  }
+});
 
 /* ======================================================
    SOCKET.IO EVENTS
@@ -1611,7 +1692,10 @@ app.use(async (req, res, next) => {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
 
-      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
+      res
+        .status(200)
+        .type("application/javascript; charset=utf-8")
+        .send(cleaned);
       return;
     }
 
