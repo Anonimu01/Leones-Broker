@@ -1908,15 +1908,35 @@ let shuttingDown = false;
 
 const safeClosePolygonSocket = async () => {
   if (!polygonSocket) return;
+
   try {
-    const maybe = polygonSocket.close();
-    if (maybe && typeof maybe.then === "function") {
-      await maybe.catch((err) => {
-        console.warn("polygonSocket.close() rejected:", err);
-      });
+    // 🔥 Validar si existe conexión real antes de cerrar
+    if (polygonSocket.ws) {
+      const state = polygonSocket.ws.readyState;
+
+      // 0 = CONNECTING
+      // 1 = OPEN
+      // 2 = CLOSING
+      // 3 = CLOSED
+
+      if (state === 0 || state === 1) {
+        try {
+          const maybe = polygonSocket.close();
+
+          if (maybe && typeof maybe.then === "function") {
+            await maybe.catch((err) => {
+              console.warn("polygonSocket.close() rejected:", err);
+            });
+          }
+        } catch (err) {
+          console.warn("Error cerrando polygonSocket:", err.message);
+        }
+      } else {
+        console.log("PolygonSocket ya estaba cerrado");
+      }
     }
   } catch (e) {
-    console.warn("polygonSocket.close() threw:", e);
+    console.warn("safeClosePolygonSocket error:", e.message);
   }
 };
 
