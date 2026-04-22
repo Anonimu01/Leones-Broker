@@ -1527,6 +1527,7 @@ async function positionsLikeHandlerLive(req, res) {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const positions = await loadOpenPositionsForUser(user._id);
+
     return res.json({
       ok: true,
       positions,
@@ -1549,6 +1550,7 @@ app.get("/api/positions/all", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const positions = await loadAllPositionsForUser(user._id);
+
     return res.json({
       ok: true,
       positions,
@@ -1565,6 +1567,7 @@ app.get("/api/positions/all", async (req, res) => {
 /* ======================================================
    TRADE BALANCE GUARD
    ====================================================== */
+
 async function tradeBalanceGuard(req, res, next) {
   try {
     const user = await getUserDocFromBearer(req);
@@ -1578,7 +1581,8 @@ async function tradeBalanceGuard(req, res, next) {
       return res.status(404).json({ ok: false, error: "Wallet not found" });
     }
 
-    const balanceOwn = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceOwn =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     const credit = toNumber(wallet.credit ?? 0) ?? 0;
     const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
     const freeMargin = balanceOwn + credit - marginUsed;
@@ -1614,6 +1618,7 @@ async function tradeBalanceGuard(req, res, next) {
 /* ======================================================
    TRADE OPEN / CLOSE / CLOSE ALL
    ====================================================== */
+
 async function tradeOpenHandlerLive(req, res) {
   try {
     const user = req.liveUser || req.user || (await getUserDocFromBearer(req));
@@ -1622,13 +1627,17 @@ async function tradeOpenHandlerLive(req, res) {
     }
 
     const body = req.body || {};
-    const symbol = String(body.symbol || body.tvSymbol || body.ticker || body.asset || "")
+    const symbol = String(
+      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+    )
       .trim()
       .toUpperCase();
 
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+    const type = String(body.type ?? body.orderType ?? "market")
+      .trim()
+      .toLowerCase();
 
     if (!symbol) {
       return res.status(400).json({
@@ -1654,7 +1663,8 @@ async function tradeOpenHandlerLive(req, res) {
       });
     }
 
-    const wallet = req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+    const wallet =
+      req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
 
     const leverage = Math.max(
       toNumber(
@@ -1671,7 +1681,9 @@ async function tradeOpenHandlerLive(req, res) {
     const requestedPrice = normalizePrice(body);
 
     let entryPrice =
-      type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
+      type === "limit" && requestedPrice
+        ? requestedPrice
+        : marketPrice || requestedPrice;
 
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
       return res.status(400).json({
@@ -1681,7 +1693,8 @@ async function tradeOpenHandlerLive(req, res) {
       });
     }
 
-    const balanceOwn = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceOwn =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     const credit = toNumber(wallet.credit ?? 0) ?? 0;
     const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
     const freeMargin = balanceOwn + credit - marginUsed;
@@ -1704,7 +1717,8 @@ async function tradeOpenHandlerLive(req, res) {
     wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.leverageFactor = leverage;
     wallet.updatedAt = new Date();
     await wallet.save();
@@ -1748,7 +1762,9 @@ async function tradeOpenHandlerLive(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1789,7 +1805,8 @@ async function tradeCloseHandlerLive(req, res) {
     }
 
     const body = req.body || {};
-    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
+    const positionId =
+      body.positionId || body.id || body._id || body.tradeId || null;
     const symbol = String(body.symbol || "").trim().toUpperCase();
 
     let position = null;
@@ -1829,16 +1846,20 @@ async function tradeCloseHandlerLive(req, res) {
 
     const currentPrice = toNumber(currentPriceRaw) ?? 0;
     const entryPrice =
-      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
-    const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
+      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
+      0;
+    const qty =
+      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
     const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
-    const wallet = req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+    const wallet =
+      req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
 
-    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceBefore =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     const marginUsedBefore = toNumber(wallet.marginUsed ?? 0) ?? 0;
     const reservedMargin = toNumber(position.marginReserved ?? 0) ?? 0;
 
@@ -1847,7 +1868,8 @@ async function tradeCloseHandlerLive(req, res) {
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -1885,7 +1907,9 @@ async function tradeCloseHandlerLive(req, res) {
     });
 
     const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+    const annotatedPosition = annotatePosition(
+      position.toObject ? position.toObject() : position
+    );
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
@@ -1951,14 +1975,17 @@ async function tradeCloseAllHandlerLive(req, res) {
             0
         ) ?? 0;
 
-      const entryPrice = toNumber(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) ?? 0;
+      const entryPrice =
+        toNumber(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) ?? 0;
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
       const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
-      const wallet = req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
-      const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+      const wallet =
+        req.liveWallet || req.wallet || (await getWalletDocForUser(user._id));
+      const balanceBefore =
+        toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
       const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
 
       wallet.marginUsed = Math.max(
@@ -1969,7 +1996,8 @@ async function tradeCloseAllHandlerLive(req, res) {
       wallet.balance = wallet.balanceOwn;
       wallet.equity = wallet.balanceOwn;
       wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+      wallet.marginLevel =
+        wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
       wallet.updatedAt = new Date();
       await wallet.save();
 
@@ -2044,11 +2072,9 @@ app.post("/api/trade/open", tradeBalanceGuard, tradeOpenHandlerLive);
 app.post("/api/trade/close", tradeBalanceGuard, tradeCloseHandlerLive);
 app.post("/api/trade/close-all", tradeBalanceGuard, tradeCloseAllHandlerLive);
 
-// compatibility aliases
 app.post("/api/order", tradeBalanceGuard, tradeOpenHandlerLive);
 app.post("/api/orders", tradeBalanceGuard, tradeOpenHandlerLive);
 app.post("/api/trade/order", tradeBalanceGuard, tradeOpenHandlerLive);
 app.post("/api/trade/orders", tradeBalanceGuard, tradeOpenHandlerLive);
-
 
 export default app;
