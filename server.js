@@ -166,27 +166,7 @@ symbols.forEach((sym) => {
   });
 });
 
-/* ===============================
-🔥 OBTENER PRECIO POR SÍMBOLO
- ===============================*/
-function getCurrentPriceForSymbol(symbol) {
-  if (!symbol) return null;
 
-  const normalized = String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-  const direct = priceStore[normalized];
-  if (direct?.price) return Number(direct.price);
-
-  // fallback búsqueda parcial
-  for (const key in priceStore) {
-    if (key.includes(normalized)) {
-      const price = Number(priceStore[key]?.price);
-      if (Number.isFinite(price)) return price;
-    }
-  }
-
-  return null;
-}
 
 // ===============================
 // 🔥 API REST PRICE FALLBACK
