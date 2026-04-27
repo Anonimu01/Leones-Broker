@@ -256,6 +256,228 @@ app.post("/api/_send_test_email", async (req, res) => {
   }
 });
 
+/**
+ * ======================================================
+ * FUNCIÓN: ABRIR OPERACIÓN (BUY / SELL)
+ * Esta función se ejecuta cuando el usuario le da a comprar o vender.
+ * - Valida datos (symbol, side, qty)
+ * - Calcula el margen requerido según el leverage
+ * - Verifica fondos disponibles (freeMargin)
+ * - Reserva margen en el wallet
+ * - Crea la posición en estado OPEN
+ * - Registra la transacción como "trade_open"
+ * - Emite actualización en tiempo real
+ * ======================================================
+ */
+async function tradeOpenHandler(req, res) {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const symbol = String(
+      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+    ).trim().toUpperCase();
+
+    const side = normalizeSide(body.side ?? body.direction ?? body.action);
+    const qty = normalizeQty(body);
+    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+
+    if (!symbol) {
+      return res.status(400).json({ ok: false, error: "symbol_required" });
+    }
+
+    if (!side) {
+      return res.status(400).json({ ok: false, error: "side_required" });
+    }
+
+    if (!qty) {
+      return res.status(400).json({ ok: false, error: "quantity_required" });
+    }
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const leverage = Math.max(
+      toNumber(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) || 1,
+      1
+    );
+
+    const marketPrice = getCurrentPriceForSymbol(symbol);
+    const requestedPrice = normalizePrice(body);
+
+    let entryPrice =
+      type === "limit" && requestedPrice
+        ? requestedPrice
+        : marketPrice || requestedPrice;
+
+    if (!entryPrice || entryPrice <= 0) {
+      return res.status(400).json({ ok: false, error: "price_unavailable" });
+    }
+
+    const balanceOwn = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const credit = toNumber(wallet.credit ?? 0) ?? 0;
+    const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    const notional = Math.abs(qty * entryPrice);
+    const requiredMargin = notional / leverage;
+
+    if (freeMargin < requiredMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds",
+        freeMargin,
+        requiredMargin,
+      });
+    }
+
+    // 👉 Reservar margen
+    wallet.marginUsed = marginUsed + requiredMargin;
+    wallet.balance = balanceOwn;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    // 👉 Crear posición
+    const position = await Position.create({
+      user: user._id,
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      currentPrice: entryPrice,
+      marginReserved: requiredMargin,
+      leverage,
+      status: "OPEN",
+      createdAt: new Date(),
+    });
+
+    // 👉 Registrar transacción
+    const tx = await recordTransaction({
+      user,
+      type: "trade_open",
+      amount: requiredMargin,
+      status: "reserved",
+      note: `${side} ${symbol}`,
+      balanceBefore: balanceOwn,
+      balanceAfter: balanceOwn,
+    });
+
+    const account = await buildAccountForUser(user);
+
+    emitStateUpdates(user._id, account, [position], tx);
+
+    return res.status(201).json({
+      ok: true,
+      msg: "Operación abierta",
+      position,
+      account,
+    });
+  } catch (err) {
+    console.error("tradeOpenHandler error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+}
+
+/**
+ * ======================================================
+ * FUNCIÓN: CERRAR OPERACIÓN
+ * Esta función se ejecuta cuando el usuario le da a cerrar.
+ * - Busca la posición abierta
+ * - Obtiene el precio actual
+ * - Calcula el PnL (ganancia o pérdida)
+ * - Libera el margen reservado
+ * - Suma/resta el resultado al balance
+ * - Marca la posición como CLOSED
+ * - Registra la transacción como "trade_close"
+ * - Emite actualización en tiempo real
+ * ======================================================
+ */
+async function tradeCloseHandler(req, res) {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const positionId = body.positionId || body.id || null;
+
+    const position = await Position.findOne({
+      _id: positionId,
+      user: user._id,
+      status: "OPEN",
+    });
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "position_not_found" });
+    }
+
+    const currentPrice =
+      toNumber(
+        body.currentPrice ??
+        getCurrentPriceForSymbol(position.symbol) ??
+        position.entryPrice
+      ) ?? 0;
+
+    const entryPrice = toNumber(position.entryPrice) ?? 0;
+    const qty = toNumber(position.qty) ?? 0;
+
+    const side = normalizeSide(position.side);
+    const sign = side === "SELL" ? -1 : 1;
+
+    // 👉 Calcular ganancia o pérdida
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceBefore = toNumber(wallet.balanceOwn ?? 0) ?? 0;
+    const reservedMargin = toNumber(position.marginReserved ?? 0) ?? 0;
+
+    // 👉 Liberar margen y aplicar resultado
+    wallet.marginUsed = Math.max(wallet.marginUsed - reservedMargin, 0);
+    wallet.balanceOwn = balanceBefore + realizedPnl;
+    wallet.balance = wallet.balanceOwn;
+    wallet.updatedAt = new Date();
+    await wallet.save();
+
+    // 👉 Cerrar posición
+    position.status = "CLOSED";
+    position.currentPrice = currentPrice;
+    position.realizedPnl = realizedPnl;
+    position.closedAt = new Date();
+    await position.save();
+
+    // 👉 Registrar transacción
+    const tx = await recordTransaction({
+      user,
+      type: "trade_close",
+      amount: realizedPnl,
+      status: "completed",
+      note: `${side} ${position.symbol}`,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+    });
+
+    const account = await buildAccountForUser(user);
+
+    emitStateUpdates(user._id, account, [position], tx);
+
+    return res.json({
+      ok: true,
+      msg: "Posición cerrada",
+      pnl: realizedPnl,
+      balance: wallet.balanceOwn,
+      account,
+    });
+  } catch (err) {
+    console.error("tradeCloseHandler error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+}
+
+
 /* ======================================================
    API ROUTES - montamos rutas principales
    ====================================================== */
