@@ -93,7 +93,6 @@ mongoose.connection.on("disconnected", () => {
 
 
 
-
 // ===============================
 // 🔥 PRICE STORE GLOBAL (REAL)
 // ===============================
@@ -104,15 +103,37 @@ function getPriceStore() {
 }
 
 // ===============================
+// 🔥 MAPEO FOREX → BINANCE SYMBOLS
+// ===============================
+function mapSymbolToBinance(symbol) {
+  const map = {
+    AUDUSD: "AUDUSDT",
+    EURUSD: "EURUSDT",
+    GBPUSD: "GBPUSDT",
+    BTCUSD: "BTCUSDT",
+    ETHUSD: "ETHUSDT"
+  };
+
+  return map[symbol] || symbol;
+}
+
+// ===============================
 // 🔥 WEBSOCKET BINANCE (PRECIOS REALES)
 // ===============================
 import WebSocket from "ws";
 
 const BINANCE_WS = "wss://stream.binance.com:9443/ws";
 
-// 🔥 símbolos que vas a usar
-const symbols = ["btcusdt", "ethusdt", "eurusdt"];
+// 🔥 símbolos que vas a usar en Binance
+const symbols = [
+  "btcusdt",
+  "ethusdt",
+  "eurusdt",
+  "audusdt",
+  "gbpusdt"
+];
 
+// 🔥 conectar streams
 symbols.forEach((sym) => {
   const ws = new WebSocket(`${BINANCE_WS}/${sym}@trade`);
 
@@ -122,16 +143,18 @@ symbols.forEach((sym) => {
 
       const price = parseFloat(json.p);
 
-      if (!isFinite(price)) return;
+      if (!Number.isFinite(price)) return;
 
-      priceStore[sym.toUpperCase()] = {
-        symbol: sym.toUpperCase(),
+      const key = sym.toUpperCase();
+
+      priceStore[key] = {
+        symbol: key,
         price,
         time: Date.now()
       };
 
-      // DEBUG
-      // console.log("📡 PRICE:", sym.toUpperCase(), price);
+      // DEBUG opcional
+      // console.log("📡 PRICE:", key, price);
 
     } catch (err) {
       console.error("WS parse error:", err);
@@ -143,10 +166,57 @@ symbols.forEach((sym) => {
   });
 });
 
+// ===============================
+// 🔥 OBTENER PRECIO POR SÍMBOLO
+// ===============================
+function getCurrentPriceForSymbol(symbol) {
+  const mapped = mapSymbolToBinance(symbol);
+  const key = mapped.toUpperCase();
 
+  const data = priceStore[key];
 
+  if (!data) return null;
 
+  return Number.isFinite(data.price) ? data.price : null;
+}
 
+// ===============================
+// 🔥 API REST PRICE FALLBACK
+// ===============================
+app.get("/api/price/:symbol", async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+
+    const map = {
+      AUDUSD: "AUD/USD",
+      EURUSD: "EUR/USD",
+      GBPUSD: "GBP/USD"
+    };
+
+    const pair = map[symbol];
+
+    if (!pair) {
+      return res.status(400).json({ error: "Par no soportado" });
+    }
+
+    const url = `https://api.exchangerate.host/convert?from=${pair.split("/")[0]}&to=${pair.split("/")[1]}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const price = data?.result;
+
+    if (!Number.isFinite(price)) {
+      return res.status(500).json({ error: "Precio inválido API externa" });
+    }
+
+    res.json({ price });
+
+  } catch (err) {
+    console.error("Error obteniendo precio:", err);
+    res.status(500).json({ error: "Error obteniendo precio" });
+  }
+});
 
 
 /* ======================================================
@@ -344,10 +414,10 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
 
 
 
-
 /* ======================================================
    🔥 PRECIO + NORMALIZACIÓN (CLAVE PARA QUE NO TE DÉ 400)
    ====================================================== */
+
 function normalizePrice(body = {}) {
   const raw =
     body.price ??
@@ -359,15 +429,35 @@ function normalizePrice(body = {}) {
     null;
 
   if (raw === null || raw === undefined || raw === "") return null;
+
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+
+/* =========================
+   🔥 SAFE SYMBOL NORMALIZER
+   ========================= */
+function safeSymbol(symbol = "") {
+  if (!symbol) return null;
+  return String(symbol)
+    .replace(":", "")
+    .replace("/", "")
+    .replace("_", "")
+    .trim()
+    .toUpperCase();
+}
+
+
+/* ======================================================
+   🔥 PRICE STORE LOOKUP
+   ====================================================== */
+
 function getCurrentPriceForSymbol(symbol) {
-  const target = compactSymbol(symbol);
+  const target = safeSymbol(symbol);
   if (!target) return null;
 
-  const store = getPriceStore();
+  const store = getPriceStore?.() || {};
   const entries = Object.entries(store);
 
   for (const [key, item] of entries) {
@@ -382,67 +472,80 @@ function getCurrentPriceForSymbol(symbol) {
       item?.marketSymbol,
     ];
 
-    if (candidates.some((c) => compactSymbol(c) === target)) {
-      return (
-        toNumber(
-          item?.price ??
-            item?.last ??
-            item?.close ??
-            item?.value ??
-            item?.mark ??
-            item?.mid ??
-            item?.lp
-        ) ?? null
+    if (
+      candidates.some((c) => safeSymbol(c) === target)
+    ) {
+      const price = Number(
+        item?.price ??
+        item?.last ??
+        item?.close ??
+        item?.value ??
+        item?.mark ??
+        item?.mid ??
+        item?.lp
       );
+
+      return Number.isFinite(price) ? price : null;
     }
   }
 
   return null;
 }
 
-/* ======================================================
-   CÁLCULO DE PNL (TIEMPO REAL)
-   ====================================================== */
-function computePositionPnl(position = {}, currentPrice = null) {
-  const entry = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
-  const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
-  const side = normalizeSide(position.side || position.direction || position.positionSide);
 
-  const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
+/* ======================================================
+   🔥 CÁLCULO DE PNL (TIEMPO REAL)
+   ====================================================== */
+
+function computePositionPnl(position = {}, currentPrice = null) {
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0);
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0);
+
+  const sideRaw = position.side || position.direction || position.positionSide || "BUY";
+  const side = String(sideRaw).toUpperCase();
+
+  const px = Number(currentPrice ?? position.currentPrice ?? entry);
+
+  if (!Number.isFinite(entry) || !Number.isFinite(px) || !Number.isFinite(qty)) {
+    return 0;
+  }
+
   const sign = side === "SELL" ? -1 : 1;
 
-  return ((px - entry) * qty) * sign;
+  return (px - entry) * qty * sign;
 }
 
+
 /* ======================================================
-   🔥 ANOTACIÓN DE POSICIÓN (LO QUE TE LLENA EL FRONT)
+   🔥 ANOTACIÓN DE POSICIÓN (FRONTEND)
    ====================================================== */
+
 function annotatePosition(position = {}) {
   const currentPrice =
-    toNumber(
+    Number(
       position.currentPrice ??
-        getCurrentPriceForSymbol(position.symbol) ??
-        position.price ??
-        position.entryPrice ??
-        0
-    ) ?? 0;
+      getCurrentPriceForSymbol(position.symbol) ??
+      position.price ??
+      position.entryPrice ??
+      0
+    ) || 0;
 
-  const entryPrice =
-    toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-    0;
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
 
-  const qty =
-    toNumber(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) ?? 0;
+  const qty = Number(
+    position.qty ??
+    position.quantity ??
+    position.amount ??
+    position.positionSize ??
+    0
+  ) || 0;
 
-  const pnl = isClosedPosition(position)
-    ? toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0
-    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+  const pnl = isClosedPosition?.(position)
+    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
+    : computePositionPnl(
+        { ...position, entryPrice, qty },
+        currentPrice
+      );
 
   return {
     ...position,
@@ -451,12 +554,15 @@ function annotatePosition(position = {}) {
     qty,
     pnl,
     unrealizedPnl: pnl,
-    isOpen: !isClosedPosition(position),
+    isOpen: !isClosedPosition?.(position),
   };
 }
+
+
 /* ======================================================
-   🔥 ABRIR OPERACIÓN (FIX: SIN ERROR 400 POR PRECIO)
+   🔥 ABRIR OPERACIÓN (FIX REAL DEL 400)
    ====================================================== */
+
 async function tradeOpenHandler(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
@@ -465,15 +571,18 @@ async function tradeOpenHandler(req, res) {
     }
 
     const body = req.body || {};
-    const symbol = String(
-      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
-    )
-      .trim()
-      .toUpperCase();
 
-    const side = normalizeSide(body.side ?? body.direction ?? body.action);
-    const qty = normalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+    const symbol = safeSymbol(
+      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+    );
+
+    const side = String(
+      normalizeSide?.(body.side ?? body.direction ?? body.action) || ""
+    ).toUpperCase();
+
+    const qty = Number(normalizeQty?.(body));
+
+    const type = String(body.type ?? body.orderType ?? "market").toLowerCase();
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "symbol_required" });
@@ -483,26 +592,21 @@ async function tradeOpenHandler(req, res) {
       return res.status(400).json({ ok: false, error: "side_required" });
     }
 
-    if (!qty) {
+    if (!qty || qty <= 0) {
       return res.status(400).json({ ok: false, error: "quantity_required" });
     }
 
-    const wallet = await getWalletDocForUser(user._id);
-
-    // 🔥 PRECIO
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
 
     let entryPrice =
       type === "limit" && requestedPrice
         ? requestedPrice
-        : marketPrice || requestedPrice;
+        : marketPrice ?? requestedPrice;
 
-    // ✅ FIX: evitar error 400
-    if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
-      console.warn("⚠️ Precio inválido, usando fallback:", symbol);
-
-      entryPrice = requestedPrice || 1; // 🔥 fallback seguro
+    // 🔥 FIX CRÍTICO (evita 400)
+    if (!entryPrice || !Number.isFinite(entryPrice)) {
+      entryPrice = requestedPrice || 1;
     }
 
     const position = await Position.create({
@@ -520,6 +624,7 @@ async function tradeOpenHandler(req, res) {
       ok: true,
       data: position,
     });
+
   } catch (err) {
     console.error("/api/trade/open error:", err);
     return res.status(500).json({
@@ -529,9 +634,11 @@ async function tradeOpenHandler(req, res) {
   }
 }
 
+
 /* ======================================================
-   🔥 CERRAR OPERACIÓN (REALIZA PNL)
+   🔥 CERRAR OPERACIÓN (PNL CORREGIDO)
    ====================================================== */
+
 async function tradeCloseHandler(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
@@ -539,8 +646,7 @@ async function tradeCloseHandler(req, res) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
-    const body = req.body || {};
-    const positionId = body.positionId;
+    const positionId = req.body?.positionId;
 
     const position = await Position.findOne({
       _id: positionId,
@@ -569,12 +675,15 @@ async function tradeCloseHandler(req, res) {
       pnl,
       position,
     });
+
   } catch (err) {
     console.error("/api/trade/close error:", err);
-    return res.status(500).json({ ok: false, error: "server_error" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+    });
   }
 }
-
 
 
 
