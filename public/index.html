@@ -4847,31 +4847,52 @@ async function placeOrder(input) {
     symbol = String(symbol || "").replace("/", "").toUpperCase();
 
     // 🔥 VALIDACIONES
-    if (!symbol) return alert("Selecciona un símbolo primero");
-    if (!amount || amount <= 0) return alert("Cantidad inválida");
-    if (!side) return alert("Dirección inválida");
+    if (!symbol) {
+      alert("Selecciona un símbolo primero");
+      return;
+    }
 
-    // 🔥 🚀 OBTENER PRECIO REAL DEL FRONT
+    if (!amount || amount <= 0) {
+      alert("Cantidad inválida");
+      return;
+    }
+
+    if (!side) {
+      alert("Dirección inválida");
+      return;
+    }
+
+    // 🔥 OBTENER PRECIO REAL
     let currentPrice =
       window.lastPrice ||
       window.currentPrice ||
       window.price ||
       null;
 
-    // intentar desde store si existe
-    if (!currentPrice && typeof getCurrentPriceForSymbol === "function") {
+    // intentar desde función si existe
+    if ((!currentPrice || !isFinite(currentPrice)) && typeof getCurrentPriceForSymbol === "function") {
       currentPrice = getCurrentPriceForSymbol(symbol);
     }
 
-    // 🔥 fallback duro (para evitar 400)
-    if (!currentPrice || !isFinite(currentPrice)) {
-      console.warn("⚠️ Precio no disponible, usando fallback:", symbol);
-      currentPrice = 1;
+    console.log("📊 Precio detectado:", currentPrice);
+
+    // ❌ BLOQUEAR SI NO HAY PRECIO REAL
+    if (!currentPrice || !isFinite(currentPrice) || currentPrice <= 0) {
+      console.error("❌ No hay precio válido, orden cancelada");
+      alert("Precio no disponible. Espera que cargue el mercado.");
+      return;
     }
 
-    // 🔥 SI ES MARKET → FORZAMOS PRECIO
+    // 🔥 MARKET → USAR PRECIO REAL
     if (type === "market") {
       price = currentPrice;
+    }
+
+    // 🔥 VALIDAR PRECIO FINAL
+    if (!price || !isFinite(price) || price <= 0) {
+      console.error("❌ Precio inválido en orden");
+      alert("Precio inválido");
+      return;
     }
 
     const payload = {
