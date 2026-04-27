@@ -91,6 +91,64 @@ mongoose.connection.on("disconnected", () => {
   console.warn("⚠️ Mongo desconectado");
 });
 
+
+
+
+// ===============================
+// 🔥 PRICE STORE GLOBAL (REAL)
+// ===============================
+const priceStore = {};
+
+function getPriceStore() {
+  return priceStore;
+}
+
+// ===============================
+// 🔥 WEBSOCKET BINANCE (PRECIOS REALES)
+// ===============================
+import WebSocket from "ws";
+
+const BINANCE_WS = "wss://stream.binance.com:9443/ws";
+
+// 🔥 símbolos que vas a usar
+const symbols = ["btcusdt", "ethusdt", "eurusdt"];
+
+symbols.forEach((sym) => {
+  const ws = new WebSocket(`${BINANCE_WS}/${sym}@trade`);
+
+  ws.on("message", (data) => {
+    try {
+      const json = JSON.parse(data);
+
+      const price = parseFloat(json.p);
+
+      if (!isFinite(price)) return;
+
+      priceStore[sym.toUpperCase()] = {
+        symbol: sym.toUpperCase(),
+        price,
+        time: Date.now()
+      };
+
+      // DEBUG
+      // console.log("📡 PRICE:", sym.toUpperCase(), price);
+
+    } catch (err) {
+      console.error("WS parse error:", err);
+    }
+  });
+
+  ws.on("error", (err) => {
+    console.error("WS error:", err.message);
+  });
+});
+
+
+
+
+
+
+
 /* ======================================================
    SECURITY MIDDLEWARES
    ====================================================== */
@@ -547,17 +605,7 @@ const SAMPLE_SYMBOLS = [
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
 
-function getPriceStore() {
-  try {
-    const raw = priceHandler?.prices;
-    if (!raw) return {};
-    if (raw instanceof Map) return Object.fromEntries(raw.entries());
-    if (typeof raw === "object") return raw;
-    return {};
-  } catch {
-    return {};
-  }
-}
+
 
 function toNumber(value) {
   const n = Number(value);
