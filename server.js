@@ -170,14 +170,22 @@ symbols.forEach((sym) => {
 // 🔥 OBTENER PRECIO POR SÍMBOLO
 // ===============================
 function getCurrentPriceForSymbol(symbol) {
-  const mapped = mapSymbolToBinance(symbol);
-  const key = mapped.toUpperCase();
+  if (!symbol) return null;
 
-  const data = priceStore[key];
+  const normalized = String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-  if (!data) return null;
+  const direct = priceStore[normalized];
+  if (direct?.price) return Number(direct.price);
 
-  return Number.isFinite(data.price) ? data.price : null;
+  // fallback búsqueda parcial
+  for (const key in priceStore) {
+    if (key.includes(normalized)) {
+      const price = Number(priceStore[key]?.price);
+      if (Number.isFinite(price)) return price;
+    }
+  }
+
+  return null;
 }
 
 // ===============================
