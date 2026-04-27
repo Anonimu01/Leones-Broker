@@ -395,19 +395,11 @@ async function validateMarginAndNotify({ user, symbol, qty, entryPrice, leverage
 /**
  * ======================================================
  * FUNCIÓN: ABRIR OPERACIÓN (BUY / SELL)
- * Esta función se ejecuta cuando el usuario le da a comprar o vender.
- * - Valida datos (symbol, side, qty)
- * - Obtiene precio de mercado o usa el enviado por frontend
- * - Verifica fondos disponibles (freeMargin)
- * - Reserva margen en el wallet
- * - Crea la posición en estado OPEN
- * - Registra la transacción como "trade_open"
- * - Emite actualización en tiempo real
  * ======================================================
  */
 async function tradeOpenHandler(req, res) {
   try {
-    const user = await getUserDocFromBearer(req);
+    const user = await getUserFromBearer(req);
     if (!user) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -415,7 +407,9 @@ async function tradeOpenHandler(req, res) {
     const body = req.body || {};
     const symbol = String(
       body.symbol || body.tvSymbol || body.ticker || body.asset || ""
-    ).trim().toUpperCase();
+    )
+      .trim()
+      .toUpperCase();
 
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
@@ -451,7 +445,11 @@ async function tradeOpenHandler(req, res) {
 
     const leverage = Math.max(
       toNumber(
-        body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1
+        body.leverage ??
+          body.leverageFactor ??
+          wallet.leverageFactor ??
+          user.leverage ??
+          1
       ) || 1,
       1
     );
@@ -459,17 +457,25 @@ async function tradeOpenHandler(req, res) {
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
 
-    let entryPrice = null;
+    // ✅ LÓGICA CORRECTA SIN ROMPER BALANCE
+    let entryPrice =
+      type === "limit" && requestedPrice && requestedPrice > 0
+        ? requestedPrice
+        : marketPrice && marketPrice > 0
+        ? marketPrice
+        : requestedPrice && requestedPrice > 0
+        ? requestedPrice
+        : null;
 
-    if (type === "limit" && requestedPrice && requestedPrice > 0) {
-      entryPrice = requestedPrice;
-    } else if (marketPrice && marketPrice > 0) {
-      entryPrice = marketPrice;
-    } else if (requestedPrice && requestedPrice > 0) {
-      entryPrice = requestedPrice;
-    }
-
+    // ❌ SI NO HAY PRECIO → ERROR (NO INVENTAR PRECIO)
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+      console.warn("❌ No hay precio válido para abrir operación", {
+        symbol,
+        marketPrice,
+        requestedPrice,
+        type,
+      });
+
       return res.status(400).json({
         ok: false,
         error: "price_unavailable",
@@ -525,6 +531,10 @@ async function tradeOpenHandler(req, res) {
           closable: true,
           position: "top-right",
           duration: 5000,
+          health:
+            requiredMargin > freeMargin
+              ? "Cuenta en riesgo ⚠️"
+              : "Saldo insuficiente",
         },
       });
     }
@@ -545,6 +555,7 @@ async function tradeOpenHandler(req, res) {
       leverage,
       status: "OPEN",
       createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     const tx = await recordTransaction({
@@ -594,7 +605,7 @@ async function tradeOpenHandler(req, res) {
       },
     });
   } catch (err) {
-    console.error("/api/trade/open error:", err);
+    console.error("tradeOpenHandler error:", err);
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -602,7 +613,6 @@ async function tradeOpenHandler(req, res) {
     });
   }
 }
-
 
 
 
