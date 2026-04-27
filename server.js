@@ -618,6 +618,236 @@ async function tradeOpenHandler(req, res) {
   }
 }
 
+/* ======================================================
+   🔥 PRECIO + NORMALIZACIÓN (CLAVE PARA QUE NO TE DÉ 400)
+   ====================================================== */
+function normalizePrice(body = {}) {
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    null;
+
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function getCurrentPriceForSymbol(symbol) {
+  const target = compactSymbol(symbol);
+  if (!target) return null;
+
+  const store = getPriceStore();
+  const entries = Object.entries(store);
+
+  for (const [key, item] of entries) {
+    const candidates = [
+      key,
+      key.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
+    ];
+
+    if (candidates.some((c) => compactSymbol(c) === target)) {
+      return (
+        toNumber(
+          item?.price ??
+            item?.last ??
+            item?.close ??
+            item?.value ??
+            item?.mark ??
+            item?.mid ??
+            item?.lp
+        ) ?? null
+      );
+    }
+  }
+
+  return null;
+}
+
+/* ======================================================
+   CÁLCULO DE PNL (TIEMPO REAL)
+   ====================================================== */
+function computePositionPnl(position = {}, currentPrice = null) {
+  const entry = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
+  const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+
+  const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
+  const sign = side === "SELL" ? -1 : 1;
+
+  return ((px - entry) * qty) * sign;
+}
+
+/* ======================================================
+   🔥 ANOTACIÓN DE POSICIÓN (LO QUE TE LLENA EL FRONT)
+   ====================================================== */
+function annotatePosition(position = {}) {
+  const currentPrice =
+    toNumber(
+      position.currentPrice ??
+        getCurrentPriceForSymbol(position.symbol) ??
+        position.price ??
+        position.entryPrice ??
+        0
+    ) ?? 0;
+
+  const entryPrice =
+    toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
+    0;
+
+  const qty =
+    toNumber(
+      position.qty ??
+        position.quantity ??
+        position.amount ??
+        position.positionSize ??
+        0
+    ) ?? 0;
+
+  const pnl = isClosedPosition(position)
+    ? toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
+}
+/* ======================================================
+   🔥 ABRIR OPERACIÓN (ESTA ES LA QUE TE DA EL 400 SI FALLA)
+   ====================================================== */
+async function tradeOpenHandler(req, res) {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const symbol = String(
+      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+    )
+      .trim()
+      .toUpperCase();
+
+    const side = normalizeSide(body.side ?? body.direction ?? body.action);
+    const qty = normalizeQty(body);
+    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+
+    if (!symbol) {
+      return res.status(400).json({ ok: false, error: "symbol_required" });
+    }
+
+    if (!side) {
+      return res.status(400).json({ ok: false, error: "side_required" });
+    }
+
+    if (!qty) {
+      return res.status(400).json({ ok: false, error: "quantity_required" });
+    }
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    // 🔥 ESTAS DOS LÍNEAS SON LAS QUE PREGUNTASTE
+    const marketPrice = getCurrentPriceForSymbol(symbol);
+    const requestedPrice = normalizePrice(body);
+
+    let entryPrice =
+      type === "limit" && requestedPrice
+        ? requestedPrice
+        : marketPrice || requestedPrice;
+
+    if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "price_unavailable",
+      });
+    }
+
+    const position = await Position.create({
+      user: user._id,
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      currentPrice: entryPrice,
+      status: "OPEN",
+      createdAt: new Date(),
+    });
+
+    return res.status(201).json({
+      ok: true,
+      data: position,
+    });
+  } catch (err) {
+    console.error("/api/trade/open error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+    });
+  }
+}
+
+/* ======================================================
+   🔥 CERRAR OPERACIÓN (REALIZA PNL)
+   ====================================================== */
+async function tradeCloseHandler(req, res) {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+    const positionId = body.positionId;
+
+    const position = await Position.findOne({
+      _id: positionId,
+      user: user._id,
+      status: "OPEN",
+    });
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "position_not_found" });
+    }
+
+    const currentPrice =
+      getCurrentPriceForSymbol(position.symbol) ?? position.entryPrice;
+
+    const pnl = computePositionPnl(position, currentPrice);
+
+    position.status = "CLOSED";
+    position.currentPrice = currentPrice;
+    position.realizedPnl = pnl;
+    position.closedAt = new Date();
+
+    await position.save();
+
+    return res.json({
+      ok: true,
+      pnl,
+      position,
+    });
+  } catch (err) {
+    console.error("/api/trade/close error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+}
+
 
 
 
