@@ -256,6 +256,113 @@ app.post("/api/_send_test_email", async (req, res) => {
   }
 });
 
+
+/**
+ * ======================================================
+ * FUNCIÓN: VALIDAR MARGEN Y PERMITIR APERTURA
+ * - Verifica si el usuario tiene saldo suficiente (freeMargin)
+ * - Calcula margen requerido según precio, qty y leverage
+ * - Si NO tiene saldo → devuelve error con mensaje flotante (toast)
+ * - Si tiene saldo → devuelve ok=true para permitir abrir la posición
+ *
+ * ⚠️ IMPORTANTE:
+ * Esta función NO abre la operación, solo valida si se puede abrir.
+ * Se usa antes de crear la posición (tradeOpenHandler).
+ * ======================================================
+ */
+async function validateMarginAndNotify({ user, symbol, qty, entryPrice, leverage }) {
+  try {
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceOwn =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+
+    const credit = toNumber(wallet.credit ?? 0) ?? 0;
+    const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
+
+    // 👉 Margen disponible real
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    // 👉 Tamaño total de la operación
+    const notional = Math.abs(qty * entryPrice);
+
+    // 👉 Margen requerido según leverage
+    const requiredMargin = notional / Math.max(leverage || 1, 1);
+
+    // 👉 Nivel de margen (salud de cuenta)
+    const marginLevel =
+      marginUsed > 0 ? ((balanceOwn / marginUsed) * 100) : 100;
+
+    // ❌ SIN FONDOS
+    if (freeMargin < requiredMargin) {
+      return {
+        ok: false,
+        error: "insufficient_margin",
+
+        // 👉 MENSAJE LISTO PARA TOAST / MENSAJE FLOTANTE
+        toast: {
+          type: "error",
+          title: "Fondos insuficientes",
+          message: `No tienes margen suficiente para abrir esta operación.`,
+          details: {
+            balance: balanceOwn,
+            freeMargin,
+            requiredMargin,
+            marginLevel: Number(marginLevel.toFixed(2)),
+          },
+
+          // 👉 BOTÓN PARA CERRAR (FRONTEND)
+          closable: true,
+          position: "top-right",
+          duration: 5000,
+
+          // 👉 MENSAJE DE SALUD DE CUENTA
+          health:
+            marginLevel < 50
+              ? "Cuenta en riesgo ⚠️"
+              : "Margen insuficiente",
+        },
+      };
+    }
+
+    // ✅ TODO BIEN → PUEDE ABRIR
+    return {
+      ok: true,
+      data: {
+        freeMargin,
+        requiredMargin,
+        marginLevel: Number(marginLevel.toFixed(2)),
+      },
+
+      // 👉 MENSAJE OPCIONAL (puedes mostrarlo si quieres)
+      toast: {
+        type: "success",
+        title: "Operación permitida",
+        message: "La posición puede abrirse correctamente",
+        closable: true,
+        position: "top-right",
+        duration: 3000,
+      },
+    };
+  } catch (err) {
+    console.error("validateMarginAndNotify error:", err);
+
+    return {
+      ok: false,
+      error: "validation_error",
+      toast: {
+        type: "error",
+        title: "Error",
+        message: "No se pudo validar el margen",
+        closable: true,
+        position: "top-right",
+      },
+    };
+  }
+}
+
+
+
 /**
  * ======================================================
  * FUNCIÓN: ABRIR OPERACIÓN (BUY / SELL)
