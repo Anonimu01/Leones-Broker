@@ -457,7 +457,7 @@ async function tradeOpenHandler(req, res) {
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
 
-    // ✅ LÓGICA CORRECTA SIN ROMPER BALANCE
+    // ✅ LÓGICA CORRECTA
     let entryPrice =
       type === "limit" && requestedPrice && requestedPrice > 0
         ? requestedPrice
@@ -467,7 +467,7 @@ async function tradeOpenHandler(req, res) {
         ? requestedPrice
         : null;
 
-    // ❌ SI NO HAY PRECIO → ERROR (NO INVENTAR PRECIO)
+    // ❌ SI NO HAY PRECIO → ERROR
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
       console.warn("❌ No hay precio válido para abrir operación", {
         symbol,
@@ -509,8 +509,10 @@ async function tradeOpenHandler(req, res) {
       return res.status(400).json(validation);
     }
 
+    // 🔥 CORREGIDO: ahora usa primero el balance del admin (user.balance)
     const balanceOwn =
-      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+      toNumber(user.balance ?? wallet.balanceOwn ?? wallet.balance ?? 0) ?? 0;
+
     const credit = toNumber(wallet.credit ?? 0) ?? 0;
     const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
     const freeMargin = balanceOwn + credit - marginUsed;
@@ -539,7 +541,9 @@ async function tradeOpenHandler(req, res) {
       });
     }
 
+    // 🔥 CORREGIDO: sincroniza bien el wallet
     wallet.marginUsed = marginUsed + requiredMargin;
+    wallet.balanceOwn = balanceOwn;
     wallet.balance = balanceOwn;
     wallet.updatedAt = new Date();
     await wallet.save();
