@@ -4901,7 +4901,7 @@ document.addEventListener("click", (e) => {
 });
 
 /* =========================
-   🔥 ORDEN REAL BACKEND
+   🔥 ORDEN REAL BACKEND (FIXED)
 ========================= */
 async function placeBrokerOrder(payload = {}) {
 
@@ -4936,26 +4936,42 @@ async function placeBrokerOrder(payload = {}) {
 
   try {
     const res = await fetch('/api/trade/open', {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer " + (getUser()?.token || "")
-  },
-  body: JSON.stringify({
-    symbol,
-    side: direction,
-    type,
-    quantity: amount,
-    price
-  })
-});
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (getUser()?.token || "")
+      },
+      body: JSON.stringify({
+        symbol,
+        side: direction,
+        type,
 
-const data = await res.json();
+        // 🔥 FIX CLAVE (ANTES ESTABA MAL)
+        qty: amount,
+        quantity: amount,
+
+        price
+      })
+    });
+
+    const data = await res.json();
 
     console.log("📩 RESPUESTA BACKEND:", data);
 
-    if (!res.ok || !data || data.error) {
-      alert(data?.error || data?.msg || "Error abriendo operación");
+    // 🔥 DEBUG MÁS CLARO
+    if (!res.ok) {
+      console.error("❌ ERROR BACKEND:", data);
+
+      if (data?.error === "price_unavailable") {
+        alert("No hay precio disponible para este activo");
+      } else if (data?.error === "insufficient_funds") {
+        alert("Fondos insuficientes");
+      } else if (data?.error === "quantity_required") {
+        alert("Cantidad inválida (qty no llegó bien)");
+      } else {
+        alert(data?.error || data?.msg || "Error abriendo operación");
+      }
+
       return;
     }
 
@@ -4968,6 +4984,7 @@ const data = await res.json();
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
+    alert("Error de conexión con el servidor");
   }
 }
 
