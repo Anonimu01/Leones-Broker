@@ -874,7 +874,7 @@ async function tradeOpenHandler(req, res) {
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
 
-    // 🔥 REEMPLAZO CORREGIDO
+    // ✅ LÓGICA CORRECTA SIN ROMPER BALANCE
     let entryPrice =
       type === "limit" && requestedPrice && requestedPrice > 0
         ? requestedPrice
@@ -884,17 +884,34 @@ async function tradeOpenHandler(req, res) {
         ? requestedPrice
         : null;
 
-    // 🔥 FALLBACK PARA EVITAR ERROR 400
+    // ❌ SI NO HAY PRECIO → ERROR (NO INVENTAR PRECIO)
     if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
-      console.warn("⚠️ Precio no disponible, usando fallback");
+      console.warn("❌ No hay precio válido para abrir operación", {
+        symbol,
+        marketPrice,
+        requestedPrice,
+        type,
+      });
 
-      if (symbol.includes("BTC")) entryPrice = 65000;
-      else if (symbol.includes("ETH")) entryPrice = 3000;
-      else if (symbol.includes("EUR")) entryPrice = 1.1;
-      else if (symbol.includes("USDJPY")) entryPrice = 150;
-      else if (symbol.includes("AAPL")) entryPrice = 200;
-      else if (symbol.includes("SPX")) entryPrice = 5000;
-      else entryPrice = 100;
+      return res.status(400).json({
+        ok: false,
+        error: "price_unavailable",
+        message: "No hay precio disponible para abrir la operación",
+        toast: {
+          type: "error",
+          title: "Precio no disponible",
+          message: "No hay precio suficiente para abrir la operación.",
+          closable: true,
+          position: "top-right",
+          duration: 5000,
+        },
+        debug: {
+          symbol,
+          marketPrice,
+          requestedPrice,
+          type,
+        },
+      });
     }
 
     const validation = await validateMarginAndNotify({
