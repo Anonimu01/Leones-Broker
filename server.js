@@ -113,7 +113,7 @@ function normalizeSymbol(symbol = "") {
 // ===============================
 // 🔥 MAPEO FOREX → BINANCE SYMBOLS
 // ===============================
-function mapSymbolToBinance(symbol) {
+function mapSymbolToBinance(symbol = "") {
   const map = {
     AUDUSD: "AUDUSDT",
     EURUSD: "EURUSDT",
@@ -133,7 +133,7 @@ import WebSocket from "ws";
 
 const BINANCE_WS = "wss://stream.binance.com:9443/ws";
 
-// 🔥 símbolos base
+// 🔥 símbolos base (USDT only)
 const symbols = [
   "btcusdt",
   "ethusdt",
@@ -142,7 +142,7 @@ const symbols = [
   "gbpusdt",
 ];
 
-// 🔥 conectar streams
+// 🔥 conexión a streams
 symbols.forEach((sym) => {
   const ws = new WebSocket(`${BINANCE_WS}/${sym}@trade`);
 
@@ -161,6 +161,7 @@ symbols.forEach((sym) => {
         time: Date.now(),
       };
 
+      // DEBUG
       // console.log("📡 PRICE:", key, price);
 
     } catch (err) {
@@ -203,11 +204,11 @@ app.get("/api/price/:symbol", async (req, res) => {
       return res.status(500).json({ error: "Precio inválido API externa" });
     }
 
-    res.json({ price });
+    return res.json({ price });
 
   } catch (err) {
     console.error("Error obteniendo precio:", err);
-    res.status(500).json({ error: "Error obteniendo precio" });
+    return res.status(500).json({ error: "Error obteniendo precio" });
   }
 });
 
