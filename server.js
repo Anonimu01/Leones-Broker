@@ -255,6 +255,34 @@ app.post("/api/_send_test_email", async (req, res) => {
     });
   }
 });
+/* ======================================================
+   lee el saldo del cliente
+   ====================================================== */
+function normalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
+  const credit = toNumber(wallet?.credit ?? 0) ?? 0;
+  const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
+}
+
+
+
+
 
 
 /* ======================================================
