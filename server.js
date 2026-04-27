@@ -166,9 +166,9 @@ symbols.forEach((sym) => {
   });
 });
 
-// ===============================
-// 🔥 OBTENER PRECIO POR SÍMBOLO
-// ===============================
+/* ===============================
+🔥 OBTENER PRECIO POR SÍMBOLO
+ ===============================*/
 function getCurrentPriceForSymbol(symbol) {
   if (!symbol) return null;
 
