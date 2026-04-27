@@ -92,7 +92,6 @@ mongoose.connection.on("disconnected", () => {
 });
 
 
-
 // ===============================
 // 🔥 PRICE STORE GLOBAL (REAL)
 // ===============================
@@ -100,6 +99,15 @@ const priceStore = {};
 
 function getPriceStore() {
   return priceStore;
+}
+
+// ===============================
+// 🔥 NORMALIZADOR GLOBAL
+// ===============================
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 // ===============================
@@ -111,10 +119,11 @@ function mapSymbolToBinance(symbol) {
     EURUSD: "EURUSDT",
     GBPUSD: "GBPUSDT",
     BTCUSD: "BTCUSDT",
-    ETHUSD: "ETHUSDT"
+    ETHUSD: "ETHUSDT",
   };
 
-  return map[symbol] || symbol;
+  const normalized = normalizeSymbol(symbol);
+  return map[normalized] || normalized;
 }
 
 // ===============================
@@ -124,13 +133,13 @@ import WebSocket from "ws";
 
 const BINANCE_WS = "wss://stream.binance.com:9443/ws";
 
-// 🔥 símbolos que vas a usar en Binance
+// 🔥 símbolos base
 const symbols = [
   "btcusdt",
   "ethusdt",
   "eurusdt",
   "audusdt",
-  "gbpusdt"
+  "gbpusdt",
 ];
 
 // 🔥 conectar streams
@@ -141,19 +150,17 @@ symbols.forEach((sym) => {
     try {
       const json = JSON.parse(data);
 
-      const price = parseFloat(json.p);
+      const price = Number(json.p);
+      if (!Number.isFinite(price) || price <= 0) return;
 
-      if (!Number.isFinite(price)) return;
-
-      const key = sym.toUpperCase();
+      const key = normalizeSymbol(sym);
 
       priceStore[key] = {
         symbol: key,
         price,
-        time: Date.now()
+        time: Date.now(),
       };
 
-      // DEBUG opcional
       // console.log("📡 PRICE:", key, price);
 
     } catch (err) {
@@ -166,19 +173,17 @@ symbols.forEach((sym) => {
   });
 });
 
-
-
 // ===============================
 // 🔥 API REST PRICE FALLBACK
 // ===============================
 app.get("/api/price/:symbol", async (req, res) => {
   try {
-    const symbol = req.params.symbol.toUpperCase();
+    const symbol = normalizeSymbol(req.params.symbol);
 
     const map = {
       AUDUSD: "AUD/USD",
       EURUSD: "EUR/USD",
-      GBPUSD: "GBP/USD"
+      GBPUSD: "GBP/USD",
     };
 
     const pair = map[symbol];
@@ -192,9 +197,9 @@ app.get("/api/price/:symbol", async (req, res) => {
     const response = await fetch(url);
     const data = await response.json();
 
-    const price = data?.result;
+    const price = Number(data?.result);
 
-    if (!Number.isFinite(price)) {
+    if (!Number.isFinite(price) || price <= 0) {
       return res.status(500).json({ error: "Precio inválido API externa" });
     }
 
