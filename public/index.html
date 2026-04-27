@@ -4798,6 +4798,12 @@ async function loadPositions() {
     };
   }
 
+function normalizeSymbol(symbol = "") {
+  return symbol
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 async function placeOrder(input) {
   try {
     const api = window.__LEONES_BROKER_EXT2 || {};
@@ -4841,10 +4847,12 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-    // 🔥 NORMALIZAR
+    // 🔥 NORMALIZACIÓN (IMPORTANTE FIX)
     side = String(side || "").toLowerCase();
     type = String(type || "market").toLowerCase();
-    symbol = String(symbol || "").replace("/", "").toUpperCase();
+
+    // 🚀 FIX CRÍTICO: normalizar símbolo correctamente
+    symbol = normalizeSymbol(symbol);
 
     // 🔥 VALIDACIONES
     if (!symbol) {
@@ -4869,8 +4877,10 @@ async function placeOrder(input) {
       window.price ||
       null;
 
-    // intentar desde función si existe
-    if ((!currentPrice || !isFinite(currentPrice)) && typeof getCurrentPriceForSymbol === "function") {
+    if (
+      (!currentPrice || !isFinite(currentPrice)) &&
+      typeof getCurrentPriceForSymbol === "function"
+    ) {
       currentPrice = getCurrentPriceForSymbol(symbol);
     }
 
@@ -4900,7 +4910,7 @@ async function placeOrder(input) {
       direction: side,
       type,
       amount,
-      price
+      price,
     };
 
     console.log("🚀 Enviando orden:", payload);
@@ -4934,7 +4944,6 @@ document.addEventListener("click", (e) => {
     placeOrder("sell");
   }
 });
-
 /* =========================
    🔥 ORDEN REAL BACKEND (FIXED)
 ========================= */
