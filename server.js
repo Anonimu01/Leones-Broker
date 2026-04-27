@@ -256,34 +256,12 @@ app.post("/api/_send_test_email", async (req, res) => {
   }
 });
 
-/* ======================================================
-   HELPERS DE TRADING / MARGEN
-   ====================================================== */
-const transactionSchema = new mongoose.Schema(
-  {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-    userId: { type: String, index: true },
-    type: { type: String, index: true },
-    amount: { type: Number, default: 0 },
-    status: { type: String, default: "completed" },
-    note: { type: String, default: "" },
-    balanceBefore: { type: Number, default: 0 },
-    balanceAfter: { type: Number, default: 0 },
-    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
-    source: { type: String, default: "server.js" },
-    createdAt: { type: Date, default: Date.now },
-  },
-  { minimize: false }
-);
-
-const Transaction =
-  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
-
-function toNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
+/**
+ * ======================================================
+ * HELPER: OBTENER PRECIO ACTUAL DE UN SÍMBOLO
+ * Busca el precio en el store de precios en tiempo real.
+ * ======================================================
+ */
 function compactSymbol(value) {
   return String(value || "")
     .trim()
@@ -291,91 +269,12 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeSide(value) {
-  const s = String(value || "").trim().toUpperCase();
-  if (!s) return "";
-  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
-  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
-  return "";
-}
-
-function normalizeQty(body = {}) {
-  const n = Number(
-    body.qty ??
-      body.quantity ??
-      body.amount ??
-      body.positionSize ??
-      body.notional ??
-      body.size
-  );
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizePrice(body = {}) {
-  const raw =
-    body.price ??
-    body.entryPrice ??
-    body.currentPrice ??
-    body.limitPrice ??
-    body.stopPrice ??
-    body.openPrice ??
-    null;
-
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function getPriceStore() {
-  try {
-    const raw = priceHandler?.prices;
-    if (!raw) return {};
-    if (raw instanceof Map) return Object.fromEntries(raw.entries());
-    if (typeof raw === "object") return raw;
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label ||
-    item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
-
-  const price =
-    toNumber(item.price) ??
-    toNumber(item.last) ??
-    toNumber(item.close) ??
-    toNumber(item.value) ??
-    toNumber(item.mark) ??
-    toNumber(item.mid);
-
-  return {
-    symbol,
-    label,
-    market: item.market || "Unknown",
-    price,
-    bid: toNumber(item.bid),
-    ask: toNumber(item.ask),
-    open: toNumber(item.open),
-    high: toNumber(item.high),
-    low: toNumber(item.low),
-    volume: toNumber(item.volume),
-    change: toNumber(item.change),
-    changePercent: toNumber(item.changePercent),
-    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
-    raw: item,
-  };
-}
-
 function getCurrentPriceForSymbol(symbol) {
   const target = compactSymbol(symbol);
   if (!target) return null;
 
   const store = getPriceStore();
-  const entries = Object.entries(store);
+  const entries = Object.entries(store || {});
 
   for (const [key, item] of entries) {
     const candidates = [
@@ -407,322 +306,6 @@ function getCurrentPriceForSymbol(symbol) {
   return null;
 }
 
-function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "")
-    .toLowerCase()
-    .trim();
-  return (
-    status.includes("close") ||
-    status === "closed" ||
-    !!p.closedAt ||
-    !!p.closed_at
-  );
-}
-
-function computePositionPnl(position = {}, currentPrice = null) {
-  const entry =
-    toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-    0;
-  const qty =
-    toNumber(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) ?? 0;
-  const side = normalizeSide(
-    position.side || position.direction || position.positionSide
-  );
-
-  const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
-  const sign = side === "SELL" ? -1 : 1;
-
-  return (px - entry) * qty * sign;
-}
-
-function annotatePosition(position = {}) {
-  const currentPrice =
-    toNumber(
-      position.currentPrice ??
-        getCurrentPriceForSymbol(position.symbol) ??
-        position.price ??
-        position.entryPrice ??
-        0
-    ) ?? 0;
-
-  const entryPrice =
-    toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-    0;
-
-  const qty =
-    toNumber(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) ?? 0;
-
-  const pnl = isClosedPosition(position)
-    ? toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0
-    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
-
-  return {
-    ...position,
-    entryPrice,
-    currentPrice,
-    qty,
-    pnl,
-    unrealizedPnl: pnl,
-    isOpen: !isClosedPosition(position),
-  };
-}
-
-async function getWalletDocForUser(userId) {
-  try {
-    let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
-
-    if (!wallet) {
-      wallet = new Wallet({
-        user: userId,
-        balanceOwn: 0,
-        balance: 0,
-        credit: 0,
-        marginUsed: 0,
-        leverageFactor: 1,
-        equity: 0,
-        freeMargin: 0,
-        marginLevel: 0,
-      });
-    }
-
-    return wallet;
-  } catch {
-    return null;
-  }
-}
-
-async function recordTransaction({
-  user,
-  type,
-  amount = 0,
-  status = "completed",
-  note = "",
-  balanceBefore = 0,
-  balanceAfter = 0,
-  meta = {},
-  source = "server.js",
-}) {
-  try {
-    const payload = {
-      user: user?._id || user?.user || user?.id || null,
-      userId: String(user?._id || user?.user || user?.id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date(),
-    };
-
-    const tx = await Transaction.create(payload);
-    return tx.toObject ? tx.toObject() : tx;
-  } catch (err) {
-    console.warn("recordTransaction fallback:", err?.message || err);
-    return {
-      userId: String(user?._id || user?.user || user?.id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date().toISOString(),
-    };
-  }
-}
-
-function normalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
-  const credit = toNumber(wallet?.credit ?? 0) ?? 0;
-  const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
-  const equity = balanceOwn + openPnl;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-  return {
-    balance: balanceOwn,
-    balanceOwn,
-    credit,
-    equity,
-    marginUsed,
-    freeMargin,
-    marginLevel,
-    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
-    currency: wallet?.currency || "USD",
-    openPnl,
-  };
-}
-
-async function loadTransactionsForUser(userId, limit = 50) {
-  try {
-    const rows = await Transaction.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean()
-      .exec()
-      .catch(() => []);
-
-    return rows || [];
-  } catch {
-    return [];
-  }
-}
-
-async function loadAllTransactions(limit = 200, userId = null) {
-  try {
-    const query = userId ? { user: userId } : {};
-    const rows = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean()
-      .exec()
-      .catch(() => []);
-    return rows || [];
-  } catch {
-    return [];
-  }
-}
-
-async function loadOpenPositionsForUser(userId) {
-  try {
-    const rows = await Position.find({
-      user: userId,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec()
-      .catch(() => []);
-
-    return (rows || []).map(annotatePosition);
-  } catch {
-    return [];
-  }
-}
-
-async function loadAllPositionsForUser(userId) {
-  try {
-    const rows = await Position.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec()
-      .catch(() => []);
-    return (rows || []).map(annotatePosition);
-  } catch {
-    return [];
-  }
-}
-
-async function buildAccountForUser(userDoc) {
-  const wallet = await getWalletDocForUser(userDoc._id);
-  const openPositions = await loadOpenPositionsForUser(userDoc._id);
-  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
-
-  const openPnl = openPositions.reduce(
-    (sum, p) => sum + (toNumber(p.pnl ?? 0) || 0),
-    0
-  );
-
-  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
-
-  return {
-    account: {
-      ...normalizedWallet,
-      leverage: toNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
-      currency: userDoc.currency || wallet.currency || "USD",
-      positions: openPositions,
-      openPositions,
-      recentTransactions,
-      transactions: recentTransactions,
-    },
-    user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet.toObject ? wallet.toObject() : wallet,
-    positions: openPositions,
-    transactions: recentTransactions,
-  };
-}
-
-function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
-  try {
-    io.emit("wallet_update", {
-      userId,
-      account: accountPayload?.account || accountPayload,
-    });
-    io.emit("account_update", {
-      userId,
-      account: accountPayload?.account || accountPayload,
-    });
-    if (Array.isArray(positions)) {
-      io.emit("positions_update", { userId, positions });
-    }
-    if (transaction) {
-      io.emit("transactions_update", { userId, transaction });
-    }
-  } catch (e) {
-    console.warn("emitStateUpdates error:", e?.message || e);
-  }
-}
-
-async function getUserFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
-
-    const token = String(auth).split(" ")[1];
-    if (!token) return null;
-    if (!process.env.JWT_SECRET) return null;
-
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (e) {
-      return null;
-    }
-
-    const userId =
-      payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-
-    const user = await User.findById(userId).lean().exec().catch(() => null);
-    return user || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function getPositionsForUser(userId) {
-  try {
-    return await Position.find({ user: userId }).lean().exec().catch(() => []);
-  } catch {
-    return [];
-  }
-}
-
-async function getWalletForUser(userId) {
-  try {
-    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * ======================================================
  * FUNCIÓN: VALIDAR MARGEN Y PERMITIR APERTURA
@@ -730,20 +313,19 @@ async function getWalletForUser(userId) {
  * - Calcula margen requerido según precio, qty y leverage
  * - Si NO tiene saldo → devuelve error con mensaje flotante (toast)
  * - Si tiene saldo → devuelve ok=true para permitir abrir la posición
+ *
+ * ⚠️ IMPORTANTE:
+ * Esta función NO abre la operación, solo valida si se puede abrir.
+ * Se usa antes de crear la posición (tradeOpenHandler).
  * ======================================================
  */
-async function validateMarginAndNotify({
-  user,
-  symbol,
-  qty,
-  entryPrice,
-  leverage,
-}) {
+async function validateMarginAndNotify({ user, symbol, qty, entryPrice, leverage }) {
   try {
     const wallet = await getWalletDocForUser(user._id);
 
     const balanceOwn =
       toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+
     const credit = toNumber(wallet.credit ?? 0) ?? 0;
     const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
 
@@ -751,7 +333,8 @@ async function validateMarginAndNotify({
     const notional = Math.abs(qty * entryPrice);
     const requiredMargin = notional / Math.max(leverage || 1, 1);
 
-    const marginLevel = marginUsed > 0 ? (balanceOwn / marginUsed) * 100 : 100;
+    const marginLevel =
+      marginUsed > 0 ? (balanceOwn / marginUsed) * 100 : 100;
 
     if (freeMargin < requiredMargin) {
       return {
@@ -809,115 +392,179 @@ async function validateMarginAndNotify({
   }
 }
 
-
-
-
-
-
-
 /**
  * ======================================================
- * FUNCIÓN: CERRAR OPERACIÓN
+ * FUNCIÓN: ABRIR OPERACIÓN (BUY / SELL)
+ * Esta función se ejecuta cuando el usuario le da a comprar o vender.
+ * - Valida datos (symbol, side, qty)
+ * - Obtiene precio de mercado o usa el enviado por frontend
+ * - Verifica fondos disponibles (freeMargin)
+ * - Reserva margen en el wallet
+ * - Crea la posición en estado OPEN
+ * - Registra la transacción como "trade_open"
+ * - Emite actualización en tiempo real
  * ======================================================
  */
-async function tradeCloseHandler(req, res) {
+async function tradeOpenHandler(req, res) {
   try {
-    const user = await getUserFromBearer(req);
+    const user = await getUserDocFromBearer(req);
     if (!user) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
     const body = req.body || {};
-    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
-    const symbol = String(body.symbol || "").trim().toUpperCase();
+    const symbol = String(
+      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
+    ).trim().toUpperCase();
 
-    let position = null;
+    const side = normalizeSide(body.side ?? body.direction ?? body.action);
+    const qty = normalizeQty(body);
+    const type = String(body.type ?? body.orderType ?? "market")
+      .trim()
+      .toLowerCase();
 
-    if (positionId) {
-      position = await Position.findOne({
-        _id: positionId,
-        user: user._id,
-        status: { $in: ["OPEN", "open", "Open"] },
-      }).catch(() => null);
-    }
-
-    if (!position && symbol) {
-      position = await Position.findOne({
-        user: user._id,
-        symbol,
-        status: { $in: ["OPEN", "open", "Open"] },
-      })
-        .sort({ createdAt: -1 })
-        .catch(() => null);
-    }
-
-    if (!position) {
-      return res.status(404).json({
+    if (!symbol) {
+      return res.status(400).json({
         ok: false,
-        error: "position_not_found",
-        message: "Posición no encontrada",
+        error: "symbol_required",
+        message: "symbol es requerido",
       });
     }
 
-    const currentPriceRaw =
-      body.currentPrice ??
-      getCurrentPriceForSymbol(position.symbol) ??
-      position.currentPrice ??
-      position.entryPrice ??
-      0;
+    if (!side) {
+      return res.status(400).json({
+        ok: false,
+        error: "side_required",
+        message: "side/direction debe ser BUY o SELL",
+      });
+    }
 
-    const currentPrice = toNumber(currentPriceRaw) ?? 0;
-    const entryPrice =
-      toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
-      0;
-    const qty =
-      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
-
-    const side = normalizeSide(position.side || position.direction);
-    const sign = side === "SELL" ? -1 : 1;
-
-    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
+    if (!qty) {
+      return res.status(400).json({
+        ok: false,
+        error: "quantity_required",
+        message: "qty/quantity/amount es requerido y debe ser mayor que 0",
+      });
+    }
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceBefore =
-      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
-    const reservedMargin = toNumber(position.marginReserved ?? 0) ?? 0;
+    const leverage = Math.max(
+      toNumber(
+        body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1
+      ) || 1,
+      1
+    );
 
-    wallet.marginUsed = Math.max((toNumber(wallet.marginUsed ?? 0) ?? 0) - reservedMargin, 0);
-    wallet.balanceOwn = balanceBefore + realizedPnl;
-    wallet.balance = wallet.balanceOwn;
+    const marketPrice = getCurrentPriceForSymbol(symbol);
+    const requestedPrice = normalizePrice(body);
+
+    let entryPrice = null;
+
+    if (type === "limit" && requestedPrice && requestedPrice > 0) {
+      entryPrice = requestedPrice;
+    } else if (marketPrice && marketPrice > 0) {
+      entryPrice = marketPrice;
+    } else if (requestedPrice && requestedPrice > 0) {
+      entryPrice = requestedPrice;
+    }
+
+    if (!entryPrice || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "price_unavailable",
+        message: "No hay precio disponible para abrir la operación",
+        toast: {
+          type: "error",
+          title: "Precio no disponible",
+          message: "No hay precio suficiente para abrir la operación.",
+          closable: true,
+          position: "top-right",
+          duration: 5000,
+        },
+        debug: {
+          symbol,
+          marketPrice,
+          requestedPrice,
+          type,
+        },
+      });
+    }
+
+    const validation = await validateMarginAndNotify({
+      user,
+      symbol,
+      qty,
+      entryPrice,
+      leverage,
+    });
+
+    if (!validation.ok) {
+      return res.status(400).json(validation);
+    }
+
+    const balanceOwn =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const credit = toNumber(wallet.credit ?? 0) ?? 0;
+    const marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    const notional = Math.abs(qty * entryPrice);
+    const requiredMargin = notional / leverage;
+
+    if (freeMargin < requiredMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds",
+        freeMargin,
+        requiredMargin,
+        toast: {
+          type: "error",
+          title: "Fondos insuficientes",
+          message: "No tienes margen suficiente para abrir esta operación.",
+          closable: true,
+          position: "top-right",
+          duration: 5000,
+        },
+      });
+    }
+
+    wallet.marginUsed = marginUsed + requiredMargin;
+    wallet.balance = balanceOwn;
     wallet.updatedAt = new Date();
     await wallet.save();
 
-    position.status = "CLOSED";
-    position.currentPrice = currentPrice;
-    position.closePrice = currentPrice;
-    position.realizedPnl = realizedPnl;
-    position.pnl = realizedPnl;
-    position.closedAt = new Date();
-    position.updatedAt = new Date();
-    await position.save();
+    const position = await Position.create({
+      user: user._id,
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      currentPrice: entryPrice,
+      marginReserved: requiredMargin,
+      leverage,
+      status: "OPEN",
+      createdAt: new Date(),
+    });
 
     const tx = await recordTransaction({
       user,
-      type: "trade_close",
-      amount: realizedPnl,
-      status: "completed",
-      note: `${side} ${position.symbol}`,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
+      type: "trade_open",
+      amount: requiredMargin,
+      status: "reserved",
+      note: `${side} ${symbol}`,
+      balanceBefore: balanceOwn,
+      balanceAfter: balanceOwn,
       meta: {
-        positionId: String(position._id),
-        symbol: position.symbol,
+        symbol,
         side,
         qty,
+        leverage,
         entryPrice,
-        closePrice: currentPrice,
-        marginReleased: reservedMargin,
-        realizedPnl,
+        currentPrice: entryPrice,
+        marginReserved: requiredMargin,
       },
-      source: "api/trade/close",
+      source: "api/trade/open",
     });
 
     const account = await buildAccountForUser(user);
@@ -927,18 +574,19 @@ async function tradeCloseHandler(req, res) {
 
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
-    return res.json({
+    return res.status(201).json({
       ok: true,
-      msg: "Posición cerrada",
+      msg: "Operación abierta",
       data: {
         positionId: position._id,
+        status: "OPEN",
         symbol: annotatedPosition.symbol,
         side: annotatedPosition.side,
         qty: annotatedPosition.qty,
-        entryPrice,
-        currentPrice,
-        realizedPnl,
-        balance: wallet.balanceOwn,
+        entryPrice: annotatedPosition.entryPrice,
+        currentPrice: annotatedPosition.currentPrice,
+        marginReserved: requiredMargin,
+        leverage,
         account: account.account,
         wallet: account.wallet,
         position: annotatedPosition,
@@ -946,7 +594,7 @@ async function tradeCloseHandler(req, res) {
       },
     });
   } catch (err) {
-    console.error("tradeCloseHandler error:", err);
+    console.error("/api/trade/open error:", err);
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -955,126 +603,11 @@ async function tradeCloseHandler(req, res) {
   }
 }
 
-async function tradeCloseAllHandler(req, res) {
-  try {
-    const user = await getUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    const openPositions = await Position.find({
-      user: user._id,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .catch(() => []);
 
-    if (!openPositions.length) {
-      return res.json({
-        ok: true,
-        msg: "No hay posiciones abiertas",
-        closed: 0,
-        totalRealized: 0,
-      });
-    }
 
-    let totalRealized = 0;
-    const closed = [];
 
-    for (const pos of openPositions) {
-      const currentPrice =
-        toNumber(
-          req.body?.currentPrice ??
-            getCurrentPriceForSymbol(pos.symbol) ??
-            pos.currentPrice ??
-            pos.entryPrice ??
-            0
-        ) ?? 0;
 
-      const entryPrice =
-        toNumber(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) ?? 0;
-      const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
-      const side = normalizeSide(pos.side || pos.direction);
-      const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
-
-      const wallet = await getWalletDocForUser(user._id);
-      const balanceBefore =
-        toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
-      const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
-
-      wallet.marginUsed = Math.max(
-        (toNumber(wallet.marginUsed ?? 0) ?? 0) - reservedMargin,
-        0
-      );
-      wallet.balanceOwn = balanceBefore + realizedPnl;
-      wallet.balance = wallet.balanceOwn;
-      wallet.equity = wallet.balanceOwn;
-      wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-      wallet.marginLevel =
-        wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-      wallet.updatedAt = new Date();
-      await wallet.save();
-
-      user.balance = wallet.balanceOwn;
-      await user.save();
-
-      pos.status = "CLOSED";
-      pos.currentPrice = currentPrice;
-      pos.closePrice = currentPrice;
-      pos.realizedPnl = realizedPnl;
-      pos.pnl = realizedPnl;
-      pos.closedAt = new Date();
-      pos.updatedAt = new Date();
-      await pos.save();
-
-      const tx = await recordTransaction({
-        user,
-        type: "trade_close",
-        amount: realizedPnl,
-        status: "completed",
-        note: `${side} ${pos.symbol}`,
-        balanceBefore,
-        balanceAfter: wallet.balanceOwn,
-        meta: {
-          positionId: String(pos._id),
-          symbol: pos.symbol,
-          side,
-          qty,
-          entryPrice,
-          closePrice: currentPrice,
-          marginReleased: reservedMargin,
-          realizedPnl,
-        },
-        source: "api/trade/close-all",
-      });
-
-      totalRealized += realizedPnl;
-      closed.push({ positionId: pos._id, symbol: pos.symbol, realizedPnl, transaction: tx });
-    }
-
-    const account = await buildAccountForUser(user);
-    emitStateUpdates(user._id, account, closed, null);
-
-    return res.json({
-      ok: true,
-      msg: "Posiciones cerradas",
-      closed: closed.length,
-      totalRealized,
-      data: {
-        closed,
-        totalRealized,
-        account: account.account,
-        wallet: account.wallet,
-      },
-    });
-  } catch (err) {
-    console.error("/api/trade/close-all error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-      message: err?.message || "Error interno",
-    });
-  }
-}
 
 /* ======================================================
    API ROUTES - montamos rutas principales
@@ -1100,6 +633,55 @@ const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
+
+function getPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeQuote(symbol, item = {}) {
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
+
+  const price =
+    toNumber(item.price) ??
+    toNumber(item.last) ??
+    toNumber(item.close) ??
+    toNumber(item.value) ??
+    toNumber(item.mark) ??
+    toNumber(item.mid);
+
+  return {
+    symbol,
+    label,
+    market: item.market || "Unknown",
+    price,
+    bid: toNumber(item.bid),
+    ask: toNumber(item.ask),
+    open: toNumber(item.open),
+    high: toNumber(item.high),
+    low: toNumber(item.low),
+    volume: toNumber(item.volume),
+    change: toNumber(item.change),
+    changePercent: toNumber(item.changePercent),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    raw: item,
+  };
+}
 
 function buildQuotesArray() {
   const store = getPriceStore();
@@ -1273,6 +855,75 @@ app.get("/api/symbols", (req, res) => {
 });
 
 /* ======================================================
+   Helper: obtener usuario desde token (si aplica)
+   ====================================================== */
+async function getUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return null;
+    }
+
+    const userId =
+      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+
+    const user = await User.findById(userId).lean().exec().catch(() => null);
+    return user || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getPositionsForUser(userId) {
+  try {
+    return await Position.find({ user: userId }).lean().exec().catch(() => []);
+  } catch {
+    return [];
+  }
+}
+
+async function getWalletForUser(userId) {
+  try {
+    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+
+  const balance = wallet?.balance ?? user.balance ?? 0;
+
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+
+/* ======================================================
    Compat endpoints: /api/account, /api/me, /api/profile
    ====================================================== */
 async function accountLikeHandler(req, res) {
@@ -1300,7 +951,7 @@ async function positionsLikeHandler(req, res) {
     const user = await getUserFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const positions = await loadOpenPositionsForUser(user._id);
+    const positions = await getPositionsForUser(user._id);
     return res.json({
       ok: true,
       positions,
@@ -1452,6 +1103,9 @@ const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
    RESOLUCIÓN ROBUSTA DE ARCHIVOS JS
+   - Sirve /js/*.js, /public/js/*.js, /authGuard.js, /trading.js, etc.
+   - Si el archivo contiene <script>...</script>, se limpia y se devuelve como JS plano.
+   - Si no existe, se devuelve un stub JS válido en vez de HTML.
    ====================================================== */
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
@@ -1596,7 +1250,7 @@ app.get("*", (req, res) => {
 });
 
 /* ======================================================
-   404 API
+   404 API (único fallback para /api)
    ====================================================== */
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
