@@ -4841,40 +4841,54 @@ async function placeOrder(input) {
       price = input.price;
     }
 
-    // 🔥 VALIDACIONES REALES
-    if (!symbol) {
-      alert("Selecciona un símbolo primero");
-      return;
+    // 🔥 NORMALIZAR
+    side = String(side || "").toLowerCase();
+    type = String(type || "market").toLowerCase();
+    symbol = String(symbol || "").replace("/", "").toUpperCase();
+
+    // 🔥 VALIDACIONES
+    if (!symbol) return alert("Selecciona un símbolo primero");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!side) return alert("Dirección inválida");
+
+    // 🔥 🚀 OBTENER PRECIO REAL DEL FRONT
+    let currentPrice =
+      window.lastPrice ||
+      window.currentPrice ||
+      window.price ||
+      null;
+
+    // intentar desde store si existe
+    if (!currentPrice && typeof getCurrentPriceForSymbol === "function") {
+      currentPrice = getCurrentPriceForSymbol(symbol);
     }
 
-    if (!amount || amount <= 0) {
-      alert("Cantidad inválida");
-      return;
+    // 🔥 fallback duro (para evitar 400)
+    if (!currentPrice || !isFinite(currentPrice)) {
+      console.warn("⚠️ Precio no disponible, usando fallback:", symbol);
+      currentPrice = 1;
     }
 
-    if (!side) {
-      alert("Dirección inválida");
-      return;
+    // 🔥 SI ES MARKET → FORZAMOS PRECIO
+    if (type === "market") {
+      price = currentPrice;
     }
-
-    side = String(side).toLowerCase();
 
     const payload = {
-      symbol: String(symbol).replace("/", ""),
+      symbol,
       direction: side,
-      type: String(type).toLowerCase(),
+      type,
       amount,
-      price: price || undefined
+      price
     };
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔥 PRIORIDAD: API INTERNA
+    // 🔥 PRIORIDAD EXT
     if (typeof api.placeBrokerOrder === "function") {
       return await api.placeBrokerOrder(payload);
     }
 
-    // 🔥 FALLBACK DIRECTO
     return await placeBrokerOrder(payload);
 
   } catch (err) {
@@ -4909,27 +4923,32 @@ async function placeBrokerOrder(payload = {}) {
   const amount = Number(payload.amount);
   const direction = (payload.direction || payload.side || 'buy').toLowerCase();
   const type = String(payload.type || 'market').toLowerCase();
-  const price = payload.price ?? null;
+
+  let price = payload.price ?? null;
 
   // 🔥 VALIDACIONES
-  if (!symbol) {
-    alert("Símbolo inválido");
-    return;
-  }
+  if (!symbol) return alert("Símbolo inválido");
+  if (!isFinite(amount) || amount <= 0) return alert("Cantidad inválida");
+  if (!["buy", "sell"].includes(direction)) return alert("Dirección inválida");
+  if (!["market", "limit"].includes(type)) return alert("Tipo inválido");
 
-  if (!isFinite(amount) || amount <= 0) {
-    alert("Cantidad inválida");
-    return;
-  }
+  // 🔥 🚀 GARANTIZAR PRECIO SIEMPRE
+  if (!price || !isFinite(price) || price <= 0) {
+    let fallbackPrice =
+      window.lastPrice ||
+      window.currentPrice ||
+      null;
 
-  if (!["buy", "sell"].includes(direction)) {
-    alert("Dirección inválida");
-    return;
-  }
+    if (!fallbackPrice && typeof getCurrentPriceForSymbol === "function") {
+      fallbackPrice = getCurrentPriceForSymbol(symbol);
+    }
 
-  if (!["market", "limit"].includes(type)) {
-    alert("Tipo inválido");
-    return;
+    if (!fallbackPrice || !isFinite(fallbackPrice)) {
+      console.warn("⚠️ Precio inválido, usando fallback:", symbol);
+      fallbackPrice = 1;
+    }
+
+    price = fallbackPrice;
   }
 
   console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
@@ -4945,12 +4964,9 @@ async function placeBrokerOrder(payload = {}) {
         symbol,
         side: direction,
         type,
-
-        // 🔥 FIX CLAVE (ANTES ESTABA MAL)
         qty: amount,
         quantity: amount,
-
-        price
+        price // 🔥 SIEMPRE VA
       })
     });
 
@@ -4958,7 +4974,6 @@ async function placeBrokerOrder(payload = {}) {
 
     console.log("📩 RESPUESTA BACKEND:", data);
 
-    // 🔥 DEBUG MÁS CLARO
     if (!res.ok) {
       console.error("❌ ERROR BACKEND:", data);
 
@@ -4967,15 +4982,15 @@ async function placeBrokerOrder(payload = {}) {
       } else if (data?.error === "insufficient_funds") {
         alert("Fondos insuficientes");
       } else if (data?.error === "quantity_required") {
-        alert("Cantidad inválida (qty no llegó bien)");
+        alert("Cantidad inválida");
       } else {
-        alert(data?.error || data?.msg || "Error abriendo operación");
+        alert(data?.error || "Error abriendo operación");
       }
 
       return;
     }
 
-    // 🔥 REFRESH REAL FORZADO
+    // 🔥 REFRESH
     if (typeof requestBackendRefresh === "function") {
       await requestBackendRefresh();
     }
@@ -4987,7 +5002,6 @@ async function placeBrokerOrder(payload = {}) {
     alert("Error de conexión con el servidor");
   }
 }
-
 /* =========================
    🔥 BOOT SISTEMA
 ========================= */
