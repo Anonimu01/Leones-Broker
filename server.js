@@ -441,28 +441,32 @@ function safeSymbol(symbol = "") {
    🔥 PRICE STORE LOOKUP
    ====================================================== */
 
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+/* ======================================================
+   🔥 PRICE STORE LOOKUP (FIXED)
+   ====================================================== */
 function getCurrentPriceForSymbol(symbol) {
-  const target = safeSymbol(symbol);
+  const target = normalizeSymbol(symbol);
   if (!target) return null;
 
   const store = getPriceStore?.() || {};
-  const entries = Object.entries(store);
 
-  for (const [key, item] of entries) {
-    const candidates = [
-      key,
-      key.split(":").pop(),
-      item?.symbol,
-      item?.tvSymbol,
-      item?.ticker,
-      item?.name,
-      item?.label,
-      item?.marketSymbol,
-    ];
+  // 1. acceso directo rápido (MEJOR PERFORMANCE)
+  if (store[target]?.price != null) {
+    const p = Number(store[target].price);
+    return Number.isFinite(p) ? p : null;
+  }
 
-    if (
-      candidates.some((c) => safeSymbol(c) === target)
-    ) {
+  // 2. fallback búsqueda flexible
+  for (const [key, item] of Object.entries(store)) {
+    const normalizedKey = normalizeSymbol(key);
+
+    if (normalizedKey === target) {
       const price = Number(
         item?.price ??
         item?.last ??
@@ -479,7 +483,6 @@ function getCurrentPriceForSymbol(symbol) {
 
   return null;
 }
-
 
 /* ======================================================
    🔥 CÁLCULO DE PNL (TIEMPO REAL)
