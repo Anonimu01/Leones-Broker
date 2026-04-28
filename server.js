@@ -443,15 +443,7 @@ function safeSymbol(symbol = "") {
 }
 
 
-/* ======================================================
-   🔥 PRICE STORE LOOKUP
-   ====================================================== */
 
-function normalizeSymbol(symbol = "") {
-  return String(symbol)
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
 
 /* ======================================================
    🔥 PRICE STORE LOOKUP (FIXED)
