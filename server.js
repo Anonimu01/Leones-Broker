@@ -424,47 +424,6 @@ function safeSymbol(symbol = "") {
 
 
 
-/* ======================================================
-   🔥 ANOTACIÓN DE POSICIÓN (FRONTEND)
-   ====================================================== */
-
-function annotatePosition(position = {}) {
-  const currentPrice =
-    Number(
-      position.currentPrice ??
-      getCurrentPriceForSymbol(position.symbol) ??
-      position.price ??
-      position.entryPrice ??
-      0
-    ) || 0;
-
-  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-
-  const qty = Number(
-    position.qty ??
-    position.quantity ??
-    position.amount ??
-    position.positionSize ??
-    0
-  ) || 0;
-
-  const pnl = isClosedPosition?.(position)
-    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl(
-        { ...position, entryPrice, qty },
-        currentPrice
-      );
-
-  return {
-    ...position,
-    entryPrice,
-    currentPrice,
-    qty,
-    pnl,
-    unrealizedPnl: pnl,
-    isOpen: !isClosedPosition?.(position),
-  };
-}
 
 
 /* ======================================================
