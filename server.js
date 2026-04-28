@@ -675,6 +675,430 @@ async function tradeCloseHandler(req, res) {
 }
 
 
+/* ======================================================
+   HELPERS
+   ====================================================== */
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeSide(value) {
+  const s = String(value || "").trim().toUpperCase();
+  if (!s) return "";
+  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
+  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
+  return "";
+}
+
+function normalizeQty(body = {}) {
+  const n = Number(
+    body.qty ??
+      body.quantity ??
+      body.amount ??
+      body.positionSize ??
+      body.notional ??
+      body.size
+  );
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizePrice(body = {}) {
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    null;
+
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function getPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeQuote(symbol, item = {}) {
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
+
+  const price =
+    toNumber(item.price) ??
+    toNumber(item.last) ??
+    toNumber(item.close) ??
+    toNumber(item.value) ??
+    toNumber(item.mark) ??
+    toNumber(item.mid);
+
+  return {
+    symbol,
+    label,
+    market: item.market || "Unknown",
+    price,
+    bid: toNumber(item.bid),
+    ask: toNumber(item.ask),
+    open: toNumber(item.open),
+    high: toNumber(item.high),
+    low: toNumber(item.low),
+    volume: toNumber(item.volume),
+    change: toNumber(item.change),
+    changePercent: toNumber(item.changePercent),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    raw: item,
+  };
+}
+
+function getCurrentPriceForSymbol(symbol) {
+  const target = compactSymbol(symbol);
+  if (!target) return null;
+
+  const store = getPriceStore();
+  const entries = Object.entries(store);
+
+  for (const [key, item] of entries) {
+    const candidates = [
+      key,
+      key.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
+    ];
+
+    if (candidates.some((c) => compactSymbol(c) === target)) {
+      return (
+        toNumber(
+          item?.price ??
+            item?.last ??
+            item?.close ??
+            item?.value ??
+            item?.mark ??
+            item?.mid ??
+            item?.lp
+        ) ?? null
+      );
+    }
+  }
+
+  return null;
+}
+
+function isClosedPosition(p = {}) {
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
+  return (
+    status.includes("close") ||
+    status === "closed" ||
+    !!p.closedAt ||
+    !!p.closed_at
+  );
+}
+
+function computePositionPnl(position = {}, currentPrice = null) {
+  const entry = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
+  const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+
+  const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
+  const sign = side === "SELL" ? -1 : 1;
+
+  return ((px - entry) * qty) * sign;
+}
+
+function annotatePosition(position = {}) {
+  const currentPrice =
+    toNumber(
+      position.currentPrice ??
+        getCurrentPriceForSymbol(position.symbol) ??
+        position.price ??
+        position.entryPrice ??
+        0
+    ) ?? 0;
+
+  const entryPrice =
+    toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
+    0;
+
+  const qty =
+    toNumber(
+      position.qty ??
+        position.quantity ??
+        position.amount ??
+        position.positionSize ??
+        0
+    ) ?? 0;
+
+  const pnl = isClosedPosition(position)
+    ? toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
+}
+
+async function getUserDocFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
+    const token = String(auth).split(" ")[1];
+    if (!token) return null;
+    if (!process.env.JWT_SECRET) return null;
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      return null;
+    }
+
+    const userId =
+      payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+
+    const user = await User.findById(userId).catch(() => null);
+    return user || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getWalletDocForUser(userId) {
+  try {
+    let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+
+    if (!wallet) {
+      wallet = new Wallet({
+        user: userId,
+        balanceOwn: 0,
+        balance: 0,
+        credit: 0,
+        marginUsed: 0,
+        leverageFactor: 1,
+        equity: 0,
+        freeMargin: 0,
+        marginLevel: 0,
+      });
+    }
+
+    return wallet;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
+  const credit = toNumber(wallet?.credit ?? 0) ?? 0;
+  const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
+}
+
+async function recordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
+  try {
+    const payload = {
+      user: user?._id || user?.user || user?.id || null,
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date(),
+    };
+
+    const tx = await Transaction.create(payload);
+    return tx.toObject ? tx.toObject() : tx;
+  } catch (err) {
+    console.warn("recordTransaction fallback:", err?.message || err);
+    return {
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+async function loadTransactionsForUser(userId, limit = 50) {
+  try {
+    const rows = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec()
+      .catch(() => []);
+
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadAllTransactions(limit = 200, userId = null) {
+  try {
+    const query = userId ? { user: userId } : {};
+    const rows = await Transaction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec()
+      .catch(() => []);
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadOpenPositionsForUser(userId) {
+  try {
+    const rows = await Position.find({
+      user: userId,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
+
+    return (rows || []).map(annotatePosition);
+  } catch {
+    return [];
+  }
+}
+
+async function loadAllPositionsForUser(userId) {
+  try {
+    const rows = await Position.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
+    return (rows || []).map(annotatePosition);
+  } catch {
+    return [];
+  }
+}
+
+async function buildAccountForUser(userDoc) {
+  const wallet = await getWalletDocForUser(userDoc._id);
+  const openPositions = await loadOpenPositionsForUser(userDoc._id);
+  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
+
+  const openPnl = openPositions.reduce(
+    (sum, p) => sum + (toNumber(p.pnl ?? 0) || 0),
+    0
+  );
+
+  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+
+  return {
+    account: {
+      ...normalizedWallet,
+      leverage: toNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
+      currency: userDoc.currency || wallet.currency || "USD",
+      positions: openPositions,
+      openPositions,
+      recentTransactions,
+      transactions: recentTransactions,
+    },
+    user: userDoc.toObject ? userDoc.toObject() : userDoc,
+    wallet: wallet.toObject ? wallet.toObject() : wallet,
+    positions: openPositions,
+    transactions: recentTransactions,
+  };
+}
+
+function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
+  try {
+    io.emit("wallet_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
+    io.emit("account_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
+    if (Array.isArray(positions)) {
+      io.emit("positions_update", { userId, positions });
+    }
+    if (transaction) {
+      io.emit("transactions_update", { userId, transaction });
+    }
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e?.message || e);
+  }
+}
+
+
+
+
+    
 
 
 
