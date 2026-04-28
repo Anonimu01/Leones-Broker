@@ -651,8 +651,33 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
   }
 });
 
-// 🔧 SOLO TE DOY LAS PARTES CORREGIDAS — NO TOCO LO DEMÁS
-
+/* ======================================================
+   POSITIONS / OPEN PnL / HISTORY
+   ====================================================== */
+async function positionsLikeHandler(req, res) {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const positions = await loadOpenPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("positionsLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+app.get("/api/positions", positionsLikeHandler);
+app.get("/api/trade/positions", positionsLikeHandler);
+app.get("/api/positions/all", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const positions = await loadAllPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/positions/all error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 /* ======================================================
    FIX PnL (CRÍTICO)
    ====================================================== */
@@ -816,6 +841,7 @@ async function tradeCloseAllHandler(req, res) {
     return res.status(500).json({ ok: false, error: "server_error" });
   }
 }
+
 /* ======================================================
    TRADE OPEN / CLOSE / CLOSE ALL
    ====================================================== */
