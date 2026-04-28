@@ -615,39 +615,23 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
   }
 }
 
-
 /* ======================================================
    Esta no se tocan parcher
    ====================================================== */
-async function buildAccountForUser(user) {
-  const wallet = await getWalletForUser(user._id);
-  const positions = await getPositionsForUser(user._id);
-
-  const balance = wallet?.balance ?? user.balance ?? 0;
-
-  return {
-    account: {
-      balance,
-      equity: balance,
-      marginUsed: 0,
-      freeMargin: balance,
-      marginLevel: 0,
-      leverage: user.leverage ?? 100,
-      currency: user.currency || "USD",
-      positions: positions || [],
-    },
-    user,
-    wallet,
-    positions,
-  };
-}
-    
 async function getWalletForUser(userId) {
   try {
     return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
   } catch {
     return null;
   }
+}
+
+async function getUserFromBearer(req) {
+  return getUserDocFromBearer(req);
+}
+
+async function getPositionsForUser(userId) {
+  return loadOpenPositionsForUser(userId);
 }
 
 async function accountLikeHandler(req, res) {
@@ -666,14 +650,6 @@ async function accountLikeHandler(req, res) {
 /* ======================================================
    ya te dije no se tocan 
    ====================================================== */
-
-
-
-
-
-
-
-
 
 /* ======================================================
    ADMIN AUTH
@@ -916,19 +892,6 @@ try {
 /* ======================================================
    ACCOUNT / WALLET / TRANSACTIONS
    ====================================================== */
-async function accountLikeHandler(req, res) {
-  try {
-    const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const payload = await buildAccountForUser(user);
-    return res.json(payload);
-  } catch (e) {
-    console.error("accountLikeHandler error", e);
-    return res.status(500).json({ error: "Server error" });
-  }
-}
-
 app.get("/api/account", accountLikeHandler);
 app.get("/api/me", accountLikeHandler);
 app.get("/api/profile", accountLikeHandler);
@@ -1341,8 +1304,7 @@ async function tradeCloseHandler(req, res) {
     }
 
     const body = req.body || {};
-    const positionId =
-      body.positionId || body.id || body._id || body.tradeId || null;
+    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
     const symbol = String(body.symbol || "").trim().toUpperCase();
 
     let position = null;
@@ -1384,8 +1346,7 @@ async function tradeCloseHandler(req, res) {
     const entryPrice =
       toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
       0;
-    const qty =
-      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
+    const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
@@ -1774,10 +1735,7 @@ app.use(async (req, res, next) => {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
 
-      res
-        .status(200)
-        .type("application/javascript; charset=utf-8")
-        .send(cleaned);
+      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
 
