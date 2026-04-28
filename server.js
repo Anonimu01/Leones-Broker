@@ -92,14 +92,7 @@ mongoose.connection.on("disconnected", () => {
 });
 
 
-// ===============================
-// 🔥 PRICE STORE GLOBAL (REAL)
-// ===============================
-const priceStore = {};
 
-function getPriceStore() {
-  return priceStore;
-}
 
 // ===============================
 // 🔥 NORMALIZADOR GLOBAL
@@ -426,42 +419,7 @@ function safeSymbol(symbol = "") {
 
 
 
-/* ======================================================
-   🔥 PRICE STORE LOOKUP (FIXED)
-   ====================================================== */
-function getCurrentPriceForSymbol(symbol) {
-  const target = normalizeSymbol(symbol);
-  if (!target) return null;
 
-  const store = getPriceStore?.() || {};
-
-  // 1. acceso directo rápido (MEJOR PERFORMANCE)
-  if (store[target]?.price != null) {
-    const p = Number(store[target].price);
-    return Number.isFinite(p) ? p : null;
-  }
-
-  // 2. fallback búsqueda flexible
-  for (const [key, item] of Object.entries(store)) {
-    const normalizedKey = normalizeSymbol(key);
-
-    if (normalizedKey === target) {
-      const price = Number(
-        item?.price ??
-        item?.last ??
-        item?.close ??
-        item?.value ??
-        item?.mark ??
-        item?.mid ??
-        item?.lp
-      );
-
-      return Number.isFinite(price) ? price : null;
-    }
-  }
-
-  return null;
-}
 
 /* ======================================================
    🔥 CÁLCULO DE PNL (TIEMPO REAL)
