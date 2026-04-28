@@ -84,7 +84,9 @@ mongoose.connection.on("connected", () => {
     const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
     const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
     startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
-    console.log(`🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`);
+    console.log(
+      `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
+    );
   } catch (e) {
     console.error("Error iniciando risk watcher:", e);
   }
@@ -154,7 +156,8 @@ app.use(
     max: 5000,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+    skip: (req) =>
+      req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
   })
 );
 
@@ -164,7 +167,9 @@ app.use(
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
   cors: {
-    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : process.env.CLIENT_URL || "*",
+    origin: Array.from(allowedOrigins).length
+      ? Array.from(allowedOrigins)
+      : process.env.CLIENT_URL || "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -190,17 +195,32 @@ function normalizeSide(value) {
   return "";
 }
 function normalizeQty(body = {}) {
-  const n = Number(body.qty ?? body.quantity ?? body.amount ?? body.positionSize ?? body.notional ?? body.size);
+  const n = Number(
+    body.qty ??
+      body.quantity ??
+      body.amount ??
+      body.positionSize ??
+      body.notional ??
+      body.size
+  );
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 function normalizePrice(body = {}) {
-  const raw = body.price ?? body.entryPrice ?? body.currentPrice ?? body.limitPrice ?? body.stopPrice ?? body.openPrice ?? null;
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    null;
   if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 const fallbackPriceStore = new Map();
+
 function basePriceFromSymbol(symbol) {
   const s = compactSymbol(symbol);
   if (!s) return 100;
@@ -214,40 +234,58 @@ function basePriceFromSymbol(symbol) {
   if (s.includes("USDJPY")) return 150 + (hash % 200) / 10;
   return base;
 }
+
 function seedFallbackQuote(symbol, item = {}) {
   const key = String(symbol);
   const existing = fallbackPriceStore.get(key);
   const now = new Date().toISOString();
-  const base = toNumber(item.price ?? item.last ?? item.close ?? item.value ?? item.mark ?? item.mid ?? item.lp) ?? existing?.price ?? basePriceFromSymbol(key);
+  const base =
+    toNumber(
+      item.price ??
+        item.last ??
+        item.close ??
+        item.value ??
+        item.mark ??
+        item.mid ??
+        item.lp
+    ) ?? existing?.price ?? basePriceFromSymbol(key);
+
   const quote = {
     symbol: key,
     label: item.label || item.name || (key.split(":").pop() || key).replace("_", "/"),
     market: item.market || existing?.market || "Unknown",
     price: base,
-    bid: toNumber(item.bid) ?? (base * 0.999),
-    ask: toNumber(item.ask) ?? (base * 1.001),
+    bid: toNumber(item.bid) ?? base * 0.999,
+    ask: toNumber(item.ask) ?? base * 1.001,
     open: toNumber(item.open) ?? base,
-    high: toNumber(item.high) ?? (base * 1.01),
-    low: toNumber(item.low) ?? (base * 0.99),
+    high: toNumber(item.high) ?? base * 1.01,
+    low: toNumber(item.low) ?? base * 0.99,
     volume: toNumber(item.volume) ?? 0,
     change: toNumber(item.change) ?? 0,
     changePercent: toNumber(item.changePercent) ?? 0,
     updatedAt: item.updatedAt || now,
     raw: item.raw || item,
   };
+
   fallbackPriceStore.set(key, quote);
   try {
     if (priceHandler?.prices instanceof Map) priceHandler.prices.set(key, quote);
-    else if (priceHandler?.prices && typeof priceHandler.prices === "object") priceHandler.prices[key] = quote;
+    else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
+      priceHandler.prices[key] = quote;
+    }
   } catch {}
   return quote;
 }
+
 function nudgeFallbackPrices() {
   for (const [symbol, quote] of fallbackPriceStore.entries()) {
     const current = Number(quote.price);
     if (!Number.isFinite(current) || current <= 0) continue;
     const seed = symbol.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-    const drift = ((Math.sin(Date.now() / 5000 + seed) + Math.cos(Date.now() / 7000 + seed)) / 2) * 0.004;
+    const drift =
+      ((Math.sin(Date.now() / 5000 + seed) + Math.cos(Date.now() / 7000 + seed)) /
+        2) *
+      0.004;
     const next = Math.max(current * (1 + drift), current * 0.0001);
     const updated = {
       ...quote,
@@ -257,16 +295,21 @@ function nudgeFallbackPrices() {
       high: Math.max(Number(quote.high) || next, next),
       low: Math.min(Number(quote.low) || next, next),
       change: next - (Number(quote.open) || next),
-      changePercent: (((next - (Number(quote.open) || next)) / (Number(quote.open) || next)) * 100) || 0,
+      changePercent:
+        (((next - (Number(quote.open) || next)) / (Number(quote.open) || next)) *
+          100) || 0,
       updatedAt: new Date().toISOString(),
     };
     fallbackPriceStore.set(symbol, updated);
     try {
       if (priceHandler?.prices instanceof Map) priceHandler.prices.set(symbol, updated);
-      else if (priceHandler?.prices && typeof priceHandler.prices === "object") priceHandler.prices[symbol] = updated;
+      else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
+        priceHandler.prices[symbol] = updated;
+      }
     } catch {}
   }
 }
+
 function getPriceStore() {
   try {
     const merged = {};
@@ -284,9 +327,19 @@ function getPriceStore() {
     return Object.fromEntries(fallbackPriceStore.entries());
   }
 }
+
 function normalizeQuote(symbol, item = {}) {
-  const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
-  const price = toNumber(item.price) ?? toNumber(item.last) ?? toNumber(item.close) ?? toNumber(item.value) ?? toNumber(item.mark) ?? toNumber(item.mid);
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
+  const price =
+    toNumber(item.price) ??
+    toNumber(item.last) ??
+    toNumber(item.close) ??
+    toNumber(item.value) ??
+    toNumber(item.mark) ??
+    toNumber(item.mid);
   return {
     symbol,
     label,
@@ -304,55 +357,115 @@ function normalizeQuote(symbol, item = {}) {
     raw: item,
   };
 }
+
 function ensureMarketSeed(symbol) {
   const key = compactSymbol(symbol);
   if (!key) return null;
   const store = getPriceStore();
   for (const [k, item] of Object.entries(store)) {
     const candidates = [
-      k, k.split(":").pop(), item?.symbol, item?.tvSymbol, item?.ticker, item?.name, item?.label, item?.marketSymbol,
+      k,
+      k.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
     ];
     if (candidates.some((c) => compactSymbol(c) === key)) {
       const quote = normalizeQuote(k, item);
-      if (!Number.isFinite(quote.price) || quote.price <= 0) return seedFallbackQuote(k, item);
+      if (!Number.isFinite(quote.price) || quote.price <= 0) {
+        return seedFallbackQuote(k, item);
+      }
       return seedFallbackQuote(k, { ...item, price: quote.price });
     }
   }
   return seedFallbackQuote(symbol, { label: symbol, market: "Unknown" });
 }
+
 function getCurrentPriceForSymbol(symbol) {
   const target = compactSymbol(symbol);
   if (!target) return null;
   const store = getPriceStore();
   for (const [key, item] of Object.entries(store)) {
-    const candidates = [key, key.split(":").pop(), item?.symbol, item?.tvSymbol, item?.ticker, item?.name, item?.label, item?.marketSymbol];
+    const candidates = [
+      key,
+      key.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
+    ];
     if (candidates.some((c) => compactSymbol(c) === target)) {
-      const p = toNumber(item?.price ?? item?.last ?? item?.close ?? item?.value ?? item?.mark ?? item?.mid ?? item?.lp);
+      const p = toNumber(
+        item?.price ??
+          item?.last ??
+          item?.close ??
+          item?.value ??
+          item?.mark ??
+          item?.mid ??
+          item?.lp
+      );
       if (Number.isFinite(p) && p > 0) return p;
     }
   }
   const seeded = ensureMarketSeed(symbol);
   return toNumber(seeded?.price) ?? null;
 }
+
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
+
 function computePositionPnl(position = {}, currentPrice = null) {
   const entry = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
-  const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
-  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const qty =
+    toNumber(
+      position.qty ??
+        position.quantity ??
+        position.amount ??
+        position.positionSize ??
+        0
+    ) ?? 0;
+  const side = normalizeSide(
+    position.side || position.direction || position.positionSide
+  );
   const px = toNumber(currentPrice ?? position.currentPrice ?? entry) ?? entry;
   const sign = side === "SELL" ? -1 : 1;
-  return ((px - entry) * qty) * sign;
+  return (px - entry) * qty * sign;
 }
+
 function annotatePosition(position = {}) {
-  const currentPrice = toNumber(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? position.price ?? position.entryPrice ?? 0) ?? 0;
+  const currentPrice =
+    toNumber(
+      position.currentPrice ??
+        getCurrentPriceForSymbol(position.symbol) ??
+        position.price ??
+        position.entryPrice ??
+        0
+    ) ?? 0;
   const entryPrice = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
   const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) ?? 0;
-  const pnl = isClosedPosition(position) ? (toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0) : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
-  return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
+  const pnl = isClosedPosition(position)
+    ? toNumber(position.realizedPnl ?? position.pnl ?? 0) ?? 0
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
 }
+
 async function getUserDocFromBearer(req) {
   try {
     const auth = req.headers.authorization || req.headers.Authorization || null;
@@ -360,21 +473,41 @@ async function getUserDocFromBearer(req) {
     const token = String(auth).split(" ")[1];
     if (!token || !process.env.JWT_SECRET) return null;
     let payload;
-    try { payload = jwt.verify(token, process.env.JWT_SECRET); } catch { return null; }
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+      return null;
+    }
     const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
     return await User.findById(userId).catch(() => null);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
-async function getUserFromBearer(req) { return getUserDocFromBearer(req); }
+async function getUserFromBearer(req) {
+  return getUserDocFromBearer(req);
+}
 async function getWalletDocForUser(userId) {
   try {
     let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
     if (!wallet) {
-      wallet = new Wallet({ user: userId, balanceOwn: 0, balance: 0, credit: 0, marginUsed: 0, leverageFactor: 1, equity: 0, freeMargin: 0, marginLevel: 0 });
+      wallet = new Wallet({
+        user: userId,
+        balanceOwn: 0,
+        balance: 0,
+        credit: 0,
+        marginUsed: 0,
+        leverageFactor: 1,
+        equity: 0,
+        freeMargin: 0,
+        marginLevel: 0,
+      });
     }
     return wallet;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
@@ -383,42 +516,121 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const equity = balanceOwn + openPnl;
   const freeMargin = Math.max(equity + credit - marginUsed, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-  return { balance: balanceOwn, balanceOwn, credit, equity, marginUsed, freeMargin, marginLevel, leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1, currency: wallet?.currency || "USD", openPnl };
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    marginLevel,
+    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
 }
-async function recordTransaction({ user, type, amount = 0, status = "completed", note = "", balanceBefore = 0, balanceAfter = 0, meta = {}, source = "server.js" }) {
+async function recordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
   try {
-    const payload = { user: user?._id || user?.user || user?.id || null, userId: String(user?._id || user?.user || user?.id || ""), type, amount: Number(amount) || 0, status, note, balanceBefore: Number(balanceBefore) || 0, balanceAfter: Number(balanceAfter) || 0, meta, source, createdAt: new Date() };
+    const payload = {
+      user: user?._id || user?.user || user?.id || null,
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date(),
+    };
     const tx = await Transaction.create(payload);
     return tx.toObject ? tx.toObject() : tx;
   } catch (err) {
     console.warn("recordTransaction fallback:", err?.message || err);
-    return { userId: String(user?._id || user?.user || user?.id || ""), type, amount: Number(amount) || 0, status, note, balanceBefore: Number(balanceBefore) || 0, balanceAfter: Number(balanceAfter) || 0, meta, source, createdAt: new Date().toISOString() };
+    return {
+      userId: String(user?._id || user?.user || user?.id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
   }
 }
 async function loadTransactionsForUser(userId, limit = 50) {
   try {
-    return await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []) || [];
-  } catch { return []; }
+    return (
+      (await Transaction.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean()
+        .exec()
+        .catch(() => [])) || []
+    );
+  } catch {
+    return [];
+  }
 }
 async function loadAllTransactions(limit = 200, userId = null) {
   try {
     const query = userId ? { user: userId } : {};
-    return await Transaction.find(query).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []) || [];
-  } catch { return []; }
+    return (
+      (await Transaction.find(query)
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean()
+        .exec()
+        .catch(() => [])) || []
+    );
+  } catch {
+    return [];
+  }
 }
 async function loadOpenPositionsForUser(userId) {
   try {
-    const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+    const rows = await Position.find({
+      user: userId,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
     return (rows || []).map(annotatePosition);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 async function loadAllPositionsForUser(userId) {
   try {
-    const rows = await Position.find({ user: userId }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+    const rows = await Position.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+      .catch(() => []);
     return (rows || []).map(annotatePosition);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
-async function getPositionsForUser(userId) { return loadOpenPositionsForUser(userId); }
+async function getPositionsForUser(userId) {
+  return loadOpenPositionsForUser(userId);
+}
 
 // Rich account builder used by the operational routes
 async function buildRichAccountForUser(userDoc) {
@@ -445,18 +657,33 @@ async function buildRichAccountForUser(userDoc) {
 }
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
   try {
-    io.emit("wallet_update", { userId, account: accountPayload?.account || accountPayload });
-    io.emit("account_update", { userId, account: accountPayload?.account || accountPayload });
+    io.emit("wallet_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
+    io.emit("account_update", {
+      userId,
+      account: accountPayload?.account || accountPayload,
+    });
     if (Array.isArray(positions)) io.emit("positions_update", { userId, positions });
     if (transaction) io.emit("transactions_update", { userId, transaction });
-  } catch (e) { console.warn("emitStateUpdates error:", e?.message || e); }
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e?.message || e);
+  }
 }
 function buildMarketPayload() {
   const store = getPriceStore();
   const keys = Object.keys(store);
   const quotes = keys.length
     ? keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}))
-    : SAMPLE_SYMBOLS.map((s) => normalizeQuote(s.symbol, { label: s.label, market: s.market, price: seedFallbackQuote(s.symbol).price, updatedAt: new Date().toISOString() }));
+    : SAMPLE_SYMBOLS.map((s) =>
+        normalizeQuote(s.symbol, {
+          label: s.label,
+          market: s.market,
+          price: seedFallbackQuote(s.symbol).price,
+          updatedAt: new Date().toISOString(),
+        })
+      );
   return {
     ok: true,
     count: quotes.length,
@@ -502,7 +729,7 @@ async function buildAccountForUser(user) {
     positions,
   };
 }
-    
+
 async function getWalletForUser(userId) {
   try {
     return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
@@ -524,7 +751,7 @@ async function accountLikeHandler(req, res) {
 }
 
 /* ======================================================
-   ya te dije no se tocan 
+   ya te dije no se tocan
    ====================================================== */
 
 /* ======================================================
@@ -532,11 +759,22 @@ async function accountLikeHandler(req, res) {
    ====================================================== */
 async function requireAdmin(req, res, next) {
   try {
-    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+    const key = String(
+      req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || ""
+    );
     if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
     const user = await getUserDocFromBearer(req);
-    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) { req.user = user; return next(); }
-    if (!process.env.ADMIN_API_KEY && user) { req.user = user; return next(); }
+    if (
+      user &&
+      (user.role === "admin" || user.isAdmin === true || user.admin === true)
+    ) {
+      req.user = user;
+      return next();
+    }
+    if (!process.env.ADMIN_API_KEY && user) {
+      req.user = user;
+      return next();
+    }
     return res.status(401).json({ ok: false, error: "Admin unauthorized" });
   } catch (err) {
     console.error("requireAdmin error:", err);
@@ -551,7 +789,11 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : process.env.EMAIL_USER || process.env.SMTP_USER ? "smtp" : "none",
+    emailProvider: process.env.RESEND_API_KEY
+      ? "resend"
+      : process.env.EMAIL_USER || process.env.SMTP_USER
+      ? "smtp"
+      : "none",
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
@@ -580,16 +822,32 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
 
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
-  if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
+  if (!to)
+    return res.status(400).json({
+      ok: false,
+      message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
+    });
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+  const html =
+    req.body.html ||
+    `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
   try {
     const r = await sendEmail({ to, subject, html });
-    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
+    if (r.ok)
+      return res.json({
+        ok: true,
+        message: "Correo enviado",
+        provider: r.provider,
+        result: r.result || r.info || r.resp,
+      });
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
-    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno enviando correo",
+      error: err && err.message ? err.message : String(err),
+    });
   }
 });
 
@@ -606,14 +864,24 @@ const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
-for (const s of SAMPLE_SYMBOLS) seedFallbackQuote(s.symbol, { label: s.label, market: s.market, price: basePriceFromSymbol(s.symbol) });
+for (const s of SAMPLE_SYMBOLS) {
+  seedFallbackQuote(s.symbol, {
+    label: s.label,
+    market: s.market,
+    price: basePriceFromSymbol(s.symbol),
+  });
+}
 
-app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(buildSymbolsPayload()));
 app.get("/api/markets/symbols", (req, res) => res.json(buildSymbolsPayload()));
 app.get("/api/api/symbols", (req, res) => res.json(buildSymbolsPayload()));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/price", (req, res) => res.json(buildMarketPayload()));
@@ -622,10 +890,52 @@ app.get("/api/prices", (req, res) => res.json(buildMarketPayload()));
 /* aliases que el frontend ya está pidiendo */
 app.get("/api/market/latest", (req, res) => {
   const symbol = String(req.query.symbol || req.query.ticker || req.query.asset || "").trim();
-  const latest = symbol ? seedFallbackQuote(symbol, { market: "Unknown" }) : buildMarketPayload().latest;
+  const latest = symbol
+    ? seedFallbackQuote(symbol, { market: "Unknown" })
+    : buildMarketPayload().latest;
   return res.json({ ok: true, latest, data: latest, item: latest });
 });
 app.get("/api/market/polygon/symbols", (req, res) => res.json(buildSymbolsPayload()));
+app.get("/api/market/polygon/quotes", (req, res) => {
+  try {
+    const store = getPriceStore();
+    const quotes = Object.keys(store).map((symbol) => {
+      const item = store[symbol] || {};
+      const q = normalizeQuote(symbol, item);
+      return {
+        symbol,
+        price:
+          Number(q.price) ||
+          Number(item.price) ||
+          Number(item.last) ||
+          Number(item.close) ||
+          Number(item.value) ||
+          Number(item.mark) ||
+          Number(item.mid) ||
+          null,
+        bid: Number(item.bid) || null,
+        ask: Number(item.ask) || null,
+        open: Number(item.open) || null,
+        high: Number(item.high) || null,
+        low: Number(item.low) || null,
+        volume: Number(item.volume) || null,
+        updatedAt: item.updatedAt || new Date().toISOString(),
+      };
+    });
+
+    return res.json({
+      ok: true,
+      count: quotes.length,
+      quotes,
+      data: quotes,
+      items: quotes,
+      latest: quotes[0] || null,
+    });
+  } catch (err) {
+    console.error("polygon quotes error:", err);
+    return res.status(500).json({ ok: false, error: "quotes_error" });
+  }
+});
 app.get("/api/symbols", (req, res) => res.json(buildSymbolsPayload()));
 app.get("/symbols", (req, res) => res.json(buildSymbolsPayload()));
 app.get("/quotes", (req, res) => res.json(buildMarketPayload()));
@@ -643,11 +953,20 @@ try {
       apiKey: process.env.POLYGON_API_KEY,
       onPrice: (data) => {
         try {
-          const symbol = String(data?.symbol || data?.ticker || data?.tvSymbol || data?.marketSymbol || "").trim();
+          const symbol = String(
+            data?.symbol || data?.ticker || data?.tvSymbol || data?.marketSymbol || ""
+          ).trim();
           const quote = seedFallbackQuote(symbol, {
             label: data?.label || data?.name,
             market: data?.market,
-            price: data?.price ?? data?.last ?? data?.close ?? data?.value ?? data?.mark ?? data?.mid ?? data?.lp,
+            price:
+              data?.price ??
+              data?.last ??
+              data?.close ??
+              data?.value ??
+              data?.mark ??
+              data?.mid ??
+              data?.lp,
             bid: data?.bid,
             ask: data?.ask,
             open: data?.open,
@@ -659,7 +978,9 @@ try {
             updatedAt: data?.updatedAt || new Date().toISOString(),
             raw: data,
           });
-          if (priceHandler && typeof priceHandler.handle === "function") priceHandler.handle({ ...data, symbol: quote.symbol, price: quote.price });
+          if (priceHandler && typeof priceHandler.handle === "function") {
+            priceHandler.handle({ ...data, symbol: quote.symbol, price: quote.price });
+          }
         } catch (e) {
           console.warn("onPrice bridge error:", e?.message || e);
         }
@@ -671,7 +992,10 @@ try {
     try {
       const maybe = polygonSocket.connect();
       if (maybe && typeof maybe.then === "function") {
-        maybe.catch((err) => { console.warn("PolygonSocket.connect() rejected:", err); polygonSocket = null; });
+        maybe.catch((err) => {
+          console.warn("PolygonSocket.connect() rejected:", err);
+          polygonSocket = null;
+        });
       }
       console.log("🔌 Intentando conectar PolygonSocket...");
     } catch (err) {
@@ -689,7 +1013,12 @@ const PNL_TICK_MS = Math.max(Number(process.env.PNL_TICK_MS) || 2000, 500);
 const marketTick = setInterval(async () => {
   try {
     nudgeFallbackPrices();
-    const openPositions = await Position.find({ status: { $in: ["OPEN", "open", "Open"] } }).lean().exec().catch(() => []);
+    const openPositions = await Position.find({
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .lean()
+      .exec()
+      .catch(() => []);
     const grouped = new Map();
     for (const pos of openPositions || []) {
       const annotated = annotatePosition(pos);
@@ -736,7 +1065,20 @@ async function walletLikeHandler(req, res) {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildRichAccountForUser(user);
-    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
+    return res.json({
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -751,7 +1093,13 @@ app.get("/api/transactions", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
     const transactions = await loadTransactionsForUser(user._id, limit);
-    return res.json({ ok: true, count: transactions.length, transactions, data: transactions, items: transactions });
+    return res.json({
+      ok: true,
+      count: transactions.length,
+      transactions,
+      data: transactions,
+      items: transactions,
+    });
   } catch (e) {
     console.error("/api/transactions error", e);
     return res.status(500).json({ error: "Server error" });
@@ -763,7 +1111,13 @@ app.get("/api/account/transactions", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
     const transactions = await loadTransactionsForUser(user._id, limit);
-    return res.json({ ok: true, count: transactions.length, transactions, data: transactions, items: transactions });
+    return res.json({
+      ok: true,
+      count: transactions.length,
+      transactions,
+      data: transactions,
+      items: transactions,
+    });
   } catch (e) {
     console.error("/api/account/transactions error", e);
     return res.status(500).json({ error: "Server error" });
@@ -782,32 +1136,67 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     const note = String(body.note || body.description || "Admin deposit").trim();
     const currency = String(body.currency || "USD").trim();
     if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
+    if (!Number.isFinite(amount) || amount <= 0)
+      return res.status(400).json({ ok: false, error: "amount_required" });
     const user = await User.findById(userId).catch(() => null);
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
     const wallet = await getWalletDocForUser(user._id);
-    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+    const balanceBefore =
+      toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) { wallet.leverageFactor = leverage; user.leverage = leverage; }
+    if (Number.isFinite(leverage) && leverage > 0) {
+      wallet.leverageFactor = leverage;
+      user.leverage = leverage;
+    }
     wallet.equity = wallet.balanceOwn;
     wallet.marginUsed = toNumber(wallet.marginUsed ?? 0) ?? 0;
     wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
     user.balance = wallet.balanceOwn;
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: {
+        source: "admin-panel",
+        method: body.method || "deposit",
+        currency,
+        leverage: wallet.leverageFactor,
+      },
+      source: "api/admin/deposit",
+    });
     const account = await buildRichAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: {
+        balance: wallet.balanceOwn,
+        leverage: wallet.leverageFactor,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+      },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   }
 });
 
@@ -819,7 +1208,11 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
     return res.json({ ok: true, count: txs.length, transactions: txs, data: txs, items: txs });
   } catch (err) {
     console.error("/api/admin/transactions error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   }
 });
 
@@ -880,9 +1273,7 @@ async function tradeOpenHandler(req, res) {
     }
 
     const body = req.body || {};
-    const symbol = String(
-      body.symbol || body.tvSymbol || body.ticker || body.asset || ""
-    )
+    const symbol = String(body.symbol || body.tvSymbol || body.ticker || body.asset || "")
       .trim()
       .toUpperCase();
 
@@ -1098,12 +1489,11 @@ async function tradeCloseHandler(req, res) {
     const currentPrice = toNumber(currentPriceRaw) ?? 0;
     const entryPrice =
       toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
-    const qty =
-      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
+    const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore =
@@ -1236,7 +1626,7 @@ async function tradeCloseAllHandler(req, res) {
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
       const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
 
       totalRealized += realizedPnl;
@@ -1337,15 +1727,34 @@ app.post("/api/trade/orders", tradeOpenHandler);
    ====================================================== */
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
-  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
-  socket.on("request_prices_snapshot", () => { try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); } });
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch {
+    socket.emit("prices_snapshot", {});
+  }
+
+  socket.on("request_prices_snapshot", () => {
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch {
+      socket.emit("prices_snapshot", {});
+    }
+  });
+
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
-        socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k] && prices[k].market ? prices[k].market : "Unknown" })));
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k] && prices[k].market ? prices[k].market : "Unknown",
+          }))
+        );
       } else {
         socket.emit("symbols_update", SAMPLE_SYMBOLS);
       }
@@ -1353,23 +1762,36 @@ io.on("connection", (socket) => {
       socket.emit("symbols_update", SAMPLE_SYMBOLS);
     }
   });
+
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
+        polygonSocket.subscribe(symbol, kind);
+      }
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("subscribe error:", e); }
+    } catch (e) {
+      console.warn("subscribe error:", e);
+    }
   });
+
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
+        polygonSocket.unsubscribe(symbol, kind);
+      }
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("unsubscribe error:", e); }
+    } catch (e) {
+      console.warn("unsubscribe error:", e);
+    }
   });
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
+
+  socket.on("disconnect", (reason) =>
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
+  );
 });
 
 /* ======================================================
@@ -1379,42 +1801,63 @@ const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
-  try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) { staticDirName = cand; break; } } catch {}
+  try {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
+  } catch {}
 }
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'. Asegúrate de que exista la carpeta con los assets (index.html).`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
+
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
   text = text.replace(/^\uFEFF/, "");
   const trimmed = text.trim();
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/i.test(trimmed);
-  if (startsWithScript && endsWithScript) text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/i, "");
+  if (startsWithScript && endsWithScript)
+    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/i, "");
   return text;
 }
+
 function resolveJsCandidate(requestPath) {
   const clean = String(requestPath || "").split("?")[0];
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
-  return [...new Set(candidates)].find((p) => { try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; } });
+  return [...new Set(candidates)].find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
+
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
@@ -1441,7 +1884,10 @@ if (!window.loadRealQuotes) { window.loadRealQuotes = async function () { return
 `);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 app.use("/public", express.static(staticPath));
@@ -1452,7 +1898,8 @@ app.use(express.static(staticPath));
    FALLBACK HTML
    ====================================================== */
 app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") return res.status(404).json({ error: "API endpoint not found" });
+  if (req.path.startsWith("/api/") || req.path === "/api")
+    return res.status(404).json({ error: "API endpoint not found" });
   const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -1465,7 +1912,10 @@ app.get("*", (req, res) => {
 app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  res.status(err.status || 500).json({ error: "Server error", message: process.env.NODE_ENV === "development" ? err.message : undefined });
+  res.status(err.status || 500).json({
+    error: "Server error",
+    message: process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
 });
 
 /* ======================================================
@@ -1480,8 +1930,10 @@ const server = httpServer.listen(PORT, () => {
   console.log("MONGO:", !!process.env.MONGO_URI);
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  if (!process.env.POLYGON_API_KEY)
+    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  if (!process.env.RESEND_API_KEY)
+    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
 
 /* ======================================================
@@ -1492,7 +1944,10 @@ const safeClosePolygonSocket = async () => {
   if (!polygonSocket) return;
   try {
     const maybe = polygonSocket.close();
-    if (maybe && typeof maybe.then === "function") await maybe.catch((err) => console.warn("polygonSocket.close() rejected:", err));
+    if (maybe && typeof maybe.then === "function")
+      await maybe.catch((err) =>
+        console.warn("polygonSocket.close() rejected:", err)
+      );
   } catch (e) {
     console.warn("polygonSocket.close() threw:", e);
   }
@@ -1501,13 +1956,41 @@ const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`📴 ${signal} recibido. Cerrando...`);
-  const timeout = setTimeout(() => { console.warn("Forzando cierre..."); process.exit(1); }, 30000);
+  const timeout = setTimeout(() => {
+    console.warn("Forzando cierre...");
+    process.exit(1);
+  }, 30000);
   timeout.unref();
   try {
-    await new Promise((resolve, reject) => { server.close((err) => { if (err) return reject(err); console.log("HTTP cerrado"); resolve(); }); });
-    try { await safeClosePolygonSocket(); } catch (e) { console.warn("Error cerrando polygonSocket (await):", e); }
-    try { if (typeof global?.stopRiskWatcher === "function") { try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); } } } catch (e) { console.warn("Error deteniendo risk watcher:", e); }
-    try { await mongoose.disconnect(); console.log("Mongo cerrado"); } catch (e) { console.warn("Error desconectando Mongo:", e); }
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) return reject(err);
+        console.log("HTTP cerrado");
+        resolve();
+      });
+    });
+    try {
+      await safeClosePolygonSocket();
+    } catch (e) {
+      console.warn("Error cerrando polygonSocket (await):", e);
+    }
+    try {
+      if (typeof global?.stopRiskWatcher === "function") {
+        try {
+          global.stopRiskWatcher();
+        } catch (e) {
+          console.warn("stopRiskWatcher threw:", e);
+        }
+      }
+    } catch (e) {
+      console.warn("Error deteniendo risk watcher:", e);
+    }
+    try {
+      await mongoose.disconnect();
+      console.log("Mongo cerrado");
+    } catch (e) {
+      console.warn("Error desconectando Mongo:", e);
+    }
     clearTimeout(timeout);
     process.exit(0);
   } catch (err) {
@@ -1518,7 +2001,13 @@ const gracefulShutdown = async (signal) => {
 };
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("unhandledRejection", (r) => { console.error("UnhandledRejection:", r); gracefulShutdown("unhandledRejection").catch(() => {}); });
-process.on("uncaughtException", (e) => { console.error("UncaughtException:", e); gracefulShutdown("uncaughtException").catch(() => {}); });
+process.on("unhandledRejection", (r) => {
+  console.error("UnhandledRejection:", r);
+  gracefulShutdown("unhandledRejection").catch(() => {});
+});
+process.on("uncaughtException", (e) => {
+  console.error("UncaughtException:", e);
+  gracefulShutdown("uncaughtException").catch(() => {});
+});
 
 export default app;
