@@ -372,30 +372,6 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 
-/* ======================================================
-   lee el saldo del cliente
-   ====================================================== */
-function normalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0;
-  const credit = toNumber(wallet?.credit ?? 0) ?? 0;
-  const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
-  const equity = balanceOwn + openPnl;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-  return {
-    balance: balanceOwn,
-    balanceOwn,
-    credit,
-    equity,
-    marginUsed,
-    freeMargin,
-    marginLevel,
-    leverageFactor: toNumber(wallet?.leverageFactor ?? 1) ?? 1,
-    currency: wallet?.currency || "USD",
-    openPnl,
-  };
-}
 
 
 
@@ -1007,16 +983,8 @@ const SAMPLE_SYMBOLS = [
 
 
 
-function toNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 
-function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label ||
-    item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
+
 
   const price =
     toNumber(item.price) ??
