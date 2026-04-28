@@ -659,11 +659,13 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 function computePositionPnl(position = {}, currentPrice = null) {
   const entry = Number(position.entryPrice ?? position.price ?? 0);
   const qty = Number(position.qty ?? position.quantity ?? 0);
-  const side = normalizeSide(position.side);
+  const side = normalizeSide(position.side || position.direction);
 
   if (!entry || !qty || !side) return 0;
 
   const px = Number(currentPrice ?? entry);
+  if (!Number.isFinite(px)) return 0;
+
   const sign = side === "SELL" ? -1 : 1;
 
   return (px - entry) * qty * sign;
@@ -673,17 +675,18 @@ function computePositionPnl(position = {}, currentPrice = null) {
    FIX ANNOTATE POSITION
    ====================================================== */
 function annotatePosition(position = {}) {
+  const entryPrice = Number(position.entryPrice ?? position.price ?? 0);
+
   const currentPrice =
     Number(position.currentPrice) ||
     getCurrentPriceForSymbol(position.symbol) ||
-    Number(position.entryPrice) ||
+    entryPrice ||
     0;
 
-  const entryPrice = Number(position.entryPrice) || 0;
-  const qty = Number(position.qty) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? 0);
 
   const pnl = isClosedPosition(position)
-    ? Number(position.realizedPnl || 0)
+    ? Number(position.realizedPnl || position.pnl || 0)
     : computePositionPnl(position, currentPrice);
 
   return {
@@ -700,12 +703,12 @@ function annotatePosition(position = {}) {
 /* ======================================================
    FIX WALLET SNAPSHOT
    ====================================================== */
-function normalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0);
-  const credit = Number(wallet?.credit ?? 0);
-  const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0), 0);
+function normalizeWalletSnapshot(wallet = {}, openPnl = 0) {
+  const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? 0);
+  const credit = Number(wallet.credit ?? 0);
+  const marginUsed = Math.max(Number(wallet.marginUsed ?? 0), 0);
 
-  const equity = balanceOwn + openPnl;
+  const equity = balanceOwn + Number(openPnl || 0);
   const freeMargin = equity + credit - marginUsed;
 
   return {
@@ -716,9 +719,9 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     marginUsed,
     freeMargin: Math.max(freeMargin, 0),
     marginLevel: marginUsed > 0 ? (equity / marginUsed) * 100 : 0,
-    leverageFactor: Number(wallet?.leverageFactor ?? 1),
-    currency: wallet?.currency || "USD",
-    openPnl,
+    leverageFactor: Number(wallet.leverageFactor ?? 1),
+    currency: wallet.currency || "USD",
+    openPnl: Number(openPnl || 0),
   };
 }
 
@@ -729,7 +732,7 @@ function getCurrentPriceForSymbol(symbol) {
   const target = compactSymbol(symbol);
   if (!target) return null;
 
-  const store = getPriceStore();
+  const store = getPriceStore?.() || {};
 
   for (const [key, item] of Object.entries(store)) {
     const candidates = [
@@ -766,11 +769,11 @@ async function tradeCloseAllHandler(req, res) {
 
     const openPositions = await Position.find({
       user: user._id,
-      status: { $in: ["OPEN", "open"] },
+      status: { $in: ["OPEN", "open", "Open"] },
     });
 
     if (!openPositions.length)
-      return res.json({ ok: true, closed: 0 });
+      return res.json({ ok: true, closed: 0, totalPnl: 0 });
 
     const wallet = await getWalletDocForUser(user._id);
 
@@ -778,22 +781,24 @@ async function tradeCloseAllHandler(req, res) {
 
     for (const pos of openPositions) {
       const currentPrice =
-        getCurrentPriceForSymbol(pos.symbol) || pos.entryPrice;
+        getCurrentPriceForSymbol(pos.symbol) || pos.entryPrice || 0;
 
       const pnl = computePositionPnl(pos, currentPrice);
       totalPnl += pnl;
 
-      wallet.marginUsed -= Number(pos.marginReserved || 0);
+      wallet.marginUsed =
+        Math.max(Number(wallet.marginUsed ?? 0) - Number(pos.marginReserved ?? 0), 0);
 
       pos.status = "CLOSED";
       pos.closePrice = currentPrice;
       pos.realizedPnl = pnl;
+      pos.pnl = pnl;
       pos.closedAt = new Date();
 
       await pos.save();
     }
 
-    wallet.balanceOwn += totalPnl;
+    wallet.balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? 0) + totalPnl;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = Math.max(wallet.marginUsed, 0);
     wallet.equity = wallet.balanceOwn;
@@ -807,7 +812,8 @@ async function tradeCloseAllHandler(req, res) {
     });
 
   } catch (err) {
-    return res.status(500).json({ ok: false });
+    console.error("close-all error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
   }
 }
 /* ======================================================
