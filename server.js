@@ -618,20 +618,35 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
 /* ======================================================
    Esta no se tocan parcher
    ====================================================== */
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+
+  const balance = wallet?.balance ?? user.balance ?? 0;
+
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+    
 async function getWalletForUser(userId) {
   try {
     return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
   } catch {
     return null;
   }
-}
-
-async function getUserFromBearer(req) {
-  return getUserDocFromBearer(req);
-}
-
-async function getPositionsForUser(userId) {
-  return loadOpenPositionsForUser(userId);
 }
 
 async function accountLikeHandler(req, res) {
@@ -650,6 +665,8 @@ async function accountLikeHandler(req, res) {
 /* ======================================================
    ya te dije no se tocan 
    ====================================================== */
+
+
 
 /* ======================================================
    ADMIN AUTH
