@@ -593,6 +593,7 @@ async function buildAccountForUser(userDoc) {
   };
 }
 
+
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
   try {
     io.emit("wallet_update", {
@@ -613,6 +614,70 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
     console.warn("emitStateUpdates error:", e?.message || e);
   }
 }
+
+/* ======================================================
+   Esta no se tocan parcher
+   ====================================================== */
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+
+  const balance = wallet?.balance ?? user.balance ?? 0;
+
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+    
+async function getWalletForUser(userId) {
+  try {
+    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function accountLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
+  } catch (e) {
+    console.error("accountLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+/* ======================================================
+   ya te dije no se tocan 
+   ====================================================== */
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* ======================================================
    ADMIN AUTH
