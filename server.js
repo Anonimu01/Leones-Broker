@@ -387,32 +387,7 @@ function annotatePosition(position = {}) {
   };
 }
 
-async function getUserDocFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
 
-    const token = String(auth).split(" ")[1];
-    if (!token) return null;
-    if (!process.env.JWT_SECRET) return null;
-
-    let payload;
-    try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (e) {
-      return null;
-    }
-
-    const userId =
-      payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-
-    const user = await User.findById(userId).catch(() => null);
-    return user || null;
-  } catch {
-    return null;
-  }
-}
 
 async function getWalletDocForUser(userId) {
   try {
@@ -565,34 +540,6 @@ async function loadAllPositionsForUser(userId) {
   }
 }
 
-async function buildAccountForUser(userDoc) {
-  const wallet = await getWalletDocForUser(userDoc._id);
-  const openPositions = await loadOpenPositionsForUser(userDoc._id);
-  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
-
-  const openPnl = openPositions.reduce(
-    (sum, p) => sum + (toNumber(p.pnl ?? 0) || 0),
-    0
-  );
-
-  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
-
-  return {
-    account: {
-      ...normalizedWallet,
-      leverage: toNumber(userDoc.leverage ?? wallet.leverageFactor ?? 100) ?? 100,
-      currency: userDoc.currency || wallet.currency || "USD",
-      positions: openPositions,
-      openPositions,
-      recentTransactions,
-      transactions: recentTransactions,
-    },
-    user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet.toObject ? wallet.toObject() : wallet,
-    positions: openPositions,
-    transactions: recentTransactions,
-  };
-}
 
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
   try {
@@ -614,6 +561,7 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
     console.warn("emitStateUpdates error:", e?.message || e);
   }
 }
+
 
 /* ======================================================
    Esta no se tocan parcher
@@ -665,6 +613,12 @@ async function accountLikeHandler(req, res) {
 /* ======================================================
    ya te dije no se tocan 
    ====================================================== */
+
+
+
+
+
+
 
 
 
@@ -909,12 +863,6 @@ try {
 /* ======================================================
    ACCOUNT / WALLET / TRANSACTIONS
    ====================================================== */
-app.get("/api/account", accountLikeHandler);
-app.get("/api/me", accountLikeHandler);
-app.get("/api/profile", accountLikeHandler);
-app.get("/api/cuenta", (req, res) => {
-  return res.redirect(307, "/api/account");
-});
 
 async function walletLikeHandler(req, res) {
   try {
@@ -1321,7 +1269,8 @@ async function tradeCloseHandler(req, res) {
     }
 
     const body = req.body || {};
-    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
+    const positionId =
+      body.positionId || body.id || body._id || body.tradeId || null;
     const symbol = String(body.symbol || "").trim().toUpperCase();
 
     let position = null;
@@ -1363,7 +1312,8 @@ async function tradeCloseHandler(req, res) {
     const entryPrice =
       toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ??
       0;
-    const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
+    const qty =
+      toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
 
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
@@ -1752,7 +1702,10 @@ app.use(async (req, res, next) => {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
 
-      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
+      res
+        .status(200)
+        .type("application/javascript; charset=utf-8")
+        .send(cleaned);
       return;
     }
 
