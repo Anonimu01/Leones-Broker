@@ -654,20 +654,7 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
     return await sendEmail({
       to,
       subject: "Verifica tu cuenta - Leones Broker",
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
-          <h2>Hola ${name}, verifica tu cuenta</h2>
-          <p>Haz clic en el botón de abajo para activar tu cuenta:</p>
-          <p>
-            <a href="${verificationLink}"
-               style="display:inline-block;background:#d4af37;color:#000;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">
-              Verificar cuenta
-            </a>
-          </p>
-          <p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
-          <p>${verificationLink}</p>
-        </div>
-      `,
+      html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#111"><h2>Hola ${name}, verifica tu cuenta</h2><p>Haz clic en el botón de abajo para activar tu cuenta:</p><p><a href="${verificationLink}" style="display:inline-block;background:#d4af37;color:#000;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">Verificar cuenta</a></p><p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p><p>${verificationLink}</p></div>`,
     });
   } catch (err) {
     console.error("[MAIL] sendVerificationEmail error:", err?.message || err);
@@ -677,34 +664,16 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
 
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
-  if (!to) {
-    return res.status(400).json({
-      ok: false,
-      message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
-    });
-  }
+  if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html =
-    req.body.html ||
-    `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
   try {
     const r = await sendEmail({ to, subject, html });
-    if (r.ok) {
-      return res.json({
-        ok: true,
-        message: "Correo enviado",
-        provider: r.provider,
-        result: r.result || r.info || r.resp,
-      });
-    }
+    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
-    return res.status(500).json({
-      ok: false,
-      message: "Error interno enviando correo",
-      error: err && err.message ? err.message : String(err),
-    });
+    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
   }
 });
 
@@ -721,45 +690,20 @@ const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
   { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
-
 function buildMarketPayload() {
   const store = getPriceStore();
   const keys = Object.keys(store);
   const quotes = keys.length
     ? keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}))
-    : SAMPLE_SYMBOLS.map((s) =>
-        normalizeQuote(s.symbol, {
-          label: s.label,
-          market: s.market,
-          price: null,
-          updatedAt: new Date().toISOString(),
-        })
-      );
-
-  const latest = quotes.find((q) => q.price != null) || quotes[0] || null;
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest,
-    symbols: quotes.map((q) => ({ symbol: q.symbol, label: q.label, market: q.market })),
-  };
+    : SAMPLE_SYMBOLS.map((s) => normalizeQuote(s.symbol, { label: s.label, market: s.market, price: null, updatedAt: new Date().toISOString() }));
+  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null, symbols: quotes.map((q) => ({ symbol: q.symbol, label: q.label, market: q.market })) };
 }
-
-app.get("/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
-);
+app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
-);
-
-// Aliases que tu frontend estaba buscando y devolvían 404
+app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
 app.get("/api/latest", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/symbols", (req, res) => res.json(buildMarketPayload().symbols));
@@ -993,7 +937,10 @@ async function positionsLikeHandler(req, res) {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const positions = await loadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+    const openPnl = positions.reduce((sum, p) => sum + (toNumber(p.pnl ?? 0) || 0), 0);
+    const wallet = await getWalletDocForUser(user._id);
+    const account = normalizeWalletSnapshot(wallet, openPnl);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length, account });
   } catch (e) {
     console.error("positionsLikeHandler error", e);
     return res.status(500).json({ error: "Server error" });
@@ -1006,7 +953,10 @@ app.get("/api/positions/all", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const positions = await loadAllPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+    const openPnl = positions.filter((p) => !isClosedPosition(p)).reduce((sum, p) => sum + (toNumber(p.pnl ?? 0) || 0), 0);
+    const wallet = await getWalletDocForUser(user._id);
+    const account = normalizeWalletSnapshot(wallet, openPnl);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length, account });
   } catch (e) {
     console.error("/api/positions/all error", e);
     return res.status(500).json({ error: "Server error" });
@@ -1020,27 +970,19 @@ async function tradeOpenHandler(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
     const body = req.body || {};
     const symbol = String(body.symbol || body.tvSymbol || body.ticker || body.asset || "").trim().toUpperCase();
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
     const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
 
-    if (!symbol) {
-      return res.status(400).json({ ok: false, error: "symbol_required", message: "symbol es requerido" });
-    }
-    if (!side) {
-      return res.status(400).json({ ok: false, error: "side_required", message: "side/direction debe ser BUY o SELL" });
-    }
-    if (!qty) {
-      return res.status(400).json({ ok: false, error: "quantity_required", message: "qty/quantity/amount es requerido y debe ser mayor que 0" });
-    }
+    if (!symbol) return res.status(400).json({ ok: false, error: "symbol_required", message: "symbol es requerido" });
+    if (!side) return res.status(400).json({ ok: false, error: "side_required", message: "side/direction debe ser BUY o SELL" });
+    if (!qty) return res.status(400).json({ ok: false, error: "quantity_required", message: "qty/quantity/amount es requerido y debe ser mayor que 0" });
 
     const wallet = await getWalletDocForUser(user._id);
-    const leverage = Math.max(
-      toNumber(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) || 1,
-      1
-    );
+    const leverage = Math.max(toNumber(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
     let entryPrice = type === "limit" && requestedPrice ? requestedPrice : marketPrice || requestedPrice;
@@ -1153,37 +1095,19 @@ async function tradeCloseHandler(req, res) {
     let position = null;
 
     if (positionId) {
-      position = await Position.findOne({
-        _id: positionId,
-        user: user._id,
-        status: { $in: ["OPEN", "open", "Open"] },
-      }).catch(() => null);
+      position = await Position.findOne({ _id: positionId, user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).catch(() => null);
     }
     if (!position && symbol) {
-      position = await Position.findOne({
-        user: user._id,
-        symbol,
-        status: { $in: ["OPEN", "open", "Open"] },
-      })
-        .sort({ createdAt: -1 })
-        .catch(() => null);
+      position = await Position.findOne({ user: user._id, symbol, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => null);
     }
-    if (!position) {
-      return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
-    }
+    if (!position) return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
 
-    const currentPriceRaw =
-      body.currentPrice ??
-      getCurrentPriceForSymbol(position.symbol) ??
-      position.currentPrice ??
-      position.entryPrice ??
-      0;
+    const currentPriceRaw = body.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? position.currentPrice ?? position.entryPrice ?? 0;
     const currentPrice = toNumber(currentPriceRaw) ?? 0;
     const entryPrice = toNumber(position.entryPrice ?? position.price ?? position.openPrice ?? 0) ?? 0;
     const qty = toNumber(position.qty ?? position.quantity ?? position.amount ?? 0) ?? 0;
     const side = normalizeSide(position.side || position.direction);
-    const sign = side === "SELL" ? -1 : 1;
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = computePositionPnl({ ...position, entryPrice, qty, side }, currentPrice);
 
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
@@ -1264,37 +1188,30 @@ async function tradeCloseAllHandler(req, res) {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-    const openPositions = await Position.find({
-      user: user._id,
-      status: { $in: ["OPEN", "open", "Open"] },
-    })
-      .sort({ createdAt: -1 })
-      .catch(() => []);
-
-    if (!openPositions.length) {
-      return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
-    }
+    const openPositions = await Position.find({ user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => []);
+    if (!openPositions.length) return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
 
     let totalRealized = 0;
     const closed = [];
-
     for (const pos of openPositions) {
-      const currentPrice =
-        toNumber(
-          req.body?.currentPrice ??
-            getCurrentPriceForSymbol(pos.symbol) ??
-            pos.currentPrice ??
-            pos.entryPrice ??
-            0
-        ) ?? 0;
+      const currentPrice = toNumber(req.body?.currentPrice ?? getCurrentPriceForSymbol(pos.symbol) ?? pos.currentPrice ?? pos.entryPrice ?? 0) ?? 0;
       const entryPrice = toNumber(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) ?? 0;
       const qty = toNumber(pos.qty ?? pos.quantity ?? pos.amount ?? 0) ?? 0;
       const side = normalizeSide(pos.side || pos.direction);
-      const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
-      totalRealized += realizedPnl;
-
+      const realizedPnl = computePositionPnl({ ...pos, entryPrice, qty, side }, currentPrice);
+      const wallet = await getWalletDocForUser(user._id);
+      const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
+      const reservedMargin = toNumber(pos.marginReserved ?? 0) ?? 0;
+      wallet.marginUsed = Math.max((toNumber(wallet.marginUsed ?? 0) ?? 0) - reservedMargin, 0);
+      wallet.balanceOwn = balanceBefore + realizedPnl;
+      wallet.balance = wallet.balanceOwn;
+      wallet.equity = wallet.balanceOwn;
+      wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+      wallet.updatedAt = new Date();
+      await wallet.save();
+      user.balance = wallet.balanceOwn;
+      await user.save();
       pos.status = "CLOSED";
       pos.currentPrice = currentPrice;
       pos.closePrice = currentPrice;
@@ -1303,72 +1220,18 @@ async function tradeCloseAllHandler(req, res) {
       pos.closedAt = new Date();
       pos.updatedAt = new Date();
       await pos.save();
-
-      closed.push({
-        positionId: pos._id,
-        symbol: pos.symbol,
-        realizedPnl,
-      });
+      const tx = await recordTransaction({ user, type: "trade_close", amount: realizedPnl, status: "completed", note: `${side} ${pos.symbol}`, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { positionId: String(pos._id), symbol: pos.symbol, side, qty, entryPrice, closePrice: currentPrice, marginReleased: reservedMargin, realizedPnl }, source: "api/trade/close-all" });
+      totalRealized += realizedPnl;
+      closed.push({ positionId: pos._id, symbol: pos.symbol, realizedPnl, transaction: tx });
     }
-
-    const wallet = await getWalletDocForUser(user._id);
-    const balanceBefore = toNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) ?? 0;
-    const totalMarginReleased = openPositions.reduce(
-      (sum, pos) => sum + (toNumber(pos.marginReserved ?? 0) || 0),
-      0
-    );
-
-    wallet.marginUsed = Math.max((toNumber(wallet.marginUsed ?? 0) ?? 0) - totalMarginReleased, 0);
-    wallet.balanceOwn = balanceBefore + totalRealized;
-    wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn;
-    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-    wallet.updatedAt = new Date();
-    await wallet.save();
-
-    user.balance = wallet.balanceOwn;
-    await user.save();
-
-    const tx = await recordTransaction({
-      user,
-      type: "trade_close_all",
-      amount: totalRealized,
-      status: "completed",
-      note: `CLOSE_ALL ${openPositions.length}`,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
-      meta: {
-        symbols: openPositions.map((p) => p.symbol),
-        closedCount: openPositions.length,
-        totalRealized,
-        totalMarginReleased,
-      },
-      source: "api/trade/close-all",
-    });
-
     const account = await buildRichAccountForUser(user);
-    emitStateUpdates(user._id, account, closed, tx);
-
-    return res.json({
-      ok: true,
-      msg: "Posiciones cerradas",
-      closed: closed.length,
-      totalRealized,
-      data: {
-        closed,
-        totalRealized,
-        account: account.account,
-        wallet: account.wallet,
-        transaction: tx,
-      },
-    });
+    emitStateUpdates(user._id, account, closed, null);
+    return res.json({ ok: true, msg: "Posiciones cerradas", closed: closed.length, totalRealized, data: { closed, totalRealized, account: account.account, wallet: account.wallet } });
   } catch (err) {
     console.error("/api/trade/close-all error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
   }
 }
-
 app.post("/api/trade/open", tradeOpenHandler);
 app.post("/api/trade/close", tradeCloseHandler);
 app.post("/api/trade/close-all", tradeCloseAllHandler);
