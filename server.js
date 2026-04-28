@@ -421,27 +421,7 @@ function safeSymbol(symbol = "") {
 
 
 
-/* ======================================================
-   🔥 CÁLCULO DE PNL (TIEMPO REAL)
-   ====================================================== */
 
-function computePositionPnl(position = {}, currentPrice = null) {
-  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0);
-  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0);
-
-  const sideRaw = position.side || position.direction || position.positionSide || "BUY";
-  const side = String(sideRaw).toUpperCase();
-
-  const px = Number(currentPrice ?? position.currentPrice ?? entry);
-
-  if (!Number.isFinite(entry) || !Number.isFinite(px) || !Number.isFinite(qty)) {
-    return 0;
-  }
-
-  const sign = side === "SELL" ? -1 : 1;
-
-  return (px - entry) * qty * sign;
-}
 
 
 /* ======================================================
