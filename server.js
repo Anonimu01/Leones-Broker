@@ -408,25 +408,6 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
 
 
 
-/* ======================================================
-   🔥 PRECIO + NORMALIZACIÓN (CLAVE PARA QUE NO TE DÉ 400)
-   ====================================================== */
-
-function normalizePrice(body = {}) {
-  const raw =
-    body.price ??
-    body.entryPrice ??
-    body.currentPrice ??
-    body.limitPrice ??
-    body.stopPrice ??
-    body.openPrice ??
-    null;
-
-  if (raw === null || raw === undefined || raw === "") return null;
-
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 
 
 /* =========================
