@@ -4937,6 +4937,14 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// ✅ COLOCA ESTO ARRIBA
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .trim();
+}
+  
 /* =========================
    🔥 ORDEN REAL BACKEND
 ========================= */
