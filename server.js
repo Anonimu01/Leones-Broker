@@ -404,21 +404,29 @@ function getCurrentPriceForSymbol(symbol) {
 
   try {
     const store = getPriceStore();
-    for (const [key, item] of Object.entries(store)) {
-      const candidates = [
-        key,
-        key.split(":").pop(),
-        item?.symbol,
-        item?.tvSymbol,
-        item?.ticker,
-        item?.name,
-        item?.label,
-        item?.marketSymbol,
-      ];
 
-      if (candidates.some((c) => compactSymbol(c) === target)) {
-        const px = Number(item?.price ?? item?.last ?? item?.close ?? item?.value ?? item?.mark ?? item?.mid ?? item?.lp);
-        return Number.isFinite(px) && px > 0 ? px : null;
+    for (const [key, item] of Object.entries(store)) {
+      const normalizedKey = compactSymbol(key);
+      const normalizedSymbol = compactSymbol(item?.symbol);
+      const normalizedLabel = compactSymbol(item?.label);
+
+      if (
+        normalizedKey === target ||
+        normalizedSymbol === target ||
+        normalizedLabel === target
+      ) {
+        const px = Number(
+          item?.price ??
+          item?.last ??
+          item?.close ??
+          item?.value ??
+          item?.mark ??
+          item?.mid
+        );
+
+        if (Number.isFinite(px) && px > 0) {
+          return px;
+        }
       }
     }
   } catch {}
