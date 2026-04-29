@@ -3228,52 +3228,95 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
-  async function openTradingView(meta, containerId = 'tv_chart_container') {
-    const resolved = meta || getActiveSymbolMeta();
-    if (!resolved) throw new Error('No hay símbolos reales para graficar');
 
-    const symbol = String(resolved.tvSymbol || resolved.symbol || '').trim();
-    if (!symbol) throw new Error('El símbolo no es válido');
+  function connectTradingView(widget) {
+  try {
+    widget.onChartReady(() => {
+      const chart = widget.activeChart();
 
-    const container = document.getElementById(containerId);
-    if (!container) throw new Error('No existe el contenedor del gráfico');
+      // 📊 CAMBIO DE SÍMBOLO DESDE EL BUSCADOR
+      chart.onSymbolChanged().subscribe(null, (symbolInfo) => {
+        console.log("📊 Symbol desde TradingView:", symbolInfo.name);
 
-    container.innerHTML = '';
-    await ensureTradingViewScript();
+        window.tvSymbol = symbolInfo.name;
+        window.selectedSymbol = symbolInfo.name; // 🔥 IMPORTANTE
+      });
 
-    if (typeof window.initTradingWidget === 'function') {
-      try {
-        window.initTradingWidget(symbol, containerId);
-        state.lastChartSymbol = symbol;
-        return symbol;
-      } catch (e) {
-        warn('window.initTradingWidget failed', e);
-      }
-    }
-
-    if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
-      throw new Error('TradingView no está disponible');
-    }
-
-    new TradingView.widget({
-      autosize: true,
-      symbol,
-      interval: '5',
-      timezone: 'Etc/UTC',
-      theme: 'dark',
-      style: '1',
-      locale: 'es',
-      enable_publishing: false,
-      allow_symbol_change: true,
-      container_id: container.id,
-      hide_side_toolbar: false,
-      withdateranges: true,
-      save_image: false
+      // 💰 PRECIO EN TIEMPO REAL
+      chart.onTick().subscribe(null, (tick) => {
+        if (tick?.price) {
+          window.tvPrice = tick.price;
+          window.lastPrice = tick.price; // 🔥 fallback global
+        }
+      });
     });
-
-    state.lastChartSymbol = symbol;
-    return symbol;
+  } catch (e) {
+    console.warn("⚠️ No se pudo conectar TradingView:", e);
   }
+}
+async function openTradingView(meta, containerId = 'tv_chart_container') {
+  const resolved = meta || getActiveSymbolMeta();
+  if (!resolved) throw new Error('No hay símbolos reales para graficar');
+
+  const symbol = String(resolved.tvSymbol || resolved.symbol || '').trim();
+  if (!symbol) throw new Error('El símbolo no es válido');
+
+  const container = document.getElementById(containerId);
+  if (!container) throw new Error('No existe el contenedor del gráfico');
+
+  container.innerHTML = '';
+  await ensureTradingViewScript();
+
+  // 🌐 RESET GLOBALS
+  window.tvSymbol = null;
+  window.tvPrice = null;
+
+  // 🔥 SI EXISTE TU INIT PERSONALIZADO
+  if (typeof window.initTradingWidget === 'function') {
+    try {
+      const widget = window.initTradingWidget(symbol, containerId);
+
+      // 🔥 CONECTAR SYNC
+      if (widget) connectTradingView(widget);
+
+      state.lastChartSymbol = symbol;
+      return symbol;
+    } catch (e) {
+      warn('window.initTradingWidget failed', e);
+    }
+  }
+
+  if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
+    throw new Error('TradingView no está disponible');
+  }
+
+  // 🔥 CREAR WIDGET
+  const widget = new TradingView.widget({
+    autosize: true,
+    symbol,
+    interval: '5',
+    timezone: 'Etc/UTC',
+    theme: 'dark',
+    style: '1',
+    locale: 'es',
+    enable_publishing: false,
+    allow_symbol_change: true,
+    container_id: container.id,
+    hide_side_toolbar: false,
+    withdateranges: true,
+    save_image: false
+  });
+
+  // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
+  connectTradingView(widget);
+
+  state.lastChartSymbol = symbol;
+
+  // 🔥 GUARDAR TAMBIÉN COMO FALLBACK GLOBAL
+  window.selectedSymbol = symbol;
+
+  return symbol;
+}
 
   function selectSymbol(meta, options = {}) {
     if (!meta) return;
@@ -4835,6 +4878,9 @@ async function loadPositions() {
     };
   }
 
+/* =========================
+   NORMALIZE SYMBOL
+========================= */
 function normalizeSymbol(symbol = "") {
   return String(symbol)
     .toUpperCase()
@@ -4842,11 +4888,21 @@ function normalizeSymbol(symbol = "") {
     .trim();
 }
 
+
+
+/* =========================
+   FLAGS
+========================= */
 let sendingOrder = false;
 
+/* =========================
+   🔥 GET SYMBOL (MEJORADO)
+========================= */
 function getActiveSymbol() {
   const api = window.__LEONES_BROKER_EXT2 || {};
+
   return (
+    window.tvSymbol || // 👈 PRIORIDAD MÁXIMA
     window.selectedSymbol ||
     api.activeSymbol ||
     document.getElementById("tradingSymbol")?.textContent?.trim() ||
@@ -4855,8 +4911,12 @@ function getActiveSymbol() {
   );
 }
 
+/* =========================
+   🔥 PRECIO REAL (MEJORADO)
+========================= */
 function getLivePriceFallback() {
   const candidates = [
+    window.tvPrice, // 👈 🔥 CLAVE
     window.lastPrice,
     window.currentPrice,
     window.entryPrice,
@@ -4871,6 +4931,9 @@ function getLivePriceFallback() {
   return null;
 }
 
+/* =========================
+   PLACE ORDER
+========================= */
 async function placeOrder(input) {
   if (sendingOrder) return;
 
@@ -4911,20 +4974,10 @@ async function placeOrder(input) {
       price = input?.price;
     }
 
-    if (!symbol) {
-      alert("Selecciona un símbolo primero");
-      return;
-    }
-
-    if (!amount || amount <= 0) {
-      alert("Cantidad inválida");
-      return;
-    }
-
-    if (!side) {
-      alert("Dirección inválida");
-      return;
-    }
+    // 🔥 VALIDACIONES
+    if (!symbol) return alert("Selecciona un símbolo primero");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!side) return alert("Dirección inválida");
 
     side = String(side).toLowerCase();
     symbol = normalizeSymbol(symbol);
@@ -4945,7 +4998,12 @@ async function placeOrder(input) {
       qty: amount
     };
 
-    if (price !== undefined && price !== null && Number.isFinite(Number(price)) && Number(price) > 0) {
+    if (
+      price !== undefined &&
+      price !== null &&
+      Number.isFinite(Number(price)) &&
+      Number(price) > 0
+    ) {
       payload.price = Number(price);
     }
 
@@ -4966,7 +5024,7 @@ async function placeOrder(input) {
 }
 
 /* =========================
-   CLICK GLOBAL SIN DUPLICADOS
+   CLICK GLOBAL
 ========================= */
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");
@@ -4984,11 +5042,14 @@ document.addEventListener("click", async (e) => {
 });
 
 /* =========================
-   ORDEN REAL BACKEND
+   🔥 ORDEN REAL BACKEND
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(payload.symbol);
+    const symbol = normalizeSymbol(
+      payload.symbol || window.tvSymbol || window.selectedSymbol
+    );
+
     const amount = Number(payload.qty ?? payload.quantity ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
@@ -5002,28 +5063,21 @@ async function placeBrokerOrder(payload = {}) {
       return;
     }
 
-    if (!symbol) {
-      alert("Símbolo inválido");
-      return;
-    }
+    // 🔥 VALIDACIONES
+    if (!symbol) return alert("Símbolo inválido");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    if (!amount || amount <= 0) {
-      alert("Cantidad inválida");
-      return;
-    }
-
-    if (!["buy", "sell"].includes(side)) {
-      alert("Dirección inválida");
-      return;
-    }
-
+    // 🔥 PRECIO REAL GARANTIZADO
     if (!price || !Number.isFinite(price) || price <= 0) {
-      const livePrice = getLivePriceFallback();
-      if (!livePrice) {
-        alert("No hay precio disponible en tiempo real");
-        return;
-      }
-      price = livePrice;
+      price = getLivePriceFallback();
+      console.warn("⚠️ Precio fallback usado:", price);
+    }
+
+    // 🔴 BLOQUEO SI NO HAY PRECIO
+    if (!price || price <= 0) {
+      alert("Esperando precio del mercado...");
+      return;
     }
 
     const body = {
@@ -5066,6 +5120,7 @@ async function placeBrokerOrder(payload = {}) {
 
     console.log("✅ ORDEN CREADA");
     return data;
+
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
   }
