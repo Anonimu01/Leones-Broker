@@ -5063,43 +5063,97 @@ document.addEventListener("click", async (e) => {
 /* =========================
    🔥 ORDEN REAL BACKEND
 ========================= */
-function placeBrokerOrder(payload = {}) {
+async function placeBrokerOrder(payload = {}) {
+  try {
+    const symbol = normalizeSymbol(
+      payload.symbol || window.tvSymbol || window.selectedSymbol
+    );
 
-  const symbol = String(payload.symbol || '').trim().toUpperCase();
-  const amount = payload.amount;
-  const direction = (payload.direction || 'BUY').toUpperCase();
-  const type = payload.type || 'Market';
-  const price = payload.price ?? null;
+    const amount = Number(payload.qty ?? payload.quantity ?? payload.amount);
+    const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
-  if (!symbol || !amount) {
-    console.warn("⚠️ Datos inválidos");
-    return;
-  }
+    let price = Number(payload.price);
 
-  console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
+    const user = getUser() || {};
+    console.log("👤 USER:", user);
 
-  return fetch('/api/orders', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
-    },
-    body: JSON.stringify({
-      symbol,
-      amount,
-      side: direction,
-      type,
-      price
-    })
-  })
-  .then(res => res.json())
-  .then(data => {
-    console.log("✅ Orden enviada:", data);
-    return data;
-  })
-  .catch(err => {
-    console.error("❌ Error enviando orden:", err);
+    if (!user.token) {
+      alert("Usuario no autenticado (sin token)");
+      return;
+    }
+
+    // 🔥 VALIDACIONES
+    if (!symbol) return alert("Símbolo inválido");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+
+    // 🔥 PRECIO REAL GARANTIZADO
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      price = getLivePriceFallback();
+      console.warn("⚠️ Precio fallback usado:", price);
+    }
+
+    if (!livePrice) {
+  console.error("❌ NO HAY PRECIO:", {
+    tvPrice: window.tvPrice,
+    lastPrice: window.lastPrice,
+    currentPrice: window.currentPrice
   });
+
+  alert("No hay precio disponible (TradingView no está dando datos)");
+  return;
+}
+
+    // 🔴 BLOQUEO SI NO HAY PRECIO
+    if (!price || price <= 0) {
+      alert("Esperando precio del mercado...");
+      return;
+    }
+
+    const body = {
+      symbol,
+      side: side.toUpperCase(),
+      type: "market",
+      qty: amount,
+      price
+    };
+
+    console.log("🚀 PAYLOAD FINAL:", body);
+
+    const res = await fetch("/api/trade/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + user.token
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+
+    console.log("📩 RESPUESTA BACKEND:", data);
+
+    if (!res.ok) {
+      console.error("❌ ERROR BACKEND:", data);
+
+      if (data?.error === "insufficient_funds") {
+        alert("Fondos insuficientes para abrir la operación");
+      } else if (data?.error === "price_unavailable") {
+        alert("Precio no disponible para este símbolo");
+      }
+
+      return;
+    }
+
+    await loadPositions();
+    await loadAccount();
+
+    console.log("✅ ORDEN CREADA");
+    return data;
+
+  } catch (err) {
+    console.error("❌ Error enviando orden:", err);
+  }
 }
 /* =========================
    🔥 BOOT SISTEMA
