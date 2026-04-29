@@ -548,6 +548,15 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   };
 }
 
+function getEffectiveBalance(userDoc, walletDoc) {
+  const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
+  const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
+
+  if (Number.isFinite(walletBalance) && walletBalance > 0) return walletBalance;
+  if (Number.isFinite(userBalance) && userBalance > 0) return userBalance;
+  return 0;
+}
+
 async function recordTransaction({
   user,
   type,
@@ -630,30 +639,37 @@ async function buildAccountForUser(userDoc) {
   const positions = await getPositionsForUser(userDoc._id);
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
 
-  const openPnl = (positions || []).reduce((sum, p) => sum + (Number(p.pnl ?? 0) || 0), 0);
-  const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
+  const balance = getEffectiveBalance(userDoc, walletSnapshot);
 
-  const balance = wallet?.balance ?? userDoc.balance ?? normalizedWallet.balance ?? 0;
+  const openPnl = (positions || []).reduce(
+    (sum, p) => sum + (Number(p.pnl ?? 0) || 0),
+    0
+  );
+
+  const normalizedWallet = normalizeWalletSnapshot(
+    walletSnapshot
+      ? { ...walletSnapshot, balanceOwn: balance, balance }
+      : { balanceOwn: balance, balance },
+    openPnl
+  );
 
   return {
     account: {
+      ...normalizedWallet,
       balance,
+      balanceOwn: balance,
       equity: balance,
-      marginUsed: normalizedWallet.marginUsed,
-      freeMargin: normalizedWallet.freeMargin,
-      marginLevel: normalizedWallet.marginLevel,
-      leverage: userDoc.leverage ?? 100,
-      currency: userDoc.currency || "USD",
+      leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
+      currency: userDoc.currency || walletSnapshot?.currency || "USD",
       positions: positions || [],
-      balanceOwn: normalizedWallet.balanceOwn,
-      leverageFactor: userDoc.leverage ?? normalizedWallet.leverageFactor ?? 100,
       openPositions: positions || [],
       recentTransactions,
       transactions: recentTransactions,
       openPnl,
     },
     user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet?.toObject ? wallet.toObject() : wallet,
+    wallet: walletSnapshot,
     positions,
     transactions: recentTransactions,
   };
@@ -1044,21 +1060,32 @@ app.post("/api/trade/open", async (req, res) => {
     if (!qty) return res.status(400).json({ ok: false, error: "quantity_required" });
 
     const wallet = await getWalletDocForUser(user._id);
-    const leverage = Math.max(Number(body.leverage ?? body.leverageFactor ?? wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+    const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
+
+    const balanceOwn = getEffectiveBalance(user, walletSnapshot);
+    const credit = Number(walletSnapshot?.credit ?? user.credit ?? 0) || 0;
+    const marginUsed = Number(walletSnapshot?.marginUsed ?? user.marginUsed ?? 0) || 0;
+    const leverage = Math.max(
+      Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1,
+      1
+    );
 
     const marketPrice = getCurrentPriceForSymbol(symbol);
     const requestedPrice = normalizePrice(body);
-    const entryPrice = type === "limit" && requestedPrice ? requestedPrice : (marketPrice || requestedPrice || normalizePrice(body) || null);
+    const entryPrice =
+      type === "limit" && requestedPrice
+        ? requestedPrice
+        : (marketPrice || requestedPrice || normalizePrice(body) || null);
 
     if (!entryPrice || entryPrice <= 0) {
-      return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para este símbolo" });
+      return res.status(400).json({
+        ok: false,
+        error: "price_unavailable",
+        message: "No hay precio disponible para este símbolo",
+      });
     }
 
-    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     const freeMargin = balanceOwn + credit - marginUsed;
-
     const notional = Math.abs(qty * entryPrice);
     const requiredMargin = notional / leverage;
 
@@ -1067,6 +1094,7 @@ app.post("/api/trade/open", async (req, res) => {
         ok: false,
         error: "insufficient_funds",
         message: "Fondos insuficientes para abrir la operación",
+        balance: balanceOwn,
         freeMargin,
         requiredMargin,
       });
@@ -1074,6 +1102,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     wallet.balanceOwn = balanceOwn;
     wallet.balance = balanceOwn;
+    wallet.credit = credit;
     wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
