@@ -3229,26 +3229,41 @@ if (window.__LEONES_BOOTED__) {
   }
 
 
-  function connectTradingView(widget) {
+ function connectTradingView(widget) {
   try {
     widget.onChartReady(() => {
       const chart = widget.activeChart();
 
-      // 📊 CAMBIO DE SÍMBOLO DESDE EL BUSCADOR
+      // 📊 símbolo desde TradingView
       chart.onSymbolChanged().subscribe(null, (symbolInfo) => {
         console.log("📊 Symbol desde TradingView:", symbolInfo.name);
 
         window.tvSymbol = symbolInfo.name;
-        window.selectedSymbol = symbolInfo.name; // 🔥 IMPORTANTE
+        window.selectedSymbol = symbolInfo.name;
       });
 
-      // 💰 PRECIO EN TIEMPO REAL
-      chart.onTick().subscribe(null, (tick) => {
-        if (tick?.price) {
-          window.tvPrice = tick.price;
-          window.lastPrice = tick.price; // 🔥 fallback global
+      // 🔥 PRECIO REAL (POLLING DESDE EL CHART)
+      setInterval(() => {
+        try {
+          const price = chart
+            .getVisibleRange && chart.getVisibleRange()
+            ? chart._model?.mainSeries()?.lastValueData?.lastPrice
+            : null;
+
+          const n = Number(price);
+
+          if (Number.isFinite(n) && n > 0) {
+            window.tvPrice = n;
+            window.lastPrice = n;
+
+            // DEBUG
+            // console.log("💰 TV PRICE:", n);
+          }
+        } catch (e) {
+          // silencio (TradingView es interno aquí)
         }
-      });
+      }, 500);
+
     });
   } catch (e) {
     console.warn("⚠️ No se pudo conectar TradingView:", e);
@@ -4915,8 +4930,12 @@ function getActiveSymbol() {
    🔥 PRECIO REAL (MEJORADO)
 ========================= */
 function getLivePriceFallback() {
+  // 🔥 PRIORIDAD ABSOLUTA: TradingView
+  if (window.tvPrice && window.tvPrice > 0) {
+    return Number(window.tvPrice);
+  }
+
   const candidates = [
-    window.tvPrice, // 👈 🔥 CLAVE
     window.lastPrice,
     window.currentPrice,
     window.entryPrice,
@@ -5073,6 +5092,17 @@ async function placeBrokerOrder(payload = {}) {
       price = getLivePriceFallback();
       console.warn("⚠️ Precio fallback usado:", price);
     }
+
+    if (!livePrice) {
+  console.error("❌ NO HAY PRECIO:", {
+    tvPrice: window.tvPrice,
+    lastPrice: window.lastPrice,
+    currentPrice: window.currentPrice
+  });
+
+  alert("No hay precio disponible (TradingView no está dando datos)");
+  return;
+}
 
     // 🔴 BLOQUEO SI NO HAY PRECIO
     if (!price || price <= 0) {
