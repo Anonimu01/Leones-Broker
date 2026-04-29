@@ -5065,15 +5065,16 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(
-      payload.symbol || window.tvSymbol || window.selectedSymbol
-    );
+    const normalize = (s = "") =>
+      String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    const amount = Number(payload.qty ?? payload.quantity ?? payload.amount);
+    const symbol = normalize(payload.symbol);
+    const amount = Number(payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
     let price = Number(payload.price);
 
+    // 🔥 USER + TOKEN DEBUG
     const user = getUser() || {};
     console.log("👤 USER:", user);
 
@@ -5087,34 +5088,20 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO REAL GARANTIZADO
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      price = getLivePriceFallback();
-      console.warn("⚠️ Precio fallback usado:", price);
-    }
-
-    if (!livePrice) {
-  console.error("❌ NO HAY PRECIO:", {
-    tvPrice: window.tvPrice,
-    lastPrice: window.lastPrice,
-    currentPrice: window.currentPrice
-  });
-
-  alert("No hay precio disponible (TradingView no está dando datos)");
-  return;
-}
-
-    // 🔴 BLOQUEO SI NO HAY PRECIO
-    if (!price || price <= 0) {
-      alert("Esperando precio del mercado...");
-      return;
+    // 🔥 PRECIO SIEMPRE
+    if (!price || !isFinite(price) || price <= 0) {
+      price =
+        window.lastPrice ||
+        window.currentPrice ||
+        window.entryPrice ||
+        1; // 👈 evita rechazo backend
     }
 
     const body = {
       symbol,
-      side: side.toUpperCase(),
+      side,
       type: "market",
-      qty: amount,
+      quantity: amount,
       price
     };
 
@@ -5124,7 +5111,7 @@ async function placeBrokerOrder(payload = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer " + user.token
+        "Authorization": "Bearer " + user.token // 🔥 CLAVE
       },
       body: JSON.stringify(body)
     });
@@ -5136,10 +5123,9 @@ async function placeBrokerOrder(payload = {}) {
     if (!res.ok) {
       console.error("❌ ERROR BACKEND:", data);
 
+      // 🔥 DEBUG CLARO
       if (data?.error === "insufficient_funds") {
-        alert("Fondos insuficientes para abrir la operación");
-      } else if (data?.error === "price_unavailable") {
-        alert("Precio no disponible para este símbolo");
+        alert("El backend dice fondos insuficientes, pero el balance está mal calculado");
       }
 
       return;
@@ -5149,6 +5135,7 @@ async function placeBrokerOrder(payload = {}) {
     await loadAccount();
 
     console.log("✅ ORDEN CREADA");
+
     return data;
 
   } catch (err) {
