@@ -4941,73 +4941,85 @@ document.addEventListener("click", (e) => {
    🔥 ORDEN REAL BACKEND
 ========================= */
 async function placeBrokerOrder(payload = {}) {
-
-  const symbol = String(payload.symbol || '').trim().toUpperCase();
-  const amount = Number(payload.amount);
-  const direction = (payload.direction || payload.side || 'buy').toLowerCase();
-  const type = String(payload.type || 'market').toLowerCase();
-  const price = payload.price ?? null;
-
-  // 🔥 VALIDACIONES
-  if (!symbol) {
-    alert("Símbolo inválido");
-    return;
-  }
-
-  if (!isFinite(amount) || amount <= 0) {
-    alert("Cantidad inválida");
-    return;
-  }
-
-  if (!["buy", "sell"].includes(direction)) {
-    alert("Dirección inválida");
-    return;
-  }
-
-  if (!["market", "limit"].includes(type)) {
-    alert("Tipo inválido");
-    return;
-  }
-
-  console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
-
   try {
-    const res = await fetch('/api/trade/open', {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer " + (getUser()?.token || "")
-  },
-  body: JSON.stringify({
-    symbol,
-    side: direction,
-    type,
-    quantity: amount,
-    price
-  })
-});
+    const symbol = normalizeSymbol(payload.symbol);
+    const amount = Number(payload.amount);
+    const side = String(payload.direction || payload.side || '').toLowerCase();
+    const type = String(payload.type || 'market').toLowerCase();
 
-const data = await res.json();
+    let price = Number(payload.price);
 
-    console.log("📩 RESPUESTA BACKEND:", data);
-
-    if (!res.ok || !data || data.error) {
-      alert(data?.error || data?.msg || "Error abriendo operación");
+    // 🔥 VALIDACIONES REALES
+    if (!symbol) {
+      alert("Símbolo inválido");
       return;
     }
 
-    // 🔥 REFRESH REAL FORZADO
-    if (typeof requestBackendRefresh === "function") {
-      await requestBackendRefresh();
+    if (!amount || amount <= 0) {
+      alert("Cantidad inválida");
+      return;
     }
+
+    if (!["buy", "sell"].includes(side)) {
+      alert("Dirección inválida");
+      return;
+    }
+
+    // 🔥 PRECIO GARANTIZADO
+    if (!price || !isFinite(price) || price <= 0) {
+      price =
+        window.lastPrice ||
+        window.currentPrice ||
+        (typeof getCurrentPriceForSymbol === "function"
+          ? getCurrentPriceForSymbol(symbol)
+          : null);
+
+      if (!price || !isFinite(price)) {
+        console.error("❌ Precio inválido final");
+        alert("Precio no disponible");
+        return;
+      }
+    }
+
+    const body = {
+      symbol,
+      side,              // 🔥 IMPORTANTE (NO direction)
+      type,
+      qty: amount,       // 🔥 ESTE ES EL QUE EL BACKEND ESPERA
+      price
+    };
+
+    console.log("🚀 PAYLOAD LIMPIO:", body);
+
+    const res = await fetch('/api/trade/open', {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + (getUser()?.token || "")
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+
+    console.log("📩 RESPUESTA BACKEND:", data);
+
+    if (!res.ok) {
+      console.error("❌ ERROR BACKEND:", data);
+      alert(data?.error || "Error abriendo operación");
+      return;
+    }
+
+    // 🔥 AQUÍ ES CLAVE
+    await loadPositions();
 
     return data;
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
+    alert("Error de conexión");
   }
 }
-
 /* =========================
    🔥 BOOT SISTEMA
 ========================= */
