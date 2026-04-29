@@ -4835,21 +4835,55 @@ async function loadPositions() {
     };
   }
 
-async function placeOrder(input) {
-  try {
-    const api = window.__LEONES_BROKER_EXT2 || {};
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .trim();
+}
 
+let sendingOrder = false;
+
+function getActiveSymbol() {
+  const api = window.__LEONES_BROKER_EXT2 || {};
+  return (
+    window.selectedSymbol ||
+    api.activeSymbol ||
+    document.getElementById("tradingSymbol")?.textContent?.trim() ||
+    document.getElementById("op-symbol")?.textContent?.trim() ||
+    ""
+  );
+}
+
+function getLivePriceFallback() {
+  const candidates = [
+    window.lastPrice,
+    window.currentPrice,
+    window.entryPrice,
+    window.marketPrice,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return null;
+}
+
+async function placeOrder(input) {
+  if (sendingOrder) return;
+
+  try {
+    sendingOrder = true;
+
+    const api = window.__LEONES_BROKER_EXT2 || {};
     let side, symbol, amount, type, price;
 
-    // 🔥 INPUT FLEXIBLE
     if (typeof input === "string") {
       side = input;
 
-      symbol =
-        window.selectedSymbol ||
-        api.activeSymbol ||
-        document.getElementById("tradingSymbol")?.textContent?.trim() ||
-        document.getElementById("op-symbol")?.textContent?.trim();
+      symbol = getActiveSymbol();
 
       const sizeInput =
         document.getElementById("brokerOrderSize") ||
@@ -4862,23 +4896,21 @@ async function placeOrder(input) {
         document.getElementById("order-type-bottom")?.value ||
         "Market";
 
-      if (type !== "Market") {
+      if (String(type).toLowerCase() !== "market") {
         const priceInput =
           document.getElementById("order-price") ||
           document.getElementById("order-price-bottom");
 
         price = parseFloat(priceInput?.value);
       }
-
     } else {
-      side = input.side || input.direction;
-      symbol = input.symbol;
-      amount = input.amount;
-      type = input.type || "Market";
-      price = input.price;
+      side = input?.side || input?.direction;
+      symbol = input?.symbol || getActiveSymbol();
+      amount = Number(input?.amount);
+      type = input?.type || "Market";
+      price = input?.price;
     }
 
-    // 🔥 VALIDACIONES REALES
     if (!symbol) {
       alert("Selecciona un símbolo primero");
       return;
@@ -4895,71 +4927,73 @@ async function placeOrder(input) {
     }
 
     side = String(side).toLowerCase();
+    symbol = normalizeSymbol(symbol);
+
+    if (String(type).toLowerCase() !== "market") {
+      const n = Number(price);
+      if (!Number.isFinite(n) || n <= 0) {
+        alert("Precio inválido");
+        return;
+      }
+      price = n;
+    }
 
     const payload = {
-      symbol: String(symbol).replace("/", ""),
+      symbol,
       direction: side,
       type: String(type).toLowerCase(),
-      amount,
-      price: price || undefined
+      qty: amount
     };
+
+    if (price !== undefined && price !== null && Number.isFinite(Number(price)) && Number(price) > 0) {
+      payload.price = Number(price);
+    }
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔥 PRIORIDAD: API INTERNA
     if (typeof api.placeBrokerOrder === "function") {
       return await api.placeBrokerOrder(payload);
     }
 
-    // 🔥 FALLBACK DIRECTO
     return await placeBrokerOrder(payload);
-
   } catch (err) {
     console.error("❌ Error al enviar orden:", err);
+  } finally {
+    setTimeout(() => {
+      sendingOrder = false;
+    }, 1000);
   }
 }
 
 /* =========================
-   🔥 CLICK GLOBAL (SIN DUPLICADOS)
+   CLICK GLOBAL SIN DUPLICADOS
 ========================= */
-document.addEventListener("click", (e) => {
-  const action = e.target?.dataset?.action;
-  if (!action) return;
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
 
-  if (action === "buy") {
-    e.preventDefault();
-    placeOrder("buy");
-  }
+  const action = btn.dataset.action;
+  if (!action || !["buy", "sell"].includes(action)) return;
 
-  if (action === "sell") {
-    e.preventDefault();
-    placeOrder("sell");
-  }
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (sendingOrder) return;
+
+  await placeOrder(action);
 });
 
-// ✅ COLOCA ESTO ARRIBA
-function normalizeSymbol(symbol = "") {
-  return String(symbol)
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .trim();
-}
-  
 /* =========================
-   🔥 ORDEN REAL BACKEND
+   ORDEN REAL BACKEND
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const normalize = (s = "") =>
-      String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-    const symbol = normalize(payload.symbol);
-    const amount = Number(payload.amount);
+    const symbol = normalizeSymbol(payload.symbol);
+    const amount = Number(payload.qty ?? payload.quantity ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
     let price = Number(payload.price);
 
-    // 🔥 USER + TOKEN DEBUG
     const user = getUser() || {};
     console.log("👤 USER:", user);
 
@@ -4968,25 +5002,35 @@ async function placeBrokerOrder(payload = {}) {
       return;
     }
 
-    // 🔥 VALIDACIONES
-    if (!symbol) return alert("Símbolo inválido");
-    if (!amount || amount <= 0) return alert("Cantidad inválida");
-    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+    if (!symbol) {
+      alert("Símbolo inválido");
+      return;
+    }
 
-    // 🔥 PRECIO SIEMPRE
-    if (!price || !isFinite(price) || price <= 0) {
-      price =
-        window.lastPrice ||
-        window.currentPrice ||
-        window.entryPrice ||
-        1; // 👈 evita rechazo backend
+    if (!amount || amount <= 0) {
+      alert("Cantidad inválida");
+      return;
+    }
+
+    if (!["buy", "sell"].includes(side)) {
+      alert("Dirección inválida");
+      return;
+    }
+
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      const livePrice = getLivePriceFallback();
+      if (!livePrice) {
+        alert("No hay precio disponible en tiempo real");
+        return;
+      }
+      price = livePrice;
     }
 
     const body = {
       symbol,
-      side,
+      side: side.toUpperCase(),
       type: "market",
-      quantity: amount,
+      qty: amount,
       price
     };
 
@@ -4996,7 +5040,7 @@ async function placeBrokerOrder(payload = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + user.token // 🔥 CLAVE
+        Authorization: "Bearer " + user.token
       },
       body: JSON.stringify(body)
     });
@@ -5008,9 +5052,10 @@ async function placeBrokerOrder(payload = {}) {
     if (!res.ok) {
       console.error("❌ ERROR BACKEND:", data);
 
-      // 🔥 DEBUG CLARO
       if (data?.error === "insufficient_funds") {
-        alert("El backend dice fondos insuficientes, pero el balance está mal calculado");
+        alert("Fondos insuficientes para abrir la operación");
+      } else if (data?.error === "price_unavailable") {
+        alert("Precio no disponible para este símbolo");
       }
 
       return;
@@ -5020,9 +5065,7 @@ async function placeBrokerOrder(payload = {}) {
     await loadAccount();
 
     console.log("✅ ORDEN CREADA");
-
     return data;
-
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
   }
