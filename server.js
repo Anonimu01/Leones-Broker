@@ -486,193 +486,35 @@ async function getUserDocFromBearer(req) {
 }
 
 /* ======================================================
-   PATCH COMPATIBLE HELPERS
+   Esta no se tocan parcher
    ====================================================== */
+async function buildAccountForUser(user) {
+  const wallet = await getWalletForUser(user._id);
+  const positions = await getPositionsForUser(user._id);
+  const balance = wallet?.balance ?? user.balance ?? 0;
+  return {
+    account: {
+      balance,
+      equity: balance,
+      marginUsed: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      leverage: user.leverage ?? 100,
+      currency: user.currency || "USD",
+      positions: positions || [],
+    },
+    user,
+    wallet,
+    positions,
+  };
+}
+    
 async function getWalletForUser(userId) {
   try {
     return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
   } catch {
     return null;
   }
-}
-
-async function getPositionsForUser(userId) {
-  try {
-    return await loadAllPositionsForUser(userId);
-  } catch {
-    return [];
-  }
-}
-
-async function getUserFromBearer(req) {
-  return await getUserDocFromBearer(req);
-}
-
-async function getWalletDocForUser(userId) {
-  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
-  if (!wallet) {
-    wallet = new Wallet({
-      user: userId,
-      balanceOwn: 0,
-      balance: 0,
-      credit: 0,
-      marginUsed: 0,
-      leverageFactor: 1,
-      equity: 0,
-      freeMargin: 0,
-      marginLevel: 0,
-    });
-  }
-  return wallet;
-}
-
-function normalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
-  const credit = Number(wallet?.credit ?? 0) || 0;
-  const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const equity = balanceOwn + openPnl;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-  return {
-    balance: balanceOwn,
-    balanceOwn,
-    credit,
-    equity,
-    marginUsed,
-    freeMargin,
-    marginLevel,
-    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
-    currency: wallet?.currency || "USD",
-    openPnl,
-  };
-}
-
-function getEffectiveBalance(userDoc, walletDoc) {
-  const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
-  const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
-
-  if (Number.isFinite(walletBalance) && walletBalance > 0) return walletBalance;
-  if (Number.isFinite(userBalance) && userBalance > 0) return userBalance;
-  return 0;
-}
-
-async function recordTransaction({
-  user,
-  type,
-  amount = 0,
-  status = "completed",
-  note = "",
-  balanceBefore = 0,
-  balanceAfter = 0,
-  meta = {},
-  source = "server.js",
-}) {
-  try {
-    const payload = {
-      user: user?._id || null,
-      userId: String(user?._id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date(),
-    };
-
-    const tx = await Transaction.create(payload);
-    return tx.toObject ? tx.toObject() : tx;
-  } catch (err) {
-    console.warn("recordTransaction fallback:", err?.message || err);
-    return {
-      userId: String(user?._id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date().toISOString(),
-    };
-  }
-}
-
-async function loadTransactionsForUser(userId, limit = 50) {
-  return await Transaction.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .exec()
-    .catch(() => []);
-}
-
-async function loadOpenPositionsForUser(userId) {
-  const rows = await Position.find({
-    user: userId,
-    status: { $in: ["OPEN", "open", "Open"] },
-  })
-    .sort({ createdAt: -1 })
-    .lean()
-    .exec()
-    .catch(() => []);
-
-  return (rows || []).map(annotatePosition);
-}
-
-async function loadAllPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .lean()
-    .exec()
-    .catch(() => []);
-
-  return (rows || []).map(annotatePosition);
-}
-
-async function buildAccountForUser(userDoc) {
-  const wallet = await getWalletForUser(userDoc._id);
-  const positions = await getPositionsForUser(userDoc._id);
-  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
-
-  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
-  const balance = getEffectiveBalance(userDoc, walletSnapshot);
-
-  const openPnl = (positions || []).reduce(
-    (sum, p) => sum + (Number(p.pnl ?? 0) || 0),
-    0
-  );
-
-  const normalizedWallet = normalizeWalletSnapshot(
-    walletSnapshot
-      ? { ...walletSnapshot, balanceOwn: balance, balance }
-      : { balanceOwn: balance, balance },
-    openPnl
-  );
-
-  return {
-    account: {
-      ...normalizedWallet,
-      balance,
-      balanceOwn: balance,
-      equity: balance,
-      leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
-      currency: userDoc.currency || walletSnapshot?.currency || "USD",
-      positions: positions || [],
-      openPositions: positions || [],
-      recentTransactions,
-      transactions: recentTransactions,
-      openPnl,
-    },
-    user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: walletSnapshot,
-    positions,
-    transactions: recentTransactions,
-  };
 }
 
 async function accountLikeHandler(req, res) {
@@ -686,6 +528,10 @@ async function accountLikeHandler(req, res) {
     return res.status(500).json({ error: "Server error" });
   }
 }
+
+/* ======================================================
+   ya te dije no se tocan 
+   ====================================================== */
 
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
   try {
