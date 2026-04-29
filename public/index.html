@@ -3966,10 +3966,10 @@ if (window.__LEONES_BOOTED__) {
 
 async function loadPositions() {
   const endpoints = [
-    '/positions',
-    '/trade/positions',
-    '/api/positions',
-    '/api/trade/positions'
+    "/positions",
+    "/trade/positions",
+    "/api/positions",
+    "/api/trade/positions",
   ];
 
   for (const ep of endpoints) {
@@ -3977,38 +3977,49 @@ async function loadPositions() {
       const res = await apiFetch(ep).catch(() => null);
       if (!res) continue;
 
-      // 🔥 NORMALIZADOR REAL MEJORADO
       let list = [];
 
-      if (Array.isArray(res)) {
-        list = res;
-      } else if (Array.isArray(res.positions)) {
-        list = res.positions;
-      } else if (Array.isArray(res.data)) {
-        list = res.data;
-      } else if (Array.isArray(res.items)) {
-        list = res.items;
-      } else if (res.data && Array.isArray(res.data.positions)) {
-        list = res.data.positions;
-      }
+      if (Array.isArray(res)) list = res;
+      else if (Array.isArray(res.positions)) list = res.positions;
+      else if (Array.isArray(res.data)) list = res.data;
+      else if (Array.isArray(res.items)) list = res.items;
+      else if (res.data && Array.isArray(res.data.positions)) list = res.data.positions;
+      else if (res.data && Array.isArray(res.data.items)) list = res.data.items;
 
-      // 🔥 LIMPIEZA Y NORMALIZACIÓN
-      list = list.map(p => ({
-        id: p.id || p._id || p.positionId || p.tradeId || null,
-        symbol: String(p.symbol || p.tvSymbol || '').toUpperCase(),
-        side: String(p.side || p.direction || 'BUY').toUpperCase(),
-        qty: Number(p.qty ?? p.quantity ?? p.amount ?? p.size ?? 0),
-        entryPrice: Number(p.entryPrice ?? p.price ?? p.openPrice ?? 0),
-        currentPrice: Number(
+      list = (list || []).map((p) => {
+        const rawSymbol = String(p.symbol || p.tvSymbol || p.ticker || "").trim();
+        const symbol = rawSymbol.toUpperCase();
+
+        const entryPrice = Number(p.entryPrice ?? p.price ?? p.openPrice ?? p.avgPrice ?? 0) || 0;
+        const currentPriceRaw =
           p.currentPrice ??
-          TR.symbolPrices?.[p.symbol]?.price ??
-          p.entryPrice ??
-          0
-        ),
-        pnl: Number(p.pnl ?? p.unrealizedPnl ?? 0),
-        status: String(p.status || 'open').toLowerCase(),
-        raw: p
-      }));
+          p.markPrice ??
+          p.lastPrice ??
+          TR.symbolPrices?.[symbol]?.price ??
+          TR.symbolPrices?.[rawSymbol]?.price ??
+          entryPrice;
+
+        const currentPrice = Number(currentPriceRaw) || 0;
+        const qty = Number(p.qty ?? p.quantity ?? p.amount ?? p.size ?? p.positionSize ?? 0) || 0;
+        const pnl = Number(
+          p.pnl ??
+          p.unrealizedPnl ??
+          p.realizedPnl ??
+          ((currentPrice - entryPrice) * qty)
+        ) || 0;
+
+        return {
+          id: p.id || p._id || p.positionId || p.tradeId || null,
+          symbol,
+          side: String(p.side || p.direction || "BUY").toUpperCase(),
+          qty,
+          entryPrice,
+          currentPrice,
+          pnl,
+          status: String(p.status || "open").toLowerCase(),
+          raw: p,
+        };
+      });
 
       console.log("📊 POSITIONS RAW:", res);
       console.log("📊 POSITIONS NORMALIZED:", list);
@@ -4016,7 +4027,6 @@ async function loadPositions() {
       state.positions = list;
       TR.positions = list;
 
-      // 🔥 ACTUALIZA TODO LO VISUAL Y MÉTRICAS
       if (typeof updateLivePortfolioMetrics === "function") {
         updateLivePortfolioMetrics();
       }
@@ -4029,13 +4039,11 @@ async function loadPositions() {
       }
 
       return list;
-
     } catch (e) {
       console.warn("loadPositions error:", e);
     }
   }
 
-  // 🔥 FALLBACK LIMPIO
   state.positions = [];
   TR.positions = [];
 
@@ -4052,773 +4060,411 @@ async function loadPositions() {
 
   return [];
 }
-  async function loadMarketsAndQuotes() {
-    await loadRealMarkets();
-    await loadRealQuotes();
-    renderMarketTabs();
+
+async function loadMarketsAndQuotes() {
+  await loadRealMarkets();
+  await loadRealQuotes();
+  renderMarketTabs();
+  renderSymbolsGrid();
+  renderBottomPanels();
+
+  const meta = getActiveSymbolMeta();
+  if (meta) {
+    renderSymbolDetails(meta);
+  } else if (getSymbols().length) {
+    const first = getSymbols()[0];
+    state.activeSymbol = first.symbol;
+    TR.activeSymbol = first.symbol;
+    TR.activeMeta = first;
+    renderSymbolDetails(first);
+  }
+
+  return getSymbols();
+}
+
+async function requestBackendRefresh() {
+  try {
+    await Promise.allSettled([loadMarketsAndQuotes(), loadAccount(), loadPositions()]);
+    const meta = getActiveSymbolMeta();
+    if (meta) requestRealtimeForSymbol(meta);
+    renderMargin();
+    renderPositions();
     renderSymbolsGrid();
     renderBottomPanels();
-
-    const meta = getActiveSymbolMeta();
-    if (meta) {
-      renderSymbolDetails(meta);
-    } else if (getSymbols().length) {
-      const first = getSymbols()[0];
-      state.activeSymbol = first.symbol;
-      TR.activeSymbol = first.symbol;
-      TR.activeMeta = first;
-      renderSymbolDetails(first);
-    }
-
-    return getSymbols();
+  } catch (e) {
+    warn("requestBackendRefresh", e);
   }
+}
 
-  async function requestBackendRefresh() {
-    try {
-      await Promise.allSettled([loadMarketsAndQuotes(), loadAccount(), loadPositions()]);
-      const meta = getActiveSymbolMeta();
-      if (meta) requestRealtimeForSymbol(meta);
-      renderMargin();
-      renderPositions();
-      renderSymbolsGrid();
-      renderBottomPanels();
-    } catch (e) {
-      warn('requestBackendRefresh', e);
-    }
+async function requestRealtimeForSymbol(meta = null) {
+  try {
+    const socket = window.__LEONES_SOCKET__?.socket || window.__LEONES_TRADING_SOCKET__ || null;
+    if (!socket || typeof socket.emit !== "function") return;
+
+    const resolved = meta || getActiveSymbolMeta();
+    if (!resolved) return;
+
+    const symbol = resolved.symbol;
+    const tvSymbol = resolved.tvSymbol || symbol;
+
+    socket.emit("request_orderbook", { symbol, tvSymbol });
+    socket.emit("subscribe_symbol", { symbol, tvSymbol });
+    socket.emit("subscribe_prices", { symbols: [symbol, tvSymbol].filter(Boolean) });
+    socket.emit("request_prices", { symbols: [symbol, tvSymbol].filter(Boolean) });
+    socket.emit("request_account");
+    socket.emit("request_positions");
+    socket.emit("request_symbols");
+    socket.emit("request_prices_snapshot");
+  } catch (e) {
+    warn("requestRealtimeForSymbol", e);
   }
+}
 
-  async function requestRealtimeForSymbol(meta = null) {
-    try {
-      const socket = window.__LEONES_SOCKET__?.socket || window.__LEONES_TRADING_SOCKET__ || null;
-      if (!socket || typeof socket.emit !== 'function') return;
-      const resolved = meta || getActiveSymbolMeta();
-      if (!resolved) return;
+function renderBottomPanels() {
+  const meta = getActiveSymbolMeta();
+  const quote = meta ? currentQuote(meta.symbol) : null;
+  const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
+  const account = state.account || {};
 
-      const symbol = resolved.symbol;
-      const tvSymbol = resolved.tvSymbol || symbol;
-
-      socket.emit('request_orderbook', { symbol, tvSymbol });
-      socket.emit('subscribe_symbol', { symbol, tvSymbol });
-      socket.emit('subscribe_prices', { symbols: [symbol, tvSymbol].filter(Boolean) });
-      socket.emit('request_prices', { symbols: [symbol, tvSymbol].filter(Boolean) });
-      socket.emit('request_account');
-      socket.emit('request_positions');
-      socket.emit('request_symbols');
-      socket.emit('request_prices_snapshot');
-    } catch (e) {
-      warn('requestRealtimeForSymbol', e);
-    }
-  }
-
-  function renderBottomPanels() {
-    const meta = getActiveSymbolMeta();
-    const quote = meta ? currentQuote(meta.symbol) : null;
-    const activePrice = quote?.price ?? TR.symbolPrices?.[meta?.symbol]?.price ?? null;
-
-    const dashboardPanel = document.getElementById('dashboardPanel');
-    if (dashboardPanel) {
-      dashboardPanel.innerHTML = `
-        <div style="padding:16px;border:1px solid rgba(255,255,255,.06);border-radius:16px;background:#0b0b0b;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Inicio</div>
-              <div style="opacity:.75;font-size:13px;margin-top:3px;">Resumen en tiempo real</div>
-            </div>
-            <span id="brokerUserBadgeBottom" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
+  const dashboardPanel = document.getElementById("dashboardPanel");
+  if (dashboardPanel) {
+    dashboardPanel.innerHTML = `
+      <div style="padding:16px;border:1px solid rgba(255,255,255,.06);border-radius:16px;background:#0b0b0b;color:#fff;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:18px;font-weight:900;">Inicio</div>
+            <div style="opacity:.75;font-size:13px;margin-top:3px;">Resumen en tiempo real</div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px;">
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Saldo</div><div id="brokerBalanceBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Apalancamiento</div><div id="brokerLeverageBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Operativo</div><div id="brokerOperatingBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-            <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Margen</div><div id="brokerMarginBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
-          </div>
-          <div style="margin-top:12px;opacity:.8;font-size:13px;">
-            Símbolo activo: <strong>${escapeHtml(meta ? meta.label : '--')}</strong>
-            ${meta ? ` · Precio: <strong>${activePrice !== null && activePrice !== undefined ? formatNumber(activePrice) : '--'}</strong>` : ''}
-          </div>
+          <span id="brokerUserBadgeBottom" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
         </div>
-      `;
-    }
-
-    const marketPanel = document.getElementById('marketPanel') || document.getElementById('marketsPanel');
-    if (marketPanel) {
-      marketPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Mercados</div>
-              <div style="opacity:.75;font-size:13px;margin-top:3px;">Símbolos en vivo</div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn ghost" data-action="refresh-all">Actualizar</button>
-              <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
-              <button class="btn ghost" data-action="refresh-quotes">Precios</button>
-            </div>
-          </div>
-
-          <label style="display:grid;gap:6px;margin-bottom:12px;">
-            <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
-            <input id="brokerMarketSearchBottom" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
-          </label>
-
-          <div id="brokerSymbolsScrollBottom">
-            <div id="brokerMarketTabsBottom"></div>
-            <div id="brokerSymbolsGridBottom"></div>
-          </div>
-        </section>
-      `;
-    }
-
-    const tradingPanel = document.getElementById('tradingPanel');
-    if (tradingPanel) {
-      tradingPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div>
-              <div style="font-size:18px;font-weight:900;">Trading</div>
-              <div id="brokerActiveSymbolBottom" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
-            </div>
-            <button class="btn glow" data-action="open-chart-bottom">Abrir gráfico</button>
-          </div>
-          <div id="tv_chart_container_bottom"></div>
-
-          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
-            <div style="font-weight:900;margin-bottom:10px;">Ticket de orden</div>
-            <div style="display:grid;gap:10px;">
-              <div style="margin-bottom:8px">
-                <label class="muted-small">Tipo</label>
-                <select id="order-type-bottom" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
-                  <option>Market</option>
-                  <option>Limit</option>
-                  <option>Stop Loss</option>
-                  <option>Take Profit</option>
-                  <option>Stop Limit</option>
-                </select>
-              </div>
-
-              <div id="priceBoxBottom" style="display:none;">
-                <label style="display:grid;gap:6px;">
-                  <span style="font-size:12px;opacity:.75;">Precio</span>
-                  <input id="order-price-bottom" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-                </label>
-              </div>
-
-              <label style="display:grid;gap:6px;">
-                <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
-                <input id="brokerOrderSizeBottom" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-              </label>
-
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
-                  <div id="brokerLeverageValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Margen requerido</div>
-                  <div id="brokerMarginValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
-                  <div id="brokerOperatingPowerValueBottom" style="font-weight:800;">--</div>
-                </div>
-                <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-                  <div style="font-size:12px;opacity:.75;">Margen libre</div>
-                  <div id="brokerFreeMarginValueBottom" style="font-weight:800;">--</div>
-                </div>
-              </div>
-
-              <div style="display:flex;gap:8px;">
-                <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
-                <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
-              </div>
-            </div>
-          </div>
-
-          <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
-            <div style="font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
-            <div id="brokerSymbolDetailsBottom" style="display:grid;gap:8px;">--</div>
-          </div>
-        </section>
-      `;
-    }
-
-    const positionsPanel = document.getElementById('positionsPanel');
-    if (positionsPanel) {
-      positionsPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div style="font-size:18px;font-weight:900;">Posiciones</div>
-            <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
-          </div>
-          <div id="brokerPositionsListBottom" style="display:grid;gap:8px;"></div>
-        </section>
-      `;
-    }
-
-    const assetsPanel = document.getElementById('assetsPanel');
-    if (assetsPanel) {
-      assetsPanel.innerHTML = `
-        <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-            <div style="font-size:18px;font-weight:900;">Activos</div>
-            <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
-          </div>
-          <div style="display:grid;gap:8px;">
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountNameBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmailBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalanceBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquityBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnlBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverageBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperatingBottom">--</strong></div>
-            <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMarginBottom">--</strong></div>
-          </div>
-        </section>
-      `;
-    }
-  }
-
-  function ensureShell(root) {
-    if (!root) return;
-    if (root.dataset.leonesShellBuilt === '1') return;
-    root.dataset.leonesShellBuilt = '1';
-    root.innerHTML = '';
-
-    const message = document.createElement('div');
-    message.id = 'brokerExtMessage';
-    message.style.cssText = 'display:none;margin-bottom:12px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);font-weight:700;text-align:center;color:#fff;';
-    root.appendChild(message);
-
-    const summary = document.createElement('section');
-    summary.id = 'brokerSummaryPanel';
-    summary.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;margin:12px 0;color:#fff;';
-    summary.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Panel de trading</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Mercados, gráfico y órdenes en vivo</div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px;">
+          <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Saldo</div><div id="brokerBalanceBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+          <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Apalancamiento</div><div id="brokerLeverageBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+          <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Operativo</div><div id="brokerOperatingBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
+          <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,.04);"><div style="opacity:.7;font-size:12px;">Margen</div><div id="brokerMarginBadgeBottom" style="font-weight:900;margin-top:4px;">--</div></div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <span id="brokerUserBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
-          <span id="brokerLeverageBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Apalancamiento: --</span>
-          <span id="brokerBalanceBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Saldo: --</span>
-          <span id="brokerOperatingBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Operativo: --</span>
-          <span id="brokerMarginBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Margen: --</span>
+        <div style="margin-top:12px;opacity:.8;font-size:13px;">
+          Símbolo activo: <strong>${escapeHtml(meta ? meta.label : "--")}</strong>
+          ${meta ? ` · Precio: <strong>${activePrice !== null && activePrice !== undefined ? formatNumber(activePrice) : "--"}</strong>` : ""}
         </div>
       </div>
     `;
-    root.appendChild(summary);
+  }
 
-    const columns = document.createElement('div');
-    columns.id = 'brokerColumns';
-
-    const left = document.createElement('div');
-    left.style.cssText = 'display:grid;gap:12px;';
-
-    const symbols = document.createElement('section');
-    symbols.id = 'brokerSymbolsPanel';
-    symbols.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    symbols.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Mercados y símbolos</div>
-          <div style="opacity:.75;font-size:13px;margin-top:3px;">Lista real desde los datos disponibles</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn ghost" data-action="refresh-all">Actualizar</button>
-          <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
-          <button class="btn ghost" data-action="refresh-quotes">Precios</button>
-        </div>
-      </div>
-
-      <label style="display:grid;gap:6px;margin-bottom:12px;">
-        <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
-        <input id="brokerMarketSearch" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
-      </label>
-
-      <div id="brokerSymbolsScroll">
-        <div id="brokerMarketTabs"></div>
-        <div id="brokerSymbolsGrid"></div>
-      </div>
-    `;
-    left.appendChild(symbols);
-
-    const chart = document.createElement('section');
-    chart.id = 'brokerChartPanel';
-    chart.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    chart.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div>
-          <div style="font-size:18px;font-weight:900;">Gráfico real</div>
-          <div id="brokerActiveSymbol" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
-        </div>
-        <button class="btn glow" data-action="open-chart">Abrir gráfico</button>
-      </div>
-      <div id="tv_chart_container"></div>
-    `;
-    left.appendChild(chart);
-
-    const right = document.createElement('div');
-    right.style.cssText = 'display:grid;gap:12px;';
-
-    const ticket = document.createElement('section');
-    ticket.id = 'brokerTicketPanel';
-    ticket.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    ticket.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
-      <div style="display:grid;gap:10px;">
-        <div style="margin-bottom:8px">
-          <label class="muted-small">Tipo</label>
-          <select id="order-type" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
-            <option>Market</option>
-            <option>Limit</option>
-            <option>Stop Loss</option>
-            <option>Take Profit</option>
-            <option>Stop Limit</option>
-          </select>
+  const marketPanel = document.getElementById("marketPanel") || document.getElementById("marketsPanel");
+  if (marketPanel) {
+    marketPanel.innerHTML = `
+      <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <div>
+            <div style="font-size:18px;font-weight:900;">Mercados</div>
+            <div style="opacity:.75;font-size:13px;margin-top:3px;">Símbolos en vivo</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn ghost" data-action="refresh-all">Actualizar</button>
+            <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
+            <button class="btn ghost" data-action="refresh-quotes">Precios</button>
+          </div>
         </div>
 
-        <div id="priceBox" style="display:none;">
-          <label style="display:grid;gap:6px;">
-            <span style="font-size:12px;opacity:.75;">Precio</span>
-            <input id="order-price" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
-          </label>
-        </div>
-
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
-          <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+        <label style="display:grid;gap:6px;margin-bottom:12px;">
+          <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
+          <input id="brokerMarketSearchBottom" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
         </label>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
-            <div id="brokerLeverageValue" style="font-weight:800;">--</div>
+        <div id="brokerSymbolsScrollBottom">
+          <div id="brokerMarketTabsBottom"></div>
+          <div id="brokerSymbolsGridBottom"></div>
+        </div>
+      </section>
+    `;
+  }
+
+  const tradingPanel = document.getElementById("tradingPanel");
+  if (tradingPanel) {
+    tradingPanel.innerHTML = `
+      <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <div>
+            <div style="font-size:18px;font-weight:900;">Trading</div>
+            <div id="brokerActiveSymbolBottom" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
           </div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Margen requerido</div>
-            <div id="brokerMarginValue" style="font-weight:800;">--</div>
-          </div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
-            <div id="brokerOperatingPowerValue" style="font-weight:800;">--</div>
-          </div>
-          <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
-            <div style="font-size:12px;opacity:.75;">Margen libre</div>
-            <div id="brokerFreeMarginValue" style="font-weight:800;">--</div>
+          <button class="btn glow" data-action="open-chart-bottom">Abrir gráfico</button>
+        </div>
+        <div id="tv_chart_container_bottom"></div>
+
+        <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
+          <div style="font-weight:900;margin-bottom:10px;">Ticket de orden</div>
+          <div style="display:grid;gap:10px;">
+            <div style="margin-bottom:8px">
+              <label class="muted-small">Tipo</label>
+              <select id="order-type-bottom" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
+                <option>Market</option>
+                <option>Limit</option>
+                <option>Stop Loss</option>
+                <option>Take Profit</option>
+                <option>Stop Limit</option>
+              </select>
+            </div>
+
+            <div id="priceBoxBottom" style="display:none;">
+              <label style="display:grid;gap:6px;">
+                <span style="font-size:12px;opacity:.75;">Precio</span>
+                <input id="order-price-bottom" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+              </label>
+            </div>
+
+            <label style="display:grid;gap:6px;">
+              <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
+              <input id="brokerOrderSizeBottom" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+            </label>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
+                <div id="brokerLeverageValueBottom" style="font-weight:800;">--</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                <div style="font-size:12px;opacity:.75;">Margen requerido</div>
+                <div id="brokerMarginValueBottom" style="font-weight:800;">--</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
+                <div id="brokerOperatingPowerValueBottom" style="font-weight:800;">--</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+                <div style="font-size:12px;opacity:.75;">Margen libre</div>
+                <div id="brokerFreeMarginValueBottom" style="font-weight:800;">--</div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;">
+              <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
+              <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
+            </div>
           </div>
         </div>
 
-        <div style="display:flex;gap:8px;">
-          <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
-          <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
+        <div style="margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.04);">
+          <div style="font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
+          <div id="brokerSymbolDetailsBottom" style="display:grid;gap:8px;">--</div>
         </div>
-      </div>
+      </section>
     `;
-    right.appendChild(ticket);
+  }
 
-    const account = document.createElement('section');
-    account.id = 'brokerAccountPanel';
-    account.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    account.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Cuenta</div>
-        <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
-      </div>
-      <div style="display:grid;gap:8px;">
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountName">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmail">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalance">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquity">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnl">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverage">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperating">--</strong></div>
-        <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMargin">--</strong></div>
-      </div>
+  const positionsPanel = document.getElementById("positionsPanel");
+  if (positionsPanel) {
+    positionsPanel.innerHTML = `
+      <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <div style="font-size:18px;font-weight:900;">Posiciones</div>
+          <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
+        </div>
+        <div id="brokerPositionsListBottom" style="display:grid;gap:8px;"></div>
+      </section>
     `;
-    right.appendChild(account);
+  }
 
-    const positions = document.createElement('section');
-    positions.id = 'brokerPositionsPanel';
-    positions.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    positions.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <div style="font-size:18px;font-weight:900;">Posiciones</div>
-        <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
-      </div>
-      <div id="brokerPositionsList" style="display:grid;gap:8px;"></div>
+  const assetsPanel = document.getElementById("assetsPanel");
+  if (assetsPanel) {
+    assetsPanel.innerHTML = `
+      <section style="background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <div style="font-size:18px;font-weight:900;">Activos</div>
+          <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
+        </div>
+        <div style="display:grid;gap:8px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountNameBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmailBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalanceBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquityBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnlBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverageBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperatingBottom">--</strong></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMarginBottom">--</strong></div>
+        </div>
+      </section>
     `;
-    right.appendChild(positions);
-
-    const details = document.createElement('section');
-    details.id = 'brokerSymbolDetailsPanel';
-    details.style.cssText = 'background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;';
-    details.innerHTML = `
-      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
-      <div id="brokerSymbolDetails" style="display:grid;gap:8px;">--</div>
-    `;
-    right.appendChild(details);
-
-    columns.appendChild(left);
-    columns.appendChild(right);
-    root.appendChild(columns);
   }
 
-  function attachGlobalDelegation() {
-    if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
-    window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
-
-    document.addEventListener('click', async (ev) => {
-      try {
-        const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
-        if (!inPrivate) return;
-
-        const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
-        if (clicked) flashButton(clicked);
-
-        const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
-        if (marketBtn && marketBtn.dataset.market !== undefined) {
-          ev.preventDefault();
-          state.marketFilter = marketBtn.dataset.market || 'All';
-          renderMarketTabs();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          return;
-        }
-
-        const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
-        if (symbolCard) {
-          ev.preventDefault();
-          const symbol = symbolCard.dataset.symbol || '';
-          const meta =
-            symbolMap().get(String(symbol).toUpperCase()) ||
-            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
-            null;
-
-          if (meta) selectSymbol(meta, { openChart: true });
-          return;
-        }
-
-        const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
-        if (closeBtn) {
-          ev.preventDefault();
-          const pid = closeBtn.dataset.closePosition;
-          const sym = closeBtn.dataset.symbol;
-          const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
-          await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
-        if (!actionTarget) return;
-
-        const action = actionTarget.dataset.action;
-
-        if (action === 'buy') {
-          ev.preventDefault();
-          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        if (action === 'sell') {
-          ev.preventDefault();
-          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
-          await requestBackendRefresh().catch(() => {});
-          return;
-        }
-
-        if (action === 'open-chart') {
-          ev.preventDefault();
-          const meta = getActiveSymbolMeta();
-          if (meta) await openTradingView(meta, 'tv_chart_container');
-          return;
-        }
-
-        if (action === 'open-chart-bottom') {
-          ev.preventDefault();
-          const meta = getActiveSymbolMeta();
-          if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
-          return;
-        }
-
-        if (action === 'refresh-all') {
-          ev.preventDefault();
-          await requestBackendRefresh();
-          return;
-        }
-
-        if (action === 'refresh-symbols') {
-          ev.preventDefault();
-          await loadRealMarkets();
-          renderMarketTabs();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-          return;
-        }
-
-        if (action === 'refresh-quotes') {
-          ev.preventDefault();
-          await loadRealQuotes();
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-          return;
-        }
-
-        if (action === 'refresh-account') {
-          ev.preventDefault();
-          await loadAccount();
-          renderBottomPanels();
-          return;
-        }
-
-        if (action === 'refresh-positions') {
-          ev.preventDefault();
-          await loadPositions();
-          renderBottomPanels();
-          return;
-        }
-      } catch (e) {
-        warn('global click delegation', e);
-      }
-    }, true);
-
-    document.addEventListener('input', (ev) => {
-      try {
-        if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
-
-        if (
-          ev.target.id === 'brokerOrderSize' ||
-          ev.target.id === 'brokerOrderSizeBottom' ||
-          ev.target.id === 'order-price' ||
-          ev.target.id === 'order-price-bottom'
-        ) {
-          renderMargin();
-        }
-
-        if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
-          applySearchValue(ev.target.value);
-        }
-
-        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
-          syncOrderTypeBoxes(ev.target.value);
-          syncOrderFields();
-        }
-      } catch (e) {}
-    }, true);
-  }
-
-  function startAutoRefresh() {
-    if (state.pollTimer) return;
-    state.pollTimer = setInterval(() => {
-      try {
-        if (!isLoggedIn()) return;
-        loadAccount().catch(() => {});
-        loadPositions().catch(() => {});
-        loadRealQuotes().then(() => {
-          renderSymbolsGrid();
-          renderBottomPanels();
-          const meta = getActiveSymbolMeta();
-          if (meta) renderSymbolDetails(meta);
-        }).catch(() => {});
-      } catch (e) {}
-    }, 7000);
-  }
-
-  function stopAutoRefresh() {
-    if (state.pollTimer) {
-      clearInterval(state.pollTimer);
-      state.pollTimer = null;
-    }
-  }
-
-  function updatePrivateHeaderName(user = {}) {
-    const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente');
-    const headerName = document.querySelector('#headerActions [data-leones-user-name]');
-    if (headerName) headerName.textContent = name;
-
-    const welcomeSelectors = [
-      '#welcomeUser',
-      '.welcomeUser',
-      '[data-leones-user-name]',
-      '[data-user-name]',
-      '[data-welcome-name]'
-    ];
-    welcomeSelectors.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
-        try { el.textContent = name; } catch (e) {}
-      });
-    });
-  }
-
-  function attachLoginEventBridge() {
-    if (window.__LEONES_EXT2_LOGIN_BRIDGE__) return;
-    window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
-
-    window.addEventListener('leones:loggedIn', () => {
-      if (isLoggedIn()) initTradingUI().catch(e => warn('initTradingUI after login', e));
-    });
-
-    window.addEventListener('leones:loggedOut', () => {
-      resetTradingState();
-    });
-  }
-
-  async function initTradingUI(context = {}) {
-    if (!isLoggedIn()) return null;
-
-    injectUiStyles();
-
-    const root = ensureRoot();
-    if (!root) return null;
-
-    if (!state.started) {
-      ensureShell(root);
-      state.started = true;
-    }
-
-    clearMessage();
-
-    if (context && context.user && typeof context.user === 'object') {
-      state.account = { ...(state.account || {}), ...context.user };
-      updatePrivateHeaderName(context.user);
-      syncAccountView(context.user);
-    } else {
-      const user = getUser();
-      if (user && Object.keys(user).length) {
-        updatePrivateHeaderName(user);
-      }
-    }
-
-    bindMenuButtons();
-    bindOrderUi();
-    attachGlobalDelegation();
-    await ensureSocket();
-    bindSocketListeners();
-    createFloatingTradesPanel();
-    startAutoRefresh();
-
-    await requestBackendRefresh();
-    await nextFrame();
-
-    const list = getSymbols();
-    const meta = getActiveSymbolMeta() || list[0] || null;
-
-    if (meta) {
-      state.activeSymbol = meta.symbol;
-      TR.activeSymbol = meta.symbol;
-      TR.activeMeta = meta;
-
-      renderSymbolDetails(meta);
-      renderBottomPanels();
-
-      if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
-        await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
-        await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
-      }
-
-      requestRealtimeForSymbol(meta);
-    } else {
-      setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
-    }
-
-    syncOrderFields();
-    return true;
-  }
-
-  function openTrade(symbol, amount, direction, price) {
-    if (amount > ACCOUNT.balance) {
-      alert('Fondos insuficientes');
-      return;
-    }
-
-    ACCOUNT.balance -= amount;
-    ACCOUNT.usedMargin += amount;
-
-    const trade = {
-      id: Date.now(),
-      symbol,
-      amount,
-      direction,
-      openPrice: price,
-      currentPrice: price,
-      profit: 0
-    };
-
-    OPEN_TRADES.push(trade);
-    updateAccountMetrics();
-  }
-
-  function renderBottomPanelsWrapper() {
-    renderBottomPanels();
-    const meta = getActiveSymbolMeta();
-    if (meta) {
-      renderSymbolDetails(meta);
-      requestRealtimeForSymbol(meta);
-    }
-  }
-
-  function exposeAPI() {
-    window.startBrokerUI = initTradingUI;
-    window.refreshBrokerUI = requestBackendRefresh;
-    window.openBrokerTradingView = openTradingView;
-    window.selectBrokerSymbol = selectSymbol;
-
-    window.openTrade = openTrade;
-    window.placeBrokerOrder = placeBrokerOrder;
-    window.updateTradesPrices = updateTradesPrices;
-    window.updateAccountMetrics = updateAccountMetrics;
-    window.closeAllTrades = closeAllTrades;
-    window.adminDeposit = adminDeposit;
-
-    window.__LEONES_BROKER_EXT2 = {
-      initTradingUI,
-      refreshBrokerUI: requestBackendRefresh,
-      openTradingView,
-      selectSymbol,
-      loadMarketsAndQuotes,
-      loadRealMarkets,
-      loadRealQuotes,
-      loadAccount,
-      loadPositions,
-      placeOrder,
-      placeBrokerOrder,
-      openTrade,
-      closePosition,
-      requestBackendRefresh,
-      positions: state.positions,
-      activeSymbol: state.activeSymbol,
-      activeMeta: TR.activeMeta || null,
-      symbolPrices: TR.symbolPrices || {}
-    };
-  }
+  syncAccountView(account);
+}
 
 function normalizeSymbol(symbol = "") {
-  return symbol
+  return String(symbol || "")
+    .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
+    .replace(/[^A-Z0-9:_/.-]/g, "")
+    .replace(/\s+/g, "");
+}
+
+function getSymbolPrice(symbol) {
+  const raw = String(symbol || "").trim();
+  if (!raw) return null;
+
+  const direct =
+    TR.symbolPrices?.[raw]?.price ??
+    TR.symbolPrices?.[normalizeSymbol(raw)]?.price ??
+    window.lastPrice ??
+    window.currentPrice ??
+    window.price ??
+    null;
+
+  const num = Number(direct);
+  if (Number.isFinite(num) && num > 0) return num;
+
+  if (typeof getCurrentPriceForSymbol === "function") {
+    const p = getCurrentPriceForSymbol(raw) ?? getCurrentPriceForSymbol(normalizeSymbol(raw));
+    const np = Number(p);
+    if (Number.isFinite(np) && np > 0) return np;
+  }
+
+  const q = currentQuote(raw) || currentQuote(normalizeSymbol(raw));
+  const qp = Number(q?.price);
+  if (Number.isFinite(qp) && qp > 0) return qp;
+
+  return null;
+}
+
+function renderBottomPanelsWrapper() {
+  renderBottomPanels();
+  const meta = getActiveSymbolMeta();
+  if (meta) {
+    renderSymbolDetails(meta);
+    requestRealtimeForSymbol(meta);
+  }
+}
+
+function updatePrivateHeaderName(user = {}) {
+  const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || "Cliente");
+  const headerName = document.querySelector("#headerActions [data-leones-user-name]");
+  if (headerName) headerName.textContent = name;
+
+  const selectors = [
+    "#welcomeUser",
+    ".welcomeUser",
+    "[data-leones-user-name]",
+    "[data-user-name]",
+    "[data-welcome-name]",
+  ];
+
+  selectors.forEach((sel) => {
+    document.querySelectorAll(sel).forEach((el) => {
+      try {
+        el.textContent = name;
+      } catch {}
+    });
+  });
+}
+
+function attachLoginEventBridge() {
+  if (window.__LEONES_EXT2_LOGIN_BRIDGE__) return;
+  window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
+
+  window.addEventListener("leones:loggedIn", () => {
+    if (isLoggedIn()) initTradingUI().catch((e) => warn("initTradingUI after login", e));
+  });
+
+  window.addEventListener("leones:loggedOut", () => {
+    resetTradingState();
+  });
+}
+
+async function placeBrokerOrder(payload = {}) {
+  const symbol = normalizeSymbol(payload.symbol || state.activeSymbol || getActiveSymbolMeta()?.symbol || "");
+  const amount = Number(payload.amount ?? payload.qty ?? payload.quantity ?? 0);
+  const direction = String(payload.direction || payload.side || "buy").toLowerCase();
+  const type = String(payload.type || "market").toLowerCase();
+
+  let price = payload.price ?? null;
+
+  if (!symbol) return alert("Símbolo inválido");
+  if (!Number.isFinite(amount) || amount <= 0) return alert("Cantidad inválida");
+  if (!["buy", "sell"].includes(direction)) return alert("Dirección inválida");
+  if (!["market", "limit", "stop loss", "take profit", "stop limit"].includes(type)) return alert("Tipo inválido");
+
+  if (!price || !Number.isFinite(Number(price)) || Number(price) <= 0) {
+    const fallbackPrice = getSymbolPrice(symbol);
+    if (fallbackPrice && Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+      price = fallbackPrice;
+    } else {
+      price = null;
+    }
+  }
+
+  const body = {
+    symbol,
+    side: direction.toUpperCase(),
+    type,
+    qty: amount,
+    quantity: amount,
+  };
+
+  if (price && Number(price) > 0) {
+    body.price = Number(price);
+  }
+
+  console.log("🚀 ORDEN REAL:", body);
+
+  try {
+    const res = await fetch("/api/trade/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + (getUser()?.token || ""),
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    console.log("📩 RESPUESTA BACKEND:", data);
+
+    if (!res.ok) {
+      console.error("❌ ERROR BACKEND:", data);
+
+      if (data?.error === "price_unavailable") {
+        alert("No hay precio disponible para este activo");
+      } else if (data?.error === "insufficient_funds") {
+        alert("Fondos insuficientes");
+      } else if (data?.error === "quantity_required") {
+        alert("Cantidad inválida");
+      } else {
+        alert(data?.message || data?.error || "Error abriendo operación");
+      }
+
+      return null;
+    }
+
+    await requestBackendRefresh().catch(() => {});
+    return data;
+  } catch (err) {
+    console.error("❌ Error enviando orden:", err);
+    alert("Error de conexión con el servidor");
+    return null;
+  }
 }
 
 async function placeOrder(input) {
   try {
-    const api = window.__LEONES_BROKER_EXT2 || {};
+    let side = "";
+    let symbol = "";
+    let amount = 0;
+    let type = "market";
+    let price = null;
 
-    let side, symbol, amount, type, price;
-
-    // 🔥 INPUT FLEXIBLE
     if (typeof input === "string") {
       side = input;
 
       symbol =
         window.selectedSymbol ||
-        api.activeSymbol ||
+        state.activeSymbol ||
+        TR.activeSymbol ||
         document.getElementById("tradingSymbol")?.textContent?.trim() ||
-        document.getElementById("op-symbol")?.textContent?.trim();
+        document.getElementById("op-symbol")?.textContent?.trim() ||
+        getActiveSymbolMeta()?.symbol ||
+        "";
 
       const sizeInput =
         document.getElementById("brokerOrderSize") ||
@@ -4829,32 +4475,27 @@ async function placeOrder(input) {
       type =
         document.getElementById("order-type")?.value ||
         document.getElementById("order-type-bottom")?.value ||
-        "Market";
+        "market";
 
-      if (type !== "Market") {
+      if (String(type).toLowerCase() !== "market") {
         const priceInput =
           document.getElementById("order-price") ||
           document.getElementById("order-price-bottom");
 
         price = parseFloat(priceInput?.value);
       }
-
     } else {
-      side = input.side || input.direction;
-      symbol = input.symbol;
-      amount = input.amount;
-      type = input.type || "Market";
-      price = input.price;
+      side = input.side || input.direction || "";
+      symbol = input.symbol || "";
+      amount = Number(input.amount ?? input.qty ?? input.quantity ?? 0);
+      type = input.type || "market";
+      price = input.price ?? null;
     }
 
-    // 🔥 NORMALIZACIÓN (IMPORTANTE FIX)
     side = String(side || "").toLowerCase();
     type = String(type || "market").toLowerCase();
-
-    // 🚀 FIX CRÍTICO: normalizar símbolo correctamente
     symbol = normalizeSymbol(symbol);
 
-    // 🔥 VALIDACIONES
     if (!symbol) {
       alert("Selecciona un símbolo primero");
       return;
@@ -4870,65 +4511,52 @@ async function placeOrder(input) {
       return;
     }
 
-    // 🔥 OBTENER PRECIO REAL
-    let currentPrice =
-      window.lastPrice ||
-      window.currentPrice ||
-      window.price ||
-      null;
-
-    if (
-      (!currentPrice || !isFinite(currentPrice)) &&
-      typeof getCurrentPriceForSymbol === "function"
-    ) {
-      currentPrice = getCurrentPriceForSymbol(symbol);
-    }
+    let currentPrice = getSymbolPrice(symbol);
 
     console.log("📊 Precio detectado:", currentPrice);
 
-    // ❌ BLOQUEAR SI NO HAY PRECIO REAL
-    if (!currentPrice || !isFinite(currentPrice) || currentPrice <= 0) {
-      console.error("❌ No hay precio válido, orden cancelada");
-      alert("Precio no disponible. Espera que cargue el mercado.");
-      return;
+    if ((!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) && type === "market") {
+      console.warn("⚠️ Precio no disponible, usando entry temporal");
+      currentPrice = null;
     }
 
-    // 🔥 MARKET → USAR PRECIO REAL
     if (type === "market") {
       price = currentPrice;
     }
 
-    // 🔥 VALIDAR PRECIO FINAL
-    if (!price || !isFinite(price) || price <= 0) {
-      console.error("❌ Precio inválido en orden");
-      alert("Precio inválido");
-      return;
+    if (!price || !Number.isFinite(Number(price)) || Number(price) <= 0) {
+      const fallback = getSymbolPrice(symbol);
+      if (fallback && Number.isFinite(fallback) && fallback > 0) {
+        price = fallback;
+      }
     }
 
     const payload = {
       symbol,
       direction: side,
+      side,
       type,
       amount,
-      price,
+      qty: amount,
+      quantity: amount,
     };
+
+    if (price && Number(price) > 0) {
+      payload.price = Number(price);
+    }
 
     console.log("🚀 Enviando orden:", payload);
 
-    // 🔥 PRIORIDAD EXT
-    if (typeof api.placeBrokerOrder === "function") {
-      return await api.placeBrokerOrder(payload);
-    }
-
     return await placeBrokerOrder(payload);
-
   } catch (err) {
     console.error("❌ Error al enviar orden:", err);
+    alert("No se pudo enviar la orden");
+    return null;
   }
 }
 
 /* =========================
-   🔥 CLICK GLOBAL (SIN DUPLICADOS)
+   CLICK GLOBAL
 ========================= */
 document.addEventListener("click", (e) => {
   const action = e.target?.dataset?.action;
@@ -4944,141 +4572,610 @@ document.addEventListener("click", (e) => {
     placeOrder("sell");
   }
 });
+
 /* =========================
-   🔥 ORDEN REAL BACKEND (FIXED)
+   BOOT / UI
 ========================= */
-async function placeBrokerOrder(payload = {}) {
+function ensureShell(root) {
+  if (!root) return;
+  if (root.dataset.leonesShellBuilt === "1") return;
+  root.dataset.leonesShellBuilt = "1";
+  root.innerHTML = "";
 
-  const symbol = String(payload.symbol || '').trim().toUpperCase();
-  const amount = Number(payload.amount);
-  const direction = (payload.direction || payload.side || 'buy').toLowerCase();
-  const type = String(payload.type || 'market').toLowerCase();
+  const message = document.createElement("div");
+  message.id = "brokerExtMessage";
+  message.style.cssText =
+    "display:none;margin-bottom:12px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);font-weight:700;text-align:center;color:#fff;";
+  root.appendChild(message);
 
-  let price = payload.price ?? null;
+  const summary = document.createElement("section");
+  summary.id = "brokerSummaryPanel";
+  summary.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;margin:12px 0;color:#fff;";
+  summary.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+      <div>
+        <div style="font-size:18px;font-weight:900;">Panel de trading</div>
+        <div style="opacity:.75;font-size:13px;margin-top:3px;">Mercados, gráfico y órdenes en vivo</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span id="brokerUserBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">--</span>
+        <span id="brokerLeverageBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Apalancamiento: --</span>
+        <span id="brokerBalanceBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Saldo: --</span>
+        <span id="brokerOperatingBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Operativo: --</span>
+        <span id="brokerMarginBadge" style="padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-weight:700;">Margen: --</span>
+      </div>
+    </div>
+  `;
+  root.appendChild(summary);
 
-  // 🔥 VALIDACIONES
-  if (!symbol) return alert("Símbolo inválido");
-  if (!isFinite(amount) || amount <= 0) return alert("Cantidad inválida");
-  if (!["buy", "sell"].includes(direction)) return alert("Dirección inválida");
-  if (!["market", "limit"].includes(type)) return alert("Tipo inválido");
+  const columns = document.createElement("div");
+  columns.id = "brokerColumns";
 
-  // 🔥 🚀 GARANTIZAR PRECIO SIEMPRE
-  if (!price || !isFinite(price) || price <= 0) {
-    let fallbackPrice =
-      window.lastPrice ||
-      window.currentPrice ||
-      null;
+  const left = document.createElement("div");
+  left.style.cssText = "display:grid;gap:12px;";
 
-    if (!fallbackPrice && typeof getCurrentPriceForSymbol === "function") {
-      fallbackPrice = getCurrentPriceForSymbol(symbol);
-    }
+  const symbols = document.createElement("section");
+  symbols.id = "brokerSymbolsPanel";
+  symbols.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  symbols.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:900;">Mercados y símbolos</div>
+        <div style="opacity:.75;font-size:13px;margin-top:3px;">Lista real desde los datos disponibles</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" data-action="refresh-all">Actualizar</button>
+        <button class="btn ghost" data-action="refresh-symbols">Símbolos</button>
+        <button class="btn ghost" data-action="refresh-quotes">Precios</button>
+      </div>
+    </div>
 
-    if (!fallbackPrice || !isFinite(fallbackPrice)) {
-      console.warn("⚠️ Precio inválido, usando fallback:", symbol);
-      fallbackPrice = 1;
-    }
+    <label style="display:grid;gap:6px;margin-bottom:12px;">
+      <span style="font-size:12px;opacity:.75;">Buscar símbolo, mercado o proveedor</span>
+      <input id="brokerMarketSearch" type="text" placeholder="EURUSD, OANDA, Bitcoin..." style="width:100%;padding:10px 12px;border-radius:10px;background:#090909;color:#fff;" />
+    </label>
 
-    price = fallbackPrice;
-  }
+    <div id="brokerSymbolsScroll">
+      <div id="brokerMarketTabs"></div>
+      <div id="brokerSymbolsGrid"></div>
+    </div>
+  `;
+  left.appendChild(symbols);
 
-  console.log("🚀 ORDEN REAL:", { symbol, amount, direction, price, type });
+  const chart = document.createElement("section");
+  chart.id = "brokerChartPanel";
+  chart.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  chart.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:900;">Gráfico real</div>
+        <div id="brokerActiveSymbol" style="opacity:.75;font-size:13px;margin-top:3px;">--</div>
+      </div>
+      <button class="btn glow" data-action="open-chart">Abrir gráfico</button>
+    </div>
+    <div id="tv_chart_container"></div>
+  `;
+  left.appendChild(chart);
 
-  try {
-    const res = await fetch('/api/trade/open', {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + (getUser()?.token || "")
-      },
-      body: JSON.stringify({
-        symbol,
-        side: direction,
-        type,
-        qty: amount,
-        quantity: amount,
-        price // 🔥 SIEMPRE VA
-      })
-    });
+  const right = document.createElement("div");
+  right.style.cssText = "display:grid;gap:12px;";
 
-    const data = await res.json();
+  const ticket = document.createElement("section");
+  ticket.id = "brokerTicketPanel";
+  ticket.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  ticket.innerHTML = `
+    <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Ticket de orden</div>
+    <div style="display:grid;gap:10px;">
+      <div style="margin-bottom:8px">
+        <label class="muted-small">Tipo</label>
+        <select id="order-type" class="form-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;">
+          <option>Market</option>
+          <option>Limit</option>
+          <option>Stop Loss</option>
+          <option>Take Profit</option>
+          <option>Stop Limit</option>
+        </select>
+      </div>
 
-    console.log("📩 RESPUESTA BACKEND:", data);
+      <div id="priceBox" style="display:none;">
+        <label style="display:grid;gap:6px;">
+          <span style="font-size:12px;opacity:.75;">Precio</span>
+          <input id="order-price" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+        </label>
+      </div>
 
-    if (!res.ok) {
-      console.error("❌ ERROR BACKEND:", data);
+      <label style="display:grid;gap:6px;">
+        <span style="font-size:12px;opacity:.75;">Monto / tamaño</span>
+        <input id="brokerOrderSize" type="number" min="0" step="0.01" placeholder="100" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:#090909;color:#fff;" />
+      </label>
 
-      if (data?.error === "price_unavailable") {
-        alert("No hay precio disponible para este activo");
-      } else if (data?.error === "insufficient_funds") {
-        alert("Fondos insuficientes");
-      } else if (data?.error === "quantity_required") {
-        alert("Cantidad inválida");
-      } else {
-        alert(data?.error || "Error abriendo operación");
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+          <div style="font-size:12px;opacity:.75;">Apalancamiento</div>
+          <div id="brokerLeverageValue" style="font-weight:800;">--</div>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+          <div style="font-size:12px;opacity:.75;">Margen requerido</div>
+          <div id="brokerMarginValue" style="font-weight:800;">--</div>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+          <div style="font-size:12px;opacity:.75;">Capacidad operativa</div>
+          <div id="brokerOperatingPowerValue" style="font-weight:800;">--</div>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);">
+          <div style="font-size:12px;opacity:.75;">Margen libre</div>
+          <div id="brokerFreeMarginValue" style="font-weight:800;">--</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;">
+        <button data-action="buy" class="btn glow" style="flex:1;">COMPRAR</button>
+        <button data-action="sell" class="btn ghost" style="flex:1;">VENDER</button>
+      </div>
+    </div>
+  `;
+  right.appendChild(ticket);
+
+  const account = document.createElement("section");
+  account.id = "brokerAccountPanel";
+  account.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  account.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="font-size:18px;font-weight:900;">Cuenta</div>
+      <button class="btn ghost" data-action="refresh-account">Actualizar cuenta</button>
+    </div>
+    <div style="display:grid;gap:8px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Nombre</span><strong id="brokerAccountName">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Email</span><strong id="brokerAccountEmail">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Saldo</span><strong id="brokerAccountBalance">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Equity</span><strong id="brokerAccountEquity">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>PnL</span><strong id="brokerAccountPnl">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Apalancamiento</span><strong id="brokerAccountLeverage">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Capacidad operativa</span><strong id="brokerAccountOperating">--</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;"><span>Margen</span><strong id="brokerAccountMargin">--</strong></div>
+    </div>
+  `;
+  right.appendChild(account);
+
+  const positions = document.createElement("section");
+  positions.id = "brokerPositionsPanel";
+  positions.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  positions.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="font-size:18px;font-weight:900;">Posiciones</div>
+      <button class="btn ghost" data-action="refresh-positions">Actualizar posiciones</button>
+    </div>
+    <div id="brokerPositionsList" style="display:grid;gap:8px;"></div>
+  `;
+  right.appendChild(positions);
+
+  const details = document.createElement("section");
+  details.id = "brokerSymbolDetailsPanel";
+  details.style.cssText =
+    "background:#0b0b0b;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;color:#fff;";
+  details.innerHTML = `
+    <div style="font-size:18px;font-weight:900;margin-bottom:10px;">Símbolo seleccionado</div>
+    <div id="brokerSymbolDetails" style="display:grid;gap:8px;">--</div>
+  `;
+  right.appendChild(details);
+
+  columns.appendChild(left);
+  columns.appendChild(right);
+  root.appendChild(columns);
+}
+
+function attachGlobalDelegation() {
+  if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
+  window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
+
+  document.addEventListener(
+    "click",
+    async (ev) => {
+      try {
+        const inPrivate = ev.target.closest && ev.target.closest("#privateArea_full");
+        if (!inPrivate) return;
+
+        const clicked = ev.target.closest && ev.target.closest("button, .broker-symbol-card, [data-action], [data-market], [data-close-position]");
+        if (clicked) flashButton(clicked);
+
+        const marketBtn = ev.target.closest && ev.target.closest("[data-market]");
+        if (marketBtn && marketBtn.dataset.market !== undefined) {
+          ev.preventDefault();
+          state.marketFilter = marketBtn.dataset.market || "All";
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          return;
+        }
+
+        const symbolCard = ev.target.closest && ev.target.closest(".broker-symbol-card");
+        if (symbolCard) {
+          ev.preventDefault();
+          const symbol = symbolCard.dataset.symbol || "";
+          const meta =
+            symbolMap().get(String(symbol).toUpperCase()) ||
+            getSymbols().find((x) => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
+            null;
+
+          if (meta) selectSymbol(meta, { openChart: true });
+          return;
+        }
+
+        const closeBtn = ev.target.closest && ev.target.closest("[data-close-position]");
+        if (closeBtn) {
+          ev.preventDefault();
+          const pid = closeBtn.dataset.closePosition;
+          const sym = closeBtn.dataset.symbol;
+          const pos =
+            (state.positions || []).find(
+              (p) => String(p.id || p._id || p.positionId || p.tradeId || "") === String(pid)
+            ) || { symbol: sym };
+
+          await closePosition(pos).catch((e) => setMessage(e?.message || "No se pudo cerrar la posición", "error"));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        const actionTarget = ev.target.closest && ev.target.closest("[data-action]");
+        if (!actionTarget) return;
+
+        const action = actionTarget.dataset.action;
+
+        if (action === "buy") {
+          ev.preventDefault();
+          await placeOrder("buy").catch((e) => setMessage(e?.message || "No se pudo comprar", "error"));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === "sell") {
+          ev.preventDefault();
+          await placeOrder("sell").catch((e) => setMessage(e?.message || "No se pudo vender", "error"));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === "open-chart") {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, "tv_chart_container");
+          return;
+        }
+
+        if (action === "open-chart-bottom") {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, "tv_chart_container_bottom");
+          return;
+        }
+
+        if (action === "refresh-all") {
+          ev.preventDefault();
+          await requestBackendRefresh();
+          return;
+        }
+
+        if (action === "refresh-symbols") {
+          ev.preventDefault();
+          await loadRealMarkets();
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === "refresh-quotes") {
+          ev.preventDefault();
+          await loadRealQuotes();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === "refresh-account") {
+          ev.preventDefault();
+          await loadAccount();
+          renderBottomPanels();
+          return;
+        }
+
+        if (action === "refresh-positions") {
+          ev.preventDefault();
+          await loadPositions();
+          renderBottomPanels();
+          return;
+        }
+      } catch (e) {
+        warn("global click delegation", e);
       }
+    },
+    true
+  );
 
-      return;
-    }
+  document.addEventListener(
+    "input",
+    (ev) => {
+      try {
+        if (!ev.target || !ev.target.closest || !ev.target.closest("#privateArea_full")) return;
 
-    // 🔥 REFRESH
-    if (typeof requestBackendRefresh === "function") {
-      await requestBackendRefresh();
-    }
+        if (
+          ev.target.id === "brokerOrderSize" ||
+          ev.target.id === "brokerOrderSizeBottom" ||
+          ev.target.id === "order-price" ||
+          ev.target.id === "order-price-bottom"
+        ) {
+          renderMargin();
+        }
 
-    return data;
+        if (ev.target.id === "brokerMarketSearch" || ev.target.id === "brokerMarketSearchBottom") {
+          applySearchValue(ev.target.value);
+        }
 
-  } catch (err) {
-    console.error("❌ Error enviando orden:", err);
-    alert("Error de conexión con el servidor");
+        if (ev.target.id === "order-type" || ev.target.id === "order-type-bottom") {
+          syncOrderTypeBoxes(ev.target.value);
+          syncOrderFields();
+        }
+      } catch {}
+    },
+    true
+  );
+}
+
+function startAutoRefresh() {
+  if (state.pollTimer) return;
+  state.pollTimer = setInterval(() => {
+    try {
+      if (!isLoggedIn()) return;
+      loadAccount().catch(() => {});
+      loadPositions().catch(() => {});
+      loadRealQuotes()
+        .then(() => {
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+        })
+        .catch(() => {});
+    } catch {}
+  }, 7000);
+}
+
+function stopAutoRefresh() {
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
   }
 }
-/* =========================
-   🔥 BOOT SISTEMA
-========================= */
+
+function syncAccountView(account = {}) {
+  const a = account || {};
+  const balance = Number(a.balance ?? a.balanceOwn ?? 0) || 0;
+  const equity = Number(a.equity ?? balance) || balance;
+  const marginUsed = Number(a.marginUsed ?? 0) || 0;
+  const freeMargin = Number(a.freeMargin ?? Math.max(equity - marginUsed, 0)) || 0;
+  const leverage = Number(a.leverage ?? a.leverageFactor ?? 100) || 100;
+  const pnl = Number(a.openPnl ?? a.pnl ?? 0) || 0;
+
+  state.account = {
+    ...(state.account || {}),
+    ...a,
+    balance,
+    equity,
+    marginUsed,
+    freeMargin,
+    leverage,
+    pnl,
+  };
+
+  const user = getUser() || {};
+  const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || "Cliente");
+  const email = String(user.email || a.email || "--");
+
+  [
+    ["brokerUserBadge", name],
+    ["brokerUserBadgeBottom", name],
+    ["brokerAccountName", name],
+    ["brokerAccountNameBottom", name],
+    ["brokerAccountEmail", email],
+    ["brokerAccountEmailBottom", email],
+    ["brokerBalanceBadge", formatNumber(balance)],
+    ["brokerBalanceBadgeBottom", formatNumber(balance)],
+    ["brokerAccountBalance", formatNumber(balance)],
+    ["brokerAccountBalanceBottom", formatNumber(balance)],
+    ["brokerAccountEquity", formatNumber(equity)],
+    ["brokerAccountEquityBottom", formatNumber(equity)],
+    ["brokerAccountPnl", formatNumber(pnl)],
+    ["brokerAccountPnlBottom", formatNumber(pnl)],
+    ["brokerAccountLeverage", `${leverage}x`],
+    ["brokerAccountLeverageBottom", `${leverage}x`],
+    ["brokerLeverageBadge", `Apalancamiento: ${leverage}x`],
+    ["brokerLeverageBadgeBottom", `Apalancamiento: ${leverage}x`],
+    ["brokerOperatingBadge", `Operativo: ${formatNumber(freeMargin)}`],
+    ["brokerOperatingBadgeBottom", `Operativo: ${formatNumber(freeMargin)}`],
+    ["brokerAccountOperating", formatNumber(freeMargin)],
+    ["brokerAccountOperatingBottom", formatNumber(freeMargin)],
+    ["brokerMarginBadge", `Margen: ${formatNumber(marginUsed)}`],
+    ["brokerMarginBadgeBottom", `Margen: ${formatNumber(marginUsed)}`],
+    ["brokerAccountMargin", formatNumber(marginUsed)],
+    ["brokerAccountMarginBottom", formatNumber(marginUsed)],
+    ["brokerLeverageValue", `${leverage}x`],
+    ["brokerLeverageValueBottom", `${leverage}x`],
+    ["brokerMarginValue", formatNumber(marginUsed)],
+    ["brokerMarginValueBottom", formatNumber(marginUsed)],
+    ["brokerOperatingPowerValue", formatNumber(freeMargin)],
+    ["brokerOperatingPowerValueBottom", formatNumber(freeMargin)],
+    ["brokerFreeMarginValue", formatNumber(freeMargin)],
+    ["brokerFreeMarginValueBottom", formatNumber(freeMargin)],
+  ].forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  });
+
+  const meta = getActiveSymbolMeta();
+  if (meta) {
+    const quote = currentQuote(meta.symbol);
+    const activePrice = quote?.price ?? TR.symbolPrices?.[meta.symbol]?.price ?? null;
+
+    const activeNodes = [
+      document.getElementById("brokerActiveSymbol"),
+      document.getElementById("brokerActiveSymbolBottom"),
+    ];
+    activeNodes.forEach((el) => {
+      if (el) el.textContent = `${meta.label || meta.symbol}${activePrice !== null && activePrice !== undefined ? ` · ${formatNumber(activePrice)}` : ""}`;
+    });
+  }
+
+  renderPositions();
+  renderSymbolsGrid();
+}
+
+async function initTradingUI(context = {}) {
+  if (!isLoggedIn()) return null;
+
+  injectUiStyles();
+
+  const root = ensureRoot();
+  if (!root) return null;
+
+  if (!state.started) {
+    ensureShell(root);
+    state.started = true;
+  }
+
+  clearMessage();
+
+  if (context && context.user && typeof context.user === "object") {
+    state.account = { ...(state.account || {}), ...context.user };
+    updatePrivateHeaderName(context.user);
+    syncAccountView(context.user);
+  } else {
+    const user = getUser();
+    if (user && Object.keys(user).length) {
+      updatePrivateHeaderName(user);
+    }
+  }
+
+  bindMenuButtons();
+  bindOrderUi();
+  attachGlobalDelegation();
+  await ensureSocket();
+  bindSocketListeners();
+  createFloatingTradesPanel();
+  startAutoRefresh();
+
+  await requestBackendRefresh();
+  await nextFrame();
+
+  const list = getSymbols();
+  const meta = getActiveSymbolMeta() || list[0] || null;
+
+  if (meta) {
+    state.activeSymbol = meta.symbol;
+    TR.activeSymbol = meta.symbol;
+    TR.activeMeta = meta;
+
+    renderSymbolDetails(meta);
+    renderBottomPanels();
+
+    if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
+      await openTradingView(meta, "tv_chart_container").catch((e) => setMessage(e?.message || "No se pudo cargar el gráfico", "error"));
+      await openTradingView(meta, "tv_chart_container_bottom").catch(() => {});
+    }
+
+    requestRealtimeForSymbol(meta);
+  } else {
+    setMessage("No hay símbolos disponibles todavía. Revisa la conexión de datos.", "error");
+  }
+
+  syncOrderFields();
+  return true;
+}
+
+function exposeAPI() {
+  window.startBrokerUI = initTradingUI;
+  window.refreshBrokerUI = requestBackendRefresh;
+  window.openBrokerTradingView = openTradingView;
+  window.selectBrokerSymbol = selectSymbol;
+
+  window.openTrade = openTrade;
+  window.placeBrokerOrder = placeBrokerOrder;
+  window.placeOrder = placeOrder;
+  window.updateTradesPrices = updateTradesPrices;
+  window.updateAccountMetrics = updateAccountMetrics;
+  window.closeAllTrades = closeAllTrades;
+  window.adminDeposit = adminDeposit;
+
+  window.__LEONES_BROKER_EXT2 = {
+    initTradingUI,
+    refreshBrokerUI: requestBackendRefresh,
+    openTradingView,
+    selectSymbol,
+    loadMarketsAndQuotes,
+    loadRealMarkets,
+    loadRealQuotes,
+    loadAccount,
+    loadPositions,
+    placeOrder,
+    placeBrokerOrder,
+    openTrade,
+    closePosition,
+    requestBackendRefresh,
+    positions: state.positions,
+    activeSymbol: state.activeSymbol,
+    activeMeta: TR.activeMeta || null,
+    symbolPrices: TR.symbolPrices || {},
+  };
+}
+
 function bootIfLoggedIn() {
   if (state.booted) return;
   state.booted = true;
 
   if (isLoggedIn() && getPrivateHost()) {
-    initTradingUI().catch(e => warn('boot initTradingUI', e));
+    initTradingUI().catch((e) => warn("boot initTradingUI", e));
   }
 }
 
 exposeAPI();
 attachLoginEventBridge();
 
-if (document.readyState !== 'loading') {
+if (document.readyState !== "loading") {
   bootIfLoggedIn();
 } else {
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener("DOMContentLoaded", () => {
     injectUiStyles();
     bootIfLoggedIn();
   });
 }
 
-window.addEventListener('load', () => {
+window.addEventListener("load", () => {
   try {
     if (isLoggedIn()) {
       initTradingUI().catch(() => {});
     }
-  } catch (e) {}
+  } catch {}
 });
 
-/* =========================
-   🔥 REFRESH GLOBAL
-========================= */
 setInterval(() => {
   try {
     renderBottomPanelsWrapper();
     syncOrderFields();
     updateFloatingTrades();
-  } catch (e) {}
+  } catch {}
 }, 5000);
 
-log('EXT2 real loaded');
-})();
-</script>
-
+log("EXT2 real loaded");
+<script/>
 
 
 
