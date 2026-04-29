@@ -64,7 +64,6 @@ const Transaction =
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ENV
 dotenv.config({
   path:
     process.env.NODE_ENV === "production"
@@ -76,7 +75,6 @@ const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-// DB CONNECT
 connectDB();
 
 mongoose.connection.on("connected", () => {
@@ -158,8 +156,7 @@ app.use(
     max: 5000,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) =>
-      req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+    skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
   })
 );
 
@@ -169,9 +166,7 @@ app.use(
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
   cors: {
-    origin: Array.from(allowedOrigins).length
-      ? Array.from(allowedOrigins)
-      : process.env.CLIENT_URL || "*",
+    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : process.env.CLIENT_URL || "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -244,6 +239,7 @@ function basePriceFromSymbol(symbol) {
   if (s.includes("USDJPY")) return 150 + (hash % 200) / 10;
   return base;
 }
+
 function seedFallbackQuote(symbol, item = {}) {
   const key = String(symbol);
   const existing = fallbackPriceStore.get(key);
@@ -276,6 +272,7 @@ function seedFallbackQuote(symbol, item = {}) {
   } catch {}
   return quote;
 }
+
 function nudgeFallbackPrices() {
   for (const [symbol, quote] of fallbackPriceStore.entries()) {
     const current = Number(quote.price);
@@ -301,6 +298,7 @@ function nudgeFallbackPrices() {
     } catch {}
   }
 }
+
 function getPriceStore() {
   try {
     const merged = {};
@@ -318,6 +316,7 @@ function getPriceStore() {
     return Object.fromEntries(fallbackPriceStore.entries());
   }
 }
+
 function normalizeQuote(symbol, item = {}) {
   const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
   const price = toNumber(item.price) ?? toNumber(item.last) ?? toNumber(item.close) ?? toNumber(item.value) ?? toNumber(item.mark) ?? toNumber(item.mid);
@@ -338,13 +337,21 @@ function normalizeQuote(symbol, item = {}) {
     raw: item,
   };
 }
+
 function ensureMarketSeed(symbol) {
   const key = compactSymbol(symbol);
   if (!key) return null;
   const store = getPriceStore();
   for (const [k, item] of Object.entries(store)) {
     const candidates = [
-      k, k.split(":").pop(), item?.symbol, item?.tvSymbol, item?.ticker, item?.name, item?.label, item?.marketSymbol,
+      k,
+      k.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
     ];
     if (candidates.some((c) => compactSymbol(c) === key)) {
       const quote = normalizeQuote(k, item);
@@ -354,12 +361,22 @@ function ensureMarketSeed(symbol) {
   }
   return seedFallbackQuote(symbol, { label: symbol, market: "Unknown" });
 }
+
 function getCurrentPriceForSymbol(symbol) {
   const target = compactSymbol(symbol);
   if (!target) return null;
   const store = getPriceStore();
   for (const [key, item] of Object.entries(store)) {
-    const candidates = [key, key.split(":").pop(), item?.symbol, item?.tvSymbol, item?.ticker, item?.name, item?.label, item?.marketSymbol];
+    const candidates = [
+      key,
+      key.split(":").pop(),
+      item?.symbol,
+      item?.tvSymbol,
+      item?.ticker,
+      item?.name,
+      item?.label,
+      item?.marketSymbol,
+    ];
     if (candidates.some((c) => compactSymbol(c) === target)) {
       const p = toNumber(item?.price ?? item?.last ?? item?.close ?? item?.value ?? item?.mark ?? item?.mid ?? item?.lp);
       if (Number.isFinite(p) && p > 0) return p;
@@ -368,6 +385,7 @@ function getCurrentPriceForSymbol(symbol) {
   const seeded = ensureMarketSeed(symbol);
   return toNumber(seeded?.price) ?? null;
 }
+
 function isClosedPosition(p = {}) {
   const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
@@ -411,10 +429,9 @@ async function getWalletDocForUser(userId) {
   } catch { return null; }
 }
 function normalizeWalletSnapshot(wallet, openPnl = 0, fallbackBalance = null) {
-  const balanceOwn =
-    Number.isFinite(Number(fallbackBalance))
-      ? Number(fallbackBalance)
-      : (toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0);
+  const balanceOwn = Number.isFinite(Number(fallbackBalance))
+    ? Number(fallbackBalance)
+    : (toNumber(wallet?.balanceOwn ?? wallet?.balance ?? 0) ?? 0);
   const credit = toNumber(wallet?.credit ?? 0) ?? 0;
   const marginUsed = Math.max(toNumber(wallet?.marginUsed ?? 0) ?? 0, 0);
   const equity = balanceOwn + openPnl;
@@ -457,7 +474,6 @@ async function loadAllPositionsForUser(userId) {
 }
 async function getPositionsForUser(userId) { return loadOpenPositionsForUser(userId); }
 
-// Rich account builder used by the operational routes
 async function buildRichAccountForUser(userDoc) {
   const wallet = await getWalletDocForUser(userDoc._id);
   const openPositions = await loadOpenPositionsForUser(userDoc._id);
@@ -554,7 +570,7 @@ async function accountLikeHandler(req, res) {
 }
 
 /* ======================================================
-   ya te dije no se tocan 
+   ya te dije no se tocan
    ====================================================== */
 
 /* ======================================================
@@ -659,8 +675,9 @@ app.get("/api/market/polygon/symbols", (req, res) => res.json(buildSymbolsPayloa
 app.get("/api/market/polygon/quotes", (req, res) => {
   try {
     const store = getPriceStore();
-    const quotes = Object.keys(store).length
-      ? Object.keys(store).map((symbol) => {
+    const keys = Object.keys(store);
+    const quotes = keys.length
+      ? keys.map((symbol) => {
           const item = store[symbol] || {};
           const q = normalizeQuote(symbol, item);
           return {
