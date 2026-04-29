@@ -4959,29 +4959,27 @@ async function placeBrokerOrder(payload = {}) {
 
     let price = Number(payload.price);
 
+    // 🔥 USER + TOKEN DEBUG
+    const user = getUser() || {};
+    console.log("👤 USER:", user);
+
+    if (!user.token) {
+      alert("Usuario no autenticado (sin token)");
+      return;
+    }
+
     // 🔥 VALIDACIONES
     if (!symbol) return alert("Símbolo inválido");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 🔥 FIX REAL: SI NO HAY PRECIO → USAR ENTRY / ÚLTIMO / 1
+    // 🔥 PRECIO SIEMPRE
     if (!price || !isFinite(price) || price <= 0) {
-
       price =
         window.lastPrice ||
         window.currentPrice ||
-        window.entryPrice || // 👈 CLAVE
-        null;
-
-      if (!price && typeof getCurrentPriceForSymbol === "function") {
-        price = getCurrentPriceForSymbol(symbol);
-      }
-
-      // 🔥 ÚLTIMO RECURSO (EVITA 400 SIEMPRE)
-      if (!price || !isFinite(price)) {
-        console.warn("⚠️ Sin precio real → usando fallback fijo:", symbol);
-        price = 1; // 👈 ESTO EVITA QUE EL BACKEND RECHACE
-      }
+        window.entryPrice ||
+        1; // 👈 evita rechazo backend
     }
 
     const body = {
@@ -4998,7 +4996,7 @@ async function placeBrokerOrder(payload = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + (getUser()?.token || "")
+        "Authorization": "Bearer " + user.token // 🔥 CLAVE
       },
       body: JSON.stringify(body)
     });
@@ -5009,11 +5007,15 @@ async function placeBrokerOrder(payload = {}) {
 
     if (!res.ok) {
       console.error("❌ ERROR BACKEND:", data);
-      alert(data?.error || "Error backend");
+
+      // 🔥 DEBUG CLARO
+      if (data?.error === "insufficient_funds") {
+        alert("El backend dice fondos insuficientes, pero el balance está mal calculado");
+      }
+
       return;
     }
 
-    // 🔥 FORZAR REFRESH REAL
     await loadPositions();
     await loadAccount();
 
@@ -5023,7 +5025,6 @@ async function placeBrokerOrder(payload = {}) {
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
-    alert("Error de conexión");
   }
 }
 /* =========================
