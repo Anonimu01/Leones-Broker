@@ -485,6 +485,29 @@ async function getUserDocFromBearer(req) {
   }
 }
 
+/* ======================================================
+   PATCH COMPATIBLE HELPERS
+   ====================================================== */
+async function getWalletForUser(userId) {
+  try {
+    return await Wallet.findOne({ user: userId }).lean().exec().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function getPositionsForUser(userId) {
+  try {
+    return await loadAllPositionsForUser(userId);
+  } catch {
+    return [];
+  }
+}
+
+async function getUserFromBearer(req) {
+  return await getUserDocFromBearer(req);
+}
+
 async function getWalletDocForUser(userId) {
   let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
   if (!wallet) {
@@ -603,28 +626,49 @@ async function loadAllPositionsForUser(userId) {
 }
 
 async function buildAccountForUser(userDoc) {
-  const wallet = await getWalletDocForUser(userDoc._id);
-  const openPositions = await loadOpenPositionsForUser(userDoc._id);
+  const wallet = await getWalletForUser(userDoc._id);
+  const positions = await getPositionsForUser(userDoc._id);
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
 
-  const openPnl = openPositions.reduce((sum, p) => sum + (Number(p.pnl ?? 0) || 0), 0);
+  const openPnl = (positions || []).reduce((sum, p) => sum + (Number(p.pnl ?? 0) || 0), 0);
   const normalizedWallet = normalizeWalletSnapshot(wallet, openPnl);
+
+  const balance = wallet?.balance ?? userDoc.balance ?? normalizedWallet.balance ?? 0;
 
   return {
     account: {
-      ...normalizedWallet,
-      leverage: Number(userDoc.leverage ?? wallet.leverageFactor ?? 100) || 100,
-      currency: userDoc.currency || wallet.currency || "USD",
-      positions: openPositions,
-      openPositions,
+      balance,
+      equity: balance,
+      marginUsed: normalizedWallet.marginUsed,
+      freeMargin: normalizedWallet.freeMargin,
+      marginLevel: normalizedWallet.marginLevel,
+      leverage: userDoc.leverage ?? 100,
+      currency: userDoc.currency || "USD",
+      positions: positions || [],
+      balanceOwn: normalizedWallet.balanceOwn,
+      leverageFactor: userDoc.leverage ?? normalizedWallet.leverageFactor ?? 100,
+      openPositions: positions || [],
       recentTransactions,
       transactions: recentTransactions,
+      openPnl,
     },
     user: userDoc.toObject ? userDoc.toObject() : userDoc,
-    wallet: wallet.toObject ? wallet.toObject() : wallet,
-    positions: openPositions,
+    wallet: wallet?.toObject ? wallet.toObject() : wallet,
+    positions,
     transactions: recentTransactions,
   };
+}
+
+async function accountLikeHandler(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const payload = await buildAccountForUser(user);
+    return res.json(payload);
+  } catch (e) {
+    console.error("accountLikeHandler error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
 }
 
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
