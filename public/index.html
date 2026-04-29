@@ -4950,23 +4950,18 @@ function normalizeSymbol(symbol = "") {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
+    // 🔥 NORMALIZADOR SEGURO LOCAL
+    const normalize = (symbol = "") =>
+      String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    // 🔥 FIX CRÍTICO: DEFINIR NORMALIZADOR LOCAL (EVITA ERROR)
-    const normalizeSymbolSafe = (symbol = "") => {
-      return String(symbol)
-        .toUpperCase()
-        .replace(/[^A-Z0-9]/g, "");
-    };
-
-    // 🔥 NORMALIZACIÓN SEGURA
-    const symbol = normalizeSymbolSafe(payload.symbol);
+    // 🔥 DATOS LIMPIOS
+    const symbol = normalize(payload.symbol);
     const amount = Number(payload.amount);
-    const direction = String(payload.direction || payload.side || "buy").toLowerCase();
-    const type = String(payload.type || "market").toLowerCase();
+    const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
-    let price = payload.price ?? null;
+    let price = Number(payload.price);
 
-    // 🔥 VALIDACIONES
+    // 🔥 VALIDACIONES REALES
     if (!symbol) {
       alert("Símbolo inválido");
       return;
@@ -4977,86 +4972,68 @@ async function placeBrokerOrder(payload = {}) {
       return;
     }
 
-    if (!["buy", "sell"].includes(direction)) {
+    if (!["buy", "sell"].includes(side)) {
       alert("Dirección inválida");
       return;
     }
 
-    if (!["market", "limit"].includes(type)) {
-      alert("Tipo inválido");
-      return;
-    }
-
-    // 🔥 GARANTIZAR PRECIO SIEMPRE
+    // 🔥 PRECIO REAL OBLIGATORIO (SIN INVENTAR 1)
     if (!price || !isFinite(price) || price <= 0) {
-
-      let fallbackPrice =
+      let realPrice =
         window.lastPrice ||
         window.currentPrice ||
         null;
 
-      // 🔥 INTENTA DEL STORE
-      if (!fallbackPrice && typeof getCurrentPriceForSymbol === "function") {
-        fallbackPrice = getCurrentPriceForSymbol(symbol);
+      if (!realPrice && typeof getCurrentPriceForSymbol === "function") {
+        realPrice = getCurrentPriceForSymbol(symbol);
       }
 
-      // 🔥 ÚLTIMO RECURSO
-      if (!fallbackPrice || !isFinite(fallbackPrice)) {
-        console.warn("⚠️ Precio inválido, usando fallback:", symbol);
-        fallbackPrice = 1;
+      // ❌ SI NO HAY PRECIO → NO ENVÍA (EVITA 400)
+      if (!realPrice || !isFinite(realPrice)) {
+        console.error("❌ No hay precio real disponible");
+        alert("Espera que cargue el precio del mercado");
+        return;
       }
 
-      price = fallbackPrice;
+      price = realPrice;
     }
 
-    console.log("🚀 ORDEN REAL:", {
+    // 🔥 PAYLOAD 100% COMPATIBLE CON BACKEND
+    const body = {
       symbol,
-      amount,
-      direction,
-      price,
-      type
-    });
+      side,
+      type: "market", // 🔥 FORZADO (CLAVE PARA EVITAR 400)
+      quantity: amount,
+      price
+    };
 
-    const res = await fetch('/api/trade/open', {
+    console.log("🚀 PAYLOAD FINAL:", body);
+
+    const res = await fetch("/api/trade/open", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer " + (getUser()?.token || "")
       },
-      body: JSON.stringify({
-        symbol,
-        side: direction,
-        type,
-        qty: amount,
-        quantity: amount,
-        price
-      })
+      body: JSON.stringify(body)
     });
 
     const data = await res.json();
 
     console.log("📩 RESPUESTA BACKEND:", data);
 
+    // ❌ SI FALLA → MOSTRAR ERROR REAL
     if (!res.ok) {
       console.error("❌ ERROR BACKEND:", data);
-
-      if (data?.error === "price_unavailable") {
-        alert("No hay precio disponible para este activo");
-      } else if (data?.error === "insufficient_funds") {
-        alert("Fondos insuficientes");
-      } else if (data?.error === "quantity_required") {
-        alert("Cantidad inválida");
-      } else {
-        alert(data?.error || "Error abriendo operación");
-      }
-
+      alert(data?.error || "Error abriendo operación");
       return;
     }
 
-    // 🔥 REFRESH
-    if (typeof requestBackendRefresh === "function") {
-      await requestBackendRefresh();
-    }
+    // 🔥 REFRESH REAL (IMPORTANTE)
+    await loadPositions();
+    await loadAccount();
+
+    console.log("✅ ORDEN EJECUTADA");
 
     return data;
 
