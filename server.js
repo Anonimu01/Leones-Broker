@@ -162,17 +162,20 @@ function symbolVariants(value) {
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
   return [
     ...new Set(
-      [compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(
-        Boolean
-      )
+      [
+        compactSymbol(raw),
+        compactSymbol(afterColon),
+        compactSymbol(afterSlash),
+        compactSymbol(afterDash),
+      ].filter(Boolean)
     ),
   ];
 }
 
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
-  if (["BUY", "LONG", "BULL"].includes(s)) return "BUY";
-  if (["SELL", "SHORT", "BEAR"].includes(s)) return "SELL";
+  if (["BUY", "LONG", "BULL", "CALL"].includes(s)) return "BUY";
+  if (["SELL", "SHORT", "BEAR", "PUT"].includes(s)) return "SELL";
   return "";
 }
 
@@ -183,7 +186,12 @@ function normalizeQty(body = {}) {
       body.amount ??
       body.positionSize ??
       body.notional ??
-      body.size
+      body.size ??
+      body.volume ??
+      body.lots ??
+      body.contracts ??
+      body.units ??
+      body.lotSize
   );
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -192,13 +200,30 @@ function normalizePrice(body = {}) {
   const raw =
     body.price ??
     body.entryPrice ??
+    body.entry_price ??
     body.currentPrice ??
+    body.current_price ??
     body.limitPrice ??
+    body.limit_price ??
     body.stopPrice ??
+    body.stop_price ??
     body.openPrice ??
+    body.open_price ??
     body.tvPrice ??
+    body.tv_price ??
     body.lastPrice ??
+    body.last_price ??
+    body.marketPrice ??
+    body.market_price ??
+    body.quotePrice ??
+    body.quote_price ??
+    body.executionPrice ??
+    body.execution_price ??
+    body.ask ??
+    body.bid ??
+    body.mark ??
     null;
+
   if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -212,21 +237,13 @@ function normalizePositionSymbol(body = {}) {
       body.chartSymbol ||
       body.instrument ||
       body.marketSymbol ||
+      body.market ||
+      body.ticker ||
+      body.asset ||
       ""
-  ).trim().toUpperCase();
-}
-
-function resolveOrderPrice(body = {}, symbol = "") {
-  const direct = normalizePrice(body);
-  if (direct) return direct;
-
-  const tvLike = Number(body.tvPrice ?? body.lastPrice ?? body.currentPrice ?? body.entryPrice);
-  if (Number.isFinite(tvLike) && tvLike > 0) return tvLike;
-
-  const market = getCurrentPriceForSymbol(symbol);
-  if (market) return market;
-
-  return null;
+  )
+    .trim()
+    .toUpperCase();
 }
 
 function toNumber(value) {
@@ -247,15 +264,23 @@ function getPriceStore() {
 }
 
 function extractQuotePrice(item = {}) {
-  return (
+  const direct =
     toNumber(item.price) ??
     toNumber(item.last) ??
     toNumber(item.close) ??
     toNumber(item.value) ??
     toNumber(item.mark) ??
-    toNumber(item.mid) ??
-    null
-  );
+    toNumber(item.mid);
+
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const ask = toNumber(item.ask);
+  const bid = toNumber(item.bid);
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
 }
 
 function normalizeQuote(symbol, item = {}) {
@@ -334,6 +359,39 @@ function getCurrentPriceForSymbol(symbol) {
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
+
+  return null;
+}
+
+function resolveOrderPrice(body = {}, symbol = "") {
+  const direct = normalizePrice(body);
+  if (direct) return direct;
+
+  const candidates = [
+    body.currentPrice,
+    body.current_price,
+    body.lastPrice,
+    body.last_price,
+    body.tvPrice,
+    body.tv_price,
+    body.entry,
+    body.entryPrice,
+    body.entry_price,
+    body.marketPrice,
+    body.market_price,
+    body.quotePrice,
+    body.quote_price,
+    body.executionPrice,
+    body.execution_price,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const market = getCurrentPriceForSymbol(symbol);
+  if (market) return market;
 
   return null;
 }
@@ -437,8 +495,8 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
 function getEffectiveBalance(userDoc, walletDoc) {
   const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
   const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
-  if (Number.isFinite(walletBalance) && walletBalance > 0) return walletBalance;
-  if (Number.isFinite(userBalance) && userBalance > 0) return userBalance;
+  if (Number.isFinite(walletBalance)) return walletBalance;
+  if (Number.isFinite(userBalance)) return userBalance;
   return 0;
 }
 
@@ -539,11 +597,16 @@ async function loadAllPositionsForUser(userId) {
 
 async function buildAccountForUser(userDoc) {
   const wallet = await getWalletDocForUser(userDoc._id);
-  const positions = await loadAllPositionsForUser(userDoc._id);
+  const openPositions = await loadOpenPositionsForUser(userDoc._id);
+  const allPositions = await loadAllPositionsForUser(userDoc._id);
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
   const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
-  const openPnl = (positions || []).reduce((sum, p) => sum + (Number(p.pnl ?? 0) || 0), 0);
+  const openPnl = (openPositions || []).reduce(
+    (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
+    0
+  );
+
   const normalizedWallet = normalizeWalletSnapshot(
     walletSnapshot
       ? { ...walletSnapshot, balanceOwn: balance, balance }
@@ -560,21 +623,18 @@ async function buildAccountForUser(userDoc) {
       equity: balance + openPnl,
       leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
       currency: userDoc.currency || walletSnapshot?.currency || "USD",
-      positions,
-      openPositions: positions,
+      positions: openPositions,
+      openPositions,
+      allPositions,
       recentTransactions,
       transactions: recentTransactions,
       openPnl,
     },
     user: userDoc.toObject ? userDoc.toObject() : userDoc,
     wallet: walletSnapshot,
-    positions,
+    positions: openPositions,
     transactions: recentTransactions,
   };
-}
-
-async function getUserFromBearer(req) {
-  return await getUserDocFromBearer(req);
 }
 
 function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
@@ -655,10 +715,12 @@ app.post("/api/_send_test_email", async (req, res) => {
       ok: false,
       message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
     });
+
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
   const html =
     req.body.html ||
     `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+
   try {
     const r = await sendEmail({ to, subject, html });
     if (r.ok)
@@ -668,6 +730,7 @@ app.post("/api/_send_test_email", async (req, res) => {
         provider: r.provider,
         result: r.result || r.info || r.resp,
       });
+
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
@@ -796,15 +859,16 @@ app.get("/api/account", async (req, res) => {
   }
 });
 
-app.get("/api/me", async (req, res) =>
-  res.status(200).json(
-    await (async () => {
-      const user = await getUserDocFromBearer(req);
-      if (!user) return { error: "Unauthorized" };
-      return await buildAccountForUser(user);
-    })()
-  )
-);
+app.get("/api/me", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(200).json(await buildAccountForUser(user));
+  } catch (e) {
+    console.error("/api/me error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 app.get("/api/profile", async (req, res) => {
   try {
@@ -1077,7 +1141,9 @@ app.post("/api/trade/open", async (req, res) => {
     const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
+    const type = String(body.type ?? body.orderType ?? body.order_type ?? "market")
+      .trim()
+      .toLowerCase();
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "symbol_required", message: "Símbolo requerido" });
@@ -1086,7 +1152,23 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "side_required", message: "Dirección requerida" });
     }
     if (!qty) {
-      return res.status(400).json({ ok: false, error: "quantity_required", message: "Cantidad requerida" });
+      return res.status(400).json({
+        ok: false,
+        error: "quantity_required",
+        message: "Cantidad requerida",
+        debug: {
+          qty: body.qty,
+          quantity: body.quantity,
+          amount: body.amount,
+          positionSize: body.positionSize,
+          notional: body.notional,
+          size: body.size,
+          volume: body.volume,
+          lots: body.lots,
+          contracts: body.contracts,
+          units: body.units,
+        },
+      });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1102,16 +1184,23 @@ app.post("/api/trade/open", async (req, res) => {
       1
     );
 
-    const entryPrice =
-      type === "limit"
-        ? resolveOrderPrice(body, symbol)
-        : resolveOrderPrice(body, symbol) || getCurrentPriceForSymbol(symbol);
+    const entryPrice = resolveOrderPrice(body, symbol);
 
     if (!entryPrice || entryPrice <= 0) {
       return res.status(400).json({
         ok: false,
         error: "price_unavailable",
         message: "No hay precio disponible para este símbolo",
+        debug: {
+          symbol,
+          side,
+          type,
+          bodyPrice: body.price,
+          bodyEntryPrice: body.entryPrice,
+          bodyCurrentPrice: body.currentPrice,
+          bodyLastPrice: body.lastPrice,
+          resolvedStorePrice: getCurrentPriceForSymbol(symbol),
+        },
       });
     }
 
@@ -1127,6 +1216,8 @@ app.post("/api/trade/open", async (req, res) => {
         balance: balanceOwn,
         freeMargin,
         requiredMargin,
+        leverage,
+        notional,
       });
     }
 
@@ -1242,8 +1333,12 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     const currentPrice =
-      Number(resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol) || position.currentPrice || 0) ||
-      0;
+      Number(
+        resolveOrderPrice(body, position.symbol) ||
+          getCurrentPriceForSymbol(position.symbol) ||
+          position.currentPrice ||
+          0
+      ) || 0;
 
     if (!currentPrice || currentPrice <= 0) {
       return res.status(400).json({
@@ -1257,7 +1352,7 @@ app.post("/api/trade/close", async (req, res) => {
     const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
     const side = normalizeSide(position.side || position.direction);
     const sign = side === "SELL" ? -1 : 1;
-    const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+    const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
@@ -1356,14 +1451,20 @@ app.post("/api/trade/close-all", async (req, res) => {
 
     for (const pos of openPositions) {
       const currentPrice =
-        Number(resolveOrderPrice(body, pos.symbol) || getCurrentPriceForSymbol(pos.symbol) || pos.currentPrice || 0) || 0;
+        Number(
+          resolveOrderPrice(body, pos.symbol) ||
+            getCurrentPriceForSymbol(pos.symbol) ||
+            pos.currentPrice ||
+            0
+        ) || 0;
+
       if (!currentPrice || currentPrice <= 0) continue;
 
       const entryPrice = Number(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) || 0;
       const qty = Number(pos.qty ?? pos.quantity ?? pos.amount ?? 0) || 0;
       const side = normalizeSide(pos.side || pos.direction);
       const sign = side === "SELL" ? -1 : 1;
-      const realizedPnl = ((currentPrice - entryPrice) * qty) * sign;
+      const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
       const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
@@ -1577,6 +1678,7 @@ for (const cand of staticCandidates) {
     }
   } catch {}
 }
+
 if (!staticDirName) {
   staticDirName = "public";
   console.warn(
@@ -1587,6 +1689,7 @@ if (!staticDirName) {
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
+
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
@@ -1609,6 +1712,7 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
+
   if (normalized.startsWith("/public/js/"))
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
@@ -1621,6 +1725,7 @@ function resolveJsCandidate(requestPath) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
+
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
     try {
