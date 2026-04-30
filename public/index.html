@@ -3229,79 +3229,48 @@ if (window.__LEONES_BOOTED__) {
   }
 
 
-  async function connectTradingView(symbol) {
+ function connectTradingView(widget) {
   try {
-    if (!window.TradingView) {
-      console.error("TradingView no está cargado");
-      return;
+    if (!widget) return;
+
+    // ⚠️ algunos builds no tienen onChartReady
+    if (typeof widget.onChartReady === "function") {
+      widget.onChartReady(() => initChart(widget));
+    } else {
+      // fallback inmediato
+      initChart(widget);
     }
 
-    const container = document.getElementById("tradingview_container");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    const widget = new TradingView.widget({
-      container_id: "tradingview_container",
-      symbol: symbol || "BINANCE:BTCUSDT",
-      interval: "1",
-      theme: "dark",
-      style: "1",
-      locale: "es",
-      enable_publishing: false,
-      allow_symbol_change: true,
-      autosize: true,
-    });
-
-    widget.onChartReady(() => {
-      console.log("📊 TradingView listo");
-    });
-
-  } catch (err) {
-    console.error("Error TradingView:", err);
+  } catch (e) {
+    console.warn("⚠️ No se pudo conectar TradingView:", e);
   }
 }
 
-
-  
- function connectTradingView(widget) {
+function initChart(widget) {
   try {
-    widget.onChartReady(() => {
-      const chart = widget.activeChart();
+    const chart = widget.activeChart?.();
+    if (!chart) return;
 
-      // 📊 símbolo desde TradingView
-      chart.onSymbolChanged().subscribe(null, (symbolInfo) => {
-        console.log("📊 Symbol desde TradingView:", symbolInfo.name);
-
-        window.tvSymbol = symbolInfo.name;
-        window.selectedSymbol = symbolInfo.name;
-      });
-
-      // 🔥 PRECIO REAL (POLLING DESDE EL CHART)
-      setInterval(() => {
-        try {
-          const price = chart
-            .getVisibleRange && chart.getVisibleRange()
-            ? chart._model?.mainSeries()?.lastValueData?.lastPrice
-            : null;
-
-          const n = Number(price);
-
-          if (Number.isFinite(n) && n > 0) {
-            window.tvPrice = n;
-            window.lastPrice = n;
-
-            // DEBUG
-            // console.log("💰 TV PRICE:", n);
-          }
-        } catch (e) {
-          // silencio (TradingView es interno aquí)
-        }
-      }, 500);
-
+    chart.onSymbolChanged?.().subscribe(null, (symbolInfo) => {
+      window.tvSymbol = symbolInfo.name;
+      window.selectedSymbol = symbolInfo.name;
     });
+
+    setInterval(() => {
+      try {
+        const price =
+          chart._model?.mainSeries?.()?.lastValueData?.lastPrice;
+
+        const n = Number(price);
+        if (Number.isFinite(n) && n > 0) {
+          window.tvPrice = n;
+          window.lastPrice = n;
+        }
+      } catch {}
+    }, 700);
+
   } catch (e) {
-    console.warn("⚠️ No se pudo conectar TradingView:", e);
+    console.warn("initChart error:", e);
   }
 }
 async function openTradingView(meta, containerId = 'tv_chart_container') {
