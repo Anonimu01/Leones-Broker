@@ -151,7 +151,7 @@ app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
 /* ======================================================
-   HELPERS
+   HELPERS (FIXED 🔥)
    ====================================================== */
 function compactSymbol(value) {
   return String(value || "")
@@ -165,11 +165,15 @@ function symbolVariants(value) {
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
   const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
+
   return [
     ...new Set(
-      [compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(
-        Boolean
-      )
+      [
+        compactSymbol(raw),
+        compactSymbol(afterColon),
+        compactSymbol(afterSlash),
+        compactSymbol(afterDash),
+      ].filter(Boolean)
     ),
   ];
 }
@@ -202,31 +206,16 @@ function normalizePrice(body = {}) {
   const raw =
     body.price ??
     body.entryPrice ??
-    body.entry_price ??
     body.currentPrice ??
-    body.current_price ??
-    body.limitPrice ??
-    body.limit_price ??
-    body.stopPrice ??
-    body.stop_price ??
-    body.openPrice ??
-    body.open_price ??
-    body.tvPrice ??
-    body.tv_price ??
     body.lastPrice ??
-    body.last_price ??
     body.marketPrice ??
-    body.market_price ??
-    body.quotePrice ??
-    body.quote_price ??
-    body.executionPrice ??
-    body.execution_price ??
     body.ask ??
     body.bid ??
     body.mark ??
     null;
 
   if (raw === null || raw === undefined || raw === "") return null;
+
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -238,7 +227,6 @@ function normalizePositionSymbol(body = {}) {
       body.selectedSymbol ||
       body.chartSymbol ||
       body.instrument ||
-      body.marketSymbol ||
       body.market ||
       body.ticker ||
       body.asset ||
@@ -270,77 +258,18 @@ function extractQuotePrice(item = {}) {
     toNumber(item.price) ??
     toNumber(item.last) ??
     toNumber(item.close) ??
-    toNumber(item.value) ??
-    toNumber(item.mark) ??
-    toNumber(item.mid);
+    toNumber(item.mark);
 
   if (Number.isFinite(direct) && direct > 0) return direct;
 
   const ask = toNumber(item.ask);
   const bid = toNumber(item.bid);
-  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+
+  if (Number.isFinite(ask) && Number.isFinite(bid)) {
     return (ask + bid) / 2;
   }
 
   return null;
-}
-
-function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
-  return {
-    symbol,
-    label,
-    market: item.market || "Unknown",
-    price: extractQuotePrice(item),
-    bid: toNumber(item.bid),
-    ask: toNumber(item.ask),
-    open: toNumber(item.open),
-    high: toNumber(item.high),
-    low: toNumber(item.low),
-    volume: toNumber(item.volume),
-    change: toNumber(item.change),
-    changePercent: toNumber(item.changePercent),
-    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
-    raw: item,
-  };
-}
-
-const SAMPLE_SYMBOLS = [
-  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
-  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
-  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
-  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
-];
-
-function buildQuotesArray() {
-  const store = getPriceStore();
-  const keys = Object.keys(store);
-  if (keys.length) return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
-  return SAMPLE_SYMBOLS.map((s) =>
-    normalizeQuote(s.symbol, {
-      label: s.label,
-      market: s.market,
-      price: null,
-      updatedAt: new Date().toISOString(),
-    })
-  );
-}
-
-function buildMarketPayload() {
-  const quotes = buildQuotesArray();
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest: quotes[0] || null,
-  };
 }
 
 function getCurrentPriceForSymbol(symbol) {
@@ -350,50 +279,26 @@ function getCurrentPriceForSymbol(symbol) {
   const store = getPriceStore();
 
   for (const [key, item] of Object.entries(store)) {
-    const keyVariants = symbolVariants(key);
-    const itemVariants = symbolVariants(item?.symbol || "");
-    const labelVariants = symbolVariants(item?.label || "");
+    const variants = [
+      ...symbolVariants(key),
+      ...symbolVariants(item?.symbol || ""),
+      ...symbolVariants(item?.label || ""),
+    ];
 
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
-      targetVariants.includes(v)
-    );
-
-    if (!matched) continue;
+    const match = variants.some((v) => targetVariants.includes(v));
+    if (!match) continue;
 
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
 
-  console.warn("⚠️ Precio no encontrado en store para:", symbol);
-  return 1;
+  // ❌ YA NO devolvemos 1 (esto dañaba el pnl)
+  return null;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
-
-  const candidates = [
-    body.currentPrice,
-    body.current_price,
-    body.lastPrice,
-    body.last_price,
-    body.tvPrice,
-    body.tv_price,
-    body.entry,
-    body.entryPrice,
-    body.entry_price,
-    body.marketPrice,
-    body.market_price,
-    body.quotePrice,
-    body.quote_price,
-    body.executionPrice,
-    body.execution_price,
-  ];
-
-  for (const candidate of candidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
 
   const market = getCurrentPriceForSymbol(symbol);
   if (market) return market;
@@ -402,95 +307,82 @@ function resolveOrderPrice(body = {}, symbol = "") {
 }
 
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "")
+  const status = String(p.status || "")
     .toLowerCase()
     .trim();
-  return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
+
+  return status.includes("close") || !!p.closedAt;
 }
 
+/* ======================================================
+   🔥 PNL REAL (FIXED)
+   ====================================================== */
 function computePositionPnl(position = {}, currentPrice = null) {
-  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const entry =
+    Number(position.entryPrice ?? position.price ?? 0) || 0;
+
   const qty =
-    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
-  const side = normalizeSide(position.side || position.direction || position.positionSide);
-  const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
+    Number(position.qty ?? position.quantity ?? 0) || 0;
+
+  const side = normalizeSide(position.side);
+
+  // 🔥 PRECIO SEGURO
+  const pxRaw = currentPrice ?? position.currentPrice;
+  const px =
+    Number.isFinite(pxRaw) && pxRaw > 0 ? pxRaw : entry;
+
   const sign = side === "SELL" ? -1 : 1;
+
   return (px - entry) * qty * sign;
 }
 
 function annotatePosition(position = {}) {
-  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const entry =
+    Number(position.entryPrice ?? position.price ?? 0) || 0;
+
+  const marketPrice =
+    getCurrentPriceForSymbol(position.symbol);
+
   const currentPrice =
-    Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) ||
-    entryPrice;
-  const qty =
-    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+    Number.isFinite(marketPrice) && marketPrice > 0
+      ? marketPrice
+      : entry;
+
   const pnl = isClosedPosition(position)
-    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+    ? Number(position.realizedPnl ?? 0)
+    : computePositionPnl(position, currentPrice);
 
   return {
     ...position,
-    entryPrice,
+    entryPrice: entry,
     currentPrice,
-    qty,
     pnl,
     unrealizedPnl: pnl,
     isOpen: !isClosedPosition(position),
   };
 }
 
-async function getUserDocFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || req.headers.Authorization || null;
-    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
-    const token = String(auth).split(" ")[1];
-    if (!token || !process.env.JWT_SECRET) return null;
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
-    if (!userId) return null;
-    return await User.findById(userId).catch(() => null);
-  } catch {
-    return null;
-  }
-}
-
-async function getWalletDocForUser(userId) {
-  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
-  if (!wallet) {
-    wallet = new Wallet({
-      user: userId,
-      balanceOwn: 0,
-      balance: 0,
-      credit: 0,
-      marginUsed: 0,
-      leverageFactor: 1,
-      equity: 0,
-      freeMargin: 0,
-      marginLevel: 0,
-    });
-  }
-  return wallet;
-}
-
+/* ======================================================
+   WALLET (ANTI-FLICKER REAL)
+   ====================================================== */
 function normalizeWalletSnapshot(wallet, openPnl = 0) {
-  const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
+  const balanceOwn =
+    Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
+
   const credit = Number(wallet?.credit ?? 0) || 0;
-  const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
 
-  // 🔥 PROTECCIÓN ANTI-FLICKER
-  const safeOpenPnl = Number.isFinite(openPnl) ? openPnl : 0;
+  const marginUsed =
+    Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
 
-  // ❗ NO TOCAR balance real
+  const safeOpenPnl =
+    Number.isFinite(openPnl) ? openPnl : 0;
+
+  // 🔥 SOLO equity cambia
   const equity = balanceOwn + safeOpenPnl;
 
-  // 🔥 CLAVE: NO recalcular disponible con precios inestables
-  const availableBalance = Math.max(balanceOwn + credit - marginUsed, 0);
-
-  const freeMargin = availableBalance;
-
-  const marginLevel =
-    marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+  // 🔥 SALDO ESTABLE (SIN PESTAÑEO)
+  const availableBalance =
+    Math.max(balanceOwn + credit - marginUsed, 0);
 
   return {
     balance: balanceOwn,
@@ -498,11 +390,10 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     credit,
     equity,
     marginUsed,
-    freeMargin,
+    freeMargin: availableBalance,
     availableBalance,
-    marginLevel,
-    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
-    currency: wallet?.currency || "USD",
+    marginLevel:
+      marginUsed > 0 ? (equity / marginUsed) * 100 : 0,
     openPnl: safeOpenPnl,
   };
 }
