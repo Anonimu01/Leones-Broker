@@ -925,143 +925,150 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE
+   TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
+
+// 🔒 Anti doble orden en memoria (simple pero efectivo)
+const activeOrders = new Set();
+
 app.post("/api/trade/open", async (req, res) => {
-  const user = await getUserDocFromBearer(req);
-  if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-  const body = req.body || {};
-  const symbol = normalizePositionSymbol(body);
-  const side = normalizeSide(body.side ?? body.direction ?? body.action);
-  const qty = normalizeQty(body);
-  const type = String(body.type ?? body.orderType ?? body.order_type ?? "market").trim().toLowerCase();
-
   try {
-    if (!symbol) return res.status(400).json({ ok: false, error: "symbol_required", message: "Símbolo requerido" });
-    if (!side) return res.status(400).json({ ok: false, error: "side_required", message: "Dirección requerida" });
-    if (!qty) return res.status(400).json({ ok: false, error: "quantity_required", message: "Cantidad requerida" });
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    const lockKey = makeOpenLockKey(user._id, symbol, side);
-    if (!withOpenLock(lockKey, 1500)) {
-      const walletNow = await getWalletDocForUser(user._id);
-      const accountNow = await buildAccountForUser(user);
-      const openPositionsNow = await loadOpenPositionsForUser(user._id);
-      return res.status(409).json({ ok: false, error: "duplicate_open_blocked", message: "Se bloqueó una apertura duplicada", account: accountNow.account, wallet: walletNow?.toObject ? walletNow.toObject() : walletNow, positions: openPositionsNow });
+    const body = req.body || {};
+    const symbol = normalizePositionSymbol(body);
+    const side = normalizeSide(body.side);
+    const qty = normalizeQty(body);
+
+    if (!symbol || !side || !qty) {
+      return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    try {
-      const wallet = await getWalletDocForUser(user._id);
-      const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
-      const balanceOwn = getEffectiveBalance(user, walletSnapshot);
-      const credit = Number(walletSnapshot?.credit ?? user.credit ?? 0) || 0;
-      const marginUsed = Number(walletSnapshot?.marginUsed ?? user.marginUsed ?? 0) || 0;
-      const leverage = Math.max(Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1, 1);
-      const entryPrice = resolveOrderPrice(body, symbol);
-      if (!entryPrice || entryPrice <= 0) return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para este símbolo" });
-      const notional = Math.abs(qty * entryPrice);
-      const requiredMargin = notional / leverage;
-      const freeMargin = Math.max(balanceOwn + credit - marginUsed, 0);
-      if (freeMargin < requiredMargin) {
-        return res.status(400).json({ ok: false, error: "insufficient_funds", message: "Fondos insuficientes para abrir la operación", balance: balanceOwn, freeMargin, requiredMargin, leverage, notional });
-      }
-
-      const duplicate = await Position.findOne({
-        user: user._id,
-        symbol,
-        side,
-        qty,
-        entryPrice,
-        status: { $in: ["OPEN", "open", "Open"] },
-        createdAt: { $gte: new Date(Date.now() - 5000) },
-      }).sort({ createdAt: -1 }).lean().exec().catch(() => null);
-
-      if (duplicate) {
-        const accountDup = await buildAccountForUser(user);
-        const positionsDup = await loadOpenPositionsForUser(user._id);
-        return res.status(200).json({ ok: true, duplicate: true, msg: "Operación ya abierta", data: { positionId: duplicate._id, status: "OPEN", symbol: duplicate.symbol, side: duplicate.side, qty: duplicate.qty, entryPrice: duplicate.entryPrice, currentPrice: duplicate.currentPrice ?? duplicate.entryPrice, marginReserved: duplicate.marginReserved ?? requiredMargin, leverage: duplicate.leverage ?? leverage, account: accountDup.account, wallet: accountDup.wallet, position: annotatePosition(duplicate) }, positions: positionsDup });
-      }
-
-      wallet.balanceOwn = balanceOwn;
-      wallet.balance = balanceOwn;
-      wallet.credit = credit;
-      wallet.marginUsed = marginUsed + requiredMargin;
-      wallet.equity = balanceOwn;
-      wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
-      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-      wallet.leverageFactor = leverage;
-      wallet.updatedAt = new Date();
-      await wallet.save();
-
-      user.balance = balanceOwn;
-      user.leverage = leverage;
-      await user.save();
-
-      const position = await Position.create({ user: user._id, symbol, side, qty, entryPrice, currentPrice: entryPrice, marginReserved: requiredMargin, leverage, status: "OPEN", createdAt: new Date(), updatedAt: new Date() });
-
-      const tx = await recordTransaction({ user, type: "trade_open", amount: -Math.abs(requiredMargin), status: "reserved", note: `${side} ${symbol}`, balanceBefore: balanceOwn, balanceAfter: wallet.balanceOwn, meta: { symbol, side, qty, leverage, entryPrice, currentPrice: entryPrice, marginReserved: requiredMargin, notional, sourceSymbol: body.tvSymbol || body.selectedSymbol || body.chartSymbol || null }, source: "api/trade/open" });
-
-      const account = await buildAccountForUser(user);
-      const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
-      emitStateUpdates(user._id, account, [annotatedPosition], tx);
-      return res.status(201).json({ ok: true, msg: "Operación abierta", data: { positionId: position._id, status: "OPEN", symbol: annotatedPosition.symbol, side: annotatedPosition.side, qty: annotatedPosition.qty, entryPrice: annotatedPosition.entryPrice, currentPrice: annotatedPosition.currentPrice, marginReserved: requiredMargin, leverage, account: account.account, wallet: account.wallet, position: annotatedPosition, transaction: tx } });
-    } finally {
-      releaseOpenLock(lockKey);
+    const lockKey = `${user._id}_${symbol}_${side}`;
+    if (activeOrders.has(lockKey)) {
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
+    activeOrders.add(lockKey);
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceOwn = Number(wallet.balanceOwn || 0);
+    const credit = Number(wallet.credit || 0);
+    const marginUsed = Number(wallet.marginUsed || 0);
+    const leverage = Math.max(Number(wallet.leverageFactor || 1), 1);
+
+    const price = resolveOrderPrice(body, symbol);
+    if (!price) {
+      activeOrders.delete(lockKey);
+      return res.status(400).json({ ok: false, error: "price_invalid" });
+    }
+
+    const notional = qty * price;
+    const requiredMargin = notional / leverage;
+
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    if (freeMargin < requiredMargin) {
+      activeOrders.delete(lockKey);
+      return res.status(400).json({ ok: false, error: "insufficient_margin" });
+    }
+
+    // ✅ DESCONTAR SALDO REAL
+    wallet.balanceOwn = balanceOwn - requiredMargin;
+
+    // ✅ AUMENTAR MARGIN USED
+    wallet.marginUsed = marginUsed + requiredMargin;
+
+    // ✅ RECALCULAR
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
+    await wallet.save();
+
+    const position = await Position.create({
+      user: user._id,
+      symbol,
+      side,
+      qty,
+      entryPrice: price,
+      currentPrice: price,
+      marginReserved: requiredMargin,
+      leverage,
+      status: "OPEN",
+    });
+
+    activeOrders.delete(lockKey);
+
+    return res.json({
+      ok: true,
+      msg: "OPENED",
+      position,
+      wallet,
+    });
   } catch (err) {
-    releaseOpenLock(makeOpenLockKey(user._id, symbol, side));
-    console.error("/api/trade/open error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    console.error(err);
+    return res.status(500).json({ ok: false });
   }
 });
 
 app.post("/api/trade/close", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const body = req.body || {};
-    const positionId = body.positionId || body.id || body._id || body.tradeId || null;
-    const symbol = normalizePositionSymbol(body);
-    let position = null;
-    if (positionId) {
-      position = await Position.findOne({ _id: positionId, user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).catch(() => null);
-    }
-    if (!position && symbol) {
-      position = await Position.findOne({ user: user._id, symbol, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => null);
-    }
-    if (!position) return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
-    const currentPrice = Number(resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol) || position.currentPrice || 0) || 0;
-    if (!currentPrice || currentPrice <= 0) return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para cerrar la posición" });
-    const result = await applyCloseToPosition({ user, positionDoc: position, currentPrice, source: "api/trade/close" });
-    return res.json({ ok: true, msg: "Posición cerrada", data: result });
-  } catch (err) {
-    console.error("/api/trade/close error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
-  }
-});
+    if (!user) return res.status(401).json({ ok: false });
 
-app.post("/api/trade/close-all", async (req, res) => {
-  try {
-    const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const body = req.body || {};
-    const openPositions = await Position.find({ user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => []);
-    if (!openPositions.length) return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
-    let totalRealized = 0;
-    const closed = [];
-    for (const pos of openPositions) {
-      const currentPrice = Number(resolveOrderPrice(body, pos.symbol) || getCurrentPriceForSymbol(pos.symbol) || pos.currentPrice || 0) || 0;
-      if (!currentPrice || currentPrice <= 0) continue;
-      const result = await applyCloseToPosition({ user, positionDoc: pos, currentPrice, source: "api/trade/close-all" });
-      totalRealized += Number(result.realizedPnl || 0) || 0;
-      closed.push({ positionId: result.positionId, symbol: result.symbol, realizedPnl: result.realizedPnl, transaction: result.transaction });
+    const { positionId } = req.body;
+
+    const position = await Position.findOne({
+      _id: positionId,
+      user: user._id,
+      status: "OPEN",
+    });
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "not_found" });
     }
-    const account = await buildAccountForUser(user);
-    emitStateUpdates(user._id, account, closed, null);
-    return res.json({ ok: true, msg: "Posiciones cerradas", closed: closed.length, totalRealized, data: { closed, totalRealized, account: account.account, wallet: account.wallet } });
+
+    const price = getCurrentPriceForSymbol(position.symbol);
+
+    const entry = position.entryPrice;
+    const qty = position.qty;
+    const side = position.side === "SELL" ? -1 : 1;
+
+    const pnl = (price - entry) * qty * side;
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceOwn = Number(wallet.balanceOwn || 0);
+    const marginUsed = Number(wallet.marginUsed || 0);
+    const credit = Number(wallet.credit || 0);
+
+    const marginReserved = Number(position.marginReserved || 0);
+
+    // ✅ DEVOLVER MARGEN + PNL
+    wallet.balanceOwn = balanceOwn + marginReserved + pnl;
+
+    // ✅ LIBERAR MARGEN
+    wallet.marginUsed = Math.max(marginUsed - marginReserved, 0);
+
+    // ✅ RECALCULAR
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
+    await wallet.save();
+
+    position.status = "CLOSED";
+    position.closePrice = price;
+    position.realizedPnl = pnl;
+
+    await position.save();
+
+    return res.json({ ok: true, pnl, wallet });
   } catch (err) {
-    console.error("/api/trade/close-all error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    console.error(err);
+    return res.status(500).json({ ok: false });
   }
 });
 
