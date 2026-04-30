@@ -125,8 +125,13 @@ const limiter = rateLimit({
   max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) =>
-    req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+  skip: (req) => {
+    const p = String(req.originalUrl || req.path || "");
+    if (p.includes("/api/trade/open") || p.includes("/api/trade/close") || p.includes("/api/trade/close-all")) {
+      return true;
+    }
+    return req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
+  },
 });
 app.use("/api", limiter);
 
@@ -717,7 +722,7 @@ function applyRealizedPnlToWallet(wallet, realizedPnl = 0, reservedMargin = 0) {
   const pnl = Number(realizedPnl) || 0;
 
   const marginUsedAfter = Math.max(marginUsedBefore - reserved, 0);
-  const balanceAfter = balanceBefore + pnl;
+  const balanceAfter = balanceBefore + reserved + pnl;
 
   wallet.balanceOwn = balanceAfter;
   wallet.balance = balanceAfter;
@@ -1326,18 +1331,18 @@ app.post("/api/trade/open", async (req, res) => {
       });
     }
 
-    wallet.balanceOwn = balanceOwn;
-    wallet.balance = balanceOwn;
+    wallet.balanceOwn = balanceOwn - requiredMargin;
+    wallet.balance = wallet.balanceOwn;
     wallet.credit = credit;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = balanceOwn;
+    wallet.equity = wallet.balanceOwn;
     wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.leverageFactor = leverage;
     wallet.updatedAt = new Date();
     await wallet.save();
 
-    user.balance = balanceOwn;
+    user.balance = wallet.balanceOwn;
     user.leverage = leverage;
     await user.save();
 
@@ -1649,6 +1654,38 @@ app.get("/api/trade/positions", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+/* ======================================================
+   PNL LIVE UPDATER
+   ====================================================== */
+const pnlRefreshMs = Math.max(Number(process.env.PNL_REFRESH_MS) || 3000, 1000);
+let pnlRefreshTimer = null;
+
+async function refreshOpenPnL() {
+  try {
+    const users = await User.find({}).select("_id leverage currency").lean().exec().catch(() => []);
+    for (const u of users || []) {
+      const positions = await loadOpenPositionsForUser(u._id);
+      const wallet = await Wallet.findOne({ user: u._id }).catch(() => null);
+      const account = await buildAccountForUser({
+        _id: u._id,
+        leverage: wallet?.leverageFactor || u.leverage || 100,
+        currency: wallet?.currency || u.currency || "USD",
+        toObject: () => ({ _id: u._id }),
+      });
+      emitStateUpdates(u._id, account, positions, null);
+    }
+  } catch (err) {
+    console.warn("refreshOpenPnL error:", err?.message || err);
+  }
+}
+
+if (!pnlRefreshTimer) {
+  pnlRefreshTimer = setInterval(() => {
+    refreshOpenPnL().catch((err) => console.warn("PnL refresh failed:", err?.message || err));
+  }, pnlRefreshMs);
+  if (typeof pnlRefreshTimer.unref === "function") pnlRefreshTimer.unref();
+}
 
 /* ======================================================
    ROUTES MODULARES
