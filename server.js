@@ -579,63 +579,98 @@ app.post("/api/_send_test_email", async (req, res) => {
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
-app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
+
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
 
 try {
-  if (typeof marketRoutesFactory === "function") app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
-  else app.use("/api/market", marketRoutesFactory);
+  if (typeof marketRoutesFactory === "function") {
+    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
 } catch (e) {
   console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
 }
 
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
+
 app.get("/api/latest", (req, res) => {
-  const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
-  if (symbol) {
-    const price = getCurrentPriceForSymbol(symbol);
-    return res.json({
-      ok: true,
-      symbol,
-      price,
-      last: price,
-      currentPrice: price,
-      close: price,
-      updatedAt: new Date().toISOString(),
-    });
-  }
+  try {
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
 
-  return res.json(buildMarketPayload().latest || {});
+    if (symbol) {
+      const price = getCurrentPriceForSymbol(symbol);
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    return res.json(buildMarketPayload().latest || {});
+  } catch (e) {
+    console.error("/api/latest error:", e);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
 });
+
 app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
-app.get("/api/market/latest", (req, res) => {
-  const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
-  if (symbol) {
-    const price = getCurrentPriceForSymbol(symbol);
-    return res.json({
-      ok: true,
-      symbol,
-      price,
-      last: price,
-      currentPrice: price,
-      close: price,
-      updatedAt: new Date().toISOString(),
-    });
-  }
 
-  return res.json(buildMarketPayload().latest || {});
+app.get("/api/market/latest", (req, res) => {
+  try {
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
+
+    if (symbol) {
+      const price = getCurrentPriceForSymbol(symbol);
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    return res.json(buildMarketPayload().latest || {});
+  } catch (e) {
+    console.error("/api/market/latest error:", e);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
 });
+
 app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+
 app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
     if (prices && Object.keys(prices).length) {
-      return res.json(Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+      return res.json(
+        Object.keys(prices).map((k) => ({
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market: prices[k]?.market || "Unknown",
+        }))
+      );
     }
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
@@ -657,11 +692,17 @@ app.get("/api/account", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
-app.get("/api/me", async (req, res) => res.status(200).json(await (async () => {
-  const user = await getUserDocFromBearer(req);
-  if (!user) return { error: "Unauthorized" };
-  return await buildAccountForUser(user);
-})()));
+
+app.get("/api/me", async (req, res) =>
+  res.status(200).json(
+    await (async () => {
+      const user = await getUserDocFromBearer(req);
+      if (!user) return { error: "Unauthorized" };
+      return await buildAccountForUser(user);
+    })()
+  )
+);
+
 app.get("/api/profile", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
@@ -672,6 +713,7 @@ app.get("/api/profile", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
 
 app.get("/api/transactions", async (req, res) => {
@@ -692,12 +734,27 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
-    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, availableBalance: payload.account.availableBalance, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
+    return res.json({
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      availableBalance: payload.account.availableBalance,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 app.get("/api/billetera", (req, res) => res.redirect(307, "/api/wallet"));
 
 app.get("/api/positions", async (req, res) => {
@@ -711,6 +768,7 @@ app.get("/api/positions", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 app.get("/api/positions/all", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
@@ -734,6 +792,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     const leverage = body.leverage !== undefined ? Number(body.leverage) : null;
     const note = String(body.note || body.description || "Admin deposit").trim();
     const currency = String(body.currency || "USD").trim();
+
     if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
 
@@ -742,27 +801,53 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
+
     if (Number.isFinite(leverage) && leverage > 0) {
       wallet.leverageFactor = leverage;
       user.leverage = leverage;
     }
+
     wallet.equity = wallet.balanceOwn;
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
     wallet.updatedAt = new Date();
     await wallet.save();
+
     user.balance = wallet.balanceOwn;
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
 
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor },
+      source: "api/admin/deposit",
+    });
+
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: {
+        balance: wallet.balanceOwn,
+        leverage: wallet.leverageFactor,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+      },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -775,14 +860,19 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     const userId = body.userId || body.user || body.clientId || null;
     const amount = Number(body.amount ?? body.withdrawAmount ?? 0);
     const note = String(body.note || body.description || "Admin withdrawal").trim();
+
     if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
 
     const user = await User.findById(userId).catch(() => null);
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
+
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+
+    if (balanceBefore < amount) {
+      return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+    }
 
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
@@ -790,13 +880,35 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     wallet.freeMargin = Math.max(wallet.equity - (Number(wallet.marginUsed ?? 0) || 0), 0);
     wallet.updatedAt = new Date();
     await wallet.save();
+
     user.balance = wallet.balanceOwn;
     await user.save();
 
-    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
+
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
+
+    return res.json({
+      ok: true,
+      msg: "Retiro aplicado",
+      data: {
+        balance: wallet.balanceOwn,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+      },
+    });
   } catch (err) {
     console.error("/api/admin/withdraw error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -808,7 +920,11 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
     const userId = req.query.userId || null;
     const limit = Math.min(Number(req.query.limit || 100) || 100, 500);
     const Transaction = mongoose.models.Transaction;
-    const txs = userId ? await loadTransactionsForUser(userId, limit) : Transaction ? await Transaction.find({}).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []) : [];
+    const txs = userId
+      ? await loadTransactionsForUser(userId, limit)
+      : Transaction
+        ? await Transaction.find({}).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => [])
+        : [];
     return res.json({ ok: true, count: txs.length, transactions: txs, data: txs, items: txs });
   } catch (err) {
     console.error("/api/admin/transactions error:", err);
@@ -840,11 +956,15 @@ app.post("/api/trade/open", async (req, res) => {
     const balanceOwn = getEffectiveBalance(user, walletSnapshot);
     const credit = Number(walletSnapshot?.credit ?? user.credit ?? 0) || 0;
     const marginUsed = Number(walletSnapshot?.marginUsed ?? user.marginUsed ?? 0) || 0;
-    const leverage = Math.max(Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+    const leverage = Math.max(
+      Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1,
+      1
+    );
 
-    const entryPrice = type === "limit"
-      ? resolveOrderPrice(body, symbol)
-      : (resolveOrderPrice(body, symbol) || getCurrentPriceForSymbol(symbol));
+    const entryPrice =
+      type === "limit"
+        ? resolveOrderPrice(body, symbol)
+        : (resolveOrderPrice(body, symbol) || getCurrentPriceForSymbol(symbol));
 
     if (!entryPrice || entryPrice <= 0) {
       return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para este símbolo" });
@@ -955,12 +1075,26 @@ app.post("/api/trade/close", async (req, res) => {
 
     let position = null;
     if (positionId) {
-      position = await Position.findOne({ _id: positionId, user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).catch(() => null);
+      position = await Position.findOne({
+        _id: positionId,
+        user: user._id,
+        status: { $in: ["OPEN", "open", "Open"] },
+      }).catch(() => null);
     }
+
     if (!position && symbol) {
-      position = await Position.findOne({ user: user._id, symbol, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => null);
+      position = await Position.findOne({
+        user: user._id,
+        symbol,
+        status: { $in: ["OPEN", "open", "Open"] },
+      })
+        .sort({ createdAt: -1 })
+        .catch(() => null);
     }
-    if (!position) return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
+    }
 
     const currentPrice = Number(resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol) || position.currentPrice || 0) || 0;
     if (!currentPrice || currentPrice <= 0) {
@@ -1007,7 +1141,16 @@ app.post("/api/trade/close", async (req, res) => {
       note: `${side} ${position.symbol}`,
       balanceBefore,
       balanceAfter: wallet.balanceOwn,
-      meta: { positionId: String(position._id), symbol: position.symbol, side, qty, entryPrice, closePrice: currentPrice, marginReleased: reservedMargin, realizedPnl },
+      meta: {
+        positionId: String(position._id),
+        symbol: position.symbol,
+        side,
+        qty,
+        entryPrice,
+        closePrice: currentPrice,
+        marginReleased: reservedMargin,
+        realizedPnl,
+      },
       source: "api/trade/close",
     });
 
@@ -1043,9 +1186,18 @@ app.post("/api/trade/close-all", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
     const body = req.body || {};
-    const openPositions = await Position.find({ user: user._id, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).catch(() => []);
-    if (!openPositions.length) return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
+    const openPositions = await Position.find({
+      user: user._id,
+      status: { $in: ["OPEN", "open", "Open"] },
+    })
+      .sort({ createdAt: -1 })
+      .catch(() => []);
+
+    if (!openPositions.length) {
+      return res.json({ ok: true, msg: "No hay posiciones abiertas", closed: 0, totalRealized: 0 });
+    }
 
     let totalRealized = 0;
     const closed = [];
@@ -1053,6 +1205,7 @@ app.post("/api/trade/close-all", async (req, res) => {
     for (const pos of openPositions) {
       const currentPrice = Number(resolveOrderPrice(body, pos.symbol) || getCurrentPriceForSymbol(pos.symbol) || pos.currentPrice || 0) || 0;
       if (!currentPrice || currentPrice <= 0) continue;
+
       const entryPrice = Number(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) || 0;
       const qty = Number(pos.qty ?? pos.quantity ?? pos.amount ?? 0) || 0;
       const side = normalizeSide(pos.side || pos.direction);
@@ -1062,6 +1215,7 @@ app.post("/api/trade/close-all", async (req, res) => {
       const wallet = await getWalletDocForUser(user._id);
       const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
       const reservedMargin = Number(pos.marginReserved ?? 0) || 0;
+
       wallet.marginUsed = Math.max((Number(wallet.marginUsed ?? 0) || 0) - reservedMargin, 0);
       wallet.balanceOwn = balanceBefore + realizedPnl;
       wallet.balance = wallet.balanceOwn;
@@ -1083,7 +1237,27 @@ app.post("/api/trade/close-all", async (req, res) => {
       pos.updatedAt = new Date();
       await pos.save();
 
-      const tx = await recordTransaction({ user, type: "trade_close", amount: realizedPnl, status: "completed", note: `${side} ${pos.symbol}`, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { positionId: String(pos._id), symbol: pos.symbol, side, qty, entryPrice, closePrice: currentPrice, marginReleased: reservedMargin, realizedPnl }, source: "api/trade/close-all" });
+      const tx = await recordTransaction({
+        user,
+        type: "trade_close",
+        amount: realizedPnl,
+        status: "completed",
+        note: `${side} ${pos.symbol}`,
+        balanceBefore,
+        balanceAfter: wallet.balanceOwn,
+        meta: {
+          positionId: String(pos._id),
+          symbol: pos.symbol,
+          side,
+          qty,
+          entryPrice,
+          closePrice: currentPrice,
+          marginReleased: reservedMargin,
+          realizedPnl,
+        },
+        source: "api/trade/close-all",
+      });
+
       totalRealized += realizedPnl;
       closed.push({ positionId: pos._id, symbol: pos.symbol, realizedPnl, transaction: tx });
     }
@@ -1091,7 +1265,13 @@ app.post("/api/trade/close-all", async (req, res) => {
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, closed, null);
 
-    return res.json({ ok: true, msg: "Posiciones cerradas", closed: closed.length, totalRealized, data: { closed, totalRealized, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Posiciones cerradas",
+      closed: closed.length,
+      totalRealized,
+      data: { closed, totalRealized, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/trade/close-all error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1108,266 +1288,6 @@ app.get("/api/trade/positions", async (req, res) => {
     console.error("/api/trade/positions error", e);
     return res.status(500).json({ error: "Server error" });
   }
-});
-
-/* ======================================================
-   ROUTES MODULARES
-   ====================================================== */
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes);
-app.use("/api/positions", positionsRoutes);
-app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes);
-
-app.use("/api/api", (req, res) => {
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
-
-/* ======================================================
-   SOCKET.IO
-   ====================================================== */
-let polygonSocket = null;
-
-io.on("connection", (socket) => {
-  console.log("📡 Cliente conectado:", socket.id);
-  try {
-    socket.emit("prices_snapshot", getPriceStore() || {});
-  } catch {
-    socket.emit("prices_snapshot", {});
-  }
-
-  socket.on("request_prices_snapshot", () => {
-    try {
-      socket.emit("prices_snapshot", getPriceStore() || {});
-    } catch {
-      socket.emit("prices_snapshot", {});
-    }
-  });
-
-  socket.on("request_symbols", () => {
-    try {
-      const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") {
-        socket.emit("symbols_update", priceHandler.getSymbols() || []);
-      } else if (prices && Object.keys(prices).length) {
-        socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_") , market: prices[k]?.market || "Unknown" })));
-      } else {
-        socket.emit("symbols_update", SAMPLE_SYMBOLS);
-      }
-    } catch {
-      socket.emit("symbols_update", SAMPLE_SYMBOLS);
-    }
-  });
-
-  socket.on("subscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
-    try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
-      socket.join(symbol);
-      console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("subscribe error:", e);
-    }
-  });
-
-  socket.on("unsubscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
-    try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
-      socket.leave(symbol);
-      console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("unsubscribe error:", e);
-    }
-  });
-
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
-});
-
-try {
-  if (!process.env.POLYGON_API_KEY) {
-    console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado limitado");
-  } else {
-    polygonSocket = new PolygonSocket({
-      apiKey: process.env.POLYGON_API_KEY,
-      onPrice: (data) => priceHandler.handle(data),
-      onOpen: () => console.log("PolygonSocket abierto"),
-      onClose: () => console.log("PolygonSocket cerrado"),
-      onError: (err) => console.error("PolygonSocket error:", err),
-    });
-
-    const maybe = polygonSocket.connect();
-    if (maybe && typeof maybe.then === "function") {
-      maybe.catch((err) => {
-        console.warn("PolygonSocket.connect() rejected:", err);
-        polygonSocket = null;
-      });
-    }
-    console.log("🔌 Intentando conectar PolygonSocket...");
-  }
-} catch (err) {
-  console.error("Error inicializando PolygonSocket:", err);
-  polygonSocket = null;
-}
-
-/* ======================================================
-   STATIC
-   ====================================================== */
-const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
-let staticDirName = null;
-for (const cand of staticCandidates) {
-  const p = path.join(__dirname, cand);
-  try {
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
-      staticDirName = cand;
-      break;
-    }
-  } catch {}
-}
-if (!staticDirName) {
-  staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
-} else {
-  console.log(`Static folder detected: '${staticDirName}'`);
-}
-const staticPath = path.join(__dirname, staticDirName);
-const jsDirPath = path.join(staticPath, "js");
-
-function stripScriptWrappers(source) {
-  let text = String(source ?? "");
-  text = text.replace(/^\uFEFF/, "");
-  const trimmed = text.trim();
-  const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
-  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
-  if (startsWithScript && endsWithScript) text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/i, "");
-  return text;
-}
-
-function resolveJsCandidate(requestPath) {
-  const clean = String(requestPath || "").split("?")[0];
-  const normalized = clean.replace(/\\/g, "/");
-  const base = path.basename(normalized);
-  const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
-  if (normalized.startsWith("/js/")) {
-    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
-    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
-  }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
-  if (base) {
-    candidates.push(path.join(staticPath, base));
-    candidates.push(path.join(jsDirPath, base));
-  }
-  const uniqueCandidates = [...new Set(candidates)];
-  return uniqueCandidates.find((p) => {
-    try {
-      return fs.existsSync(p) && fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
-}
-
-app.use(async (req, res, next) => {
-  const pathname = req.path || "";
-  if (!pathname.endsWith(".js")) return next();
-  try {
-    const candidate = resolveJsCandidate(pathname);
-    if (candidate) {
-      const raw = await fs.promises.readFile(candidate, "utf8");
-      const cleaned = stripScriptWrappers(raw);
-      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
-      return;
-    }
-
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
-  } catch (err) {
-    console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
-  }
-});
-
-app.use("/public", express.static(staticPath));
-app.use("/js", express.static(jsDirPath));
-app.use(express.static(staticPath));
-
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") return res.status(404).json({ error: "API endpoint not found" });
-  const indexPath = path.join(staticPath, "index.html");
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
-    }
-  });
-});
-
-app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
-
-/* ======================================================
-   START / SHUTDOWN
-   ====================================================== */
-const PORT = process.env.PORT || 3000;
-const server = httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on ${PORT}`);
-  console.log("ENV STATUS:");
-  console.log("RESEND:", !!process.env.RESEND_API_KEY);
-  console.log("SENDER:", !!process.env.SENDER_EMAIL);
-  console.log("MONGO:", !!process.env.MONGO_URI);
-  console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
-  console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-});
-
-let shuttingDown = false;
-const safeClosePolygonSocket = async () => {
-  if (!polygonSocket) return;
-  try {
-    const maybe = polygonSocket.close();
-    if (maybe && typeof maybe.then === "function") await maybe.catch((err) => console.warn("polygonSocket.close() rejected:", err));
-  } catch (e) {
-    console.warn("polygonSocket.close() threw:", e);
-  }
-};
-
-const gracefulShutdown = async (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`📴 ${signal} recibido. Cerrando...`);
-  const timeout = setTimeout(() => {
-    console.warn("Forzando cierre...");
-    process.exit(1);
-  }, 30000);
-  timeout.unref();
-  try {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    });
-    await safeClosePolygonSocket();
-    if (typeof global?.stopRiskWatcher === "function") {
-      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
-    }
-    await mongoose.disconnect();
-    clearTimeout(timeout);
-    process.exit(0);
-  } catch (err) {
-    console.error("Shutdown error:", err);
-    clearTimeout(timeout);
-    process.exit(1);
-  }
-};
-
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("unhandledRejection", (r) => {
-  console.error("UnhandledRejection:", r);
-  gracefulShutdown("unhandledRejection").catch(() => {});
-});
-process.on("uncaughtException", (e) => {
-  console.error("UncaughtException:", e);
-  gracefulShutdown("uncaughtException").catch(() => {});
 });
 
 export default app;
