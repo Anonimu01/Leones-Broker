@@ -4908,9 +4908,11 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
-   FLAGS
+   FLAGS (ANTI-SPAM REAL)
 ========================= */
 let sendingOrder = false;
+let lastOrderTime = 0;
+const ORDER_COOLDOWN = 1200; // 🔥 evita 429
 
 /* =========================
    GET ACTIVE SYMBOL
@@ -4929,11 +4931,10 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (FIXED)
+   🔥 LIVE PRICE SYNC (MEJORADO)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    // 🔥 PRIMERO intenta endpoint correcto
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
@@ -4942,22 +4943,9 @@ async function syncLivePrice(symbol) {
       return Number(data.price);
     }
 
-    // 🔥 FALLBACK quotes
-    const res2 = await fetch("/api/quotes");
-    const quotes = await res2.json();
-
-    const normalized = normalizeSymbol(symbol);
-
-    const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === normalized
-    );
-
-    if (match?.price && Number(match.price) > 0) {
-      window.tvPrice = Number(match.price);
-      return Number(match.price);
-    }
-
+    // fallback más liviano
     return null;
+
   } catch (err) {
     console.warn("Precio sync error:", err);
     return null;
@@ -4965,14 +4953,13 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   🔥 GET LIVE PRICE SAFE (MEJORADO)
+   🔥 GET LIVE PRICE SAFE
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
     window.tvPrice,
     window.lastPrice,
     window.currentPrice,
-    window.entryPrice,
     window.marketPrice,
   ];
 
@@ -4985,13 +4972,37 @@ function getLivePriceFallback() {
 }
 
 /* =========================
+   CLEAR INPUTS (🔥 FIX CLAVE)
+========================= */
+function clearOrderInputs() {
+  const ids = [
+    "brokerOrderSize",
+    "brokerOrderSizeBottom",
+    "order-price",
+    "order-price-bottom"
+  ];
+
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+}
+
+/* =========================
    PLACE ORDER CONTROLLER
 ========================= */
 async function placeOrder(input) {
-  if (sendingOrder) return;
+
+  // 🔥 ANTI SPAM + RATE LIMIT FIX
+  const now = Date.now();
+  if (sendingOrder || (now - lastOrderTime < ORDER_COOLDOWN)) {
+    console.warn("⛔ Orden bloqueada (cooldown)");
+    return;
+  }
 
   try {
     sendingOrder = true;
+    lastOrderTime = now;
 
     const api = window.__LEONES_BROKER_EXT2 || {};
     let side, symbol, amount, type, price;
@@ -5046,16 +5057,25 @@ async function placeOrder(input) {
 
     console.log("🚀 ORDER INIT:", payload);
 
+    let result;
+
     if (typeof api.placeBrokerOrder === "function") {
-      return await api.placeBrokerOrder(payload);
+      result = await api.placeBrokerOrder(payload);
+    } else {
+      result = await placeBrokerOrder(payload);
     }
 
-    return await placeBrokerOrder(payload);
+    // 🔥 LIMPIAR INPUTS DESPUÉS DE OPERAR
+    clearOrderInputs();
+
+    return result;
 
   } catch (err) {
     console.error("❌ ORDER ERROR:", err);
   } finally {
-    setTimeout(() => (sendingOrder = false), 800);
+    setTimeout(() => {
+      sendingOrder = false;
+    }, 800);
   }
 }
 
@@ -5072,13 +5092,11 @@ document.addEventListener("click", async (e) => {
   e.preventDefault();
   e.stopPropagation();
 
-  if (sendingOrder) return;
-
   await placeOrder(action);
 });
 
 /* =========================
-   🔥 FINAL BACKEND ORDER (FIXED)
+   🔥 FINAL BACKEND ORDER (OPTIMIZADO)
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
@@ -5100,7 +5118,7 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO GARANTIZADO
+    // 🔥 PRECIO MÁS ESTABLE (SIN PARPADEO)
     let price = getLivePriceFallback();
 
     if (!price) {
@@ -5108,7 +5126,6 @@ async function placeBrokerOrder(payload = {}) {
     }
 
     if (!price || price <= 0) {
-      console.error("❌ Precio final inválido:", price);
       alert("No hay precio disponible del mercado");
       return;
     }
@@ -5137,13 +5154,15 @@ async function placeBrokerOrder(payload = {}) {
     console.log("📩 BACKEND RESPONSE:", data);
 
     if (!res.ok) {
-      console.error("❌ BACKEND ERROR:", data);
       alert(data?.message || "Error al abrir operación");
       return;
     }
 
-    await loadPositions?.();
-    await loadAccount?.();
+    // 🔥 EVITA PARPADEO (delay controlado)
+    setTimeout(() => {
+      loadPositions?.();
+      loadAccount?.();
+    }, 300);
 
     console.log("✅ ORDER OK");
     return data;
