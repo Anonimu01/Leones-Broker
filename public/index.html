@@ -4929,26 +4929,35 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   LIVE PRICE SYNC
+   LIVE PRICE SYNC (FIXED)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const res = await fetch("/api/latest");
+    if (!symbol) return null;
+
+    // 🔥 INTENTO 1: endpoint directo por símbolo
+    const res = await fetch(`/api/latest?symbol=${symbol}`);
     const data = await res.json();
 
-    if (data?.price) {
-      window.tvPrice = data.price;
-      return data.price;
+    if (data?.price && Number(data.price) > 0) {
+      window.tvPrice = Number(data.price);
+      return window.tvPrice;
     }
 
+    // 🔥 INTENTO 2: buscar en quotes
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json();
 
-    const match = quotes.find(q => q.symbol === symbol);
+    const normalized = normalizeSymbol(symbol);
 
-    if (match?.price) {
-      window.tvPrice = match.price;
-      return match.price;
+    const match = quotes.find(q =>
+      normalizeSymbol(q.symbol) === normalized ||
+      normalizeSymbol(q.label) === normalized
+    );
+
+    if (match?.price && Number(match.price) > 0) {
+      window.tvPrice = Number(match.price);
+      return window.tvPrice;
     }
 
     return null;
@@ -5082,7 +5091,7 @@ document.addEventListener("click", async (e) => {
 });
 
 /* =========================
-   🔥 FINAL BACKEND ORDER
+   🔥 FINAL BACKEND ORDER (FIXED)
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
@@ -5104,14 +5113,22 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO FINAL GARANTIZADO
+    // 🔥 PRECIO GARANTIZADO
     let price = getLivePriceFallback();
 
     if (!price) {
       price = await syncLivePrice(symbol);
     }
 
+    if (!price) {
+      // 🔥 ÚLTIMO INTENTO HARD
+      const res = await fetch(`/api/latest?symbol=${symbol}`);
+      const data = await res.json();
+      price = Number(data?.price);
+    }
+
     if (!price || price <= 0) {
+      console.error("❌ Precio final inválido:", price);
       alert("No hay precio disponible del mercado");
       return;
     }
