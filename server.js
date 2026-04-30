@@ -164,10 +164,44 @@ function normalizeQty(body = {}) {
 }
 
 function normalizePrice(body = {}) {
-  const raw = body.price ?? body.entryPrice ?? body.currentPrice ?? body.limitPrice ?? body.stopPrice ?? body.openPrice ?? null;
+  const raw =
+    body.price ??
+    body.entryPrice ??
+    body.currentPrice ??
+    body.limitPrice ??
+    body.stopPrice ??
+    body.openPrice ??
+    body.tvPrice ??
+    body.lastPrice ??
+    null;
   if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function normalizePositionSymbol(body = {}) {
+  return String(
+    body.symbol ||
+    body.tvSymbol ||
+    body.selectedSymbol ||
+    body.chartSymbol ||
+    body.instrument ||
+    body.marketSymbol ||
+    ""
+  ).trim().toUpperCase();
+}
+
+function resolveOrderPrice(body = {}, symbol = "") {
+  const direct = normalizePrice(body);
+  if (direct) return direct;
+
+  const tvLike = Number(body.tvPrice ?? body.lastPrice ?? body.currentPrice ?? body.entryPrice);
+  if (Number.isFinite(tvLike) && tvLike > 0) return tvLike;
+
+  const market = getCurrentPriceForSymbol(symbol);
+  if (market) return market;
+
+  return null;
 }
 
 function toNumber(value) {
@@ -560,9 +594,41 @@ try {
 }
 
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
-app.get("/api/latest", (req, res) => res.json(buildMarketPayload().latest || {}));
+app.get("/api/latest", (req, res) => {
+  const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+  if (symbol) {
+    const price = getCurrentPriceForSymbol(symbol);
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      last: price,
+      currentPrice: price,
+      close: price,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return res.json(buildMarketPayload().latest || {});
+});
 app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
-app.get("/api/market/latest", (req, res) => res.json(buildMarketPayload().latest || {}));
+app.get("/api/market/latest", (req, res) => {
+  const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+  if (symbol) {
+    const price = getCurrentPriceForSymbol(symbol);
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      last: price,
+      currentPrice: price,
+      close: price,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return res.json(buildMarketPayload().latest || {});
+});
 app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/symbols", (req, res) => {
@@ -759,14 +825,14 @@ app.post("/api/trade/open", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-    const symbol = String(body.symbol || body.tvSymbol || "").trim().toUpperCase();
+    const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
     const type = String(body.type ?? body.orderType ?? "market").trim().toLowerCase();
 
-    if (!symbol) return res.status(400).json({ ok: false, error: "symbol_required" });
-    if (!side) return res.status(400).json({ ok: false, error: "side_required" });
-    if (!qty) return res.status(400).json({ ok: false, error: "quantity_required" });
+    if (!symbol) return res.status(400).json({ ok: false, error: "symbol_required", message: "Símbolo requerido" });
+    if (!side) return res.status(400).json({ ok: false, error: "side_required", message: "Dirección requerida" });
+    if (!qty) return res.status(400).json({ ok: false, error: "quantity_required", message: "Cantidad requerida" });
 
     const wallet = await getWalletDocForUser(user._id);
     const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
@@ -776,9 +842,9 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(walletSnapshot?.marginUsed ?? user.marginUsed ?? 0) || 0;
     const leverage = Math.max(Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
-    const marketPrice = getCurrentPriceForSymbol(symbol);
-    const requestedPrice = normalizePrice(body);
-    const entryPrice = type === "limit" && requestedPrice ? requestedPrice : (marketPrice || requestedPrice || null);
+    const entryPrice = type === "limit"
+      ? resolveOrderPrice(body, symbol)
+      : (resolveOrderPrice(body, symbol) || getCurrentPriceForSymbol(symbol));
 
     if (!entryPrice || entryPrice <= 0) {
       return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para este símbolo" });
@@ -789,7 +855,14 @@ app.post("/api/trade/open", async (req, res) => {
     const freeMargin = balanceOwn + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
-      return res.status(400).json({ ok: false, error: "insufficient_funds", message: "Fondos insuficientes para abrir la operación", balance: balanceOwn, freeMargin, requiredMargin });
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds",
+        message: "Fondos insuficientes para abrir la operación",
+        balance: balanceOwn,
+        freeMargin,
+        requiredMargin,
+      });
     }
 
     wallet.balanceOwn = balanceOwn;
@@ -829,7 +902,16 @@ app.post("/api/trade/open", async (req, res) => {
       note: `${side} ${symbol}`,
       balanceBefore: balanceOwn,
       balanceAfter: balanceOwn,
-      meta: { symbol, side, qty, leverage, entryPrice, currentPrice: entryPrice, marginReserved: requiredMargin },
+      meta: {
+        symbol,
+        side,
+        qty,
+        leverage,
+        entryPrice,
+        currentPrice: entryPrice,
+        marginReserved: requiredMargin,
+        sourceSymbol: body.tvSymbol || body.selectedSymbol || body.chartSymbol || null,
+      },
       source: "api/trade/open",
     });
 
@@ -869,7 +951,7 @@ app.post("/api/trade/close", async (req, res) => {
 
     const body = req.body || {};
     const positionId = body.positionId || body.id || body._id || body.tradeId || null;
-    const symbol = String(body.symbol || "").trim().toUpperCase();
+    const symbol = normalizePositionSymbol(body);
 
     let position = null;
     if (positionId) {
@@ -880,7 +962,7 @@ app.post("/api/trade/close", async (req, res) => {
     }
     if (!position) return res.status(404).json({ ok: false, error: "position_not_found", message: "Posición no encontrada" });
 
-    const currentPrice = Number(body.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? 0) || 0;
+    const currentPrice = Number(resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol) || position.currentPrice || 0) || 0;
     if (!currentPrice || currentPrice <= 0) {
       return res.status(400).json({ ok: false, error: "price_unavailable", message: "No hay precio disponible para cerrar la posición" });
     }
@@ -969,7 +1051,7 @@ app.post("/api/trade/close-all", async (req, res) => {
     const closed = [];
 
     for (const pos of openPositions) {
-      const currentPrice = Number(body.currentPrice ?? getCurrentPriceForSymbol(pos.symbol) ?? 0) || 0;
+      const currentPrice = Number(resolveOrderPrice(body, pos.symbol) || getCurrentPriceForSymbol(pos.symbol) || pos.currentPrice || 0) || 0;
       if (!currentPrice || currentPrice <= 0) continue;
       const entryPrice = Number(pos.entryPrice ?? pos.price ?? pos.openPrice ?? 0) || 0;
       const qty = Number(pos.qty ?? pos.quantity ?? pos.amount ?? 0) || 0;
