@@ -162,12 +162,9 @@ function symbolVariants(value) {
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
   return [
     ...new Set(
-      [
-        compactSymbol(raw),
-        compactSymbol(afterColon),
-        compactSymbol(afterSlash),
-        compactSymbol(afterDash),
-      ].filter(Boolean)
+      [compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(
+        Boolean
+      )
     ),
   ];
 }
@@ -347,7 +344,6 @@ function getCurrentPriceForSymbol(symbol) {
 
   const store = getPriceStore();
 
-  // 🔥 1. BUSCAR EN PRICE STORE
   for (const [key, item] of Object.entries(store)) {
     const keyVariants = symbolVariants(key);
     const itemVariants = symbolVariants(item?.symbol || "");
@@ -363,12 +359,10 @@ function getCurrentPriceForSymbol(symbol) {
     if (Number.isFinite(px) && px > 0) return px;
   }
 
-  // 🔥 2. FALLBACK MANUAL (CRÍTICO)
   console.warn("⚠️ Precio no encontrado en store para:", symbol);
-
-  // evita que devuelva null → rompe todo
-  return 1; // 👈 TEMPORAL SAFE PRICE (puedes cambiarlo luego)
+  return 1;
 }
+
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
@@ -478,8 +472,8 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
   const credit = Number(wallet?.credit ?? 0) || 0;
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const equity = balanceOwn + openPnl;
-  const availableBalance = Math.max(balanceOwn + credit - marginUsed, 0);
+  const equity = balanceOwn + Number(openPnl || 0);
+  const availableBalance = Math.max(equity + credit - marginUsed, 0);
   const freeMargin = availableBalance;
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
@@ -494,7 +488,7 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     marginLevel,
     leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
     currency: wallet?.currency || "USD",
-    openPnl,
+    openPnl: Number(openPnl || 0) || 0,
   };
 }
 
@@ -523,8 +517,7 @@ const transactionSchema = new mongoose.Schema(
   { minimize: false }
 );
 
-const Transaction =
-  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 async function recordTransaction({
   user,
@@ -654,6 +647,97 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
   }
 }
 
+/* ======================================================
+   DUPLICATE ORDER GUARDS + SETTLEMENT
+   ====================================================== */
+const openOrderGuards = new Map();
+
+function buildTradeSignature(body = {}, symbol = "", side = "", qty = 0, type = "") {
+  const price = normalizePrice(body) || resolveOrderPrice(body, symbol) || "";
+  return [
+    compactSymbol(symbol),
+    String(side || "").toUpperCase(),
+    String(qty || ""),
+    String(type || "").toLowerCase(),
+    String(price || ""),
+  ].join("|");
+}
+
+function canOpenTrade(userId, signature, cooldownMs = 1500) {
+  const key = String(userId || "");
+  if (!key || !signature) return { ok: false, reason: "invalid_guard" };
+
+  const now = Date.now();
+  const state = openOrderGuards.get(key);
+
+  if (state?.inFlight) {
+    return { ok: false, reason: "in_flight" };
+  }
+
+  if (state?.signature === signature && now - state.ts < cooldownMs) {
+    return { ok: false, reason: "duplicate" };
+  }
+
+  openOrderGuards.set(key, {
+    inFlight: true,
+    signature,
+    ts: now,
+  });
+
+  return { ok: true };
+}
+
+function releaseOpenTrade(userId, signature) {
+  const key = String(userId || "");
+  if (!key) return;
+
+  const state = openOrderGuards.get(key);
+  if (!state) return;
+
+  state.inFlight = false;
+  state.signature = signature || state.signature;
+  state.ts = Date.now();
+  openOrderGuards.set(key, state);
+
+  const timer = setTimeout(() => {
+    const current = openOrderGuards.get(key);
+    if (current && !current.inFlight && Date.now() - current.ts > 3000) {
+      openOrderGuards.delete(key);
+    }
+  }, 4000);
+
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+function applyRealizedPnlToWallet(wallet, realizedPnl = 0, reservedMargin = 0) {
+  const balanceBefore = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
+  const credit = Number(wallet?.credit ?? 0) || 0;
+  const marginUsedBefore = Number(wallet?.marginUsed ?? 0) || 0;
+  const reserved = Math.max(Number(reservedMargin) || 0, 0);
+  const pnl = Number(realizedPnl) || 0;
+
+  const marginUsedAfter = Math.max(marginUsedBefore - reserved, 0);
+  const balanceAfter = balanceBefore + pnl;
+
+  wallet.balanceOwn = balanceAfter;
+  wallet.balance = balanceAfter;
+  wallet.marginUsed = marginUsedAfter;
+  wallet.equity = balanceAfter;
+  wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
+  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+  wallet.updatedAt = new Date();
+
+  return {
+    balanceBefore,
+    balanceAfter,
+    marginUsedBefore,
+    marginUsedAfter,
+    credit,
+    realizedPnl: pnl,
+    reservedMargin: reserved,
+  };
+}
+
 async function requireAdmin(req, res, next) {
   try {
     const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
@@ -721,12 +805,10 @@ app.post("/api/_send_test_email", async (req, res) => {
       ok: false,
       message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
     });
-
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
   const html =
     req.body.html ||
     `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
-
   try {
     const r = await sendEmail({ to, subject, html });
     if (r.ok)
@@ -736,7 +818,6 @@ app.post("/api/_send_test_email", async (req, res) => {
         provider: r.provider,
         result: r.result || r.info || r.resp,
       });
-
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
@@ -1139,6 +1220,9 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
    TRADING CORE
    ====================================================== */
 app.post("/api/trade/open", async (req, res) => {
+  let lockUserId = null;
+  let lockSignature = null;
+
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
@@ -1210,11 +1294,26 @@ app.post("/api/trade/open", async (req, res) => {
       });
     }
 
+    lockUserId = String(user._id);
+    lockSignature = buildTradeSignature(body, symbol, side, qty, type);
+    const lock = canOpenTrade(lockUserId, lockSignature);
+    if (!lock.ok) {
+      return res.status(429).json({
+        ok: false,
+        error: "duplicate_order",
+        message: "Orden duplicada o envío repetido detectado",
+      });
+    }
+
     const notional = Math.abs(qty * entryPrice);
     const requiredMargin = notional / leverage;
     const freeMargin = balanceOwn + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
+      releaseOpenTrade(lockUserId, lockSignature);
+      lockUserId = null;
+      lockSignature = null;
+
       return res.status(400).json({
         ok: false,
         error: "insufficient_funds",
@@ -1279,6 +1378,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const account = await buildAccountForUser(user);
     const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
     return res.status(201).json({
@@ -1292,17 +1392,23 @@ app.post("/api/trade/open", async (req, res) => {
         qty: annotatedPosition.qty,
         entryPrice: annotatedPosition.entryPrice,
         currentPrice: annotatedPosition.currentPrice,
+        pnl: annotatedPosition.pnl,
+        unrealizedPnl: annotatedPosition.unrealizedPnl,
         marginReserved: requiredMargin,
         leverage,
         account: account.account,
         wallet: account.wallet,
         position: annotatedPosition,
         transaction: tx,
+        availableBalance: account.account.availableBalance,
+        freeMargin: account.account.freeMargin,
       },
     });
   } catch (err) {
     console.error("/api/trade/open error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  } finally {
+    if (lockUserId) releaseOpenTrade(lockUserId, lockSignature);
   }
 });
 
@@ -1363,15 +1469,7 @@ app.post("/api/trade/close", async (req, res) => {
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const reservedMargin = Number(position.marginReserved ?? 0) || 0;
-    const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
-
-    wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-    wallet.balanceOwn = balanceBefore + realizedPnl;
-    wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn;
-    wallet.freeMargin = Math.max(wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-    wallet.updatedAt = new Date();
+    const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
     await wallet.save();
 
     user.balance = wallet.balanceOwn;
@@ -1392,8 +1490,8 @@ app.post("/api/trade/close", async (req, res) => {
       amount: realizedPnl,
       status: "completed",
       note: `${side} ${position.symbol}`,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
+      balanceBefore: settlement.balanceBefore,
+      balanceAfter: settlement.balanceAfter,
       meta: {
         positionId: String(position._id),
         symbol: position.symbol,
@@ -1401,7 +1499,7 @@ app.post("/api/trade/close", async (req, res) => {
         qty,
         entryPrice,
         closePrice: currentPrice,
-        marginReleased: reservedMargin,
+        marginReleased: settlement.reservedMargin,
         realizedPnl,
       },
       source: "api/trade/close",
@@ -1409,6 +1507,7 @@ app.post("/api/trade/close", async (req, res) => {
 
     const account = await buildAccountForUser(user);
     const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
+
     emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
     return res.json({
@@ -1427,6 +1526,8 @@ app.post("/api/trade/close", async (req, res) => {
         wallet: account.wallet,
         position: annotatedPosition,
         transaction: tx,
+        availableBalance: account.account.availableBalance,
+        freeMargin: account.account.freeMargin,
       },
     });
   } catch (err) {
@@ -1475,14 +1576,7 @@ app.post("/api/trade/close-all", async (req, res) => {
       const wallet = await getWalletDocForUser(user._id);
       const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
       const reservedMargin = Number(pos.marginReserved ?? 0) || 0;
-
-      wallet.marginUsed = Math.max((Number(wallet.marginUsed ?? 0) || 0) - reservedMargin, 0);
-      wallet.balanceOwn = balanceBefore + realizedPnl;
-      wallet.balance = wallet.balanceOwn;
-      wallet.equity = wallet.balanceOwn;
-      wallet.freeMargin = Math.max(wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
-      wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-      wallet.updatedAt = new Date();
+      const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
       await wallet.save();
 
       user.balance = wallet.balanceOwn;
@@ -1503,8 +1597,8 @@ app.post("/api/trade/close-all", async (req, res) => {
         amount: realizedPnl,
         status: "completed",
         note: `${side} ${pos.symbol}`,
-        balanceBefore,
-        balanceAfter: wallet.balanceOwn,
+        balanceBefore: settlement.balanceBefore,
+        balanceAfter: settlement.balanceAfter,
         meta: {
           positionId: String(pos._id),
           symbol: pos.symbol,
@@ -1512,7 +1606,7 @@ app.post("/api/trade/close-all", async (req, res) => {
           qty,
           entryPrice,
           closePrice: currentPrice,
-          marginReleased: reservedMargin,
+          marginReleased: settlement.reservedMargin,
           realizedPnl,
         },
         source: "api/trade/close-all",
@@ -1684,7 +1778,6 @@ for (const cand of staticCandidates) {
     }
   } catch {}
 }
-
 if (!staticDirName) {
   staticDirName = "public";
   console.warn(
@@ -1695,7 +1788,6 @@ if (!staticDirName) {
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
-
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
@@ -1718,7 +1810,6 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-
   if (normalized.startsWith("/public/js/"))
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
@@ -1731,7 +1822,6 @@ function resolveJsCandidate(requestPath) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
-
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
     try {
