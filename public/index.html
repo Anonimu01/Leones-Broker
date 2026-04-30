@@ -3229,6 +3229,41 @@ if (window.__LEONES_BOOTED__) {
   }
 
 
+  async function connectTradingView(symbol) {
+  try {
+    if (!window.TradingView) {
+      console.error("TradingView no está cargado");
+      return;
+    }
+
+    const container = document.getElementById("tradingview_container");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const widget = new TradingView.widget({
+      container_id: "tradingview_container",
+      symbol: symbol || "BINANCE:BTCUSDT",
+      interval: "1",
+      theme: "dark",
+      style: "1",
+      locale: "es",
+      enable_publishing: false,
+      allow_symbol_change: true,
+      autosize: true,
+    });
+
+    widget.onChartReady(() => {
+      console.log("📊 TradingView listo");
+    });
+
+  } catch (err) {
+    console.error("Error TradingView:", err);
+  }
+}
+
+
+  
  function connectTradingView(widget) {
   try {
     widget.onChartReady(() => {
@@ -4926,6 +4961,30 @@ function getActiveSymbol() {
   );
 }
 
+  async function syncLivePrice(symbol) {
+  try {
+    const res = await fetch("/api/latest");
+    const data = await res.json();
+
+    if (data && data.price) {
+      livePrice = data.price;
+      return;
+    }
+
+    // fallback desde quotes
+    const res2 = await fetch("/api/quotes");
+    const quotes = await res2.json();
+
+    const match = quotes.find(q => q.symbol === symbol);
+    if (match && match.price) {
+      livePrice = match.price;
+    }
+
+  } catch (err) {
+    console.warn("Precio live error:", err);
+  }
+}
+
 /* =========================
    🔥 PRECIO REAL (MEJORADO)
 ========================= */
@@ -5082,34 +5141,38 @@ async function placeBrokerOrder(payload = {}) {
       return;
     }
 
-    // 🔥 VALIDACIONES
+    // 🔥 VALIDACIONES BÁSICAS
     if (!symbol) return alert("Símbolo inválido");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO REAL GARANTIZADO
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      price = getLivePriceFallback();
-      console.warn("⚠️ Precio fallback usado:", price);
-    }
+    // 🔥 OBTENER PRECIO REAL DE FORMA ROBUSTA
+    const livePrice =
+      window.tvPrice ||
+      window.lastPrice ||
+      window.currentPrice ||
+      getLivePriceFallback?.() ||
+      null;
 
-    if (!livePrice) {
-  console.error("❌ NO HAY PRECIO:", {
-    tvPrice: window.tvPrice,
-    lastPrice: window.lastPrice,
-    currentPrice: window.currentPrice
-  });
+    // 🔴 SI NO HAY PRECIO REAL, BLOQUEAR
+    if (!livePrice || !Number.isFinite(Number(livePrice)) || Number(livePrice) <= 0) {
+      console.error("❌ NO HAY PRECIO DISPONIBLE:", {
+        tvPrice: window.tvPrice,
+        lastPrice: window.lastPrice,
+        currentPrice: window.currentPrice
+      });
 
-  alert("No hay precio disponible (TradingView no está dando datos)");
-  return;
-}
-
-    // 🔴 BLOQUEO SI NO HAY PRECIO
-    if (!price || price <= 0) {
-      alert("Esperando precio del mercado...");
+      alert("No hay precio disponible en este momento");
       return;
     }
 
+    // 🔥 SI NO VIENE PRECIO EN PAYLOAD, USAR EL REAL
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      price = Number(livePrice);
+      console.warn("⚠️ Usando precio del mercado:", price);
+    }
+
+    // 🔥 BODY FINAL LIMPIO
     const body = {
       symbol,
       side: side.toUpperCase(),
@@ -5139,20 +5202,23 @@ async function placeBrokerOrder(payload = {}) {
       if (data?.error === "insufficient_funds") {
         alert("Fondos insuficientes para abrir la operación");
       } else if (data?.error === "price_unavailable") {
-        alert("Precio no disponible para este símbolo");
+        alert("El precio del mercado no está disponible");
+      } else {
+        alert(data?.message || "Error al abrir operación");
       }
 
       return;
     }
 
-    await loadPositions();
-    await loadAccount();
+    await loadPositions?.();
+    await loadAccount?.();
 
-    console.log("✅ ORDEN CREADA");
+    console.log("✅ ORDEN CREADA CORRECTAMENTE");
     return data;
 
   } catch (err) {
     console.error("❌ Error enviando orden:", err);
+    alert("Error interno al enviar la orden");
   }
 }
 /* =========================
