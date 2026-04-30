@@ -45,7 +45,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config({
-  path: process.env.NODE_ENV === "production" ? undefined : path.resolve(__dirname, ".env"),
+  path:
+    process.env.NODE_ENV === "production"
+      ? undefined
+      : path.resolve(__dirname, ".env"),
 });
 
 const app = express();
@@ -54,18 +57,24 @@ app.disable("x-powered-by");
 
 connectDB();
 
+let riskWatcherStarted = false;
+
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
-  try {
-    const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
-    const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
-    const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
-    startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
-    console.log(
-      `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
-    );
-  } catch (e) {
-    console.error("Error iniciando risk watcher:", e);
+
+  if (!riskWatcherStarted) {
+    riskWatcherStarted = true;
+    try {
+      const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
+      const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
+      const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
+      startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
+      console.log(
+        `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
+      );
+    } catch (e) {
+      console.error("Error iniciando risk watcher:", e);
+    }
   }
 });
 
@@ -119,11 +128,12 @@ app.use(express.urlencoded({ extended: true }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10000,
+  max: 100000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
     const p = String(req.originalUrl || req.path || "");
+
     if (
       p.includes("/api/trade/open") ||
       p.includes("/api/trade/close") ||
@@ -131,6 +141,21 @@ const limiter = rateLimit({
     ) {
       return true;
     }
+
+    if (
+      p.startsWith("/api/account") ||
+      p.startsWith("/api/me") ||
+      p.startsWith("/api/profile") ||
+      p.startsWith("/api/wallet") ||
+      p.startsWith("/api/positions") ||
+      p.startsWith("/api/trade/positions") ||
+      p.startsWith("/api/quotes") ||
+      p.startsWith("/api/latest") ||
+      p.startsWith("/api/market")
+    ) {
+      return true;
+    }
+
     return req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
   },
 });
@@ -152,7 +177,7 @@ app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
 /* ======================================================
-   HELPERS (FIXED REAL 🔥)
+   HELPERS
    ====================================================== */
 function compactSymbol(value) {
   return String(value || "")
@@ -169,9 +194,12 @@ function symbolVariants(value) {
 
   return [
     ...new Set(
-      [compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(
-        Boolean
-      )
+      [
+        compactSymbol(raw),
+        compactSymbol(afterColon),
+        compactSymbol(afterSlash),
+        compactSymbol(afterDash),
+      ].filter(Boolean)
     ),
   ];
 }
@@ -281,7 +309,6 @@ function extractQuotePrice(item = {}) {
 
   const ask = toNumber(item.ask);
   const bid = toNumber(item.bid);
-
   if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
     return (ask + bid) / 2;
   }
@@ -309,17 +336,19 @@ function getCurrentPriceForSymbol(symbol) {
     if (Number.isFinite(px) && px > 0) return px;
   }
 
-  console.warn("⚠️ Precio no encontrado:", symbol);
   return null;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
-  if (direct) return direct;
-
   const market = getCurrentPriceForSymbol(symbol);
-  if (market) return market;
 
+  if (Number.isFinite(direct) && direct > 0) {
+    if (direct === 1 && Number.isFinite(market) && market > 0) return market;
+    return direct;
+  }
+
+  if (market) return market;
   return null;
 }
 
@@ -327,29 +356,36 @@ function isClosedPosition(p = {}) {
   const status = String(p.status || p.state || p.positionStatus || "")
     .toLowerCase()
     .trim();
-
-  return status.includes("close") || !!p.closedAt || !!p.closed_at;
+  return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
 function computePositionPnl(position = {}, currentPrice = null) {
-  const entry = Number(position.entryPrice ?? position.price ?? 0) || 0;
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const qty =
     Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
   const side = normalizeSide(position.side || position.direction || position.positionSide);
+
   const px = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : entry;
   const sign = side === "SELL" ? -1 : 1;
+
   return (px - entry) * qty * sign;
 }
 
 function annotatePosition(position = {}) {
-  const entry = Number(position.entryPrice ?? position.price ?? 0) || 0;
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const storedCurrent = Number(position.currentPrice ?? 0) || 0;
   const market = getCurrentPriceForSymbol(position.symbol);
 
-  const currentPrice = Number.isFinite(market) && market > 0 ? market : entry;
+  const currentPrice =
+    Number.isFinite(market) && market > 0
+      ? market
+      : Number.isFinite(storedCurrent) && storedCurrent > 0
+        ? storedCurrent
+        : entry;
 
   const pnl = isClosedPosition(position)
-    ? Number(position.realizedPnl ?? 0)
-    : computePositionPnl(position, currentPrice);
+    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
+    : computePositionPnl({ ...position, entryPrice: entry }, currentPrice);
 
   return {
     ...position,
@@ -380,8 +416,6 @@ async function getUserDocFromBearer(req) {
   }
 }
 
-app.locals.getUserDocFromBearer = getUserDocFromBearer;
-
 async function getWalletDocForUser(userId) {
   let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
   if (!wallet) {
@@ -404,11 +438,10 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
   const credit = Number(wallet?.credit ?? 0) || 0;
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const safePnl = Number.isFinite(openPnl) ? openPnl : 0;
+  const safeOpenPnl = Number.isFinite(openPnl) ? openPnl : 0;
 
-  // balanceOwn ya refleja el dinero disponible después de reservar margen
-  const equity = balanceOwn + marginUsed + safePnl;
-  const availableBalance = Math.max(balanceOwn + credit, 0);
+  const equity = balanceOwn + marginUsed + safeOpenPnl;
+  const availableBalance = Math.max(balanceOwn + credit + safeOpenPnl, 0);
 
   return {
     balance: balanceOwn,
@@ -421,15 +454,17 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     marginLevel: marginUsed > 0 ? (equity / marginUsed) * 100 : 0,
     leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
     currency: wallet?.currency || "USD",
-    openPnl: safePnl,
+    openPnl: safeOpenPnl,
   };
 }
 
 function getEffectiveBalance(userDoc, walletDoc) {
   const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
-  const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
   if (Number.isFinite(walletBalance)) return walletBalance;
+
+  const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
   if (Number.isFinite(userBalance)) return userBalance;
+
   return 0;
 }
 
@@ -530,10 +565,11 @@ async function loadAllPositionsForUser(userId) {
 
 async function buildAccountForUser(userDoc) {
   const wallet = await getWalletDocForUser(userDoc._id);
+  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const openPositions = await loadOpenPositionsForUser(userDoc._id);
   const allPositions = await loadAllPositionsForUser(userDoc._id);
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
-  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
+
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
   const openPnl = (openPositions || []).reduce(
     (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
@@ -541,7 +577,7 @@ async function buildAccountForUser(userDoc) {
   );
 
   const normalizedWallet = normalizeWalletSnapshot(
-    walletSnapshot ? { ...walletSnapshot, balanceOwn: balance, balance } : { balanceOwn: balance, balance },
+    { ...walletSnapshot, balanceOwn: balance, balance },
     openPnl
   );
 
@@ -551,7 +587,7 @@ async function buildAccountForUser(userDoc) {
       balance,
       balanceOwn: balance,
       availableBalance: normalizedWallet.availableBalance,
-      equity: normalizedWallet.equity,
+      equity: balance + Number(walletSnapshot?.marginUsed ?? 0) + openPnl,
       leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
       currency: userDoc.currency || walletSnapshot?.currency || "USD",
       positions: openPositions,
@@ -656,6 +692,7 @@ function applyRealizedPnlToWallet(wallet, realizedPnl = 0, reservedMargin = 0) {
   wallet.marginUsed = marginUsedAfter;
   wallet.equity = balanceAfter + marginUsedAfter;
   wallet.freeMargin = Math.max(balanceAfter + credit, 0);
+  wallet.availableBalance = wallet.freeMargin;
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
   wallet.updatedAt = new Date();
 
@@ -767,6 +804,80 @@ app.post("/api/_send_test_email", async (req, res) => {
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
+];
+
+function buildQuotesArray() {
+  const store = getPriceStore();
+  const keys = Object.keys(store);
+  if (keys.length) return keys.map((symbol) => {
+    const item = store[symbol] || {};
+    return {
+      symbol,
+      label: item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/"),
+      market: item.market || "Unknown",
+      price: extractQuotePrice(item),
+      bid: toNumber(item.bid),
+      ask: toNumber(item.ask),
+      open: toNumber(item.open),
+      high: toNumber(item.high),
+      low: toNumber(item.low),
+      volume: toNumber(item.volume),
+      change: toNumber(item.change),
+      changePercent: toNumber(item.changePercent),
+      updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+      raw: item,
+    };
+  });
+
+  return SAMPLE_SYMBOLS.map((s) => ({
+    symbol: s.symbol,
+    label: s.label,
+    market: s.market,
+    price: null,
+    bid: null,
+    ask: null,
+    open: null,
+    high: null,
+    low: null,
+    volume: null,
+    change: null,
+    changePercent: null,
+    updatedAt: new Date().toISOString(),
+    raw: s,
+  }));
+}
+
+function buildMarketPayload() {
+  const quotes = buildQuotesArray();
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
+}
+
+try {
+  if (typeof marketRoutesFactory === "function") {
+    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
+} catch (e) {
+  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
+}
+
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
 );
@@ -779,21 +890,13 @@ app.get("/api/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
 );
 
-try {
-  if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
-  } else {
-    app.use("/api/market", marketRoutesFactory);
-  }
-} catch (e) {
-  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
-}
-
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
 
 app.get("/api/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
 
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
@@ -819,7 +922,9 @@ app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
 
 app.get("/api/market/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
 
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
@@ -900,7 +1005,6 @@ app.get("/api/profile", async (req, res) => {
 });
 
 app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
-app.get("/api/posiciones", (req, res) => res.redirect(307, "/api/positions"));
 
 app.get("/api/transactions", async (req, res) => {
   try {
@@ -1016,8 +1120,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       user.leverage = leverage;
     }
 
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0) || wallet.balanceOwn;
-    wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
     wallet.freeMargin = Math.max(wallet.balanceOwn + wallet.credit, 0);
     wallet.availableBalance = wallet.freeMargin;
     wallet.updatedAt = new Date();
@@ -1090,7 +1193,7 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
 
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0) || wallet.balanceOwn;
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
     wallet.freeMargin = Math.max(wallet.balanceOwn + wallet.credit, 0);
     wallet.availableBalance = wallet.freeMargin;
     wallet.updatedAt = new Date();
@@ -1165,7 +1268,9 @@ app.post("/api/trade/open", async (req, res) => {
     const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side ?? body.direction ?? body.action);
     const qty = normalizeQty(body);
-    const type = String(body.type ?? body.orderType ?? body.order_type ?? "market").trim().toLowerCase();
+    const type = String(body.type ?? body.orderType ?? body.order_type ?? "market")
+      .trim()
+      .toLowerCase();
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "symbol_required", message: "Símbolo requerido" });
@@ -1200,7 +1305,9 @@ app.post("/api/trade/open", async (req, res) => {
     const credit = Number(walletSnapshot?.credit ?? user.credit ?? 0) || 0;
     const marginUsed = Number(walletSnapshot?.marginUsed ?? user.marginUsed ?? 0) || 0;
     const leverage = Math.max(
-      Number(body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1) || 1,
+      Number(
+        body.leverage ?? body.leverageFactor ?? walletSnapshot?.leverageFactor ?? user.leverage ?? 1
+      ) || 1,
       1
     );
 
@@ -1237,7 +1344,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const notional = Math.abs(qty * entryPrice);
     const requiredMargin = notional / leverage;
-    const freeMargin = Math.max(balanceOwn + credit, 0);
+    const freeMargin = balanceOwn + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
       releaseOpenTrade(lockUserId, lockSignature);
@@ -1398,6 +1505,7 @@ app.post("/api/trade/close", async (req, res) => {
     const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
+    const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const reservedMargin = Number(position.marginReserved ?? 0) || 0;
     const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
     await wallet.save();
@@ -1504,6 +1612,7 @@ app.post("/api/trade/close-all", async (req, res) => {
       const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
+      const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
       const reservedMargin = Number(pos.marginReserved ?? 0) || 0;
       const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
       await wallet.save();
@@ -1587,17 +1696,17 @@ let pnlRefreshTimer = null;
 
 async function refreshOpenPnL() {
   try {
-    const users = await User.find({}).select("_id leverage currency").lean().exec().catch(() => []);
-    for (const u of users || []) {
-      const positions = await loadOpenPositionsForUser(u._id);
-      const wallet = await Wallet.findOne({ user: u._id }).catch(() => null);
-      const account = await buildAccountForUser({
-        _id: u._id,
-        leverage: wallet?.leverageFactor || u.leverage || 100,
-        currency: wallet?.currency || u.currency || "USD",
-        toObject: () => ({ _id: u._id }),
-      });
-      emitStateUpdates(u._id, account, positions, null);
+    const userIds = await Position.distinct("user", {
+      status: { $in: ["OPEN", "open", "Open"] },
+    }).catch(() => []);
+
+    for (const userId of userIds || []) {
+      const user = await User.findById(userId).catch(() => null);
+      if (!user) continue;
+
+      const account = await buildAccountForUser(user);
+      const positions = account.positions || [];
+      emitStateUpdates(user._id, account, positions, null);
     }
   } catch (err) {
     console.warn("refreshOpenPnL error:", err?.message || err);
@@ -1608,6 +1717,7 @@ if (!pnlRefreshTimer) {
   pnlRefreshTimer = setInterval(() => {
     refreshOpenPnL().catch((err) => console.warn("PnL refresh failed:", err?.message || err));
   }, pnlRefreshMs);
+
   if (typeof pnlRefreshTimer.unref === "function") pnlRefreshTimer.unref();
 }
 
@@ -1634,6 +1744,7 @@ let polygonSocket = null;
 
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
+
   try {
     socket.emit("prices_snapshot", getPriceStore() || {});
   } catch {
@@ -1673,7 +1784,8 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function")
+        polygonSocket.subscribe(symbol, kind);
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1684,7 +1796,8 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function")
+        polygonSocket.unsubscribe(symbol, kind);
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1728,6 +1841,7 @@ try {
    ====================================================== */
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
+
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
   try {
@@ -1737,14 +1851,18 @@ for (const cand of staticCandidates) {
     }
   } catch {}
 }
+
 if (!staticDirName) {
   staticDirName = "public";
   console.warn(
-    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'.`
   );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
+
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
@@ -1755,7 +1873,9 @@ function stripScriptWrappers(source) {
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/.test(trimmed);
   if (startsWithScript && endsWithScript) {
-    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/, "");
   }
   return text;
 }
@@ -1765,6 +1885,7 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
+
   if (normalized.startsWith("/public/js/"))
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
@@ -1777,6 +1898,7 @@ function resolveJsCandidate(requestPath) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
+
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
     try {
@@ -1790,6 +1912,7 @@ function resolveJsCandidate(requestPath) {
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
+
   try {
     const candidate = resolveJsCandidate(pathname);
     if (candidate) {
@@ -1799,16 +1922,26 @@ app.use(async (req, res, next) => {
       return;
     }
 
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
 app.use("/public", express.static(staticPath));
 app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
+
+app.use("/api", (req, res) =>
+  res.status(404).json({ error: "API endpoint not found" })
+);
 
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
@@ -1823,8 +1956,6 @@ app.get("*", (req, res) => {
     }
   });
 });
-
-app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
 
 /* ======================================================
    START / SHUTDOWN
