@@ -477,10 +477,20 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
   const credit = Number(wallet?.credit ?? 0) || 0;
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const equity = balanceOwn + Number(openPnl || 0);
-  const availableBalance = Math.max(equity + credit - marginUsed, 0);
+
+  // 🔥 PROTECCIÓN ANTI-FLICKER
+  const safeOpenPnl = Number.isFinite(openPnl) ? openPnl : 0;
+
+  // ❗ NO TOCAR balance real
+  const equity = balanceOwn + safeOpenPnl;
+
+  // 🔥 CLAVE: NO recalcular disponible con precios inestables
+  const availableBalance = Math.max(balanceOwn + credit - marginUsed, 0);
+
   const freeMargin = availableBalance;
-  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  const marginLevel =
+    marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
   return {
     balance: balanceOwn,
@@ -493,10 +503,9 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     marginLevel,
     leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
     currency: wallet?.currency || "USD",
-    openPnl: Number(openPnl || 0) || 0,
+    openPnl: safeOpenPnl,
   };
 }
-
 function getEffectiveBalance(userDoc, walletDoc) {
   const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
   const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
