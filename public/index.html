@@ -4929,35 +4929,32 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   LIVE PRICE SYNC (FIXED)
+   🔥 LIVE PRICE SYNC (FIXED)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    if (!symbol) return null;
-
-    // 🔥 INTENTO 1: endpoint directo por símbolo
-    const res = await fetch(`/api/latest?symbol=${symbol}`);
+    // 🔥 PRIMERO intenta endpoint correcto
+    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     if (data?.price && Number(data.price) > 0) {
       window.tvPrice = Number(data.price);
-      return window.tvPrice;
+      return Number(data.price);
     }
 
-    // 🔥 INTENTO 2: buscar en quotes
+    // 🔥 FALLBACK quotes
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json();
 
     const normalized = normalizeSymbol(symbol);
 
     const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === normalized ||
-      normalizeSymbol(q.label) === normalized
+      normalizeSymbol(q.symbol) === normalized
     );
 
     if (match?.price && Number(match.price) > 0) {
       window.tvPrice = Number(match.price);
-      return window.tvPrice;
+      return Number(match.price);
     }
 
     return null;
@@ -4968,7 +4965,7 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   GET LIVE PRICE SAFE
+   🔥 GET LIVE PRICE SAFE (MEJORADO)
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
@@ -5001,7 +4998,6 @@ async function placeOrder(input) {
 
     if (typeof input === "string") {
       side = input;
-
       symbol = getActiveSymbol();
 
       const sizeInput =
@@ -5036,15 +5032,6 @@ async function placeOrder(input) {
 
     symbol = normalizeSymbol(symbol);
     side = String(side).toLowerCase();
-
-    if (String(type).toLowerCase() !== "market") {
-      const n = Number(price);
-      if (!Number.isFinite(n) || n <= 0) {
-        alert("Precio inválido");
-        return;
-      }
-      price = n;
-    }
 
     const payload = {
       symbol,
@@ -5118,13 +5105,6 @@ async function placeBrokerOrder(payload = {}) {
 
     if (!price) {
       price = await syncLivePrice(symbol);
-    }
-
-    if (!price) {
-      // 🔥 ÚLTIMO INTENTO HARD
-      const res = await fetch(`/api/latest?symbol=${symbol}`);
-      const data = await res.json();
-      price = Number(data?.price);
     }
 
     if (!price || price <= 0) {
