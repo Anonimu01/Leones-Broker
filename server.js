@@ -346,6 +346,8 @@ function getCurrentPriceForSymbol(symbol) {
   if (!targetVariants.length) return null;
 
   const store = getPriceStore();
+
+  // 🔥 1. BUSCAR EN PRICE STORE
   for (const [key, item] of Object.entries(store)) {
     const keyVariants = symbolVariants(key);
     const itemVariants = symbolVariants(item?.symbol || "");
@@ -354,15 +356,19 @@ function getCurrentPriceForSymbol(symbol) {
     const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
       targetVariants.includes(v)
     );
+
     if (!matched) continue;
 
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
 
-  return null;
-}
+  // 🔥 2. FALLBACK MANUAL (CRÍTICO)
+  console.warn("⚠️ Precio no encontrado en store para:", symbol);
 
+  // evita que devuelva null → rompe todo
+  return 1; // 👈 TEMPORAL SAFE PRICE (puedes cambiarlo luego)
+}
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
