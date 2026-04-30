@@ -1289,5 +1289,15 @@ app.get("/api/trade/positions", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+/* ======================================================
+   START / SHUTDOWN
+   ====================================================== */
+const PORT = process.env.PORT || 3000;
+
+const httpServer = createServer(app); // 🔥 ASEGÚRATE QUE ESTO EXISTE
+
+const server = httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on ${PORT}`);
+});
 
 export default app;
