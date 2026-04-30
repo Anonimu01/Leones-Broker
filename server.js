@@ -57,24 +57,18 @@ app.disable("x-powered-by");
 
 connectDB();
 
-let riskWatcherStarted = false;
-
 mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
-
-  if (!riskWatcherStarted) {
-    riskWatcherStarted = true;
-    try {
-      const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
-      const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
-      const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
-      startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
-      console.log(
-        `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
-      );
-    } catch (e) {
-      console.error("Error iniciando risk watcher:", e);
-    }
+  try {
+    const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
+    const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
+    const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
+    startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
+    console.log(
+      `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
+    );
+  } catch (e) {
+    console.error("Error iniciando risk watcher:", e);
   }
 });
 
@@ -128,34 +122,19 @@ app.use(express.urlencoded({ extended: true }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100000,
+  max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
     const p = String(req.originalUrl || req.path || "");
-
     if (
       p.includes("/api/trade/open") ||
       p.includes("/api/trade/close") ||
-      p.includes("/api/trade/close-all")
+      p.includes("/api/trade/close-all") ||
+      p.includes("/api/trade/positions")
     ) {
       return true;
     }
-
-    if (
-      p.startsWith("/api/account") ||
-      p.startsWith("/api/me") ||
-      p.startsWith("/api/profile") ||
-      p.startsWith("/api/wallet") ||
-      p.startsWith("/api/positions") ||
-      p.startsWith("/api/trade/positions") ||
-      p.startsWith("/api/quotes") ||
-      p.startsWith("/api/latest") ||
-      p.startsWith("/api/market")
-    ) {
-      return true;
-    }
-
     return req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
   },
 });
@@ -191,7 +170,6 @@ function symbolVariants(value) {
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
   const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
-
   return [
     ...new Set(
       [
@@ -257,7 +235,6 @@ function normalizePrice(body = {}) {
     null;
 
   if (raw === null || raw === undefined || raw === "") return null;
-
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -316,39 +293,117 @@ function extractQuotePrice(item = {}) {
   return null;
 }
 
+function normalizeQuote(symbol, item = {}) {
+  const label =
+    item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
+  return {
+    symbol,
+    label,
+    market: item.market || "Unknown",
+    price: extractQuotePrice(item),
+    bid: toNumber(item.bid),
+    ask: toNumber(item.ask),
+    open: toNumber(item.open),
+    high: toNumber(item.high),
+    low: toNumber(item.low),
+    volume: toNumber(item.volume),
+    change: toNumber(item.change),
+    changePercent: toNumber(item.changePercent),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    raw: item,
+  };
+}
+
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
+];
+
+function buildQuotesArray() {
+  const store = getPriceStore();
+  const keys = Object.keys(store);
+  if (keys.length) return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
+  return SAMPLE_SYMBOLS.map((s) =>
+    normalizeQuote(s.symbol, {
+      label: s.label,
+      market: s.market,
+      price: null,
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
+function buildMarketPayload() {
+  const quotes = buildQuotesArray();
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
+}
+
 function getCurrentPriceForSymbol(symbol) {
   const targetVariants = symbolVariants(symbol);
   if (!targetVariants.length) return null;
 
   const store = getPriceStore();
-
   for (const [key, item] of Object.entries(store)) {
-    const variants = [
-      ...symbolVariants(key),
-      ...symbolVariants(item?.symbol || ""),
-      ...symbolVariants(item?.label || ""),
-    ];
+    const keyVariants = symbolVariants(key);
+    const itemVariants = symbolVariants(item?.symbol || "");
+    const labelVariants = symbolVariants(item?.label || "");
 
-    const match = variants.some((v) => targetVariants.includes(v));
-    if (!match) continue;
+    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
+      targetVariants.includes(v)
+    );
+    if (!matched) continue;
 
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
 
+  console.warn("⚠️ Precio no encontrado en store para:", symbol);
   return null;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
-  const market = getCurrentPriceForSymbol(symbol);
+  if (direct) return direct;
 
-  if (Number.isFinite(direct) && direct > 0) {
-    if (direct === 1 && Number.isFinite(market) && market > 0) return market;
-    return direct;
+  const candidates = [
+    body.currentPrice,
+    body.current_price,
+    body.lastPrice,
+    body.last_price,
+    body.tvPrice,
+    body.tv_price,
+    body.entry,
+    body.entryPrice,
+    body.entry_price,
+    body.marketPrice,
+    body.market_price,
+    body.quotePrice,
+    body.quote_price,
+    body.executionPrice,
+    body.execution_price,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
+  const market = getCurrentPriceForSymbol(symbol);
   if (market) return market;
+
   return null;
 }
 
@@ -364,33 +419,27 @@ function computePositionPnl(position = {}, currentPrice = null) {
   const qty =
     Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
   const side = normalizeSide(position.side || position.direction || position.positionSide);
-
-  const px = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : entry;
+  const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
   const sign = side === "SELL" ? -1 : 1;
-
   return (px - entry) * qty * sign;
 }
 
 function annotatePosition(position = {}) {
-  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const storedCurrent = Number(position.currentPrice ?? 0) || 0;
-  const market = getCurrentPriceForSymbol(position.symbol);
-
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const currentPrice =
-    Number.isFinite(market) && market > 0
-      ? market
-      : Number.isFinite(storedCurrent) && storedCurrent > 0
-        ? storedCurrent
-        : entry;
-
+    Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) ||
+    entryPrice;
+  const qty =
+    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
   const pnl = isClosedPosition(position)
     ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl({ ...position, entryPrice: entry }, currentPrice);
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
 
   return {
     ...position,
-    entryPrice: entry,
+    entryPrice,
     currentPrice,
+    qty,
     pnl,
     unrealizedPnl: pnl,
     isOpen: !isClosedPosition(position),
@@ -399,19 +448,15 @@ function annotatePosition(position = {}) {
 
 async function getUserDocFromBearer(req) {
   try {
-    const authHeader = req.headers.authorization || req.headers.Authorization || "";
-    if (!authHeader.startsWith("Bearer ")) return null;
-
-    const token = authHeader.split(" ")[1];
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+    const token = String(auth).split(" ")[1];
     if (!token || !process.env.JWT_SECRET) return null;
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded?.id || decoded?._id || decoded?.userId || decoded?.sub;
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
-
     return await User.findById(userId).catch(() => null);
-  } catch (err) {
-    console.warn("⚠️ getUserDocFromBearer error:", err?.message || err);
+  } catch {
     return null;
   }
 }
@@ -438,10 +483,13 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
   const credit = Number(wallet?.credit ?? 0) || 0;
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const safeOpenPnl = Number.isFinite(openPnl) ? openPnl : 0;
 
-  const equity = balanceOwn + marginUsed + safeOpenPnl;
-  const availableBalance = Math.max(balanceOwn + credit + safeOpenPnl, 0);
+  const safeOpenPnl = Number.isFinite(openPnl) ? openPnl : 0;
+  const equity = balanceOwn + safeOpenPnl;
+
+  const availableBalance = Math.max(balanceOwn + credit - marginUsed, 0);
+  const freeMargin = availableBalance;
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
   return {
     balance: balanceOwn,
@@ -449,9 +497,9 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
     credit,
     equity,
     marginUsed,
-    freeMargin: availableBalance,
+    freeMargin,
     availableBalance,
-    marginLevel: marginUsed > 0 ? (equity / marginUsed) * 100 : 0,
+    marginLevel,
     leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
     currency: wallet?.currency || "USD",
     openPnl: safeOpenPnl,
@@ -460,11 +508,9 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
 
 function getEffectiveBalance(userDoc, walletDoc) {
   const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
-  if (Number.isFinite(walletBalance)) return walletBalance;
-
   const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
+  if (Number.isFinite(walletBalance)) return walletBalance;
   if (Number.isFinite(userBalance)) return userBalance;
-
   return 0;
 }
 
@@ -485,8 +531,7 @@ const transactionSchema = new mongoose.Schema(
   { minimize: false }
 );
 
-const Transaction =
-  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 async function recordTransaction({
   user,
@@ -565,11 +610,10 @@ async function loadAllPositionsForUser(userId) {
 
 async function buildAccountForUser(userDoc) {
   const wallet = await getWalletDocForUser(userDoc._id);
-  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const openPositions = await loadOpenPositionsForUser(userDoc._id);
   const allPositions = await loadAllPositionsForUser(userDoc._id);
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
-
+  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
   const openPnl = (openPositions || []).reduce(
     (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
@@ -577,7 +621,9 @@ async function buildAccountForUser(userDoc) {
   );
 
   const normalizedWallet = normalizeWalletSnapshot(
-    { ...walletSnapshot, balanceOwn: balance, balance },
+    walletSnapshot
+      ? { ...walletSnapshot, balanceOwn: balance, balance }
+      : { balanceOwn: balance, balance },
     openPnl
   );
 
@@ -587,7 +633,7 @@ async function buildAccountForUser(userDoc) {
       balance,
       balanceOwn: balance,
       availableBalance: normalizedWallet.availableBalance,
-      equity: balance + Number(walletSnapshot?.marginUsed ?? 0) + openPnl,
+      equity: balance + openPnl,
       leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
       currency: userDoc.currency || walletSnapshot?.currency || "USD",
       positions: openPositions,
@@ -685,14 +731,13 @@ function applyRealizedPnlToWallet(wallet, realizedPnl = 0, reservedMargin = 0) {
   const pnl = Number(realizedPnl) || 0;
 
   const marginUsedAfter = Math.max(marginUsedBefore - reserved, 0);
-  const balanceAfter = balanceBefore + reserved + pnl;
+  const balanceAfter = balanceBefore + pnl;
 
   wallet.balanceOwn = balanceAfter;
   wallet.balance = balanceAfter;
   wallet.marginUsed = marginUsedAfter;
-  wallet.equity = balanceAfter + marginUsedAfter;
-  wallet.freeMargin = Math.max(balanceAfter + credit, 0);
-  wallet.availableBalance = wallet.freeMargin;
+  wallet.equity = balanceAfter;
+  wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
   wallet.updatedAt = new Date();
 
@@ -774,12 +819,10 @@ app.post("/api/_send_test_email", async (req, res) => {
       ok: false,
       message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
     });
-
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
   const html =
     req.body.html ||
     `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
-
   try {
     const r = await sendEmail({ to, subject, html });
     if (r.ok)
@@ -789,7 +832,6 @@ app.post("/api/_send_test_email", async (req, res) => {
         provider: r.provider,
         result: r.result || r.info || r.resp,
       });
-
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
@@ -804,80 +846,6 @@ app.post("/api/_send_test_email", async (req, res) => {
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
-const SAMPLE_SYMBOLS = [
-  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
-  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
-  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
-  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
-];
-
-function buildQuotesArray() {
-  const store = getPriceStore();
-  const keys = Object.keys(store);
-  if (keys.length) return keys.map((symbol) => {
-    const item = store[symbol] || {};
-    return {
-      symbol,
-      label: item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/"),
-      market: item.market || "Unknown",
-      price: extractQuotePrice(item),
-      bid: toNumber(item.bid),
-      ask: toNumber(item.ask),
-      open: toNumber(item.open),
-      high: toNumber(item.high),
-      low: toNumber(item.low),
-      volume: toNumber(item.volume),
-      change: toNumber(item.change),
-      changePercent: toNumber(item.changePercent),
-      updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
-      raw: item,
-    };
-  });
-
-  return SAMPLE_SYMBOLS.map((s) => ({
-    symbol: s.symbol,
-    label: s.label,
-    market: s.market,
-    price: null,
-    bid: null,
-    ask: null,
-    open: null,
-    high: null,
-    low: null,
-    volume: null,
-    change: null,
-    changePercent: null,
-    updatedAt: new Date().toISOString(),
-    raw: s,
-  }));
-}
-
-function buildMarketPayload() {
-  const quotes = buildQuotesArray();
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest: quotes[0] || null,
-  };
-}
-
-try {
-  if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
-  } else {
-    app.use("/api/market", marketRoutesFactory);
-  }
-} catch (e) {
-  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
-}
-
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
 );
@@ -889,6 +857,16 @@ app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
 );
+
+try {
+  if (typeof marketRoutesFactory === "function") {
+    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
+} catch (e) {
+  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
+}
 
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
 
@@ -1120,9 +1098,9 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       user.leverage = leverage;
     }
 
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
-    wallet.freeMargin = Math.max(wallet.balanceOwn + wallet.credit, 0);
-    wallet.availableBalance = wallet.freeMargin;
+    wallet.equity = wallet.balanceOwn;
+    wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -1193,9 +1171,8 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
 
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
-    wallet.freeMargin = Math.max(wallet.balanceOwn + wallet.credit, 0);
-    wallet.availableBalance = wallet.freeMargin;
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = Math.max(wallet.equity - (Number(wallet.marginUsed ?? 0) || 0), 0);
     wallet.updatedAt = new Date();
     await wallet.save();
 
@@ -1363,13 +1340,15 @@ app.post("/api/trade/open", async (req, res) => {
       });
     }
 
-    wallet.balanceOwn = balanceOwn - requiredMargin;
+    // IMPORTANTE:
+    // No se descuenta el balance real aquí para evitar el brinco visual.
+    // Se reserva el margen con marginUsed y el availableBalance/freeMargin se reduce.
+    wallet.balanceOwn = balanceOwn;
     wallet.balance = wallet.balanceOwn;
     wallet.credit = credit;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
-    wallet.availableBalance = wallet.freeMargin;
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.leverageFactor = leverage;
     wallet.updatedAt = new Date();
@@ -1400,7 +1379,7 @@ app.post("/api/trade/open", async (req, res) => {
       status: "reserved",
       note: `${side} ${symbol}`,
       balanceBefore: balanceOwn,
-      balanceAfter: wallet.balanceOwn,
+      balanceAfter: balanceOwn,
       meta: {
         symbol,
         side,
@@ -1505,7 +1484,6 @@ app.post("/api/trade/close", async (req, res) => {
     const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
     const wallet = await getWalletDocForUser(user._id);
-    const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const reservedMargin = Number(position.marginReserved ?? 0) || 0;
     const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
     await wallet.save();
@@ -1612,7 +1590,6 @@ app.post("/api/trade/close-all", async (req, res) => {
       const realizedPnl = (currentPrice - entryPrice) * qty * sign;
 
       const wallet = await getWalletDocForUser(user._id);
-      const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
       const reservedMargin = Number(pos.marginReserved ?? 0) || 0;
       const settlement = applyRealizedPnlToWallet(wallet, realizedPnl, reservedMargin);
       await wallet.save();
@@ -1696,17 +1673,17 @@ let pnlRefreshTimer = null;
 
 async function refreshOpenPnL() {
   try {
-    const userIds = await Position.distinct("user", {
-      status: { $in: ["OPEN", "open", "Open"] },
-    }).catch(() => []);
-
-    for (const userId of userIds || []) {
-      const user = await User.findById(userId).catch(() => null);
-      if (!user) continue;
-
-      const account = await buildAccountForUser(user);
-      const positions = account.positions || [];
-      emitStateUpdates(user._id, account, positions, null);
+    const users = await User.find({}).select("_id leverage currency").lean().exec().catch(() => []);
+    for (const u of users || []) {
+      const positions = await loadOpenPositionsForUser(u._id);
+      const wallet = await Wallet.findOne({ user: u._id }).catch(() => null);
+      const account = await buildAccountForUser({
+        _id: u._id,
+        leverage: wallet?.leverageFactor || u.leverage || 100,
+        currency: wallet?.currency || u.currency || "USD",
+        toObject: () => ({ _id: u._id }),
+      });
+      emitStateUpdates(u._id, account, positions, null);
     }
   } catch (err) {
     console.warn("refreshOpenPnL error:", err?.message || err);
@@ -1717,7 +1694,6 @@ if (!pnlRefreshTimer) {
   pnlRefreshTimer = setInterval(() => {
     refreshOpenPnL().catch((err) => console.warn("PnL refresh failed:", err?.message || err));
   }, pnlRefreshMs);
-
   if (typeof pnlRefreshTimer.unref === "function") pnlRefreshTimer.unref();
 }
 
@@ -1744,7 +1720,6 @@ let polygonSocket = null;
 
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
-
   try {
     socket.emit("prices_snapshot", getPriceStore() || {});
   } catch {
@@ -1841,7 +1816,6 @@ try {
    ====================================================== */
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
-
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
   try {
@@ -1851,7 +1825,6 @@ for (const cand of staticCandidates) {
     }
   } catch {}
 }
-
 if (!staticDirName) {
   staticDirName = "public";
   console.warn(
@@ -1862,7 +1835,6 @@ if (!staticDirName) {
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
-
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
@@ -1885,7 +1857,6 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-
   if (normalized.startsWith("/public/js/"))
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
@@ -1898,7 +1869,6 @@ function resolveJsCandidate(requestPath) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
-
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
     try {
@@ -1912,7 +1882,6 @@ function resolveJsCandidate(requestPath) {
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
-
   try {
     const candidate = resolveJsCandidate(pathname);
     if (candidate) {
@@ -1939,10 +1908,6 @@ app.use("/public", express.static(staticPath));
 app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
 
-app.use("/api", (req, res) =>
-  res.status(404).json({ error: "API endpoint not found" })
-);
-
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
     return res.status(404).json({ error: "API endpoint not found" });
@@ -1956,6 +1921,10 @@ app.get("*", (req, res) => {
     }
   });
 });
+
+app.use("/api", (req, res) =>
+  res.status(404).json({ error: "API endpoint not found" })
+);
 
 /* ======================================================
    START / SHUTDOWN
