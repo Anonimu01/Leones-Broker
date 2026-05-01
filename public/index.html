@@ -4898,6 +4898,34 @@ async function loadPositions() {
   }
 
 /* =========================
+   SOCKET.IO (🔥 PNL EN VIVO)
+========================= */
+const socket = io();
+
+socket.on("connect", () => {
+  console.log("🟢 Socket conectado:", socket.id);
+});
+
+socket.on("pnl_update", (data) => {
+  if (!data) return;
+
+  console.log("📊 PNL UPDATE:", data);
+
+  const { equity, freeMargin, marginLevel, openPnl } = data;
+
+  const equityEl = document.getElementById("equity");
+  const pnlEl = document.getElementById("pnl");
+  const freeMarginEl = document.getElementById("freeMargin");
+  const marginLevelEl = document.getElementById("marginLevel");
+
+  if (equityEl) equityEl.innerText = `US$${Number(equity || 0).toFixed(2)}`;
+  if (pnlEl) pnlEl.innerText = `US$${Number(openPnl || 0).toFixed(2)}`;
+  if (freeMarginEl) freeMarginEl.innerText = `US$${Number(freeMargin || 0).toFixed(2)}`;
+  if (marginLevelEl) marginLevelEl.innerText = `${Number(marginLevel || 0).toFixed(2)}%`;
+});
+
+
+/* =========================
    NORMALIZE SYMBOL
 ========================= */
 function normalizeSymbol(symbol = "") {
@@ -4912,7 +4940,7 @@ function normalizeSymbol(symbol = "") {
 ========================= */
 let sendingOrder = false;
 let lastOrderTime = 0;
-const ORDER_COOLDOWN = 1200; // 🔥 evita 429
+const ORDER_COOLDOWN = 1200;
 
 /* =========================
    GET ACTIVE SYMBOL
@@ -4931,7 +4959,7 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (MEJORADO)
+   🔥 LIVE PRICE SYNC
 ========================= */
 async function syncLivePrice(symbol) {
   try {
@@ -4943,7 +4971,6 @@ async function syncLivePrice(symbol) {
       return Number(data.price);
     }
 
-    // fallback más liviano
     return null;
 
   } catch (err) {
@@ -4972,7 +4999,7 @@ function getLivePriceFallback() {
 }
 
 /* =========================
-   CLEAR INPUTS (🔥 FIX CLAVE)
+   CLEAR INPUTS
 ========================= */
 function clearOrderInputs() {
   const ids = [
@@ -4993,7 +5020,6 @@ function clearOrderInputs() {
 ========================= */
 async function placeOrder(input) {
 
-  // 🔥 ANTI SPAM + RATE LIMIT FIX
   const now = Date.now();
   if (sendingOrder || (now - lastOrderTime < ORDER_COOLDOWN)) {
     console.warn("⛔ Orden bloqueada (cooldown)");
@@ -5065,7 +5091,6 @@ async function placeOrder(input) {
       result = await placeBrokerOrder(payload);
     }
 
-    // 🔥 LIMPIAR INPUTS DESPUÉS DE OPERAR
     clearOrderInputs();
 
     return result;
@@ -5096,7 +5121,7 @@ document.addEventListener("click", async (e) => {
 });
 
 /* =========================
-   🔥 FINAL BACKEND ORDER (OPTIMIZADO)
+   BACKEND ORDER
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
@@ -5118,7 +5143,6 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO MÁS ESTABLE (SIN PARPADEO)
     let price = getLivePriceFallback();
 
     if (!price) {
@@ -5158,7 +5182,6 @@ async function placeBrokerOrder(payload = {}) {
       return;
     }
 
-    // 🔥 EVITA PARPADEO (delay controlado)
     setTimeout(() => {
       loadPositions?.();
       loadAccount?.();
