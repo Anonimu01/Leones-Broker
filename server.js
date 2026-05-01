@@ -718,7 +718,6 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
 
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
 
-  // saldo correcto: saldo previo + margen reservado + pnl realizado
   wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
   wallet.balance = wallet.balanceOwn;
   wallet.equity = wallet.balanceOwn;
@@ -961,7 +960,21 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
-    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, availableBalance: payload.account.availableBalance, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
+    return res.json({
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      availableBalance: payload.account.availableBalance,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -1014,7 +1027,10 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) { wallet.leverageFactor = leverage; user.leverage = leverage; }
+    if (Number.isFinite(leverage) && leverage > 0) {
+      wallet.leverageFactor = leverage;
+      user.leverage = leverage;
+    }
     wallet.equity = wallet.balanceOwn;
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
@@ -1024,10 +1040,24 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor },
+      source: "api/admin/deposit",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1046,7 +1076,8 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+    if (balanceBefore < amount)
+      return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn;
@@ -1055,10 +1086,24 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     await wallet.save();
     user.balance = wallet.balanceOwn;
     await user.save();
-    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Retiro aplicado",
+      data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/withdraw error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1082,7 +1127,6 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 /* ======================================================
    TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
-
 app.post("/api/trade/open", async (req, res) => {
   const user = await getUserDocFromBearer(req);
   if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
