@@ -629,6 +629,101 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
 }
 
 /* ======================================================
+   REAL-TIME PNL ENGINE
+   ====================================================== */
+
+function startPnLEngine(io) {
+  setInterval(async () => {
+    try {
+      const positions = await Position.find({
+        status: { $in: ["OPEN", "open"] },
+      });
+
+      if (!positions.length) return;
+
+      const userMap = new Map();
+
+      for (const pos of positions) {
+        const currentPrice = getCurrentPriceForSymbol(pos.symbol);
+
+        if (!currentPrice) continue;
+
+        const entry = pos.entryPrice;
+        const qty = pos.qty;
+        const side = pos.side === "SELL" ? -1 : 1;
+
+        const pnl = (currentPrice - entry) * qty * side;
+
+        // actualizar posición en memoria (no guardes en DB cada tick)
+        pos.currentPrice = currentPrice;
+        pos.pnl = pnl;
+
+        if (!userMap.has(pos.user.toString())) {
+          userMap.set(pos.user.toString(), []);
+        }
+
+        userMap.get(pos.user.toString()).push(pos);
+      }
+
+      // 🔥 actualizar wallet por usuario
+      for (const [userId, userPositions] of userMap.entries()) {
+        const wallet = await getWalletDocForUser(userId);
+
+        const balanceOwn = Number(wallet.balanceOwn || 0);
+        const credit = Number(wallet.credit || 0);
+        const marginUsed = Number(wallet.marginUsed || 0);
+
+        // 🔥 SUMA DE PNL
+        const totalPnl = userPositions.reduce(
+          (sum, p) => sum + (Number(p.pnl) || 0),
+          0
+        );
+
+        // ✅ EQUITY REAL
+        const equity = balanceOwn + totalPnl;
+
+        // ✅ FREE MARGIN
+        const freeMargin = equity + credit - marginUsed;
+
+        // ✅ MARGIN LEVEL
+        const marginLevel =
+          marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+        // 🔥 EMITIR EN TIEMPO REAL
+        io.emit("pnl_update", {
+          userId,
+          equity,
+          freeMargin,
+          marginLevel,
+          openPnl: totalPnl,
+          positions: userPositions,
+        });
+
+        // ⚠️ LIQUIDACIÓN AUTOMÁTICA
+        if (marginLevel > 0 && marginLevel <= 100) {
+          console.log("⚠️ LIQUIDANDO USUARIO:", userId);
+
+          for (const pos of userPositions) {
+            const positionDoc = await Position.findById(pos._id);
+            if (!positionDoc) continue;
+
+            await applyCloseToPosition({
+              user: await User.findById(userId),
+              positionDoc,
+              currentPrice: pos.currentPrice,
+              source: "auto-liquidation",
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("PnL Engine error:", err);
+    }
+  }, 1000); // 🔥 cada 1 segundo
+}
+
+    
+/* ======================================================
    HEALTH / MAIL
    ====================================================== */
 app.get("/api/health", (req, res) => {
@@ -967,7 +1062,7 @@ app.post("/api/trade/open", async (req, res) => {
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    // ✅ EQUITY REAL (SIN PNL AQUI TODAVÍA)
+    // ✅ EQUITY (SIN PNL TODAVÍA)
     const equity = balanceOwn;
 
     // ✅ FREE MARGIN REAL
@@ -978,8 +1073,8 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // ✅ NO TOCAR BALANCE
-    // ❌ wallet.balanceOwn = balanceOwn - requiredMargin;
+    // 🔥 NO TOCAR BALANCE (CLAVE)
+    // wallet.balanceOwn = balanceOwn - requiredMargin; ❌
 
     // ✅ SOLO BLOQUEAR MARGEN
     wallet.marginUsed = marginUsed + requiredMargin;
@@ -1049,16 +1144,15 @@ app.post("/api/trade/close", async (req, res) => {
     const balanceOwn = Number(wallet.balanceOwn || 0);
     const marginUsed = Number(wallet.marginUsed || 0);
     const credit = Number(wallet.credit || 0);
-
     const marginReserved = Number(position.marginReserved || 0);
 
-    // ✅ SOLO APLICAR PNL (NO SUMAR MARGEN)
+    // 🔥 SOLO APLICAR PNL (NO SUMAR MARGEN)
     wallet.balanceOwn = balanceOwn + pnl;
 
     // ✅ LIBERAR MARGEN
     wallet.marginUsed = Math.max(marginUsed - marginReserved, 0);
 
-    // ✅ RECALCULAR TODO
+    // ✅ RECALCULAR
     wallet.equity = wallet.balanceOwn;
     wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
     wallet.marginLevel =
@@ -1120,42 +1214,100 @@ app.use("/api/api", (req, res) => {
    ====================================================== */
 let polygonSocket = null;
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
-  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+
+  // 🔥 IDENTIFICAR USUARIO Y ASIGNAR ROOM
+  try {
+    const user = await getUserDocFromBearer({
+      headers: socket.handshake.headers,
+    });
+
+    if (user?._id) {
+      const userId = String(user._id);
+      socket.join(userId);
+      socket.userId = userId;
+
+      console.log("👤 Usuario conectado al room:", userId);
+    }
+  } catch (err) {
+    console.warn("No se pudo identificar usuario en socket:", err);
+  }
+
+  // 📊 SNAPSHOT DE PRECIOS
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch {
+    socket.emit("prices_snapshot", {});
+  }
 
   socket.on("request_prices_snapshot", () => {
-    try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch {
+      socket.emit("prices_snapshot", {});
+    }
   });
 
+  // 📊 SÍMBOLOS
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") socket.emit("symbols_update", priceHandler.getSymbols() || []);
-      else if (prices && Object.keys(prices).length) socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
-      else socket.emit("symbols_update", SAMPLE_SYMBOLS);
-    } catch { socket.emit("symbols_update", SAMPLE_SYMBOLS); }
+
+      if (priceHandler && typeof priceHandler.getSymbols === "function") {
+        socket.emit("symbols_update", priceHandler.getSymbols() || []);
+      } else if (prices && Object.keys(prices).length) {
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k]?.market || "Unknown",
+          }))
+        );
+      } else {
+        socket.emit("symbols_update", SAMPLE_SYMBOLS);
+      }
+    } catch {
+      socket.emit("symbols_update", SAMPLE_SYMBOLS);
+    }
   });
 
+  // 📡 SUBSCRIBE
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
+        polygonSocket.subscribe(symbol, kind);
+      }
+
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("subscribe error:", e); }
+    } catch (e) {
+      console.warn("subscribe error:", e);
+    }
   });
 
+  // 📡 UNSUBSCRIBE
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
+        polygonSocket.unsubscribe(symbol, kind);
+      }
+
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("unsubscribe error:", e); }
+    } catch (e) {
+      console.warn("unsubscribe error:", e);
+    }
   });
 
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason);
+  });
 });
 
 try {
@@ -1169,13 +1321,16 @@ try {
       onClose: () => console.log("PolygonSocket cerrado"),
       onError: (err) => console.error("PolygonSocket error:", err),
     });
+
     const maybe = polygonSocket.connect();
+
     if (maybe && typeof maybe.then === "function") {
       maybe.catch((err) => {
         console.warn("PolygonSocket.connect() rejected:", err);
         polygonSocket = null;
       });
     }
+
     console.log("🔌 Intentando conectar PolygonSocket...");
   }
 } catch (err) {
