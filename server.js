@@ -176,10 +176,9 @@ function compactSymbol(value) {
 
 function symbolVariants(value) {
   const raw = String(value || "").trim().toUpperCase();
-
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
-  const afterSlash = afterColon.replace("/", "");
-  const afterDash = afterSlash.replace("-", "");
+  const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
+  const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
 
   return [
     ...new Set(
@@ -195,10 +194,8 @@ function symbolVariants(value) {
 
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
-
   if (["BUY", "LONG", "BULL", "CALL"].includes(s)) return "BUY";
   if (["SELL", "SHORT", "BEAR", "PUT"].includes(s)) return "SELL";
-
   return "";
 }
 
@@ -216,7 +213,6 @@ function normalizeQty(body = {}) {
       body.units ??
       body.lotSize
   );
-
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
@@ -279,13 +275,9 @@ function toNumber(value) {
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
-
     if (!raw) return {};
-
     if (raw instanceof Map) return Object.fromEntries(raw.entries());
-
     if (typeof raw === "object") return raw;
-
     return {};
   } catch {
     return {};
@@ -305,7 +297,6 @@ function extractQuotePrice(item = {}) {
 
   const ask = toNumber(item.ask);
   const bid = toNumber(item.bid);
-
   if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
     return (ask + bid) / 2;
   }
@@ -315,9 +306,7 @@ function extractQuotePrice(item = {}) {
 
 function normalizeQuote(symbol, item = {}) {
   const label =
-    item.label ||
-    item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
+    item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
 
   return {
     symbol,
@@ -332,10 +321,7 @@ function normalizeQuote(symbol, item = {}) {
     volume: toNumber(item.volume),
     change: toNumber(item.change),
     changePercent: toNumber(item.changePercent),
-    updatedAt:
-      item.updatedAt ||
-      item.timestamp ||
-      new Date().toISOString(),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
     raw: item,
   };
 }
@@ -356,9 +342,7 @@ function buildQuotesArray() {
   const keys = Object.keys(store);
 
   if (keys.length) {
-    return keys.map((symbol) =>
-      normalizeQuote(symbol, store[symbol] || {})
-    );
+    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
   }
 
   return SAMPLE_SYMBOLS.map((s) =>
@@ -373,7 +357,6 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-
   return {
     ok: true,
     count: quotes.length,
@@ -395,20 +378,19 @@ function getCurrentPriceForSymbol(symbol) {
     const itemVariants = symbolVariants(item?.symbol || "");
     const labelVariants = symbolVariants(item?.label || "");
 
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some(
-      (v) => targetVariants.includes(v)
+    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
+      targetVariants.includes(v)
     );
 
     if (!matched) continue;
 
     const px = extractQuotePrice(item);
-
     if (Number.isFinite(px) && px > 0) return px;
   }
 
   console.warn("⚠️ Precio no encontrado en store para:", symbol);
 
-  return 1; // fallback controlado
+  return 1;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
@@ -445,87 +427,33 @@ function resolveOrderPrice(body = {}, symbol = "") {
 }
 
 function isClosedPosition(p = {}) {
-  const status = String(
-    p.status || p.state || p.positionStatus || ""
-  )
+  const status = String(p.status || p.state || p.positionStatus || "")
     .toLowerCase()
     .trim();
-
-  return (
-    status.includes("close") ||
-    status === "closed" ||
-    !!p.closedAt ||
-    !!p.closed_at
-  );
+  return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
 function computePositionPnl(position = {}, currentPrice = null) {
-  const entry =
-    Number(
-      position.entryPrice ??
-        position.price ??
-        position.openPrice ??
-        0
-    ) || 0;
-
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const qty =
-    Number(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) || 0;
-
-  const side = normalizeSide(
-    position.side ||
-      position.direction ||
-      position.positionSide
-  );
-
-  const px =
-    Number(
-      currentPrice ??
-        position.currentPrice ??
-        entry
-    ) || entry;
-
+    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
   const sign = side === "SELL" ? -1 : 1;
-
   return (px - entry) * qty * sign;
 }
 
 function annotatePosition(position = {}) {
-  const entryPrice =
-    Number(
-      position.entryPrice ??
-        position.price ??
-        position.openPrice ??
-        0
-    ) || 0;
-
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const currentPrice =
-    Number(
-      position.currentPrice ??
-        getCurrentPriceForSymbol(position.symbol) ??
-        entryPrice
-    ) || entryPrice;
-
+    Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) ||
+    entryPrice;
   const qty =
-    Number(
-      position.qty ??
-        position.quantity ??
-        position.amount ??
-        position.positionSize ??
-        0
-    ) || 0;
+    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
 
   const pnl = isClosedPosition(position)
     ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl(
-        { ...position, entryPrice, qty },
-        currentPrice
-      );
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
 
   return {
     ...position,
@@ -533,8 +461,315 @@ function annotatePosition(position = {}) {
     currentPrice,
     qty,
     pnl,
+    pnlColor: pnl >= 0 ? "green" : "red",
     unrealizedPnl: pnl,
     isOpen: !isClosedPosition(position),
+  };
+}
+
+async function getUserDocFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || null;
+    if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+    const token = String(auth).split(" ")[1];
+    if (!token || !process.env.JWT_SECRET) return null;
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
+    if (!userId) return null;
+    return await User.findById(userId).catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function getWalletDocForUser(userId) {
+  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+  if (!wallet) {
+    wallet = new Wallet({
+      user: userId,
+      balanceOwn: 0,
+      balance: 0,
+      credit: 0,
+      marginUsed: 0,
+      leverageFactor: 1,
+      equity: 0,
+      freeMargin: 0,
+      marginLevel: 0,
+    });
+  }
+  return wallet;
+}
+
+function normalizeWalletSnapshot(wallet, openPnl = 0) {
+  const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
+  const credit = Number(wallet?.credit ?? 0) || 0;
+  const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
+  const equity = balanceOwn + openPnl;
+  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    availableBalance: freeMargin,
+    marginLevel,
+    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
+    currency: wallet?.currency || "USD",
+    openPnl,
+  };
+}
+
+function getEffectiveBalance(userDoc, walletDoc) {
+  const walletBalance = Number(walletDoc?.balanceOwn ?? walletDoc?.balance);
+  const userBalance = Number(userDoc?.balanceOwn ?? userDoc?.balance);
+  if (Number.isFinite(walletBalance)) return walletBalance;
+  if (Number.isFinite(userBalance)) return userBalance;
+  return 0;
+}
+
+const transactionSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+    userId: { type: String, index: true },
+    type: { type: String, index: true },
+    amount: { type: Number, default: 0 },
+    status: { type: String, default: "completed" },
+    note: { type: String, default: "" },
+    balanceBefore: { type: Number, default: 0 },
+    balanceAfter: { type: Number, default: 0 },
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+    source: { type: String, default: "server.js" },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { minimize: false }
+);
+
+const Transaction =
+  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+
+async function recordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
+  try {
+    const tx = await Transaction.create({
+      user: user?._id || null,
+      userId: String(user?._id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date(),
+    });
+    return tx.toObject ? tx.toObject() : tx;
+  } catch (err) {
+    console.warn("recordTransaction fallback:", err?.message || err);
+    return {
+      userId: String(user?._id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+async function loadTransactionsForUser(userId, limit = 50) {
+  return await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean()
+    .exec()
+    .catch(() => []);
+}
+
+async function loadOpenPositionsForUser(userId) {
+  const rows = await Position.find({
+    user: userId,
+    status: { $in: ["OPEN", "open", "Open"] },
+  })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
+
+  return (rows || []).map(annotatePosition);
+}
+
+async function loadAllPositionsForUser(userId) {
+  const rows = await Position.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
+
+  return (rows || []).map(annotatePosition);
+}
+
+async function buildAccountForUser(userDoc) {
+  const wallet = await getWalletDocForUser(userDoc._id);
+  const openPositions = await loadOpenPositionsForUser(userDoc._id);
+  const allPositions = await loadAllPositionsForUser(userDoc._id);
+  const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
+  const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
+  const balance = getEffectiveBalance(userDoc, walletSnapshot);
+  const openPnl = (openPositions || []).reduce(
+    (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
+    0
+  );
+
+  const normalizedWallet = normalizeWalletSnapshot(
+    walletSnapshot
+      ? { ...walletSnapshot, balanceOwn: balance, balance }
+      : { balanceOwn: balance, balance },
+    openPnl
+  );
+
+  return {
+    account: {
+      ...normalizedWallet,
+      balance,
+      balanceOwn: balance,
+      availableBalance: normalizedWallet.availableBalance,
+      equity: balance + openPnl,
+      leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
+      currency: userDoc.currency || walletSnapshot?.currency || "USD",
+      positions: openPositions,
+      openPositions,
+      allPositions,
+      recentTransactions,
+      transactions: recentTransactions,
+      openPnl,
+    },
+    user: userDoc.toObject ? userDoc.toObject() : userDoc,
+    wallet: walletSnapshot,
+    positions: openPositions,
+    transactions: recentTransactions,
+  };
+}
+
+function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
+  try {
+    io.emit("wallet_update", { userId, account: accountPayload?.account || accountPayload });
+    io.emit("account_update", { userId, account: accountPayload?.account || accountPayload });
+    if (Array.isArray(positions)) io.emit("positions_update", { userId, positions });
+    if (transaction) io.emit("transactions_update", { userId, transaction });
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e?.message || e);
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+
+    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
+
+    const user = await getUserDocFromBearer(req);
+    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
+      req.user = user;
+      return next();
+    }
+
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  } catch {
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  }
+}
+
+async function applyCloseToPosition({ user, positionDoc, currentPrice, source = "api/trade/close" }) {
+  const position = positionDoc?.toObject ? positionDoc.toObject() : positionDoc;
+  const symbol = String(position.symbol || "").toUpperCase();
+  const side = normalizeSide(position.side || position.direction);
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
+  const sign = side === "SELL" ? -1 : 1;
+  const realizedPnl = (Number(currentPrice) - entryPrice) * qty * sign;
+
+  const wallet = await getWalletDocForUser(user._id);
+  const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+  const reservedMargin = Number(position.marginReserved ?? 0) || 0;
+  const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
+
+  wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
+  wallet.balanceOwn = balanceBefore + realizedPnl;
+  wallet.balance = wallet.balanceOwn;
+  wallet.equity = wallet.balanceOwn;
+  wallet.freeMargin = Math.max(wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
+  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+  wallet.updatedAt = new Date();
+  await wallet.save();
+
+  user.balance = wallet.balanceOwn;
+  await user.save();
+
+  position.status = "CLOSED";
+  position.currentPrice = currentPrice;
+  position.closePrice = currentPrice;
+  position.realizedPnl = realizedPnl;
+  position.pnl = realizedPnl;
+  position.closedAt = new Date();
+  position.updatedAt = new Date();
+  await positionDoc.save();
+
+  const tx = await recordTransaction({
+    user,
+    type: "trade_close",
+    amount: realizedPnl,
+    status: "completed",
+    note: `${side} ${symbol}`,
+    balanceBefore,
+    balanceAfter: wallet.balanceOwn,
+    meta: {
+      positionId: String(position._id),
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      closePrice: currentPrice,
+      marginReleased: reservedMargin,
+      realizedPnl,
+    },
+    source,
+  });
+
+  const account = await buildAccountForUser(user);
+  const annotatedPosition = annotatePosition(position);
+  emitStateUpdates(user._id, account, [annotatedPosition], tx);
+
+  return {
+    positionId: position._id,
+    symbol,
+    side,
+    qty,
+    entryPrice,
+    currentPrice,
+    realizedPnl,
+    balance: wallet.balanceOwn,
+    account: account.account,
+    wallet: account.wallet,
+    position: annotatedPosition,
+    transaction: tx,
   };
 }
 
