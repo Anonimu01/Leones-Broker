@@ -142,6 +142,7 @@ app.locals.priceHandler = priceHandler;
    HELPERS
    ====================================================== */
 const openTradeLocks = new Map();
+const stablePriceCache = new Map();
 
 function makeOpenLockKey(userId, symbol, side) {
   return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}`;
@@ -272,6 +273,42 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseQuoteTime(item = {}) {
+  const candidates = [
+    item.updatedAt,
+    item.timestamp,
+    item.time,
+    item.t,
+    item.date,
+    item.updated_at,
+    item.lastUpdated,
+  ];
+
+  for (const c of candidates) {
+    if (!c) continue;
+    const ms = Date.parse(c);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+    const num = Number(c);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+
+  return 0;
+}
+
+function rememberStablePrice(symbol, price) {
+  const key = compactSymbol(symbol);
+  if (!key || !Number.isFinite(price) || price <= 0) return;
+  stablePriceCache.set(key, { price, updatedAt: Date.now() });
+}
+
+function getStableCachedPrice(symbol) {
+  const key = compactSymbol(symbol);
+  const cached = stablePriceCache.get(key);
+  if (!cached) return null;
+  const price = Number(cached.price);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
@@ -367,29 +404,76 @@ function buildMarketPayload() {
   };
 }
 
-function getCurrentPriceForSymbol(symbol) {
-  const targetVariants = symbolVariants(symbol);
-  if (!targetVariants.length) return 1;
+function getSymbolMatchScore(targetSymbol, candidateKey, item = {}) {
+  const target = compactSymbol(targetSymbol);
+  if (!target) return 0;
 
+  const keySymbol = compactSymbol(candidateKey);
+  const itemSymbol = compactSymbol(item?.symbol);
+  const itemLabel = compactSymbol(item?.label);
+
+  if (target === keySymbol || target === itemSymbol) return 3;
+
+  const targetVariants = symbolVariants(targetSymbol);
+  const candidateVariants = [
+    ...symbolVariants(candidateKey),
+    ...symbolVariants(item?.symbol || ""),
+    ...symbolVariants(item?.label || ""),
+  ];
+
+  if (candidateVariants.some((v) => targetVariants.includes(v))) return 2;
+  if (itemLabel && itemLabel.includes(target)) return 1;
+
+  return 0;
+}
+
+function getBestQuoteForSymbol(symbol) {
   const store = getPriceStore();
+  const entries = Object.entries(store);
+  if (!entries.length) return null;
 
-  for (const [key, item] of Object.entries(store)) {
-    const keyVariants = symbolVariants(key);
-    const itemVariants = symbolVariants(item?.symbol || "");
-    const labelVariants = symbolVariants(item?.label || "");
+  const target = String(symbol || "").trim().toUpperCase();
+  let best = null;
 
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
-      targetVariants.includes(v)
-    );
+  for (const [key, item] of entries) {
+    const score = getSymbolMatchScore(target, key, item);
+    if (score <= 0) continue;
 
-    if (!matched) continue;
+    const price = extractQuotePrice(item);
+    if (!Number.isFinite(price) || price <= 0) continue;
 
-    const px = extractQuotePrice(item);
-    if (Number.isFinite(px) && px > 0) return px;
+    const time = parseQuoteTime(item);
+
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && time > best.time) ||
+      (score === best.score && time === best.time && price !== best.price)
+    ) {
+      best = {
+        price,
+        time,
+        score,
+        symbol: key,
+        raw: item,
+      };
+    }
   }
 
-  console.warn("⚠️ Precio no encontrado en store para:", symbol);
-  return 1;
+  return best;
+}
+
+function getCurrentPriceForSymbol(symbol) {
+  const best = getBestQuoteForSymbol(symbol);
+  if (best && Number.isFinite(best.price) && best.price > 0) {
+    rememberStablePrice(symbol, best.price);
+    return best.price;
+  }
+
+  const cached = getStableCachedPrice(symbol);
+  if (cached) return cached;
+
+  return null;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
@@ -420,7 +504,7 @@ function resolveOrderPrice(body = {}, symbol = "") {
   }
 
   const market = getCurrentPriceForSymbol(symbol);
-  if (market) return market;
+  if (Number.isFinite(market) && market > 0) return market;
 
   return null;
 }
@@ -444,9 +528,13 @@ function computePositionPnl(position = {}, currentPrice = null) {
 
 function annotatePosition(position = {}) {
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const marketPrice = getCurrentPriceForSymbol(position.symbol);
   const currentPrice =
-    Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) ||
-    entryPrice;
+    Number(position.currentPrice) > 0
+      ? Number(position.currentPrice)
+      : Number.isFinite(marketPrice) && marketPrice > 0
+        ? marketPrice
+        : entryPrice;
   const qty =
     Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
 
@@ -742,7 +830,6 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   const credit = Number(wallet.credit ?? 0) || 0;
 
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-
   wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
   wallet.balance = wallet.balanceOwn;
   wallet.equity = wallet.balanceOwn;
@@ -985,7 +1072,21 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
-    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, availableBalance: payload.account.availableBalance, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
+    return res.json({
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      availableBalance: payload.account.availableBalance,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -1051,10 +1152,24 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor },
+      source: "api/admin/deposit",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1082,10 +1197,24 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     await wallet.save();
     user.balance = wallet.balanceOwn;
     await user.save();
-    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Retiro aplicado",
+      data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/withdraw error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1343,40 +1472,71 @@ let polygonSocket = null;
 
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
-  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch {
+    socket.emit("prices_snapshot", {});
+  }
 
   socket.on("request_prices_snapshot", () => {
-    try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch {
+      socket.emit("prices_snapshot", {});
+    }
   });
 
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") socket.emit("symbols_update", priceHandler.getSymbols() || []);
-      else if (prices && Object.keys(prices).length) socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
-      else socket.emit("symbols_update", SAMPLE_SYMBOLS);
-    } catch { socket.emit("symbols_update", SAMPLE_SYMBOLS); }
+      if (priceHandler && typeof priceHandler.getSymbols === "function") {
+        socket.emit("symbols_update", priceHandler.getSymbols() || []);
+      } else if (prices && Object.keys(prices).length) {
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k]?.market || "Unknown",
+          }))
+        );
+      } else {
+        socket.emit("symbols_update", SAMPLE_SYMBOLS);
+      }
+    } catch {
+      socket.emit("symbols_update", SAMPLE_SYMBOLS);
+    }
   });
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
+        polygonSocket.subscribe(symbol, kind);
+      }
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("subscribe error:", e); }
+    } catch (e) {
+      console.warn("subscribe error:", e);
+    }
   });
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
+        polygonSocket.unsubscribe(symbol, kind);
+      }
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) { console.warn("unsubscribe error:", e); }
+    } catch (e) {
+      console.warn("unsubscribe error:", e);
+    }
   });
 
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
+  socket.on("disconnect", (reason) =>
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
+  );
 });
 
 try {
@@ -1421,7 +1581,9 @@ for (const cand of staticCandidates) {
 
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -1446,19 +1608,25 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
-    try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -1473,10 +1641,16 @@ app.use(async (req, res, next) => {
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
@@ -1550,7 +1724,11 @@ const gracefulShutdown = async (signal) => {
     });
     await safeClosePolygonSocket();
     if (typeof global?.stopRiskWatcher === "function") {
-      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
+      try {
+        global.stopRiskWatcher();
+      } catch (e) {
+        console.warn("stopRiskWatcher threw:", e);
+      }
     }
     await mongoose.disconnect();
     clearTimeout(timeout);
