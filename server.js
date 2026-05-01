@@ -628,99 +628,6 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   };
 }
 
-/* ======================================================
-   REAL-TIME PNL ENGINE
-   ====================================================== */
-
-function startPnLEngine(io) {
-  setInterval(async () => {
-    try {
-      const positions = await Position.find({
-        status: { $in: ["OPEN", "open"] },
-      });
-
-      if (!positions.length) return;
-
-      const userMap = new Map();
-
-      for (const pos of positions) {
-        const currentPrice = getCurrentPriceForSymbol(pos.symbol);
-
-        if (!currentPrice) continue;
-
-        const entry = pos.entryPrice;
-        const qty = pos.qty;
-        const side = pos.side === "SELL" ? -1 : 1;
-
-        const pnl = (currentPrice - entry) * qty * side;
-
-        // actualizar posición en memoria (no guardes en DB cada tick)
-        pos.currentPrice = currentPrice;
-        pos.pnl = pnl;
-
-        if (!userMap.has(pos.user.toString())) {
-          userMap.set(pos.user.toString(), []);
-        }
-
-        userMap.get(pos.user.toString()).push(pos);
-      }
-
-      // 🔥 actualizar wallet por usuario
-      for (const [userId, userPositions] of userMap.entries()) {
-        const wallet = await getWalletDocForUser(userId);
-
-        const balanceOwn = Number(wallet.balanceOwn || 0);
-        const credit = Number(wallet.credit || 0);
-        const marginUsed = Number(wallet.marginUsed || 0);
-
-        // 🔥 SUMA DE PNL
-        const totalPnl = userPositions.reduce(
-          (sum, p) => sum + (Number(p.pnl) || 0),
-          0
-        );
-
-        // ✅ EQUITY REAL
-        const equity = balanceOwn + totalPnl;
-
-        // ✅ FREE MARGIN
-        const freeMargin = equity + credit - marginUsed;
-
-        // ✅ MARGIN LEVEL
-        const marginLevel =
-          marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-        // 🔥 EMITIR EN TIEMPO REAL
-        io.emit("pnl_update", {
-          userId,
-          equity,
-          freeMargin,
-          marginLevel,
-          openPnl: totalPnl,
-          positions: userPositions,
-        });
-
-        // ⚠️ LIQUIDACIÓN AUTOMÁTICA
-        if (marginLevel > 0 && marginLevel <= 100) {
-          console.log("⚠️ LIQUIDANDO USUARIO:", userId);
-
-          for (const pos of userPositions) {
-            const positionDoc = await Position.findById(pos._id);
-            if (!positionDoc) continue;
-
-            await applyCloseToPosition({
-              user: await User.findById(userId),
-              positionDoc,
-              currentPrice: pos.currentPrice,
-              source: "auto-liquidation",
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error("PnL Engine error:", err);
-    }
-  }, 1000); // 🔥 cada 1 segundo
-}
 
     
 /* ======================================================
@@ -1212,6 +1119,104 @@ app.use("/api/api", (req, res) => {
 /* ======================================================
    SOCKET.IO
    ====================================================== */
+
+
+/* ======================================================
+   REAL-TIME PNL ENGINE
+   ====================================================== */
+
+function startPnLEngine(io) {
+  setInterval(async () => {
+    try {
+      const positions = await Position.find({
+        status: { $in: ["OPEN", "open"] },
+      });
+
+      if (!positions.length) return;
+
+      const userMap = new Map();
+
+      for (const pos of positions) {
+        const currentPrice = getCurrentPriceForSymbol(pos.symbol);
+
+        if (!currentPrice) continue;
+
+        const entry = pos.entryPrice;
+        const qty = pos.qty;
+        const side = pos.side === "SELL" ? -1 : 1;
+
+        const pnl = (currentPrice - entry) * qty * side;
+
+        // actualizar posición en memoria (no guardes en DB cada tick)
+        pos.currentPrice = currentPrice;
+        pos.pnl = pnl;
+
+        if (!userMap.has(pos.user.toString())) {
+          userMap.set(pos.user.toString(), []);
+        }
+
+        userMap.get(pos.user.toString()).push(pos);
+      }
+
+      // 🔥 actualizar wallet por usuario
+      for (const [userId, userPositions] of userMap.entries()) {
+        const wallet = await getWalletDocForUser(userId);
+
+        const balanceOwn = Number(wallet.balanceOwn || 0);
+        const credit = Number(wallet.credit || 0);
+        const marginUsed = Number(wallet.marginUsed || 0);
+
+        // 🔥 SUMA DE PNL
+        const totalPnl = userPositions.reduce(
+          (sum, p) => sum + (Number(p.pnl) || 0),
+          0
+        );
+
+        // ✅ EQUITY REAL
+        const equity = balanceOwn + totalPnl;
+
+        // ✅ FREE MARGIN
+        const freeMargin = equity + credit - marginUsed;
+
+        // ✅ MARGIN LEVEL
+        const marginLevel =
+          marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+
+        // 🔥 EMITIR EN TIEMPO REAL
+        io.emit("pnl_update", {
+          userId,
+          equity,
+          freeMargin,
+          marginLevel,
+          openPnl: totalPnl,
+          positions: userPositions,
+        });
+
+        // ⚠️ LIQUIDACIÓN AUTOMÁTICA
+        if (marginLevel > 0 && marginLevel <= 100) {
+          console.log("⚠️ LIQUIDANDO USUARIO:", userId);
+
+          for (const pos of userPositions) {
+            const positionDoc = await Position.findById(pos._id);
+            if (!positionDoc) continue;
+
+            await applyCloseToPosition({
+              user: await User.findById(userId),
+              positionDoc,
+              currentPrice: pos.currentPrice,
+              source: "auto-liquidation",
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("PnL Engine error:", err);
+    }
+  }, 1000); // 🔥 cada 1 segundo
+}
+
+
+
 let polygonSocket = null;
 
 io.on("connection", async (socket) => {
