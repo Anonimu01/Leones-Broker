@@ -151,6 +151,7 @@ function withOpenLock(key, ttlMs = 3000) {
   const now = Date.now();
   const until = openTradeLocks.get(key) || 0;
   if (until > now) return false;
+
   openTradeLocks.set(key, now + ttlMs);
   const t = setTimeout(() => {
     const current = openTradeLocks.get(key) || 0;
@@ -352,17 +353,17 @@ function getCurrentPriceForSymbol(symbol) {
   const targetVariants = symbolVariants(symbol);
   if (!targetVariants.length) return null;
   const store = getPriceStore();
+
   for (const [key, item] of Object.entries(store)) {
     const keyVariants = symbolVariants(key);
     const itemVariants = symbolVariants(item?.symbol || "");
     const labelVariants = symbolVariants(item?.label || "");
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
-      targetVariants.includes(v)
-    );
+    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) => targetVariants.includes(v));
     if (!matched) continue;
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
+
   console.warn("⚠️ Precio no encontrado en store para:", symbol);
   return 1;
 }
@@ -418,7 +419,15 @@ function annotatePosition(position = {}) {
   const pnl = isClosedPosition(position)
     ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
     : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
-  return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
 }
 
 async function getUserDocFromBearer(req) {
@@ -708,11 +717,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY
-      ? "resend"
-      : process.env.EMAIL_USER || process.env.SMTP_USER
-      ? "smtp"
-      : "none",
+    emailProvider: process.env.RESEND_API_KEY ? "resend" : process.env.EMAIL_USER || process.env.SMTP_USER ? "smtp" : "none",
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
@@ -801,15 +806,7 @@ app.get("/api/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({
-        ok: true,
-        symbol,
-        price,
-        last: price,
-        currentPrice: price,
-        close: price,
-        updatedAt: new Date().toISOString(),
-      });
+      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -824,15 +821,7 @@ app.get("/api/market/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({
-        ok: true,
-        symbol,
-        price,
-        last: price,
-        currentPrice: price,
-        close: price,
-        updatedAt: new Date().toISOString(),
-      });
+      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -1035,8 +1024,7 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    if (balanceBefore < amount)
-      return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+    if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn;
@@ -1084,13 +1072,14 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE
+   TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
+
 app.post("/api/trade/open", async (req, res) => {
-  const body = req.body || {};
   const user = await getUserDocFromBearer(req);
   if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
+  const body = req.body || {};
   const symbol = normalizePositionSymbol(body);
   const side = normalizeSide(body.side);
   const qty = normalizeQty(body);
@@ -1112,7 +1101,10 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(wallet.marginUsed || 0);
     const leverage = Math.max(Number(wallet.leverageFactor || 1), 1);
 
-    const price = resolveOrderPrice(body, symbol);
+    let price = resolveOrderPrice(body, symbol);
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      price = getCurrentPriceForSymbol(symbol);
+    }
     if (!price || !Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ ok: false, error: "price_invalid" });
     }
@@ -1176,7 +1168,10 @@ app.post("/api/trade/close", async (req, res) => {
       return res.status(404).json({ ok: false, error: "not_found" });
     }
 
-    const currentPrice = resolveOrderPrice({}, position.symbol) || getCurrentPriceForSymbol(position.symbol);
+    let currentPrice = getCurrentPriceForSymbol(position.symbol);
+    if (!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+      currentPrice = Number(position.entryPrice || 0);
+    }
     if (!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) {
       return res.status(400).json({ ok: false, error: "price_invalid" });
     }
