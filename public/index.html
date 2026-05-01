@@ -4900,31 +4900,62 @@ async function loadPositions() {
 /* =========================
    SOCKET.IO (🔥 PNL EN VIVO)
 ========================= */
-const socket = io();
+
+// 🔥 SI TU BACKEND ESTÁ EN OTRO PUERTO, AJUSTA AQUÍ
+// const socket = io("http://localhost:4000");
+
+const socket = io({
+  transports: ["websocket"],
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+});
 
 socket.on("connect", () => {
   console.log("🟢 Socket conectado:", socket.id);
 });
 
+// 🔴 DEBUG IMPORTANTE
+socket.on("connect_error", (err) => {
+  console.error("❌ Socket error:", err.message);
+});
+
+socket.on("disconnect", (reason) => {
+  console.warn("⚠️ Socket desconectado:", reason);
+});
+
+/* =========================
+   🔥 PNL UPDATE (TIEMPO REAL)
+========================= */
 socket.on("pnl_update", (data) => {
-  if (!data) return;
+  if (!data || typeof data !== "object") return;
 
   console.log("📊 PNL UPDATE:", data);
 
-  const { equity, freeMargin, marginLevel, openPnl } = data;
+  const equity = Number(data.equity || 0);
+  const freeMargin = Number(data.freeMargin || 0);
+  const marginLevel = Number(data.marginLevel || 0);
+  const openPnl = Number(data.openPnl || 0);
 
   const equityEl = document.getElementById("equity");
   const pnlEl = document.getElementById("pnl");
   const freeMarginEl = document.getElementById("freeMargin");
   const marginLevelEl = document.getElementById("marginLevel");
 
-  if (equityEl) equityEl.innerText = `US$${Number(equity || 0).toFixed(2)}`;
-  if (pnlEl) pnlEl.innerText = `US$${Number(openPnl || 0).toFixed(2)}`;
-  if (freeMarginEl) freeMarginEl.innerText = `US$${Number(freeMargin || 0).toFixed(2)}`;
-  if (marginLevelEl) marginLevelEl.innerText = `${Number(marginLevel || 0).toFixed(2)}%`;
+  // 🔥 UI UPDATE (SIN PARPADEO)
+  if (equityEl) equityEl.textContent = `US$${equity.toFixed(2)}`;
+  if (pnlEl) pnlEl.textContent = `US$${openPnl.toFixed(2)}`;
+  if (freeMarginEl) freeMarginEl.textContent = `US$${freeMargin.toFixed(2)}`;
+  if (marginLevelEl) marginLevelEl.textContent = `${marginLevel.toFixed(2)}%`;
+
+  // 🔥 COLOR DINÁMICO PNL
+  if (pnlEl) {
+    pnlEl.style.color =
+      openPnl > 0 ? "#00c853" :
+      openPnl < 0 ? "#ff3d00" :
+      "#ffffff";
+  }
 });
-
-
 /* =========================
    NORMALIZE SYMBOL
 ========================= */
