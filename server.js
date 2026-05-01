@@ -925,15 +925,13 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE (FIXED REAL LOGIC)
+   TRADING CORE (REAL BROKER LOGIC)
    ====================================================== */
 
-// 🔒 Anti doble orden en memoria (simple pero efectivo)
+// 🔒 Anti doble orden en memoria
 const activeOrders = new Set();
 
 app.post("/api/trade/open", async (req, res) => {
-  let lockKey = null;
-
   try {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
@@ -947,16 +945,11 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    const price = resolveOrderPrice(body, symbol);
-    if (!price) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
+    const lockKey = `${user._id}_${symbol}_${side}`;
+    if (activeOrders.has(lockKey)) {
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
-
-    // 🚫 BLOQUEO ANTI-DUPLICADO
-    lockKey = makeOpenLockKey(user._id, symbol, side);
-    if (!withOpenLock(lockKey, 3000)) {
-      return res.status(429).json({ ok: false, error: "duplicate_blocked" });
-    }
+    activeOrders.add(lockKey);
 
     const wallet = await getWalletDocForUser(user._id);
 
@@ -965,20 +958,34 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(wallet.marginUsed || 0);
     const leverage = Math.max(Number(wallet.leverageFactor || 1), 1);
 
+    const price = resolveOrderPrice(body, symbol);
+    if (!price) {
+      activeOrders.delete(lockKey);
+      return res.status(400).json({ ok: false, error: "price_invalid" });
+    }
+
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    const freeMargin = balanceOwn + credit - marginUsed;
+    // ✅ EQUITY REAL (SIN PNL AQUI TODAVÍA)
+    const equity = balanceOwn;
+
+    // ✅ FREE MARGIN REAL
+    const freeMargin = equity + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
+      activeOrders.delete(lockKey);
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // ✅ DESCUENTO REAL (UNA SOLA VEZ)
-    wallet.balanceOwn -= requiredMargin;
-    wallet.marginUsed += requiredMargin;
+    // ✅ NO TOCAR BALANCE
+    // ❌ wallet.balanceOwn = balanceOwn - requiredMargin;
 
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed;
+    // ✅ SOLO BLOQUEAR MARGEN
+    wallet.marginUsed = marginUsed + requiredMargin;
+
+    // ✅ RECALCULAR
+    wallet.equity = equity;
     wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
     wallet.marginLevel =
       wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
@@ -997,6 +1004,8 @@ app.post("/api/trade/open", async (req, res) => {
       status: "OPEN",
     });
 
+    activeOrders.delete(lockKey);
+
     return res.json({
       ok: true,
       msg: "OPENED",
@@ -1006,10 +1015,9 @@ app.post("/api/trade/open", async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false });
-  } finally {
-    if (lockKey) releaseOpenLock(lockKey);
   }
 });
+
 app.post("/api/trade/close", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
@@ -1027,52 +1035,70 @@ app.post("/api/trade/close", async (req, res) => {
       return res.status(404).json({ ok: false, error: "not_found" });
     }
 
-    const currentPrice = getCurrentPriceForSymbol(position.symbol);
+    const price = getCurrentPriceForSymbol(position.symbol);
 
-    const entryPrice = Number(position.entryPrice);
-    const qty = Number(position.qty);
-    const side = normalizeSide(position.side);
+    const entry = position.entryPrice;
+    const qty = position.qty;
+    const side = position.side === "SELL" ? -1 : 1;
 
-    const sign = side === "SELL" ? -1 : 1;
-
-    // ✅ CALCULO REAL PNL
-    const pnl = (currentPrice - entryPrice) * qty * sign;
+    // ✅ PNL REAL
+    const pnl = (price - entry) * qty * side;
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const reservedMargin = Number(position.marginReserved || 0);
+    const balanceOwn = Number(wallet.balanceOwn || 0);
+    const marginUsed = Number(wallet.marginUsed || 0);
+    const credit = Number(wallet.credit || 0);
 
-    // ✅ DEVOLVER MARGEN + GANANCIA
-    wallet.marginUsed -= reservedMargin;
-    wallet.balanceOwn += reservedMargin + pnl;
+    const marginReserved = Number(position.marginReserved || 0);
 
-    wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed;
-    wallet.freeMargin = wallet.equity - wallet.marginUsed;
+    // ✅ SOLO APLICAR PNL (NO SUMAR MARGEN)
+    wallet.balanceOwn = balanceOwn + pnl;
+
+    // ✅ LIBERAR MARGEN
+    wallet.marginUsed = Math.max(marginUsed - marginReserved, 0);
+
+    // ✅ RECALCULAR TODO
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
     wallet.marginLevel =
       wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
 
     await wallet.save();
 
-    // ✅ MARCAR CERRADA
     position.status = "CLOSED";
-    position.closePrice = currentPrice;
-    position.pnl = pnl;
-    position.closedAt = new Date();
+    position.closePrice = price;
+    position.realizedPnl = pnl;
 
     await position.save();
 
-    return res.json({
-      ok: true,
-      pnl,
-      wallet,
-      position,
-    });
+    return res.json({ ok: true, pnl, wallet });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false });
   }
 });
+
+app.get("/api/trade/positions", async (req, res) => {
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    const positions = await loadOpenPositionsForUser(user._id);
+
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/trade/positions error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
