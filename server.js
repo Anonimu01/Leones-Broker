@@ -151,14 +151,11 @@ function withOpenLock(key, ttlMs = 3000) {
   const now = Date.now();
   const until = openTradeLocks.get(key) || 0;
   if (until > now) return false;
-
   openTradeLocks.set(key, now + ttlMs);
-
   const t = setTimeout(() => {
     const current = openTradeLocks.get(key) || 0;
     if (current <= Date.now()) openTradeLocks.delete(key);
   }, ttlMs + 100);
-
   if (t && typeof t.unref === "function") t.unref();
   return true;
 }
@@ -179,7 +176,16 @@ function symbolVariants(value) {
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
   const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
-  return [...new Set([compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(Boolean))];
+  return [
+    ...new Set(
+      [
+        compactSymbol(raw),
+        compactSymbol(afterColon),
+        compactSymbol(afterSlash),
+        compactSymbol(afterDash),
+      ].filter(Boolean)
+    ),
+  ];
 }
 
 function normalizeSide(value) {
@@ -293,7 +299,8 @@ function extractQuotePrice(item = {}) {
 }
 
 function normalizeQuote(symbol, item = {}) {
-  const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
+  const label =
+    item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
   return {
     symbol,
     label,
@@ -350,7 +357,9 @@ function getCurrentPriceForSymbol(symbol) {
     const keyVariants = symbolVariants(key);
     const itemVariants = symbolVariants(item?.symbol || "");
     const labelVariants = symbolVariants(item?.label || "");
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) => targetVariants.includes(v));
+    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) =>
+      targetVariants.includes(v)
+    );
     if (!matched) continue;
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
@@ -389,13 +398,17 @@ function resolveOrderPrice(body = {}, symbol = "") {
 }
 
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
 function computePositionPnl(position = {}, currentPrice = null) {
   const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const qty = Number(
+    position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0
+  ) || 0;
   const side = normalizeSide(position.side || position.direction || position.positionSide);
   const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
   const sign = side === "SELL" ? -1 : 1;
@@ -404,12 +417,24 @@ function computePositionPnl(position = {}, currentPrice = null) {
 
 function annotatePosition(position = {}) {
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const currentPrice = Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) || entryPrice;
-  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const currentPrice =
+    Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) ||
+    entryPrice;
+  const qty = Number(
+    position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0
+  ) || 0;
   const pnl = isClosedPosition(position)
     ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
     : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
-  return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
 }
 
 async function getUserDocFromBearer(req) {
@@ -492,7 +517,8 @@ const transactionSchema = new mongoose.Schema(
   { minimize: false }
 );
 
-const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const Transaction =
+  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 async function recordTransaction({
   user,
@@ -538,16 +564,29 @@ async function recordTransaction({
 }
 
 async function loadTransactionsForUser(userId, limit = 50) {
-  return await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []);
+  return await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean()
+    .exec()
+    .catch(() => []);
 }
 
 async function loadOpenPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+  const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
   return (rows || []).map(annotatePosition);
 }
 
 async function loadAllPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+  const rows = await Position.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
   return (rows || []).map(annotatePosition);
 }
 
@@ -558,8 +597,14 @@ async function buildAccountForUser(userDoc) {
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
   const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
-  const openPnl = (openPositions || []).reduce((sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0), 0);
-  const normalizedWallet = normalizeWalletSnapshot(walletSnapshot ? { ...walletSnapshot, balanceOwn: balance, balance } : { balanceOwn: balance, balance }, openPnl);
+  const openPnl = (openPositions || []).reduce(
+    (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
+    0
+  );
+  const normalizedWallet = normalizeWalletSnapshot(
+    walletSnapshot ? { ...walletSnapshot, balanceOwn: balance, balance } : { balanceOwn: balance, balance },
+    openPnl
+  );
   return {
     account: {
       ...normalizedWallet,
@@ -652,7 +697,16 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
     note: `${side} ${symbol}`,
     balanceBefore,
     balanceAfter: wallet.balanceOwn,
-    meta: { positionId: String(position._id), symbol, side, qty, entryPrice, closePrice: currentPrice, marginReleased: reservedMargin, realizedPnl },
+    meta: {
+      positionId: String(position._id),
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      closePrice: currentPrice,
+      marginReleased: reservedMargin,
+      realizedPnl,
+    },
     source,
   });
 
@@ -683,7 +737,11 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : process.env.EMAIL_USER || process.env.SMTP_USER ? "smtp" : "none",
+    emailProvider: process.env.RESEND_API_KEY
+      ? "resend"
+      : process.env.EMAIL_USER || process.env.SMTP_USER
+      ? "smtp"
+      : "none",
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
@@ -722,27 +780,42 @@ app.post("/api/_send_test_email", async (req, res) => {
       message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
     });
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+  const html =
+    req.body.html ||
+    `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
   try {
     const r = await sendEmail({ to, subject, html });
     if (r.ok)
-      return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
+      return res.json({
+        ok: true,
+        message: "Correo enviado",
+        provider: r.provider,
+        result: r.result || r.info || r.resp,
+      });
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
-    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno enviando correo",
+      error: err && err.message ? err.message : String(err),
+    });
   }
 });
 
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
-app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
 
 try {
   if (typeof marketRoutesFactory === "function") {
@@ -761,7 +834,15 @@ app.get("/api/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -776,7 +857,15 @@ app.get("/api/market/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -792,7 +881,13 @@ app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
     if (prices && Object.keys(prices).length) {
-      return res.json(Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+      return res.json(
+        Object.keys(prices).map((k) => ({
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market: prices[k]?.market || "Unknown",
+        }))
+      );
     }
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
@@ -845,7 +940,13 @@ app.get("/api/transactions", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
     const transactions = await loadTransactionsForUser(user._id, limit);
-    return res.json({ ok: true, count: transactions.length, transactions, data: transactions, items: transactions });
+    return res.json({
+      ok: true,
+      count: transactions.length,
+      transactions,
+      data: transactions,
+      items: transactions,
+    });
   } catch (e) {
     console.error("/api/transactions error", e);
     return res.status(500).json({ error: "Server error" });
@@ -857,7 +958,21 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
-    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, availableBalance: payload.account.availableBalance, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
+    return res.json({
+      ok: true,
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      availableBalance: payload.account.availableBalance,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
+    });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -902,7 +1017,8 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     const note = String(body.note || body.description || "Admin deposit").trim();
     const currency = String(body.currency || "USD").trim();
     if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
+    if (!Number.isFinite(amount) || amount <= 0)
+      return res.status(400).json({ ok: false, error: "amount_required" });
     const user = await User.findById(userId).catch(() => null);
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
     const wallet = await getWalletDocForUser(user._id);
@@ -910,7 +1026,10 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) { wallet.leverageFactor = leverage; user.leverage = leverage; }
+    if (Number.isFinite(leverage) && leverage > 0) {
+      wallet.leverageFactor = leverage;
+      user.leverage = leverage;
+    }
     wallet.equity = wallet.balanceOwn;
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
@@ -920,10 +1039,35 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: {
+        source: "admin-panel",
+        method: body.method || "deposit",
+        currency,
+        leverage: wallet.leverageFactor,
+      },
+      source: "api/admin/deposit",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: {
+        balance: wallet.balanceOwn,
+        leverage: wallet.leverageFactor,
+        transaction: tx,
+        account: account.account,
+        wallet: account.wallet,
+      },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -937,12 +1081,14 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     const amount = Number(body.amount ?? body.withdrawAmount ?? 0);
     const note = String(body.note || body.description || "Admin withdrawal").trim();
     if (!userId) return res.status(400).json({ ok: false, error: "userId_required" });
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ ok: false, error: "amount_required" });
+    if (!Number.isFinite(amount) || amount <= 0)
+      return res.status(400).json({ ok: false, error: "amount_required" });
     const user = await User.findById(userId).catch(() => null);
     if (!user) return res.status(404).json({ ok: false, error: "user_not_found" });
     const wallet = await getWalletDocForUser(user._id);
     const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
+    if (balanceBefore < amount)
+      return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn;
@@ -951,10 +1097,24 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     await wallet.save();
     user.balance = wallet.balanceOwn;
     await user.save();
-    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Retiro aplicado",
+      data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/withdraw error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -967,7 +1127,12 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
     const limit = Math.min(Number(req.query.limit || 100) || 100, 500);
     const txs = userId
       ? await loadTransactionsForUser(userId, limit)
-      : await Transaction.find({}).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []);
+      : await Transaction.find({})
+          .sort({ createdAt: -1 })
+          .limit(limit)
+          .lean()
+          .exec()
+          .catch(() => []);
     return res.json({ ok: true, count: txs.length, transactions: txs, data: txs, items: txs });
   } catch (err) {
     console.error("/api/admin/transactions error:", err);
@@ -976,9 +1141,8 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE (FIXED REAL LOGIC)
+   TRADING CORE
    ====================================================== */
-
 app.post("/api/trade/open", async (req, res) => {
   const user = await getUserDocFromBearer(req);
   if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
@@ -1149,13 +1313,17 @@ io.on("connection", (socket) => {
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") socket.emit("symbols_update", priceHandler.getSymbols() || []);
+      if (priceHandler && typeof priceHandler.getSymbols === "function")
+        socket.emit("symbols_update", priceHandler.getSymbols() || []);
       else if (prices && Object.keys(prices).length)
-        socket.emit("symbols_update", Object.keys(prices).map((k) => ({
-          symbol: k,
-          label: (k.split(":").pop() || k).replace("_", "/"),
-          market: prices[k]?.market || "Unknown",
-        })));
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k]?.market || "Unknown",
+          }))
+        );
       else socket.emit("symbols_update", SAMPLE_SYMBOLS);
     } catch {
       socket.emit("symbols_update", SAMPLE_SYMBOLS);
@@ -1165,7 +1333,8 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.subscribe === "function")
+        polygonSocket.subscribe(symbol, kind);
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1176,7 +1345,8 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function")
+        polygonSocket.unsubscribe(symbol, kind);
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1184,7 +1354,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
+  socket.on("disconnect", (reason) =>
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
+  );
 });
 
 try {
@@ -1229,7 +1401,11 @@ for (const cand of staticCandidates) {
 
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'.`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -1254,12 +1430,14 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
@@ -1285,10 +1463,16 @@ app.use(async (req, res, next) => {
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
@@ -1324,8 +1508,10 @@ const server = httpServer.listen(PORT, "0.0.0.0", () => {
   console.log("MONGO:", !!process.env.MONGO_URI);
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  if (!process.env.POLYGON_API_KEY)
+    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  if (!process.env.RESEND_API_KEY)
+    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
 
 let shuttingDown = false;
