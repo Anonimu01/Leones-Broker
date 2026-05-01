@@ -969,10 +969,7 @@ app.post("/api/trade/open", async (req, res) => {
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    // ✅ EQUITY (SIN PNL TODAVÍA)
     const equity = balanceOwn;
-
-    // ✅ FREE MARGIN REAL
     const freeMargin = equity + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
@@ -980,13 +977,9 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // 🔥 NO TOCAR BALANCE (CLAVE)
-    // wallet.balanceOwn = balanceOwn - requiredMargin; ❌
-
     // ✅ SOLO BLOQUEAR MARGEN
     wallet.marginUsed = marginUsed + requiredMargin;
 
-    // ✅ RECALCULAR
     wallet.equity = equity;
     wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
     wallet.marginLevel =
@@ -1008,12 +1001,8 @@ app.post("/api/trade/open", async (req, res) => {
 
     activeOrders.delete(lockKey);
 
-    return res.json({
-      ok: true,
-      msg: "OPENED",
-      position,
-      wallet,
-    });
+    return res.json({ ok: true, position, wallet });
+
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false });
@@ -1039,29 +1028,23 @@ app.post("/api/trade/close", async (req, res) => {
 
     const price = getCurrentPriceForSymbol(position.symbol);
 
-    const entry = position.entryPrice;
-    const qty = position.qty;
-    const side = position.side === "SELL" ? -1 : 1;
-
-    // ✅ PNL REAL
-    const pnl = (price - entry) * qty * side;
+    const pnl =
+      (price - position.entryPrice) *
+      position.qty *
+      (position.side === "SELL" ? -1 : 1);
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn = Number(wallet.balanceOwn || 0);
-    const marginUsed = Number(wallet.marginUsed || 0);
-    const credit = Number(wallet.credit || 0);
     const marginReserved = Number(position.marginReserved || 0);
 
-    // 🔥 SOLO APLICAR PNL (NO SUMAR MARGEN)
-    wallet.balanceOwn = balanceOwn + pnl;
+    // ✅ APLICAR PNL
+    wallet.balanceOwn += pnl;
 
     // ✅ LIBERAR MARGEN
-    wallet.marginUsed = Math.max(marginUsed - marginReserved, 0);
+    wallet.marginUsed = Math.max(wallet.marginUsed - marginReserved, 0);
 
-    // ✅ RECALCULAR
     wallet.equity = wallet.balanceOwn;
-    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
+    wallet.freeMargin = wallet.equity + wallet.credit - wallet.marginUsed;
     wallet.marginLevel =
       wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
 
@@ -1074,35 +1057,17 @@ app.post("/api/trade/close", async (req, res) => {
     await position.save();
 
     return res.json({ ok: true, pnl, wallet });
+
   } catch (err) {
     console.error(err);
     return res.status(500).json({ ok: false });
   }
 });
 
-app.get("/api/trade/positions", async (req, res) => {
-  try {
-    const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const positions = await loadOpenPositionsForUser(user._id);
-
-    return res.json({
-      ok: true,
-      positions,
-      data: positions,
-      items: positions,
-      count: positions.length,
-    });
-  } catch (e) {
-    console.error("/api/trade/positions error", e);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
+
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/verification", verificationRoutes);
@@ -1111,16 +1076,6 @@ app.use("/api/positions", positionsRoutes);
 app.use("/api/trade", tradeRoutes);
 app.use("/api/account", accountRoutes);
 
-app.use("/api/api", (req, res) => {
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
-
-/* ======================================================
-   SOCKET.IO
-   ====================================================== */
-
-
 /* ======================================================
    REAL-TIME PNL ENGINE
    ====================================================== */
@@ -1128,94 +1083,57 @@ app.use("/api/api", (req, res) => {
 function startPnLEngine(io) {
   setInterval(async () => {
     try {
-      const positions = await Position.find({
-        status: { $in: ["OPEN", "open"] },
-      });
-
+      const positions = await Position.find({ status: "OPEN" });
       if (!positions.length) return;
 
       const userMap = new Map();
 
       for (const pos of positions) {
-        const currentPrice = getCurrentPriceForSymbol(pos.symbol);
+        const price = getCurrentPriceForSymbol(pos.symbol);
+        if (!price) continue;
 
-        if (!currentPrice) continue;
+        const pnl =
+          (price - pos.entryPrice) *
+          pos.qty *
+          (pos.side === "SELL" ? -1 : 1);
 
-        const entry = pos.entryPrice;
-        const qty = pos.qty;
-        const side = pos.side === "SELL" ? -1 : 1;
-
-        const pnl = (currentPrice - entry) * qty * side;
-
-        // actualizar posición en memoria (no guardes en DB cada tick)
-        pos.currentPrice = currentPrice;
+        pos.currentPrice = price;
         pos.pnl = pnl;
 
-        if (!userMap.has(pos.user.toString())) {
-          userMap.set(pos.user.toString(), []);
-        }
-
-        userMap.get(pos.user.toString()).push(pos);
+        const uid = pos.user.toString();
+        if (!userMap.has(uid)) userMap.set(uid, []);
+        userMap.get(uid).push(pos);
       }
 
-      // 🔥 actualizar wallet por usuario
       for (const [userId, userPositions] of userMap.entries()) {
         const wallet = await getWalletDocForUser(userId);
 
-        const balanceOwn = Number(wallet.balanceOwn || 0);
-        const credit = Number(wallet.credit || 0);
-        const marginUsed = Number(wallet.marginUsed || 0);
+        const totalPnl = userPositions.reduce((s, p) => s + (p.pnl || 0), 0);
 
-        // 🔥 SUMA DE PNL
-        const totalPnl = userPositions.reduce(
-          (sum, p) => sum + (Number(p.pnl) || 0),
-          0
-        );
-
-        // ✅ EQUITY REAL
-        const equity = balanceOwn + totalPnl;
-
-        // ✅ FREE MARGIN
-        const freeMargin = equity + credit - marginUsed;
-
-        // ✅ MARGIN LEVEL
+        const equity = wallet.balanceOwn + totalPnl;
+        const freeMargin = equity + wallet.credit - wallet.marginUsed;
         const marginLevel =
-          marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+          wallet.marginUsed > 0 ? (equity / wallet.marginUsed) * 100 : 0;
 
-        // 🔥 EMITIR EN TIEMPO REAL
-        io.emit("pnl_update", {
-          userId,
+        // 🔥 FIX REAL
+        io.to(userId).emit("pnl_update", {
           equity,
           freeMargin,
           marginLevel,
           openPnl: totalPnl,
           positions: userPositions,
         });
-
-        // ⚠️ LIQUIDACIÓN AUTOMÁTICA
-        if (marginLevel > 0 && marginLevel <= 100) {
-          console.log("⚠️ LIQUIDANDO USUARIO:", userId);
-
-          for (const pos of userPositions) {
-            const positionDoc = await Position.findById(pos._id);
-            if (!positionDoc) continue;
-
-            await applyCloseToPosition({
-              user: await User.findById(userId),
-              positionDoc,
-              currentPrice: pos.currentPrice,
-              source: "auto-liquidation",
-            });
-          }
-        }
       }
+
     } catch (err) {
       console.error("PnL Engine error:", err);
     }
-  }, 1000); // 🔥 cada 1 segundo
+  }, 1000);
 }
 
-
+/* ======================================================
+   SOCKET.IO
+   ====================================================== */
 
 let polygonSocket = null;
 
@@ -1342,7 +1260,26 @@ try {
   console.error("Error inicializando PolygonSocket:", err);
   polygonSocket = null;
 }
+/* ======================================================
+   🔥 ESTO ERA LO QUE TE FALTABA
+   ====================================================== */
+startPnLEngine(io);
 
+/* ======================================================
+   POLYGON
+   ====================================================== */
+
+try {
+  if (process.env.POLYGON_API_KEY) {
+    polygonSocket = new PolygonSocket({
+      apiKey: process.env.POLYGON_API_KEY,
+      onPrice: (data) => priceHandler.handle(data),
+    });
+    polygonSocket.connect();
+  }
+} catch (err) {
+  console.error(err);
+}
 /* ======================================================
    STATIC
    ====================================================== */
