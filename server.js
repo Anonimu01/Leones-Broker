@@ -142,24 +142,20 @@ app.locals.priceHandler = priceHandler;
    HELPERS
    ====================================================== */
 const openTradeLocks = new Map();
-const stablePriceCache = new Map();
 
 function makeOpenLockKey(userId, symbol, side) {
   return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}`;
 }
 
-function withOpenLock(key, ttlMs = 3000) {
+function withOpenLock(key, ttlMs = 1500) {
   const now = Date.now();
   const until = openTradeLocks.get(key) || 0;
   if (until > now) return false;
-
   openTradeLocks.set(key, now + ttlMs);
-
   const t = setTimeout(() => {
     const current = openTradeLocks.get(key) || 0;
     if (current <= Date.now()) openTradeLocks.delete(key);
   }, ttlMs + 100);
-
   if (t && typeof t.unref === "function") t.unref();
   return true;
 }
@@ -180,17 +176,7 @@ function symbolVariants(value) {
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
   const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
   const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
-
-  return [
-    ...new Set(
-      [
-        compactSymbol(raw),
-        compactSymbol(afterColon),
-        compactSymbol(afterSlash),
-        compactSymbol(afterDash),
-      ].filter(Boolean)
-    ),
-  ];
+  return [...new Set([compactSymbol(raw), compactSymbol(afterColon), compactSymbol(afterSlash), compactSymbol(afterDash)].filter(Boolean))];
 }
 
 function normalizeSide(value) {
@@ -244,9 +230,7 @@ function normalizePrice(body = {}) {
     body.bid ??
     body.mark ??
     null;
-
   if (raw === null || raw === undefined || raw === "") return null;
-
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -271,42 +255,6 @@ function normalizePositionSymbol(body = {}) {
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function parseQuoteTime(item = {}) {
-  const candidates = [
-    item.updatedAt,
-    item.timestamp,
-    item.time,
-    item.t,
-    item.date,
-    item.updated_at,
-    item.lastUpdated,
-  ];
-
-  for (const c of candidates) {
-    if (!c) continue;
-    const ms = Date.parse(c);
-    if (Number.isFinite(ms) && ms > 0) return ms;
-    const num = Number(c);
-    if (Number.isFinite(num) && num > 0) return num;
-  }
-
-  return 0;
-}
-
-function rememberStablePrice(symbol, price) {
-  const key = compactSymbol(symbol);
-  if (!key || !Number.isFinite(price) || price <= 0) return;
-  stablePriceCache.set(key, { price, updatedAt: Date.now() });
-}
-
-function getStableCachedPrice(symbol) {
-  const key = compactSymbol(symbol);
-  const cached = stablePriceCache.get(key);
-  if (!cached) return null;
-  const price = Number(cached.price);
-  return Number.isFinite(price) && price > 0 ? price : null;
 }
 
 function getPriceStore() {
@@ -342,9 +290,7 @@ function extractQuotePrice(item = {}) {
 }
 
 function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
-
+  const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
   return {
     symbol,
     label,
@@ -377,11 +323,7 @@ const SAMPLE_SYMBOLS = [
 function buildQuotesArray() {
   const store = getPriceStore();
   const keys = Object.keys(store);
-
-  if (keys.length) {
-    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
-  }
-
+  if (keys.length) return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
   return SAMPLE_SYMBOLS.map((s) =>
     normalizeQuote(s.symbol, {
       label: s.label,
@@ -394,92 +336,29 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest: quotes[0] || null,
-  };
-}
-
-function getSymbolMatchScore(targetSymbol, candidateKey, item = {}) {
-  const target = compactSymbol(targetSymbol);
-  if (!target) return 0;
-
-  const keySymbol = compactSymbol(candidateKey);
-  const itemSymbol = compactSymbol(item?.symbol);
-  const itemLabel = compactSymbol(item?.label);
-
-  if (target === keySymbol || target === itemSymbol) return 3;
-
-  const targetVariants = symbolVariants(targetSymbol);
-  const candidateVariants = [
-    ...symbolVariants(candidateKey),
-    ...symbolVariants(item?.symbol || ""),
-    ...symbolVariants(item?.label || ""),
-  ];
-
-  if (candidateVariants.some((v) => targetVariants.includes(v))) return 2;
-  if (itemLabel && itemLabel.includes(target)) return 1;
-
-  return 0;
-}
-
-function getBestQuoteForSymbol(symbol) {
-  const store = getPriceStore();
-  const entries = Object.entries(store);
-  if (!entries.length) return null;
-
-  const target = String(symbol || "").trim().toUpperCase();
-  let best = null;
-
-  for (const [key, item] of entries) {
-    const score = getSymbolMatchScore(target, key, item);
-    if (score <= 0) continue;
-
-    const price = extractQuotePrice(item);
-    if (!Number.isFinite(price) || price <= 0) continue;
-
-    const time = parseQuoteTime(item);
-
-    if (
-      !best ||
-      score > best.score ||
-      (score === best.score && time > best.time) ||
-      (score === best.score && time === best.time && price !== best.price)
-    ) {
-      best = {
-        price,
-        time,
-        score,
-        symbol: key,
-        raw: item,
-      };
-    }
-  }
-
-  return best;
+  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null };
 }
 
 function getCurrentPriceForSymbol(symbol) {
-  const best = getBestQuoteForSymbol(symbol);
-  if (best && Number.isFinite(best.price) && best.price > 0) {
-    rememberStablePrice(symbol, best.price);
-    return best.price;
+  const targetVariants = symbolVariants(symbol);
+  if (!targetVariants.length) return null;
+  const store = getPriceStore();
+  for (const [key, item] of Object.entries(store)) {
+    const keyVariants = symbolVariants(key);
+    const itemVariants = symbolVariants(item?.symbol || "");
+    const labelVariants = symbolVariants(item?.label || "");
+    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) => targetVariants.includes(v));
+    if (!matched) continue;
+    const px = extractQuotePrice(item);
+    if (Number.isFinite(px) && px > 0) return px;
   }
-
-  const cached = getStableCachedPrice(symbol);
-  if (cached) return cached;
-
-  return null;
+  console.warn("⚠️ Precio no encontrado en store para:", symbol);
+  return 1;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
-
   const candidates = [
     body.currentPrice,
     body.current_price,
@@ -497,29 +376,23 @@ function resolveOrderPrice(body = {}, symbol = "") {
     body.executionPrice,
     body.execution_price,
   ];
-
   for (const candidate of candidates) {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
   }
-
   const market = getCurrentPriceForSymbol(symbol);
-  if (Number.isFinite(market) && market > 0) return market;
-
+  if (market) return market;
   return null;
 }
 
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "")
-    .toLowerCase()
-    .trim();
+  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
 function computePositionPnl(position = {}, currentPrice = null) {
   const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const qty =
-    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
   const side = normalizeSide(position.side || position.direction || position.positionSide);
   const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
   const sign = side === "SELL" ? -1 : 1;
@@ -528,30 +401,10 @@ function computePositionPnl(position = {}, currentPrice = null) {
 
 function annotatePosition(position = {}) {
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const marketPrice = getCurrentPriceForSymbol(position.symbol);
-  const currentPrice =
-    Number(position.currentPrice) > 0
-      ? Number(position.currentPrice)
-      : Number.isFinite(marketPrice) && marketPrice > 0
-        ? marketPrice
-        : entryPrice;
-  const qty =
-    Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
-
-  const pnl = isClosedPosition(position)
-    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
-
-  return {
-    ...position,
-    entryPrice,
-    currentPrice,
-    qty,
-    pnl,
-    pnlColor: pnl >= 0 ? "green" : "red",
-    unrealizedPnl: pnl,
-    isOpen: !isClosedPosition(position),
-  };
+  const currentPrice = Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) || entryPrice;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const pnl = isClosedPosition(position) ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0 : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+  return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
 }
 
 async function getUserDocFromBearer(req) {
@@ -572,17 +425,7 @@ async function getUserDocFromBearer(req) {
 async function getWalletDocForUser(userId) {
   let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
   if (!wallet) {
-    wallet = new Wallet({
-      user: userId,
-      balanceOwn: 0,
-      balance: 0,
-      credit: 0,
-      marginUsed: 0,
-      leverageFactor: 1,
-      equity: 0,
-      freeMargin: 0,
-      marginLevel: 0,
-    });
+    wallet = new Wallet({ user: userId, balanceOwn: 0, balance: 0, credit: 0, marginUsed: 0, leverageFactor: 1, equity: 0, freeMargin: 0, marginLevel: 0 });
   }
   return wallet;
 }
@@ -594,20 +437,7 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const equity = balanceOwn + openPnl;
   const freeMargin = Math.max(equity + credit - marginUsed, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-
-  return {
-    balance: balanceOwn,
-    balanceOwn,
-    credit,
-    equity,
-    marginUsed,
-    freeMargin,
-    availableBalance: freeMargin,
-    marginLevel,
-    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
-    currency: wallet?.currency || "USD",
-    openPnl,
-  };
+  return { balance: balanceOwn, balanceOwn, credit, equity, marginUsed, freeMargin, availableBalance: freeMargin, marginLevel, leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1, currency: wallet?.currency || "USD", openPnl };
 }
 
 function getEffectiveBalance(userDoc, walletDoc) {
@@ -635,20 +465,9 @@ const transactionSchema = new mongoose.Schema(
   { minimize: false }
 );
 
-const Transaction =
-  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
-async function recordTransaction({
-  user,
-  type,
-  amount = 0,
-  status = "completed",
-  note = "",
-  balanceBefore = 0,
-  balanceAfter = 0,
-  meta = {},
-  source = "server.js",
-}) {
+async function recordTransaction({ user, type, amount = 0, status = "completed", note = "", balanceBefore = 0, balanceAfter = 0, meta = {}, source = "server.js" }) {
   try {
     const tx = await Transaction.create({
       user: user?._id || null,
@@ -666,50 +485,21 @@ async function recordTransaction({
     return tx.toObject ? tx.toObject() : tx;
   } catch (err) {
     console.warn("recordTransaction fallback:", err?.message || err);
-    return {
-      userId: String(user?._id || ""),
-      type,
-      amount: Number(amount) || 0,
-      status,
-      note,
-      balanceBefore: Number(balanceBefore) || 0,
-      balanceAfter: Number(balanceAfter) || 0,
-      meta,
-      source,
-      createdAt: new Date().toISOString(),
-    };
+    return { userId: String(user?._id || ""), type, amount: Number(amount) || 0, status, note, balanceBefore: Number(balanceBefore) || 0, balanceAfter: Number(balanceAfter) || 0, meta, source, createdAt: new Date().toISOString() };
   }
 }
 
 async function loadTransactionsForUser(userId, limit = 50) {
-  return await Transaction.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .exec()
-    .catch(() => []);
+  return await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []);
 }
 
 async function loadOpenPositionsForUser(userId) {
-  const rows = await Position.find({
-    user: userId,
-    status: { $in: ["OPEN", "open", "Open"] },
-  })
-    .sort({ createdAt: -1 })
-    .lean()
-    .exec()
-    .catch(() => []);
-
+  const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
   return (rows || []).map(annotatePosition);
 }
 
 async function loadAllPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .lean()
-    .exec()
-    .catch(() => []);
-
+  const rows = await Position.find({ user: userId }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
   return (rows || []).map(annotatePosition);
 }
 
@@ -720,18 +510,8 @@ async function buildAccountForUser(userDoc) {
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
   const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
-  const openPnl = (openPositions || []).reduce(
-    (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
-    0
-  );
-
-  const normalizedWallet = normalizeWalletSnapshot(
-    walletSnapshot
-      ? { ...walletSnapshot, balanceOwn: balance, balance }
-      : { balanceOwn: balance, balance },
-    openPnl
-  );
-
+  const openPnl = (openPositions || []).reduce((sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0), 0);
+  const normalizedWallet = normalizeWalletSnapshot(walletSnapshot ? { ...walletSnapshot, balanceOwn: balance, balance } : { balanceOwn: balance, balance }, openPnl);
   return {
     account: {
       ...normalizedWallet,
@@ -766,42 +546,15 @@ function emitStateUpdates(userId, accountPayload = null, positions = null, trans
   }
 }
 
-async function broadcastLiveTradingState() {
-  try {
-    const openUserIds = await Position.distinct("user", {
-      status: { $in: ["OPEN", "open", "Open"] },
-    }).catch(() => []);
-
-    for (const userId of openUserIds || []) {
-      const user = await User.findById(userId).catch(() => null);
-      if (!user) continue;
-
-      const account = await buildAccountForUser(user);
-      emitStateUpdates(user._id, account, account.positions, null);
-    }
-  } catch (err) {
-    console.warn("broadcastLiveTradingState error:", err?.message || err);
-  }
-}
-
-const liveTradingTimer = setInterval(() => {
-  broadcastLiveTradingState().catch(() => {});
-}, 2000);
-
-if (typeof liveTradingTimer.unref === "function") liveTradingTimer.unref();
-
 async function requireAdmin(req, res, next) {
   try {
     const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
-
     if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
-
     const user = await getUserDocFromBearer(req);
     if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
       req.user = user;
       return next();
     }
-
     return res.status(401).json({ ok: false, error: "Admin unauthorized" });
   } catch {
     return res.status(401).json({ ok: false, error: "Admin unauthorized" });
@@ -814,29 +567,19 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   const side = normalizeSide(position.side || position.direction);
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
-  const px = Number(currentPrice) || 0;
-
-  if (!(entryPrice > 0 && qty > 0 && px > 0)) {
-    throw new Error("price_invalid");
-  }
-
   const sign = side === "SELL" ? -1 : 1;
-  const realizedPnl = (px - entryPrice) * qty * sign;
+  const realizedPnl = (Number(currentPrice) - entryPrice) * qty * sign;
 
   const wallet = await getWalletDocForUser(user._id);
   const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
   const reservedMargin = Number(position.marginReserved ?? 0) || 0;
   const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
-  const credit = Number(wallet.credit ?? 0) || 0;
 
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-  wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
+  wallet.balanceOwn = balanceBefore + realizedPnl;
   wallet.balance = wallet.balanceOwn;
   wallet.equity = wallet.balanceOwn;
-  wallet.freeMargin = Math.max(
-    wallet.equity + credit - wallet.marginUsed,
-    0
-  );
+  wallet.freeMargin = Math.max(wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
   wallet.updatedAt = new Date();
   await wallet.save();
@@ -845,8 +588,8 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   await user.save();
 
   position.status = "CLOSED";
-  position.currentPrice = px;
-  position.closePrice = px;
+  position.currentPrice = currentPrice;
+  position.closePrice = currentPrice;
   position.realizedPnl = realizedPnl;
   position.pnl = realizedPnl;
   position.closedAt = new Date();
@@ -861,16 +604,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
     note: `${side} ${symbol}`,
     balanceBefore,
     balanceAfter: wallet.balanceOwn,
-    meta: {
-      positionId: String(position._id),
-      symbol,
-      side,
-      qty,
-      entryPrice,
-      closePrice: px,
-      marginReleased: reservedMargin,
-      realizedPnl,
-    },
+    meta: { positionId: String(position._id), symbol, side, qty, entryPrice, closePrice: currentPrice, marginReleased: reservedMargin, realizedPnl },
     source,
   });
 
@@ -884,7 +618,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
     side,
     qty,
     entryPrice,
-    currentPrice: px,
+    currentPrice,
     realizedPnl,
     balance: wallet.balanceOwn,
     account: account.account,
@@ -1072,21 +806,7 @@ app.get("/api/wallet", async (req, res) => {
     const user = await getUserDocFromBearer(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const payload = await buildAccountForUser(user);
-    return res.json({
-      ok: true,
-      wallet: payload.wallet,
-      account: payload.account,
-      balance: payload.account.balance,
-      balanceOwn: payload.account.balanceOwn,
-      availableBalance: payload.account.availableBalance,
-      equity: payload.account.equity,
-      marginUsed: payload.account.marginUsed,
-      freeMargin: payload.account.freeMargin,
-      marginLevel: payload.account.marginLevel,
-      leverageFactor: payload.account.leverageFactor,
-      currency: payload.account.currency,
-      transactions: payload.transactions,
-    });
+    return res.json({ ok: true, wallet: payload.wallet, account: payload.account, balance: payload.account.balance, balanceOwn: payload.account.balanceOwn, availableBalance: payload.account.availableBalance, equity: payload.account.equity, marginUsed: payload.account.marginUsed, freeMargin: payload.account.freeMargin, marginLevel: payload.account.marginLevel, leverageFactor: payload.account.leverageFactor, currency: payload.account.currency, transactions: payload.transactions });
   } catch (e) {
     console.error("/api/wallet error", e);
     return res.status(500).json({ error: "Server error" });
@@ -1139,10 +859,7 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) {
-      wallet.leverageFactor = leverage;
-      user.leverage = leverage;
-    }
+    if (Number.isFinite(leverage) && leverage > 0) { wallet.leverageFactor = leverage; user.leverage = leverage; }
     wallet.equity = wallet.balanceOwn;
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
@@ -1152,24 +869,10 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({
-      user,
-      type: "deposit",
-      amount,
-      status: "completed",
-      note,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
-      meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor },
-      source: "api/admin/deposit",
-    });
+    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({
-      ok: true,
-      msg: "Depósito aplicado",
-      data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet },
-    });
+    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1197,24 +900,10 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     await wallet.save();
     user.balance = wallet.balanceOwn;
     await user.save();
-    const tx = await recordTransaction({
-      user,
-      type: "withdrawal",
-      amount: -Math.abs(amount),
-      status: "completed",
-      note,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
-      meta: { source: "admin-panel" },
-      source: "api/admin/withdraw",
-    });
+    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
     const account = await buildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({
-      ok: true,
-      msg: "Retiro aplicado",
-      data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet },
-    });
+    return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
   } catch (err) {
     console.error("/api/admin/withdraw error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1238,77 +927,65 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 /* ======================================================
    TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
+
+// 🔒 Anti doble orden en memoria (simple pero efectivo)
+const activeOrders = new Set();
+
 app.post("/api/trade/open", async (req, res) => {
-  const user = await getUserDocFromBearer(req);
-  if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-  const body = req.body || {};
-  const symbol = normalizePositionSymbol(body);
-  const side = normalizeSide(body.side);
-  const qty = normalizeQty(body);
-
-  if (!symbol || !side || !qty) {
-    return res.status(400).json({ ok: false, error: "invalid_params" });
-  }
-
-  const lockKey = makeOpenLockKey(user._id, symbol, side);
-
-  if (!withOpenLock(lockKey, 3000)) {
-    return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
-  }
-
-  let wallet = null;
-  let balanceBefore = 0;
-  let marginReserved = 0;
-  let walletSaved = false;
-  let userSaved = false;
-
   try {
-    wallet = await getWalletDocForUser(user._id);
+    const user = await getUserDocFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
+    const body = req.body || {};
+    const symbol = normalizePositionSymbol(body);
+    const side = normalizeSide(body.side);
+    const qty = normalizeQty(body);
+
+    if (!symbol || !side || !qty) {
+      return res.status(400).json({ ok: false, error: "invalid_params" });
+    }
+
+    const lockKey = `${user._id}_${symbol}_${side}`;
+    if (activeOrders.has(lockKey)) {
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
+    }
+    activeOrders.add(lockKey);
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceOwn = Number(wallet.balanceOwn || 0);
+    const credit = Number(wallet.credit || 0);
+    const marginUsed = Number(wallet.marginUsed || 0);
     const leverage = Math.max(Number(wallet.leverageFactor || 1), 1);
 
     const price = resolveOrderPrice(body, symbol);
-    if (!price || price <= 0) {
+    if (!price) {
+      activeOrders.delete(lockKey);
       return res.status(400).json({ ok: false, error: "price_invalid" });
     }
 
-    const duplicateOpen = await Position.findOne({
-      user: user._id,
-      symbol,
-      side,
-      status: "OPEN",
-    }).catch(() => null);
-
-    if (duplicateOpen) {
-      return res.status(429).json({ ok: false, error: "position_already_open" });
-    }
-
     const notional = qty * price;
-    marginReserved = notional / leverage;
-    const freeMarginBefore = balanceBefore + credit - marginUsedBefore;
+    const requiredMargin = notional / leverage;
 
-    if (freeMarginBefore < marginReserved) {
+    const freeMargin = balanceOwn + credit - marginUsed;
+
+    if (freeMargin < requiredMargin) {
+      activeOrders.delete(lockKey);
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    wallet.balanceOwn = balanceBefore - marginReserved;
-    wallet.balance = wallet.balanceOwn;
-    wallet.marginUsed = marginUsedBefore + marginReserved;
+    // ✅ DESCONTAR SALDO REAL
+    wallet.balanceOwn = balanceOwn - requiredMargin;
+
+    // ✅ AUMENTAR MARGIN USED
+    wallet.marginUsed = marginUsed + requiredMargin;
+
+    // ✅ RECALCULAR
     wallet.equity = wallet.balanceOwn;
-    wallet.freeMargin = Math.max(wallet.equity + credit - wallet.marginUsed, 0);
+    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-    wallet.updatedAt = new Date();
 
     await wallet.save();
-    walletSaved = true;
-
-    user.balance = wallet.balanceOwn;
-    await user.save();
-    userSaved = true;
 
     const position = await Position.create({
       user: user._id,
@@ -1317,90 +994,31 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved,
+      marginReserved: requiredMargin,
       leverage,
       status: "OPEN",
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
-    const tx = await recordTransaction({
-      user,
-      type: "trade_open",
-      amount: -Math.abs(marginReserved),
-      status: "completed",
-      note: `${side} ${symbol}`,
-      balanceBefore,
-      balanceAfter: wallet.balanceOwn,
-      meta: {
-        positionId: String(position._id),
-        symbol,
-        side,
-        qty,
-        entryPrice: price,
-        marginReserved,
-        leverage,
-      },
-      source: "api/trade/open",
-    });
-
-    const account = await buildAccountForUser(user);
-    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
-
-    emitStateUpdates(user._id, account, [annotatedPosition], tx);
+    activeOrders.delete(lockKey);
 
     return res.json({
       ok: true,
       msg: "OPENED",
-      position: annotatedPosition,
+      position,
       wallet,
-      account: account.account,
-      transaction: tx,
     });
   } catch (err) {
-    console.error("OPEN ERROR:", err);
-
-    if (wallet && walletSaved) {
-      try {
-        wallet.balanceOwn = balanceBefore;
-        wallet.balance = balanceBefore;
-        wallet.marginUsed = Math.max(
-          Number(wallet.marginUsed ?? 0) - Number(marginReserved ?? 0),
-          0
-        );
-        wallet.equity = wallet.balanceOwn;
-        wallet.freeMargin = Math.max(
-          wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed,
-          0
-        );
-        wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-        wallet.updatedAt = new Date();
-        await wallet.save();
-
-        if (userSaved) {
-          user.balance = balanceBefore;
-          await user.save();
-        }
-      } catch (rollbackErr) {
-        console.warn("ROLLBACK OPEN ERROR:", rollbackErr?.message || rollbackErr);
-      }
-    }
-
-    return res.status(500).json({ ok: false, error: err?.message || "server_error" });
-  } finally {
-    releaseOpenLock(lockKey);
+    console.error(err);
+    return res.status(500).json({ ok: false });
   }
 });
 
 app.post("/api/trade/close", async (req, res) => {
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user) return res.status(401).json({ ok: false });
 
-    const { positionId } = req.body || {};
-    if (!positionId) {
-      return res.status(400).json({ ok: false, error: "positionId_required" });
-    }
+    const { positionId } = req.body;
 
     const position = await Position.findOne({
       _id: positionId,
@@ -1412,28 +1030,45 @@ app.post("/api/trade/close", async (req, res) => {
       return res.status(404).json({ ok: false, error: "not_found" });
     }
 
-    const body = req.body || {};
-    const resolvedPrice =
-      resolveOrderPrice(body, position.symbol) ||
-      getCurrentPriceForSymbol(position.symbol) ||
-      Number(position.entryPrice) ||
-      0;
+    const price = getCurrentPriceForSymbol(position.symbol);
 
-    if (!(resolvedPrice > 0)) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
-    }
+    const entry = position.entryPrice;
+    const qty = position.qty;
+    const side = position.side === "SELL" ? -1 : 1;
 
-    const result = await applyCloseToPosition({
-      user,
-      positionDoc: position,
-      currentPrice: resolvedPrice,
-      source: "api/trade/close",
-    });
+    const pnl = (price - entry) * qty * side;
 
-    return res.json({ ok: true, ...result });
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balanceOwn = Number(wallet.balanceOwn || 0);
+    const marginUsed = Number(wallet.marginUsed || 0);
+    const credit = Number(wallet.credit || 0);
+
+    const marginReserved = Number(position.marginReserved || 0);
+
+    // ✅ DEVOLVER MARGEN + PNL
+    wallet.balanceOwn = balanceOwn + marginReserved + pnl;
+
+    // ✅ LIBERAR MARGEN
+    wallet.marginUsed = Math.max(marginUsed - marginReserved, 0);
+
+    // ✅ RECALCULAR
+    wallet.equity = wallet.balanceOwn;
+    wallet.freeMargin = wallet.equity + credit - wallet.marginUsed;
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
+    await wallet.save();
+
+    position.status = "CLOSED";
+    position.closePrice = price;
+    position.realizedPnl = pnl;
+
+    await position.save();
+
+    return res.json({ ok: true, pnl, wallet });
   } catch (err) {
-    console.error("CLOSE ERROR:", err);
-    return res.status(500).json({ ok: false, error: err?.message || "server_error" });
+    console.error(err);
+    return res.status(500).json({ ok: false });
   }
 });
 
@@ -1472,71 +1107,40 @@ let polygonSocket = null;
 
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
-  try {
-    socket.emit("prices_snapshot", getPriceStore() || {});
-  } catch {
-    socket.emit("prices_snapshot", {});
-  }
+  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
 
   socket.on("request_prices_snapshot", () => {
-    try {
-      socket.emit("prices_snapshot", getPriceStore() || {});
-    } catch {
-      socket.emit("prices_snapshot", {});
-    }
+    try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
   });
 
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
-      if (priceHandler && typeof priceHandler.getSymbols === "function") {
-        socket.emit("symbols_update", priceHandler.getSymbols() || []);
-      } else if (prices && Object.keys(prices).length) {
-        socket.emit(
-          "symbols_update",
-          Object.keys(prices).map((k) => ({
-            symbol: k,
-            label: (k.split(":").pop() || k).replace("_", "/"),
-            market: prices[k]?.market || "Unknown",
-          }))
-        );
-      } else {
-        socket.emit("symbols_update", SAMPLE_SYMBOLS);
-      }
-    } catch {
-      socket.emit("symbols_update", SAMPLE_SYMBOLS);
-    }
+      if (priceHandler && typeof priceHandler.getSymbols === "function") socket.emit("symbols_update", priceHandler.getSymbols() || []);
+      else if (prices && Object.keys(prices).length) socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+      else socket.emit("symbols_update", SAMPLE_SYMBOLS);
+    } catch { socket.emit("symbols_update", SAMPLE_SYMBOLS); }
   });
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
-        polygonSocket.subscribe(symbol, kind);
-      }
+      if (polygonSocket && typeof polygonSocket.subscribe === "function") polygonSocket.subscribe(symbol, kind);
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("subscribe error:", e);
-    }
+    } catch (e) { console.warn("subscribe error:", e); }
   });
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
-        polygonSocket.unsubscribe(symbol, kind);
-      }
+      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") polygonSocket.unsubscribe(symbol, kind);
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
-    } catch (e) {
-      console.warn("unsubscribe error:", e);
-    }
+    } catch (e) { console.warn("unsubscribe error:", e); }
   });
 
-  socket.on("disconnect", (reason) =>
-    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
-  );
+  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
 });
 
 try {
@@ -1581,9 +1185,7 @@ for (const cand of staticCandidates) {
 
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(
-    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
-  );
+  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -1608,25 +1210,19 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/"))
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/"))
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
-    try {
-      return fs.existsSync(p) && fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
+    try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
   });
 }
 
@@ -1641,16 +1237,10 @@ app.use(async (req, res, next) => {
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res
-      .status(404)
-      .type("application/javascript; charset=utf-8")
-      .send(`console.error("JS missing: ${pathname}");`);
+    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res
-      .status(500)
-      .type("application/javascript; charset=utf-8")
-      .send(`console.error("JS server error");`);
+    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
   }
 });
 
@@ -1724,11 +1314,7 @@ const gracefulShutdown = async (signal) => {
     });
     await safeClosePolygonSocket();
     if (typeof global?.stopRiskWatcher === "function") {
-      try {
-        global.stopRiskWatcher();
-      } catch (e) {
-        console.warn("stopRiskWatcher threw:", e);
-      }
+      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
     }
     await mongoose.disconnect();
     clearTimeout(timeout);
