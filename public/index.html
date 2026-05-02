@@ -4476,327 +4476,339 @@ function renderBottomPanels() {
     `;
   }
 }
- function attachGlobalDelegation() {
-  if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
-  window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
+function attachGlobalDelegation() {
+    if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
+    window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
 
-  document.addEventListener('click', async (ev) => {
-    try {
-      const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
-      if (!inPrivate) return;
+    document.addEventListener('click', async (ev) => {
+      try {
+        const inPrivate = ev.target.closest && ev.target.closest('#privateArea_full');
+        if (!inPrivate) return;
 
-      const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
-      if (clicked) flashButton(clicked);
+        const clicked = ev.target.closest && ev.target.closest('button, .broker-symbol-card, [data-action], [data-market], [data-close-position]');
+        if (clicked) flashButton(clicked);
 
-      const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
-      if (marketBtn && marketBtn.dataset.market !== undefined) {
-        ev.preventDefault();
-        state.marketFilter = marketBtn.dataset.market || 'All';
-        renderMarketTabs();
-        renderSymbolsGrid();
-        renderBottomPanels();
-        return;
+        const marketBtn = ev.target.closest && ev.target.closest('[data-market]');
+        if (marketBtn && marketBtn.dataset.market !== undefined) {
+          ev.preventDefault();
+          state.marketFilter = marketBtn.dataset.market || 'All';
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          return;
+        }
+
+        const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
+        if (symbolCard) {
+          ev.preventDefault();
+          const symbol = symbolCard.dataset.symbol || '';
+          const meta =
+            symbolMap().get(String(symbol).toUpperCase()) ||
+            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
+            null;
+
+          if (meta) selectSymbol(meta, { openChart: true });
+          return;
+        }
+
+        const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
+        if (closeBtn) {
+          ev.preventDefault();
+          const pid = closeBtn.dataset.closePosition;
+          const sym = closeBtn.dataset.symbol;
+          const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
+          await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
+        if (!actionTarget) return;
+
+        const action = actionTarget.dataset.action;
+
+        if (action === 'buy') {
+          ev.preventDefault();
+          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === 'sell') {
+          ev.preventDefault();
+          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
+
+        if (action === 'open-chart') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container');
+          return;
+        }
+
+        if (action === 'open-chart-bottom') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
+          return;
+        }
+
+        if (action === 'refresh-all') {
+          ev.preventDefault();
+          await requestBackendRefresh();
+          return;
+        }
+
+        if (action === 'refresh-symbols') {
+          ev.preventDefault();
+          await loadRealMarkets();
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === 'refresh-quotes') {
+          ev.preventDefault();
+          await loadRealQuotes();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
+
+        if (action === 'refresh-account') {
+          ev.preventDefault();
+          await loadAccount();
+          renderBottomPanels();
+          return;
+        }
+
+        if (action === 'refresh-positions') {
+          ev.preventDefault();
+          await loadPositions();
+          renderBottomPanels();
+          return;
+        }
+      } catch (e) {
+        warn('global click delegation', e);
       }
+    }, true);
 
-      const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
-      if (symbolCard) {
-        ev.preventDefault();
-        const symbol = symbolCard.dataset.symbol || '';
-        const meta =
-          symbolMap().get(String(symbol).toUpperCase()) ||
-          getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
-          null;
+    document.addEventListener('input', (ev) => {
+      try {
+        if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
 
-        if (meta) selectSymbol(meta, { openChart: true });
-        return;
-      }
+        if (
+          ev.target.id === 'brokerOrderSize' ||
+          ev.target.id === 'brokerOrderSizeBottom' ||
+          ev.target.id === 'order-price' ||
+          ev.target.id === 'order-price-bottom'
+        ) {
+          renderMargin();
+        }
 
-      const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
-      if (closeBtn) {
-        ev.preventDefault();
-        const pid = closeBtn.dataset.closePosition;
-        const sym = closeBtn.dataset.symbol;
-        const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
+        if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
+          applySearchValue(ev.target.value);
+        }
 
-        await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
-        return;
-      }
-
-      const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
-      if (!actionTarget) return;
-
-      const action = actionTarget.dataset.action;
-
-      if (action === 'buy') {
-        ev.preventDefault();
-        await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
-        return;
-      }
-
-      if (action === 'sell') {
-        ev.preventDefault();
-        await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
-        return;
-      }
-
-      if (action === 'open-chart') {
-        ev.preventDefault();
-        const meta = getActiveSymbolMeta();
-        if (meta) await openTradingView(meta, 'tv_chart_container');
-        return;
-      }
-
-      if (action === 'open-chart-bottom') {
-        ev.preventDefault();
-        const meta = getActiveSymbolMeta();
-        if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
-        return;
-      }
-
-      if (action === 'refresh-all') {
-        ev.preventDefault();
-        await requestBackendRefresh();
-        return;
-      }
-
-      if (action === 'refresh-symbols') {
-        ev.preventDefault();
-        await loadRealMarkets();
-        renderMarketTabs();
-        renderSymbolsGrid();
-        renderBottomPanels();
-        const meta = getActiveSymbolMeta();
-        if (meta) renderSymbolDetails(meta);
-        return;
-      }
-
-      if (action === 'refresh-quotes') {
-        ev.preventDefault();
-        await loadRealQuotes();
-        renderSymbolsGrid();
-        renderBottomPanels();
-        const meta = getActiveSymbolMeta();
-        if (meta) renderSymbolDetails(meta);
-        return;
-      }
-
-      if (action === 'refresh-account') {
-        ev.preventDefault();
-        await loadAccount();
-        renderBottomPanels();
-        return;
-      }
-
-      if (action === 'refresh-positions') {
-        ev.preventDefault();
-        await loadPositions();
-        renderBottomPanels();
-        return;
-      }
-    } catch (e) {
-      warn('global click delegation', e);
-    }
-  }, true);
-
-  document.addEventListener('input', (ev) => {
-    try {
-      if (!ev.target || !ev.target.closest || !ev.target.closest('#privateArea_full')) return;
-
-      if (
-        ev.target.id === 'brokerOrderSize' ||
-        ev.target.id === 'brokerOrderSizeBottom' ||
-        ev.target.id === 'order-price' ||
-        ev.target.id === 'order-price-bottom'
-      ) {
-        renderMargin();
-      }
-
-      if (ev.target.id === 'brokerMarketSearch' || ev.target.id === 'brokerMarketSearchBottom') {
-        applySearchValue(ev.target.value);
-      }
-
-      if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
-        syncOrderTypeBoxes(ev.target.value);
-        syncOrderFields();
-      }
-    } catch (e) {}
-  }, true);
-}
-
-function startAutoRefresh() {
-  if (state.pollTimer) return;
-  state.pollTimer = setInterval(() => {
-    try {
-      if (!isLoggedIn()) return;
-      loadAccount().catch(() => {});
-      loadPositions().catch(() => {});
-      loadRealQuotes().then(() => {
-        renderSymbolsGrid();
-        renderBottomPanels();
-        const meta = getActiveSymbolMeta();
-        if (meta) renderSymbolDetails(meta);
-      }).catch(() => {});
-    } catch (e) {}
-  }, 7000);
-}
-
-function stopAutoRefresh() {
-  if (state.pollTimer) {
-    clearInterval(state.pollTimer);
-    state.pollTimer = null;
+        if (ev.target.id === 'order-type' || ev.target.id === 'order-type-bottom') {
+          syncOrderTypeBoxes(ev.target.value);
+          syncOrderFields();
+        }
+      } catch (e) {}
+    }, true);
   }
-}
 
-function updatePrivateHeaderName(user = {}) {
-  const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente');
-  const headerName = document.querySelector('#headerActions [data-leones-user-name]');
-  if (headerName) headerName.textContent = name;
+  function startAutoRefresh() {
+    if (state.pollTimer) return;
+    state.pollTimer = setInterval(() => {
+      try {
+        if (!isLoggedIn()) return;
+        loadAccount().catch(() => {});
+        loadPositions().catch(() => {});
+        loadRealQuotes().then(() => {
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+        }).catch(() => {});
+      } catch (e) {}
+    }, 7000);
+  }
 
-  const welcomeSelectors = [
-    '#welcomeUser',
-    '.welcomeUser',
-    '[data-leones-user-name]',
-    '[data-user-name]',
-    '[data-welcome-name]'
-  ];
-  welcomeSelectors.forEach(sel => {
-    document.querySelectorAll(sel).forEach(el => {
-      try { el.textContent = name; } catch (e) {}
+  function stopAutoRefresh() {
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  function updatePrivateHeaderName(user = {}) {
+    const name = String(user.name || user.fullName || user.displayName || user.alias || user.email || 'Cliente');
+    const headerName = document.querySelector('#headerActions [data-leones-user-name]');
+    if (headerName) headerName.textContent = name;
+
+    const welcomeSelectors = [
+      '#welcomeUser',
+      '.welcomeUser',
+      '[data-leones-user-name]',
+      '[data-user-name]',
+      '[data-welcome-name]'
+    ];
+    welcomeSelectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        try { el.textContent = name; } catch (e) {}
+      });
     });
-  });
-}
-
-function attachLoginEventBridge() {
-  if (window.__LEONES_EXT2_LOGIN_BRIDGE__) return;
-  window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
-
-  window.addEventListener('leones:loggedIn', () => {
-    if (isLoggedIn()) initTradingUI().catch(e => warn('initTradingUI after login', e));
-  });
-
-  window.addEventListener('leones:loggedOut', () => {
-    resetTradingState();
-  });
-}
-
-async function initTradingUI(context = {}) {
-  if (!isLoggedIn()) return null;
-
-  injectUiStyles();
-
-  const root = ensureRoot();
-  if (!root) return null;
-
-  if (!state.started) {
-    ensureShell(root);
-    state.started = true;
   }
 
-  clearMessage();
+  function attachLoginEventBridge() {
+    if (window.__LEONES_EXT2_LOGIN_BRIDGE__) return;
+    window.__LEONES_EXT2_LOGIN_BRIDGE__ = true;
 
-  if (context && context.user && typeof context.user === 'object') {
-    state.account = { ...(state.account || {}), ...context.user };
-    updatePrivateHeaderName(context.user);
-    syncAccountView(context.user);
-  } else {
-    const user = getUser();
-    if (user && Object.keys(user).length) {
-      updatePrivateHeaderName(user);
+    window.addEventListener('leones:loggedIn', () => {
+      if (isLoggedIn()) initTradingUI().catch(e => warn('initTradingUI after login', e));
+    });
+
+    window.addEventListener('leones:loggedOut', () => {
+      resetTradingState();
+    });
+  }
+
+  async function initTradingUI(context = {}) {
+    if (!isLoggedIn()) return null;
+
+    injectUiStyles();
+
+    const root = ensureRoot();
+    if (!root) return null;
+
+    if (!state.started) {
+      ensureShell(root);
+      state.started = true;
     }
+
+    clearMessage();
+
+    if (context && context.user && typeof context.user === 'object') {
+      state.account = { ...(state.account || {}), ...context.user };
+      updatePrivateHeaderName(context.user);
+      syncAccountView(context.user);
+    } else {
+      const user = getUser();
+      if (user && Object.keys(user).length) {
+        updatePrivateHeaderName(user);
+      }
+    }
+
+    bindMenuButtons();
+    bindOrderUi();
+    attachGlobalDelegation();
+    await ensureSocket();
+    bindSocketListeners();
+    createFloatingTradesPanel();
+    startAutoRefresh();
+
+    await requestBackendRefresh();
+    await nextFrame();
+
+    const list = getSymbols();
+    const meta = getActiveSymbolMeta() || list[0] || null;
+
+    if (meta) {
+      state.activeSymbol = meta.symbol;
+      TR.activeSymbol = meta.symbol;
+      TR.activeMeta = meta;
+
+      renderSymbolDetails(meta);
+      renderBottomPanels();
+
+      if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
+        await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
+        await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+      }
+
+      requestRealtimeForSymbol(meta);
+    } else {
+      setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
+    }
+
+    syncOrderFields();
+    return true;
   }
 
-  bindMenuButtons();
-  bindOrderUi();
-  attachGlobalDelegation();
-  await ensureSocket();
-  bindSocketListeners();
-  createFloatingTradesPanel();
-  startAutoRefresh();
+  function openTrade(symbol, amount, direction, price) {
+    if (amount > ACCOUNT.balance) {
+      alert('Fondos insuficientes');
+      return;
+    }
 
-  await requestBackendRefresh();
-  await nextFrame();
+    ACCOUNT.balance -= amount;
+    ACCOUNT.usedMargin += amount;
 
-  const list = getSymbols();
-  const meta = getActiveSymbolMeta() || list[0] || null;
+    const trade = {
+      id: Date.now(),
+      symbol,
+      amount,
+      direction,
+      openPrice: price,
+      currentPrice: price,
+      profit: 0
+    };
 
-  if (meta) {
-    state.activeSymbol = meta.symbol;
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
+    OPEN_TRADES.push(trade);
+    updateAccountMetrics();
+  }
 
-    renderSymbolDetails(meta);
+  function renderBottomPanelsWrapper() {
     renderBottomPanels();
-
-    if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
-      await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
-      await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+    const meta = getActiveSymbolMeta();
+    if (meta) {
+      renderSymbolDetails(meta);
+      requestRealtimeForSymbol(meta);
     }
-
-    requestRealtimeForSymbol(meta);
-  } else {
-    setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
   }
 
-  syncOrderFields();
-  return true;
-}
+  function exposeAPI() {
+    window.startBrokerUI = initTradingUI;
+    window.refreshBrokerUI = requestBackendRefresh;
+    window.openBrokerTradingView = openTradingView;
+    window.selectBrokerSymbol = selectSymbol;
 
-function openTrade(symbol, amount, direction, price) {
-  return placeBrokerOrder({
-    symbol,
-    qty: amount,
-    direction: String(direction || '').toLowerCase(),
-    side: String(direction || '').toLowerCase(),
-    price: Number.isFinite(Number(price)) ? Number(price) : undefined,
-    type: 'market'
-  });
-}
+    window.openTrade = openTrade;
+    window.placeBrokerOrder = placeBrokerOrder;
+    window.updateTradesPrices = updateTradesPrices;
+    window.updateAccountMetrics = updateAccountMetrics;
+    window.closeAllTrades = closeAllTrades;
+    window.adminDeposit = adminDeposit;
 
-function renderBottomPanelsWrapper() {
-  renderBottomPanels();
-  const meta = getActiveSymbolMeta();
-  if (meta) {
-    renderSymbolDetails(meta);
-    requestRealtimeForSymbol(meta);
+    window.__LEONES_BROKER_EXT2 = {
+      initTradingUI,
+      refreshBrokerUI: requestBackendRefresh,
+      openTradingView,
+      selectSymbol,
+      loadMarketsAndQuotes,
+      loadRealMarkets,
+      loadRealQuotes,
+      loadAccount,
+      loadPositions,
+      placeOrder,
+      placeBrokerOrder,
+      openTrade,
+      closePosition,
+      requestBackendRefresh,
+      positions: state.positions,
+      activeSymbol: state.activeSymbol,
+      activeMeta: TR.activeMeta || null,
+      symbolPrices: TR.symbolPrices || {}
+    };
   }
-}
-
-function exposeAPI() {
-  window.startBrokerUI = initTradingUI;
-  window.refreshBrokerUI = requestBackendRefresh;
-  window.openBrokerTradingView = openTradingView;
-  window.selectBrokerSymbol = selectSymbol;
-
-  window.openTrade = openTrade;
-  window.placeBrokerOrder = placeBrokerOrder;
-  window.updateTradesPrices = updateTradesPrices;
-  window.updateAccountMetrics = updateAccountMetrics;
-  window.closeAllTrades = closeAllTrades;
-  window.adminDeposit = adminDeposit;
-
-  window.__LEONES_BROKER_EXT2 = {
-    initTradingUI,
-    refreshBrokerUI: requestBackendRefresh,
-    openTradingView,
-    selectSymbol,
-    loadMarketsAndQuotes,
-    loadRealMarkets,
-    loadRealQuotes,
-    loadAccount,
-    loadPositions,
-    placeOrder,
-    placeBrokerOrder,
-    openTrade,
-    closePosition,
-    requestBackendRefresh,
-    get positions() { return state.positions; },
-    get activeSymbol() { return state.activeSymbol; },
-    get activeMeta() { return TR.activeMeta || null; },
-    get symbolPrices() { return TR.symbolPrices || {}; },
-    get markets() { return state.markets; },
-    get account() { return state.account; }
-  };
-}
 
 /* =========================
    NORMALIZE SYMBOL
@@ -4809,11 +4821,9 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
-   FLAGS (ANTI-SPAM REAL)
+   FLAGS
 ========================= */
 let sendingOrder = false;
-let lastOrderTime = 0;
-const ORDER_COOLDOWN = 1200;
 
 /* =========================
    GET ACTIVE SYMBOL
@@ -4832,16 +4842,32 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC
+   🔥 LIVE PRICE SYNC (FIXED)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
+    // 🔥 PRIMERO intenta endpoint correcto
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     if (data?.price && Number(data.price) > 0) {
       window.tvPrice = Number(data.price);
       return Number(data.price);
+    }
+
+    // 🔥 FALLBACK quotes
+    const res2 = await fetch("/api/quotes");
+    const quotes = await res2.json();
+
+    const normalized = normalizeSymbol(symbol);
+
+    const match = quotes.find(q =>
+      normalizeSymbol(q.symbol) === normalized
+    );
+
+    if (match?.price && Number(match.price) > 0) {
+      window.tvPrice = Number(match.price);
+      return Number(match.price);
     }
 
     return null;
@@ -4852,14 +4878,15 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   🔥 GET LIVE PRICE SAFE
+   🔥 GET LIVE PRICE SAFE (MEJORADO)
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
     window.tvPrice,
     window.lastPrice,
     window.currentPrice,
-    window.marketPrice
+    window.entryPrice,
+    window.marketPrice,
   ];
 
   for (const v of candidates) {
@@ -4871,35 +4898,13 @@ function getLivePriceFallback() {
 }
 
 /* =========================
-   CLEAR INPUTS
-========================= */
-function clearOrderInputs() {
-  const ids = [
-    "brokerOrderSize",
-    "brokerOrderSizeBottom",
-    "order-price",
-    "order-price-bottom"
-  ];
-
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = "";
-  });
-}
-
-/* =========================
    PLACE ORDER CONTROLLER
 ========================= */
 async function placeOrder(input) {
-  const now = Date.now();
-  if (sendingOrder || (now - lastOrderTime < ORDER_COOLDOWN)) {
-    console.warn("⛔ Orden bloqueada (cooldown)");
-    return;
-  }
+  if (sendingOrder) return;
 
   try {
     sendingOrder = true;
-    lastOrderTime = now;
 
     const api = window.__LEONES_BROKER_EXT2 || {};
     let side, symbol, amount, type, price;
@@ -4943,8 +4948,7 @@ async function placeOrder(input) {
 
     const payload = {
       symbol,
-      side: side.toUpperCase(),
-      direction: side.toUpperCase(),
+      direction: side,
       type: String(type).toLowerCase(),
       qty: amount
     };
@@ -4955,27 +4959,39 @@ async function placeOrder(input) {
 
     console.log("🚀 ORDER INIT:", payload);
 
-    let result;
-
     if (typeof api.placeBrokerOrder === "function") {
-      result = await api.placeBrokerOrder(payload);
-    } else {
-      result = await placeBrokerOrder(payload);
+      return await api.placeBrokerOrder(payload);
     }
 
-    clearOrderInputs();
-    return result;
+    return await placeBrokerOrder(payload);
+
   } catch (err) {
     console.error("❌ ORDER ERROR:", err);
   } finally {
-    setTimeout(() => {
-      sendingOrder = false;
-    }, 800);
+    setTimeout(() => (sendingOrder = false), 800);
   }
 }
 
 /* =========================
-   BACKEND ORDER
+   CLICK BUY/SELL
+========================= */
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  if (!["buy", "sell"].includes(action)) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (sendingOrder) return;
+
+  await placeOrder(action);
+});
+
+/* =========================
+   🔥 FINAL BACKEND ORDER (FIXED)
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
@@ -4997,6 +5013,7 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
+    // 🔥 PRECIO GARANTIZADO
     let price = getLivePriceFallback();
 
     if (!price) {
@@ -5004,6 +5021,7 @@ async function placeBrokerOrder(payload = {}) {
     }
 
     if (!price || price <= 0) {
+      console.error("❌ Precio final inválido:", price);
       alert("No hay precio disponible del mercado");
       return;
     }
@@ -5011,7 +5029,6 @@ async function placeBrokerOrder(payload = {}) {
     const body = {
       symbol,
       side: side.toUpperCase(),
-      direction: side.toUpperCase(),
       type: "market",
       qty: amount,
       price: Number(price)
@@ -5033,22 +5050,21 @@ async function placeBrokerOrder(payload = {}) {
     console.log("📩 BACKEND RESPONSE:", data);
 
     if (!res.ok) {
+      console.error("❌ BACKEND ERROR:", data);
       alert(data?.message || "Error al abrir operación");
       return;
     }
 
-    setTimeout(() => {
-      loadPositions?.();
-      loadAccount?.();
-    }, 300);
+    await loadPositions?.();
+    await loadAccount?.();
 
     console.log("✅ ORDER OK");
     return data;
+
   } catch (err) {
     console.error("❌ ORDER FAILED:", err);
   }
 }
-
 /* =========================
    🔥 BOOT SISTEMA
 ========================= */
@@ -5088,9 +5104,7 @@ setInterval(() => {
   try {
     renderBottomPanelsWrapper();
     syncOrderFields();
-    if (typeof updateFloatingTrades === 'function') {
-      updateFloatingTrades();
-    }
+    updateFloatingTrades();
   } catch (e) {}
 }, 5000);
 
