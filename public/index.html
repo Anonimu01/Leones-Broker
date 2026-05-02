@@ -4742,26 +4742,14 @@ async function initTradingUI(context = {}) {
 }
 
 function openTrade(symbol, amount, direction, price) {
-  if (amount > ACCOUNT.balance) {
-    alert('Fondos insuficientes');
-    return;
-  }
-
-  ACCOUNT.balance -= amount;
-  ACCOUNT.usedMargin += amount;
-
-  const trade = {
-    id: Date.now(),
+  return placeBrokerOrder({
     symbol,
-    amount,
-    direction,
-    openPrice: price,
-    currentPrice: price,
-    profit: 0
-  };
-
-  OPEN_TRADES.push(trade);
-  updateAccountMetrics();
+    qty: amount,
+    direction: String(direction || '').toLowerCase(),
+    side: String(direction || '').toLowerCase(),
+    price: Number.isFinite(Number(price)) ? Number(price) : undefined,
+    type: 'market'
+  });
 }
 
 function renderBottomPanelsWrapper() {
