@@ -727,27 +727,23 @@ app.get("/api/positions/all", async (req, res) => {
   }
 });
 
-async function requireAdmin(req, res, next) {
+function requireAdmin(req, res, next) {
   try {
-    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token" });
 
-    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) {
-      return next();
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!decoded || decoded.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
-    const user = await getUserDocFromBearer(req);
-
-    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
-      req.user = user;
-      return next();
-    }
-
-    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+    req.user = decoded;
+    next();
   } catch (err) {
-    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+    return res.status(401).json({ error: "Invalid token" });
   }
 }
-
 /* ======================================================
    ADMIN
    ====================================================== */
