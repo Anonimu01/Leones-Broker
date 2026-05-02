@@ -727,6 +727,27 @@ app.get("/api/positions/all", async (req, res) => {
   }
 });
 
+async function requireAdmin(req, res, next) {
+  try {
+    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+
+    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) {
+      return next();
+    }
+
+    const user = await getUserDocFromBearer(req);
+
+    if (user && (user.role === "admin" || user.isAdmin === true || user.admin === true)) {
+      req.user = user;
+      return next();
+    }
+
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  } catch (err) {
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  }
+}
+
 /* ======================================================
    ADMIN
    ====================================================== */
