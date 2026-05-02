@@ -862,6 +862,9 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
   const sign = side === "SELL" ? -1 : 1;
   const closePx = Number(currentPrice) > 0 ? Number(currentPrice) : entryPrice;
+
+  // PnL realizado:
+  // PnL = (precio_actual - precio_entrada) * cantidad * dirección
   const realizedPnl = (closePx - entryPrice) * qty * sign;
 
   const wallet = await getWalletDocForUser(user._id);
@@ -869,6 +872,9 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   const reservedMargin = Number(position.marginReserved ?? 0) || 0;
   const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
 
+  // Al cerrar:
+  // liberar margen
+  // sumar o restar PnL al balance
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
   wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
   wallet.balance = wallet.balanceOwn;
@@ -1372,6 +1378,7 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
+    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
