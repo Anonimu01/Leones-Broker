@@ -56,7 +56,10 @@ mongoose.connection.on("connected", () => {
     const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
     const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
     const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
-    startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
+    const stopFn = startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
+    if (typeof stopFn === "function") {
+      global.stopRiskWatcher = stopFn;
+    }
     console.log(
       `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
     );
@@ -144,9 +147,10 @@ app.locals.priceHandler = priceHandler;
 
 const openTradeLocks = new Map();
 const liveSyncTimers = new Map();
+const activeOrders = new Set();
 
-function makeOpenLockKey(userId, symbol, side) {
-  return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}`;
+function makeOpenLockKey(userId, symbol, side, qty) {
+  return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}:${String(qty || "")}`;
 }
 
 function makeCloseLockKey(userId, positionId) {
@@ -171,6 +175,22 @@ function withOpenLock(key, ttlMs = 1500) {
 
 function releaseOpenLock(key) {
   openTradeLocks.delete(key);
+}
+
+function withActiveOrder(key, ttlMs = 2500) {
+  if (activeOrders.has(key)) return false;
+  activeOrders.add(key);
+
+  const t = setTimeout(() => {
+    activeOrders.delete(key);
+  }, ttlMs);
+
+  if (t && typeof t.unref === "function") t.unref();
+  return true;
+}
+
+function releaseActiveOrder(key) {
+  activeOrders.delete(key);
 }
 
 function compactSymbol(value) {
@@ -425,7 +445,10 @@ function annotatePosition(position = {}) {
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const currentPrice = Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) || entryPrice;
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
-  const pnl = isClosedPosition(position) ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0 : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+  const pnl = isClosedPosition(position)
+    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
+    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+
   return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
 }
 
@@ -447,7 +470,17 @@ async function getUserDocFromBearer(req) {
 async function getWalletDocForUser(userId) {
   let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
   if (!wallet) {
-    wallet = new Wallet({ user: userId, balanceOwn: 0, balance: 0, credit: 0, marginUsed: 0, leverageFactor: 1, equity: 0, freeMargin: 0, marginLevel: 0 });
+    wallet = new Wallet({
+      user: userId,
+      balanceOwn: 0,
+      balance: 0,
+      credit: 0,
+      marginUsed: 0,
+      leverageFactor: 1,
+      equity: 0,
+      freeMargin: 0,
+      marginLevel: 0,
+    });
   }
   return wallet;
 }
@@ -456,10 +489,25 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const balanceOwn = Number(wallet?.balanceOwn ?? wallet?.balance ?? 0) || 0;
   const credit = Number(wallet?.credit ?? 0) || 0;
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
-  const equity = balanceOwn + openPnl;
-  const freeMargin = Math.max(equity + credit - marginUsed, 0);
+  const pnl = Number(openPnl ?? 0) || 0;
+
+  const equity = balanceOwn + marginUsed + pnl + credit;
+  const freeMargin = Math.max(balanceOwn + pnl + credit, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
-  return { balance: balanceOwn, balanceOwn, credit, equity, marginUsed, freeMargin, availableBalance: freeMargin, marginLevel, leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1, currency: wallet?.currency || "USD", openPnl };
+
+  return {
+    balance: balanceOwn,
+    balanceOwn,
+    credit,
+    equity,
+    marginUsed,
+    freeMargin,
+    availableBalance: freeMargin,
+    marginLevel,
+    leverageFactor: Number(wallet?.leverageFactor ?? 1) || 1,
+    currency: wallet?.currency || "USD",
+    openPnl: pnl,
+  };
 }
 
 function getEffectiveBalance(userDoc, walletDoc) {
@@ -489,7 +537,17 @@ const transactionSchema = new mongoose.Schema(
 
 const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
-async function recordTransaction({ user, type, amount = 0, status = "completed", note = "", balanceBefore = 0, balanceAfter = 0, meta = {}, source = "server.js" }) {
+async function recordTransaction({
+  user,
+  type,
+  amount = 0,
+  status = "completed",
+  note = "",
+  balanceBefore = 0,
+  balanceAfter = 0,
+  meta = {},
+  source = "server.js",
+}) {
   try {
     const tx = await Transaction.create({
       user: user?._id || null,
@@ -507,7 +565,18 @@ async function recordTransaction({ user, type, amount = 0, status = "completed",
     return tx.toObject ? tx.toObject() : tx;
   } catch (err) {
     console.warn("recordTransaction fallback:", err?.message || err);
-    return { userId: String(user?._id || ""), type, amount: Number(amount) || 0, status, note, balanceBefore: Number(balanceBefore) || 0, balanceAfter: Number(balanceAfter) || 0, meta, source, createdAt: new Date().toISOString() };
+    return {
+      userId: String(user?._id || ""),
+      type,
+      amount: Number(amount) || 0,
+      status,
+      note,
+      balanceBefore: Number(balanceBefore) || 0,
+      balanceAfter: Number(balanceAfter) || 0,
+      meta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
   }
 }
 
@@ -516,7 +585,11 @@ async function loadTransactionsForUser(userId, limit = 50) {
 }
 
 async function loadOpenPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+  const rows = await Position.find({ user: userId, status: { $in: ["OPEN", "open", "Open"] } })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
   return (rows || []).map((p) => {
     try {
       return annotatePosition(p);
@@ -545,14 +618,21 @@ async function buildAccountForUser(userDoc) {
   const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
   const openPnl = (openPositions || []).reduce((sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0), 0);
-  const normalizedWallet = normalizeWalletSnapshot(walletSnapshot ? { ...walletSnapshot, balanceOwn: balance, balance } : { balanceOwn: balance, balance }, openPnl);
+
+  const normalizedWallet = normalizeWalletSnapshot(
+    walletSnapshot
+      ? { ...walletSnapshot, balanceOwn: balance, balance }
+      : { balanceOwn: balance, balance },
+    openPnl
+  );
+
   return {
     account: {
       ...normalizedWallet,
       balance,
       balanceOwn: balance,
       availableBalance: normalizedWallet.availableBalance,
-      equity: balance + openPnl,
+      equity: normalizedWallet.equity,
       leverage: Number(userDoc.leverage ?? walletSnapshot?.leverageFactor ?? 100) || 100,
       currency: userDoc.currency || walletSnapshot?.currency || "USD",
       positions: openPositions,
@@ -792,8 +872,8 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
   wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
   wallet.balance = wallet.balanceOwn;
-  wallet.equity = wallet.balanceOwn;
-  wallet.freeMargin = Math.max(wallet.equity + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
+  wallet.equity = wallet.balanceOwn + wallet.marginUsed;
+  wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
   wallet.updatedAt = new Date();
   await wallet.save();
@@ -859,7 +939,11 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : process.env.EMAIL_USER || process.env.SMTP_USER ? "smtp" : "none",
+    emailProvider: process.env.RESEND_API_KEY
+      ? "resend"
+      : process.env.EMAIL_USER || process.env.SMTP_USER
+        ? "smtp"
+        : "none",
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
@@ -893,17 +977,31 @@ app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
 app.post("/api/_send_test_email", async (req, res) => {
   const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
   if (!to)
-    return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
+    return res.status(400).json({
+      ok: false,
+      message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL",
+    });
   const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
+  const html =
+    req.body.html ||
+    `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
   try {
     const r = await sendEmail({ to, subject, html });
     if (r.ok)
-      return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
+      return res.json({
+        ok: true,
+        message: "Correo enviado",
+        provider: r.provider,
+        result: r.result || r.info || r.resp,
+      });
     return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
   } catch (err) {
     console.error("test email error:", err);
-    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno enviando correo",
+      error: err && err.message ? err.message : String(err),
+    });
   }
 });
 
@@ -911,7 +1009,9 @@ app.post("/api/_send_test_email", async (req, res) => {
    MARKET ROUTES
    ====================================================== */
 
-app.get("/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] }));
+app.get("/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+);
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
@@ -935,7 +1035,15 @@ app.get("/api/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -950,7 +1058,15 @@ app.get("/api/market/latest", (req, res) => {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
-      return res.json({ ok: true, symbol, price, last: price, currentPrice: price, close: price, updatedAt: new Date().toISOString() });
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        last: price,
+        currentPrice: price,
+        close: price,
+        updatedAt: new Date().toISOString(),
+      });
     }
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
@@ -966,7 +1082,13 @@ app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
     if (prices && Object.keys(prices).length) {
-      return res.json(Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+      return res.json(
+        Object.keys(prices).map((k) => ({
+          symbol: k,
+          label: (k.split(":").pop() || k).replace("_", "/"),
+          market: prices[k]?.market || "Unknown",
+        }))
+      );
     }
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
@@ -1112,20 +1234,37 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
     wallet.balanceOwn = balanceBefore + amount;
     wallet.balance = wallet.balanceOwn;
     wallet.currency = currency || wallet.currency || "USD";
-    if (Number.isFinite(leverage) && leverage > 0) { wallet.leverageFactor = leverage; user.leverage = leverage; }
-    wallet.equity = wallet.balanceOwn;
+    if (Number.isFinite(leverage) && leverage > 0) {
+      wallet.leverageFactor = leverage;
+      user.leverage = leverage;
+    }
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-    wallet.freeMargin = Math.max(wallet.equity + wallet.credit - wallet.marginUsed, 0);
+    wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
     wallet.updatedAt = new Date();
     await wallet.save();
     user.balance = wallet.balanceOwn;
     user.currency = currency || user.currency || "USD";
     if (Number.isFinite(leverage) && leverage > 0) user.leverage = leverage;
     await user.save();
-    const tx = await recordTransaction({ user, type: "deposit", amount, status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor }, source: "api/admin/deposit" });
+    const tx = await recordTransaction({
+      user,
+      type: "deposit",
+      amount,
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel", method: body.method || "deposit", currency, leverage: wallet.leverageFactor },
+      source: "api/admin/deposit",
+    });
     const account = await safeBuildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
-    return res.json({ ok: true, msg: "Depósito aplicado", data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet } });
+    return res.json({
+      ok: true,
+      msg: "Depósito aplicado",
+      data: { balance: wallet.balanceOwn, leverage: wallet.leverageFactor, transaction: tx, account: account.account, wallet: account.wallet },
+    });
   } catch (err) {
     console.error("/api/admin/deposit error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
@@ -1147,13 +1286,23 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn;
-    wallet.freeMargin = Math.max(wallet.equity - (Number(wallet.marginUsed ?? 0) || 0), 0);
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
+    wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - (Number(wallet.marginUsed ?? 0) || 0), 0);
     wallet.updatedAt = new Date();
     await wallet.save();
     user.balance = wallet.balanceOwn;
     await user.save();
-    const tx = await recordTransaction({ user, type: "withdrawal", amount: -Math.abs(amount), status: "completed", note, balanceBefore, balanceAfter: wallet.balanceOwn, meta: { source: "admin-panel" }, source: "api/admin/withdraw" });
+    const tx = await recordTransaction({
+      user,
+      type: "withdrawal",
+      amount: -Math.abs(amount),
+      status: "completed",
+      note,
+      balanceBefore,
+      balanceAfter: wallet.balanceOwn,
+      meta: { source: "admin-panel" },
+      source: "api/admin/withdraw",
+    });
     const account = await safeBuildAccountForUser(user);
     emitStateUpdates(user._id, account, null, tx);
     return res.json({ ok: true, msg: "Retiro aplicado", data: { balance: wallet.balanceOwn, transaction: tx, account: account.account, wallet: account.wallet } });
@@ -1181,8 +1330,6 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
    TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
 
-const activeOrders = new Set();
-
 app.post("/api/trade/open", async (req, res) => {
   let lockKey = null;
 
@@ -1199,8 +1346,9 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    lockKey = makeOpenLockKey(user._id, symbol, side);
-    if (!withOpenLock(lockKey, 2500)) {
+    lockKey = makeOpenLockKey(user._id, symbol, side, qty);
+
+    if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
       return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
 
@@ -1218,7 +1366,6 @@ app.post("/api/trade/open", async (req, res) => {
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
-
     const freeMargin = balanceOwn + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
@@ -1228,7 +1375,7 @@ app.post("/api/trade/open", async (req, res) => {
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn;
+    wallet.equity = wallet.balanceOwn + wallet.marginUsed;
     wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
@@ -1265,7 +1412,10 @@ app.post("/api/trade/open", async (req, res) => {
     console.error("/api/trade/open error:", err);
     return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
   } finally {
-    if (lockKey) releaseOpenLock(lockKey);
+    if (lockKey) {
+      releaseOpenLock(lockKey);
+      releaseActiveOrder(lockKey);
+    }
   }
 });
 
@@ -1295,9 +1445,7 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     const body = req.body || {};
-    const price =
-      resolveOrderPrice(body, position.symbol) ||
-      getCurrentPriceForSymbol(position.symbol);
+    const price = resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol);
 
     if (!price || !Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ ok: false, error: "price_invalid" });
@@ -1510,7 +1658,9 @@ for (const cand of staticCandidates) {
 
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -1547,7 +1697,11 @@ function resolveJsCandidate(requestPath) {
   }
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
-    try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -1626,22 +1780,36 @@ const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`📴 ${signal} recibido. Cerrando...`);
+
   const timeout = setTimeout(() => {
     console.warn("Forzando cierre...");
     process.exit(1);
   }, 30000);
   timeout.unref();
+
   try {
+    for (const t of liveSyncTimers.values()) clearTimeout(t);
+    liveSyncTimers.clear();
+    openTradeLocks.clear();
+    activeOrders.clear();
+
     await new Promise((resolve, reject) => {
       server.close((err) => {
         if (err) return reject(err);
         resolve();
       });
     });
+
     await safeClosePolygonSocket();
+
     if (typeof global?.stopRiskWatcher === "function") {
-      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
+      try {
+        global.stopRiskWatcher();
+      } catch (e) {
+        console.warn("stopRiskWatcher threw:", e);
+      }
     }
+
     await mongoose.disconnect();
     clearTimeout(timeout);
     process.exit(0);
