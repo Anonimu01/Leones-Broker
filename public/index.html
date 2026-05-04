@@ -4026,6 +4026,24 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     return null;
   }
 
+//esto es una prueva de pnl
+  
+  async function updatePnLRealTime() {
+  const positions = await fetch("/api/positions").then(r => r.json());
+
+  positions.forEach(pos => {
+    const livePrice = window.lastKnownPrice;
+
+    if (!livePrice) return;
+
+    const pnl = pos.side === "LONG"
+      ? (livePrice - pos.entryPrice) * pos.qty
+      : (pos.entryPrice - livePrice) * pos.qty;
+
+    console.log("📈 PNL:", pnl);
+  });
+}
+
 async function loadPositions() {
   const endpoints = [
     '/positions',
@@ -5082,6 +5100,13 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
+    // 🔒 BLOQUEO ANTI DOBLE CLICK
+    if (window.__ORDER_LOCK__) {
+      console.warn("🚫 Orden bloqueada (doble click)");
+      return;
+    }
+    window.__ORDER_LOCK__ = true;
+
     const symbol = normalizeSymbol(
       payload.symbol || window.tvSymbol || window.selectedSymbol
     );
@@ -5092,42 +5117,47 @@ async function placeBrokerOrder(payload = {}) {
     const user = getUser() || {};
 
     if (!user.token) {
+      window.__ORDER_LOCK__ = false;
       alert("No autenticado");
       return;
     }
 
-    if (!symbol) return alert("Símbolo inválido");
-    if (!amount || amount <= 0) return alert("Cantidad inválida");
-    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+    if (!symbol) {
+      window.__ORDER_LOCK__ = false;
+      return alert("Símbolo inválido");
+    }
+
+    if (!amount || amount <= 0) {
+      window.__ORDER_LOCK__ = false;
+      return alert("Cantidad inválida");
+    }
+
+    if (!["buy", "sell"].includes(side)) {
+      window.__ORDER_LOCK__ = false;
+      return alert("Dirección inválida");
+    }
 
     // =========================
-    // 🔥 PRECIO GARANTIZADO REAL
+    // 🔥 PRECIO GARANTIZADO
     // =========================
     let price = getLivePriceFallback();
 
-    // intento 2 (async)
     if (!price || price <= 0) {
       try {
         price = await syncLivePrice(symbol);
-      } catch (e) {
-        console.warn("⚠️ syncLivePrice falló");
-      }
+      } catch {}
     }
 
-    // intento 3 (fallback seguro)
     if (!price || price <= 0) {
-      price = window.lastKnownPrice || 1; // 🔥 NUNCA 0
-      console.warn("⚠️ usando fallback:", price);
+      price = window.lastKnownPrice || 1;
     }
 
-    // validación final (bloqueo total si algo raro)
     if (!price || price <= 0) {
-      console.error("❌ Precio inválido bloqueado:", price);
-      alert("No hay precio disponible del mercado");
+      console.error("❌ Precio inválido:", price);
+      window.__ORDER_LOCK__ = false;
       return;
     }
 
-    // guardar último precio global
     window.lastKnownPrice = price;
 
     const body = {
@@ -5151,11 +5181,9 @@ async function placeBrokerOrder(payload = {}) {
 
     const data = await res.json();
 
-    console.log("📩 BACKEND RESPONSE:", data);
-
     if (!res.ok) {
       console.error("❌ BACKEND ERROR:", data);
-      alert(data?.message || "Error al abrir operación");
+      window.__ORDER_LOCK__ = false;
       return;
     }
 
@@ -5163,10 +5191,12 @@ async function placeBrokerOrder(payload = {}) {
     await loadAccount?.();
 
     console.log("✅ ORDER OK");
-    return data;
 
   } catch (err) {
     console.error("❌ ORDER FAILED:", err);
+  } finally {
+    // 🔓 LIBERAR BLOQUEO SIEMPRE
+    window.__ORDER_LOCK__ = false;
   }
 }
 /* =========================
@@ -5214,6 +5244,12 @@ setInterval(() => {
 
 log('EXT2 real loaded');
 })();
+
+  // de pnl
+  window.addEventListener("load", () => {
+  setInterval(updatePnLRealTime, 1000);
+});
+  
 </script>
 
 
