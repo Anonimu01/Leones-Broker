@@ -830,17 +830,37 @@ function scheduleLivePnLSync(symbol) {
 
 async function syncLivePnLForSymbol(symbol) {
   try {
-    const variants = symbolVariants(symbol);
-    if (!variants.length) return;
+    const targetVariants = symbolVariants(symbol);
+    if (!targetVariants.length) return;
 
     const openRows = await Position.find({
       status: { $in: ["OPEN", "open"] },
-      symbol: { $in: variants },
     }).lean();
 
     if (!openRows.length) return;
 
-    const userIds = [...new Set(openRows.map((p) => String(p.user)))];
+    const matchedRows = openRows.filter((p) => {
+      const source = [
+        p.symbol,
+        p.tvSymbol,
+        p.selectedSymbol,
+        p.chartSymbol,
+        p.instrument,
+        p.marketSymbol,
+        p.market,
+        p.ticker,
+        p.asset,
+      ]
+        .filter(Boolean)
+        .map((x) => symbolVariants(x))
+        .flat();
+
+      return source.some((v) => targetVariants.includes(v));
+    });
+
+    if (!matchedRows.length) return;
+
+    const userIds = [...new Set(matchedRows.map((p) => String(p.user)))];
 
     for (const userId of userIds) {
       const user = await User.findById(userId);
@@ -863,23 +883,19 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   const sign = side === "SELL" ? -1 : 1;
   const closePx = Number(currentPrice) > 0 ? Number(currentPrice) : entryPrice;
 
-  // PnL realizado:
-  // PnL = (precio_actual - precio_entrada) * cantidad * dirección
   const realizedPnl = (closePx - entryPrice) * qty * sign;
 
   const wallet = await getWalletDocForUser(user._id);
   const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
   const reservedMargin = Number(position.marginReserved ?? 0) || 0;
   const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
+  const credit = Number(wallet.credit ?? 0) || 0;
 
-  // Al cerrar:
-  // liberar margen
-  // sumar o restar PnL al balance
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
   wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
   wallet.balance = wallet.balanceOwn;
-  wallet.equity = wallet.balanceOwn + wallet.marginUsed;
-  wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
+  wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
+  wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
   wallet.updatedAt = new Date();
   await wallet.save();
@@ -1244,9 +1260,9 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
       wallet.leverageFactor = leverage;
       user.leverage = leverage;
     }
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0) + Number(wallet.credit ?? 0);
     wallet.marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - wallet.marginUsed, 0);
+    wallet.freeMargin = Math.max(wallet.balanceOwn + Number(wallet.credit ?? 0), 0);
     wallet.updatedAt = new Date();
     await wallet.save();
     user.balance = wallet.balanceOwn;
@@ -1292,8 +1308,8 @@ app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
     if (balanceBefore < amount) return res.status(400).json({ ok: false, error: "insufficient_balance", message: "Saldo insuficiente" });
     wallet.balanceOwn = balanceBefore - amount;
     wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0);
-    wallet.freeMargin = Math.max(wallet.balanceOwn + (Number(wallet.credit ?? 0) || 0) - (Number(wallet.marginUsed ?? 0) || 0), 0);
+    wallet.equity = wallet.balanceOwn + Number(wallet.marginUsed ?? 0) + Number(wallet.credit ?? 0);
+    wallet.freeMargin = Math.max(wallet.balanceOwn + Number(wallet.credit ?? 0), 0);
     wallet.updatedAt = new Date();
     await wallet.save();
     user.balance = wallet.balanceOwn;
@@ -1333,7 +1349,7 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE (FIXED REAL LOGIC)
+   TRADING CORE (REAL TIME PNL)
    ====================================================== */
 
 app.post("/api/trade/open", async (req, res) => {
@@ -1378,12 +1394,11 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
+    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
+    wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
