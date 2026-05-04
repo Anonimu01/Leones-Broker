@@ -335,7 +335,10 @@ function extractQuotePrice(item = {}) {
 }
 
 function normalizeQuote(symbol, item = {}) {
-  const label = item.label || item.name || (symbol.split(":").pop() || symbol).replace("_", "/");
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
   return {
     symbol,
     label,
@@ -409,7 +412,12 @@ function getCurrentPriceForSymbol(symbol) {
     const matched = candidates.some((candidate) => {
       const c = compactSymbol(candidate);
       if (!c) return false;
-      return c === targetCompact || c.includes(targetCompact) || targetCompact.includes(c) || sameMarketSymbol(c, targetCompact);
+      return (
+        c === targetCompact ||
+        c.includes(targetCompact) ||
+        targetCompact.includes(c) ||
+        sameMarketSymbol(c, targetCompact)
+      );
     });
 
     if (!matched) continue;
@@ -442,6 +450,7 @@ function resolveOrderPrice(body = {}, symbol = "") {
     body.executionPrice,
     body.execution_price,
   ];
+
   for (const candidate of candidates) {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
@@ -580,7 +589,8 @@ const transactionSchema = new mongoose.Schema(
   { minimize: false }
 );
 
-const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const Transaction =
+  mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 async function recordTransaction({
   user,
@@ -626,7 +636,12 @@ async function recordTransaction({
 }
 
 async function loadTransactionsForUser(userId, limit = 50) {
-  return await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(limit).lean().exec().catch(() => []);
+  return await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean()
+    .exec()
+    .catch(() => []);
 }
 
 async function loadOpenPositionsForUser(userId) {
@@ -662,7 +677,10 @@ async function buildAccountForUser(userDoc) {
   const recentTransactions = await loadTransactionsForUser(userDoc._id, 20);
   const walletSnapshot = wallet?.toObject ? wallet.toObject() : wallet;
   const balance = getEffectiveBalance(userDoc, walletSnapshot);
-  const openPnl = (openPositions || []).reduce((sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0), 0);
+  const openPnl = (openPositions || []).reduce(
+    (sum, p) => sum + (Number(p.unrealizedPnl ?? p.pnl ?? 0) || 0),
+    0
+  );
 
   const normalizedWallet = normalizeWalletSnapshot(
     walletSnapshot
@@ -902,7 +920,12 @@ async function syncLivePnLForSymbol(symbol) {
 
       return candidates.some((candidate) => {
         const c = compactSymbol(candidate);
-        return c === targetCompact || c.includes(targetCompact) || targetCompact.includes(c) || sameMarketSymbol(c, targetCompact);
+        return (
+          c === targetCompact ||
+          c.includes(targetCompact) ||
+          targetCompact.includes(c) ||
+          sameMarketSymbol(c, targetCompact)
+        );
       });
     });
 
@@ -1438,7 +1461,7 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE (REAL TIME PNL)
+   TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
 
 app.post("/api/trade/open", async (req, res) => {
@@ -1470,9 +1493,27 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
-    const price = resolveOrderPrice(body, symbol) || getCurrentPriceForSymbol(symbol);
+    let price = resolveOrderPrice(body, symbol);
+
+    if (!price) {
+      const market = getCurrentPriceForSymbol(symbol);
+      if (market && Number.isFinite(market) && market > 0) {
+        price = market;
+      } else {
+        const alt = Number(body.entryPrice || body.price || body.currentPrice || 1);
+        price = Number.isFinite(alt) && alt > 0 ? alt : null;
+        if (price) console.warn("⚠️ Usando precio fallback temporal:", price);
+      }
+    }
+
     if (!price || !Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
+      console.warn("❌ Precio final inválido:", price, { symbol, body });
+      return res.status(400).json({
+        ok: false,
+        error: "price_invalid",
+        symbol,
+        receivedPrice: price,
+      });
     }
 
     const notional = qty * price;
@@ -1483,11 +1524,12 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
+    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
+    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
@@ -1703,7 +1745,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", (reason) => console.log("❌ Cliente desconectado:", socket.id, "reason:", reason));
+  socket.on("disconnect", (reason) =>
+    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
+  );
 });
 
 try {
@@ -1796,12 +1840,14 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
@@ -1827,7 +1873,10 @@ app.use(async (req, res, next) => {
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
     res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
