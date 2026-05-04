@@ -4029,21 +4029,35 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 //esto es una prueva de pnl
   
   async function updatePnLRealTime() {
-  const positions = await fetch("/api/positions").then(r => r.json());
+  try {
+    const res = await fetch("/api/positions");
+    const data = await res.json();
 
-  positions.forEach(pos => {
-    const livePrice = window.lastKnownPrice;
+    const positions = data?.data || data || [];
 
-    if (!livePrice) return;
+    positions.forEach(pos => {
+      const livePrice = window.lastKnownPrice;
 
-    const pnl = pos.side === "LONG"
-      ? (livePrice - pos.entryPrice) * pos.qty
-      : (pos.entryPrice - livePrice) * pos.qty;
+      if (!livePrice || !pos.entryPrice) return;
 
-    console.log("📈 PNL:", pnl);
-  });
+      const pnl = pos.side === "LONG"
+        ? (livePrice - pos.entryPrice) * pos.qty
+        : (pos.entryPrice - livePrice) * pos.qty;
+
+      console.log("📈 PNL:", pnl);
+
+      // 🔥 OPCIONAL: guardarlo en la UI
+      pos.pnl = pnl;
+    });
+
+  } catch (err) {
+    console.error("❌ PNL ERROR:", err);
+  }
 }
 
+  // ✅ 2. interval
+setInterval(updatePnLRealTime, 1000);
+  
 async function loadPositions() {
   const endpoints = [
     '/positions',
@@ -5260,10 +5274,6 @@ setInterval(() => {
 log('EXT2 real loaded');
 })();
 
-  // de pnl
-  window.addEventListener("load", () => {
-  setInterval(updatePnLRealTime, 1000);
-});
   
 </script>
 
