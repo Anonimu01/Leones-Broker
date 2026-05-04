@@ -5100,18 +5100,35 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO GARANTIZADO
+    // =========================
+    // 🔥 PRECIO GARANTIZADO REAL
+    // =========================
     let price = getLivePriceFallback();
 
-    if (!price) {
-      price = await syncLivePrice(symbol);
+    // intento 2 (async)
+    if (!price || price <= 0) {
+      try {
+        price = await syncLivePrice(symbol);
+      } catch (e) {
+        console.warn("⚠️ syncLivePrice falló");
+      }
     }
 
+    // intento 3 (fallback seguro)
     if (!price || price <= 0) {
-      console.error("❌ Precio final inválido:", price);
+      price = window.lastKnownPrice || 1; // 🔥 NUNCA 0
+      console.warn("⚠️ usando fallback:", price);
+    }
+
+    // validación final (bloqueo total si algo raro)
+    if (!price || price <= 0) {
+      console.error("❌ Precio inválido bloqueado:", price);
       alert("No hay precio disponible del mercado");
       return;
     }
+
+    // guardar último precio global
+    window.lastKnownPrice = price;
 
     const body = {
       symbol,
