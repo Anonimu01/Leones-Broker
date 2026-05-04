@@ -216,6 +216,13 @@ function symbolVariants(value) {
   ].filter(Boolean);
 }
 
+function sameMarketSymbol(a = "", b = "") {
+  const x = compactSymbol(a);
+  const y = compactSymbol(b);
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
   if (["BUY", "LONG", "BULL", "CALL"].includes(s)) return "BUY";
@@ -382,25 +389,42 @@ function buildMarketPayload() {
 }
 
 function getCurrentPriceForSymbol(symbol) {
-  const targetVariants = symbolVariants(symbol);
+  const targetCompact = compactSymbol(symbol);
+  if (!targetCompact) return null;
+
   const store = getPriceStore();
 
   for (const [key, item] of Object.entries(store)) {
-    const keyVariants = symbolVariants(key);
-    const itemVariants = symbolVariants(item?.symbol || "");
-    const labelVariants = symbolVariants(item?.label || "");
-    const matched = [...keyVariants, ...itemVariants, ...labelVariants].some((v) => targetVariants.includes(v));
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.label,
+      item?.ticker,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+    ].filter(Boolean);
+
+    const matched = candidates.some((candidate) => {
+      const c = compactSymbol(candidate);
+      if (!c) return false;
+      return c === targetCompact || c.includes(targetCompact) || targetCompact.includes(c) || sameMarketSymbol(c, targetCompact);
+    });
+
     if (!matched) continue;
+
     const px = extractQuotePrice(item);
     if (Number.isFinite(px) && px > 0) return px;
   }
 
-  return 1;
+  return null;
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
+
   const candidates = [
     body.currentPrice,
     body.current_price,
@@ -422,8 +446,10 @@ function resolveOrderPrice(body = {}, symbol = "") {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
   }
+
   const market = getCurrentPriceForSymbol(symbol);
-  if (market) return market;
+  if (market && Number.isFinite(market) && market > 0) return market;
+
   return null;
 }
 
@@ -443,13 +469,32 @@ function computePositionPnl(position = {}, currentPrice = null) {
 
 function annotatePosition(position = {}) {
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const currentPrice = Number(position.currentPrice ?? getCurrentPriceForSymbol(position.symbol) ?? entryPrice) || entryPrice;
+
+  let currentPrice = Number(position.currentPrice);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    currentPrice = getCurrentPriceForSymbol(position.symbol);
+  }
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    currentPrice = entryPrice;
+  }
+
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const sign = side === "SELL" ? -1 : 1;
+
   const pnl = isClosedPosition(position)
     ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
-    : computePositionPnl({ ...position, entryPrice, qty }, currentPrice);
+    : (currentPrice - entryPrice) * qty * sign;
 
-  return { ...position, entryPrice, currentPrice, qty, pnl, unrealizedPnl: pnl, isOpen: !isClosedPosition(position) };
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
 }
 
 async function getUserDocFromBearer(req) {
@@ -822,7 +867,7 @@ function scheduleLivePnLSync(symbol) {
     } catch (e) {
       console.warn("syncLivePnL error:", e?.message || e);
     }
-  }, 180);
+  }, 120);
 
   if (timer?.unref) timer.unref();
   liveSyncTimers.set(key, timer);
@@ -830,8 +875,11 @@ function scheduleLivePnLSync(symbol) {
 
 async function syncLivePnLForSymbol(symbol) {
   try {
-    const targetVariants = symbolVariants(symbol);
-    if (!targetVariants.length) return;
+    const targetCompact = compactSymbol(symbol);
+    if (!targetCompact) return;
+
+    const currentPrice = getCurrentPriceForSymbol(symbol);
+    if (!currentPrice || !Number.isFinite(currentPrice) || currentPrice <= 0) return;
 
     const openRows = await Position.find({
       status: { $in: ["OPEN", "open"] },
@@ -840,7 +888,7 @@ async function syncLivePnLForSymbol(symbol) {
     if (!openRows.length) return;
 
     const matchedRows = openRows.filter((p) => {
-      const source = [
+      const candidates = [
         p.symbol,
         p.tvSymbol,
         p.selectedSymbol,
@@ -850,22 +898,39 @@ async function syncLivePnLForSymbol(symbol) {
         p.market,
         p.ticker,
         p.asset,
-      ]
-        .filter(Boolean)
-        .map((x) => symbolVariants(x))
-        .flat();
+      ].filter(Boolean);
 
-      return source.some((v) => targetVariants.includes(v));
+      return candidates.some((candidate) => {
+        const c = compactSymbol(candidate);
+        return c === targetCompact || c.includes(targetCompact) || targetCompact.includes(c) || sameMarketSymbol(c, targetCompact);
+      });
     });
 
     if (!matchedRows.length) return;
+
+    const updateTime = new Date();
+
+    for (const pos of matchedRows) {
+      const livePnl = computePositionPnl(pos, currentPrice);
+
+      await Position.updateOne(
+        { _id: pos._id },
+        {
+          $set: {
+            currentPrice,
+            pnl: livePnl,
+            unrealizedPnl: livePnl,
+            updatedAt: updateTime,
+          },
+        }
+      ).catch(() => null);
+    }
 
     const userIds = [...new Set(matchedRows.map((p) => String(p.user)))];
 
     for (const userId of userIds) {
       const user = await User.findById(userId);
       if (!user) continue;
-
       const account = await safeBuildAccountForUser(user);
       emitStateUpdates(user._id, account, account.positions || [], null);
     }
@@ -1211,6 +1276,18 @@ app.get("/api/positions", async (req, res) => {
   }
 });
 
+app.get("/api/posiciones", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadOpenPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/posiciones error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
 app.get("/api/positions/all", async (req, res) => {
   try {
     const user = await safeGetUserFromBearer(req);
@@ -1219,6 +1296,18 @@ app.get("/api/positions/all", async (req, res) => {
     return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
   } catch (e) {
     console.error("/api/positions/all error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/posiciones/all", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadAllPositionsForUser(user._id);
+    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+  } catch (e) {
+    console.error("/api/posiciones/all error", e);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
