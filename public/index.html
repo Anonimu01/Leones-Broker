@@ -4951,37 +4951,37 @@ function getActiveSymbol() {
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    // 🔥 PRIMERO intenta endpoint correcto
-    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetch(`/api/market/price?symbol=${symbol}`);
     const data = await res.json();
 
-    if (data?.price && Number(data.price) > 0) {
-      window.tvPrice = Number(data.price);
-      return Number(data.price);
-    }
+    const price = Number(data?.price);
 
-    // 🔥 FALLBACK quotes
-    const res2 = await fetch("/api/quotes");
-    const quotes = await res2.json();
-
-    const normalized = normalizeSymbol(symbol);
-
-    const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === normalized
-    );
-
-    if (match?.price && Number(match.price) > 0) {
-      window.tvPrice = Number(match.price);
-      return Number(match.price);
+    if (price && price > 0) {
+      window.lastKnownPrice = price;
+      console.log("✅ Precio sincronizado:", price);
+      return price;
     }
 
     return null;
-  } catch (err) {
-    console.warn("Precio sync error:", err);
+  } catch (e) {
+    console.error("❌ Error obteniendo precio:", e);
     return null;
   }
 }
 
+
+ // 🔥 AQUÍ VA (fuera de todo)
+  setInterval(async () => {
+    if (!window.tvSymbol) return;
+
+    const price = await syncLivePrice(window.tvSymbol);
+
+    if (price) {
+      window.lastKnownPrice = price;
+    }
+  }, 1000);
+
+  
 /* =========================
    🔥 GET LIVE PRICE SAFE (MEJORADO)
 ========================= */
@@ -5100,6 +5100,7 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
+    // 🔒 EVITAR DOBLE CLICK
     if (window.__sendingOrder) return;
     window.__sendingOrder = true;
 
@@ -5133,26 +5134,48 @@ async function placeBrokerOrder(payload = {}) {
       return alert("Dirección inválida");
     }
 
-    // 🔥 PRECIO REAL OBLIGATORIO
-    let price = window.lastKnownPrice;
+    // ============================
+    // 🔥 PRECIO REAL (FIX FUERTE)
+    // ============================
 
+    let price = Number(window.lastKnownPrice);
+
+    // Intento 1: usar precio actual en memoria
     if (!price || price <= 0) {
+      console.warn("⚠️ lastKnownPrice vacío, intentando sync...");
+
       price = await syncLivePrice(symbol);
     }
 
+    // Intento 2: reintento corto
     if (!price || price <= 0) {
-      console.error("❌ Precio inválido REAL:", price);
-      window.__sendingOrder = false;
-      return alert("No hay precio del mercado");
+      console.warn("⚠️ Reintentando obtener precio...");
+
+      await new Promise(r => setTimeout(r, 500));
+
+      price = await syncLivePrice(symbol);
     }
+
+    // ❌ SI FALLA → NO OPERA
+    if (!price || price <= 0) {
+      console.error("❌ PRECIO FINAL FALLÓ TOTALMENTE:", price);
+
+      window.__sendingOrder = false;
+      return alert("No hay precio en tiempo real. Espera unos segundos.");
+    }
+
+    // 🔥 GUARDAR GLOBAL
+    window.lastKnownPrice = price;
+
+    // ============================
+    // 🚀 PAYLOAD CORRECTO
+    // ============================
 
     const body = {
       symbol,
       side: side.toUpperCase(),
       type: "MARKET",
-
-      // 🔥 CORRECCIÓN CRÍTICA
-      quantity: quantity,   // <-- ANTES DECÍAS qty ❌
+      quantity: quantity,
       price: Number(price)
     };
 
@@ -5177,6 +5200,7 @@ async function placeBrokerOrder(payload = {}) {
       return alert(data?.error || "Error al abrir operación");
     }
 
+    // 🔄 RECARGAR DATOS
     await loadPositions?.();
     await loadAccount?.();
 
