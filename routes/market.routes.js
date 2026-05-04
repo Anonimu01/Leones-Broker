@@ -6,7 +6,12 @@ import { updateLivePrice } from "../controllers/trade.controller.js";
 
 function normalizeSymbolInput(s) {
   if (!s) return null;
-  return String(s).trim().toUpperCase();
+
+  return String(s)
+    .replace("OANDA:", "")
+    .replace("OANDA", "")
+    .trim()
+    .toUpperCase();
 }
 
 export default function marketRoutesFactory(deps = {}) {
@@ -99,7 +104,35 @@ export default function marketRoutesFactory(deps = {}) {
   });
 
   // =========================
-  // 🔥 NUEVO: RECIBIR PRECIO Y ACTUALIZAR PNL
+  // 🔥 GET PRECIO (ESTO TE FALTABA)
+  // =========================
+  router.get("/price", async (req, res) => {
+    try {
+      let { symbol } = req.query;
+
+      symbol = normalizeSymbolInput(symbol);
+
+      if (!symbol) {
+        return res.status(400).json({ ok: false, msg: "symbol required" });
+      }
+
+      // 🔥 MOCK TEMPORAL (luego conectas polygon real)
+      const fakePrice = Math.random() * (1.2 - 1.0) + 1.0;
+
+      return res.json({
+        ok: true,
+        symbol,
+        price: Number(fakePrice.toFixed(5)),
+      });
+
+    } catch (err) {
+      console.error("market.getPrice error:", err);
+      res.status(500).json({ ok: false, msg: err.message });
+    }
+  });
+
+  // =========================
+  // 🔥 POST PRECIO (ACTUALIZA PNL)
   // =========================
   router.post("/price", async (req, res) => {
     try {
@@ -124,6 +157,7 @@ export default function marketRoutesFactory(deps = {}) {
         price,
         msg: "Precio actualizado y PnL recalculado",
       });
+
     } catch (err) {
       console.error("market.price error:", err);
       return res.status(500).json({
