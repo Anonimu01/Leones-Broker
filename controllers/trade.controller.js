@@ -62,6 +62,42 @@ async function getOrCreateWallet(userId, session) {
 }
 
 // =======================
+// 📈 UPDATE LIVE PRICE (PNL EN TIEMPO REAL)
+// =======================
+export const updateLivePrice = async ({ symbol, price }) => {
+  try {
+    const livePrice = normalizePrice(price);
+    if (!livePrice) return;
+
+    const positions = await Position.find({
+      symbol: String(symbol).toUpperCase(),
+      status: "OPEN",
+    });
+
+    for (const pos of positions) {
+      const pnl = computePnl({
+        side: pos.side,
+        entryPrice: pos.entryPrice,
+        exitPrice: livePrice,
+        qty: pos.qty,
+      });
+
+      pos.currentPrice = livePrice;
+      pos.pnl = pnl;
+      pos.profit = pnl;
+      pos.updatedAt = new Date();
+
+      await pos.save();
+    }
+
+    return { ok: true };
+  } catch (err) {
+    console.error("Live price error:", err);
+    return { ok: false };
+  }
+};
+
+// =======================
 // 🚀 OPEN TRADE
 // =======================
 export const openTrade = async ({ user, order }) => {
