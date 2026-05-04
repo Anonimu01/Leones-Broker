@@ -1,18 +1,23 @@
 import express from "express";
-// import { authMiddleware } from "../middlewares/auth.middleware.js"; // descomenta si quieres proteger estas rutas
+// import { authMiddleware } from "../middlewares/auth.middleware.js";
+
+// 🔥 IMPORTANTE: conectar con trading
+import { updateLivePrice } from "../controllers/trade.controller.js";
 
 function normalizeSymbolInput(s) {
   if (!s) return null;
-  return String(s).trim();
+  return String(s).trim().toUpperCase();
 }
 
 export default function marketRoutesFactory(deps = {}) {
   const router = express.Router();
   const polygonSocket = deps.polygonSocket;
 
-  // Si quieres proteger estas rutas con autenticación:
   // router.use(authMiddleware);
 
+  // =========================
+  // 📡 SUBSCRIBE
+  // =========================
   router.post("/subscribe", (req, res) => {
     if (!polygonSocket) {
       return res.status(503).json({ ok: false, msg: "Realtime socket not initialized" });
@@ -22,21 +27,20 @@ export default function marketRoutesFactory(deps = {}) {
     kind = (kind || "trades").toString();
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, msg: "symbol required (string or array)" });
+      return res.status(400).json({ ok: false, msg: "symbol required" });
     }
 
-    // support array or single symbol
-    const symbols = Array.isArray(symbol) ? symbol.map(normalizeSymbolInput).filter(Boolean) : [normalizeSymbolInput(symbol)];
-
-    if (symbols.length === 0) return res.status(400).json({ ok: false, msg: "no valid symbols provided" });
+    const symbols = Array.isArray(symbol)
+      ? symbol.map(normalizeSymbolInput).filter(Boolean)
+      : [normalizeSymbolInput(symbol)];
 
     try {
       symbols.forEach((s) => polygonSocket.subscribe(s, kind));
+
       return res.json({
         ok: true,
         subscribed: symbols,
         kind,
-        socketConnected: polygonSocket.isConnected ? polygonSocket.isConnected() : undefined
       });
     } catch (e) {
       console.error("market.subscribe error:", e);
@@ -44,6 +48,9 @@ export default function marketRoutesFactory(deps = {}) {
     }
   });
 
+  // =========================
+  // ❌ UNSUBSCRIBE
+  // =========================
   router.post("/unsubscribe", (req, res) => {
     if (!polygonSocket) {
       return res.status(503).json({ ok: false, msg: "Realtime socket not initialized" });
@@ -53,20 +60,20 @@ export default function marketRoutesFactory(deps = {}) {
     kind = (kind || "trades").toString();
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, msg: "symbol required (string or array)" });
+      return res.status(400).json({ ok: false, msg: "symbol required" });
     }
 
-    const symbols = Array.isArray(symbol) ? symbol.map(normalizeSymbolInput).filter(Boolean) : [normalizeSymbolInput(symbol)];
-
-    if (symbols.length === 0) return res.status(400).json({ ok: false, msg: "no valid symbols provided" });
+    const symbols = Array.isArray(symbol)
+      ? symbol.map(normalizeSymbolInput).filter(Boolean)
+      : [normalizeSymbolInput(symbol)];
 
     try {
       symbols.forEach((s) => polygonSocket.unsubscribe(s, kind));
+
       return res.json({
         ok: true,
         unsubscribed: symbols,
         kind,
-        socketConnected: polygonSocket.isConnected ? polygonSocket.isConnected() : undefined
       });
     } catch (e) {
       console.error("market.unsubscribe error:", e);
@@ -74,6 +81,9 @@ export default function marketRoutesFactory(deps = {}) {
     }
   });
 
+  // =========================
+  // 📊 SUBSCRIPTIONS
+  // =========================
   router.get("/subscriptions", (req, res) => {
     if (!polygonSocket) {
       return res.status(503).json({ ok: false, msg: "Realtime socket not initialized" });
@@ -81,18 +91,45 @@ export default function marketRoutesFactory(deps = {}) {
 
     try {
       const list = polygonSocket.listSubscriptions();
-      // include connection state per class when possible
-      const state = {};
-      Object.keys(list).forEach((cls) => {
-        state[cls] = {
-          connected: polygonSocket.isConnected ? !!polygonSocket.isConnected(cls) : undefined,
-          count: (list[cls] || []).length,
-        };
-      });
-      res.json({ ok: true, list, state });
+      res.json({ ok: true, list });
     } catch (e) {
       console.error("market.subscriptions error:", e);
       res.status(500).json({ ok: false, msg: String(e) });
+    }
+  });
+
+  // =========================
+  // 🔥 NUEVO: RECIBIR PRECIO Y ACTUALIZAR PNL
+  // =========================
+  router.post("/price", async (req, res) => {
+    try {
+      let { symbol, price } = req.body || {};
+
+      symbol = normalizeSymbolInput(symbol);
+      price = Number(price);
+
+      if (!symbol || !Number.isFinite(price) || price <= 0) {
+        return res.status(400).json({
+          ok: false,
+          msg: "symbol y price válidos requeridos",
+        });
+      }
+
+      // 🔥 ACTUALIZA TODAS LAS POSICIONES ABIERTAS
+      await updateLivePrice({ symbol, price });
+
+      return res.json({
+        ok: true,
+        symbol,
+        price,
+        msg: "Precio actualizado y PnL recalculado",
+      });
+    } catch (err) {
+      console.error("market.price error:", err);
+      return res.status(500).json({
+        ok: false,
+        msg: err.message || "error",
+      });
     }
   });
 
