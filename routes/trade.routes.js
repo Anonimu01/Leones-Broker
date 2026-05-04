@@ -1,7 +1,7 @@
 // routes/trade.routes.js
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
-import { openTrade } from "../controllers/trade.controller.js";
+// import { openTrade } from "../controllers/trade.controller.js";
 
 const router = express.Router();
 
@@ -27,6 +27,7 @@ function validateOrderBody(body) {
   return null;
 }
 
+/*
 router.post("/open", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
@@ -111,6 +112,11 @@ router.post("/open", authMiddleware, async (req, res) => {
       error: err.message || "server_error"
     });
   }
+});
+*/
+
+router.get("/health", (req, res) => {
+  res.json({ ok: true, module: "trade.routes" });
 });
 
 export default router;
