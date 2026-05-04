@@ -5100,71 +5100,59 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    // 🔒 BLOQUEO ANTI DOBLE CLICK
-    if (window.__ORDER_LOCK__) {
-      console.warn("🚫 Orden bloqueada (doble click)");
-      return;
-    }
-    window.__ORDER_LOCK__ = true;
+    if (window.__sendingOrder) return;
+    window.__sendingOrder = true;
 
     const symbol = normalizeSymbol(
       payload.symbol || window.tvSymbol || window.selectedSymbol
     );
 
-    const amount = Number(payload.qty ?? payload.amount);
+    const quantity = Number(payload.qty ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
     const user = getUser() || {};
 
     if (!user.token) {
-      window.__ORDER_LOCK__ = false;
       alert("No autenticado");
+      window.__sendingOrder = false;
       return;
     }
 
     if (!symbol) {
-      window.__ORDER_LOCK__ = false;
+      window.__sendingOrder = false;
       return alert("Símbolo inválido");
     }
 
-    if (!amount || amount <= 0) {
-      window.__ORDER_LOCK__ = false;
+    if (!quantity || quantity <= 0) {
+      window.__sendingOrder = false;
       return alert("Cantidad inválida");
     }
 
     if (!["buy", "sell"].includes(side)) {
-      window.__ORDER_LOCK__ = false;
+      window.__sendingOrder = false;
       return alert("Dirección inválida");
     }
 
-    // =========================
-    // 🔥 PRECIO GARANTIZADO
-    // =========================
-    let price = getLivePriceFallback();
+    // 🔥 PRECIO REAL OBLIGATORIO
+    let price = window.lastKnownPrice;
 
     if (!price || price <= 0) {
-      try {
-        price = await syncLivePrice(symbol);
-      } catch {}
+      price = await syncLivePrice(symbol);
     }
 
     if (!price || price <= 0) {
-      price = window.lastKnownPrice || 1;
+      console.error("❌ Precio inválido REAL:", price);
+      window.__sendingOrder = false;
+      return alert("No hay precio del mercado");
     }
-
-    if (!price || price <= 0) {
-      console.error("❌ Precio inválido:", price);
-      window.__ORDER_LOCK__ = false;
-      return;
-    }
-
-    window.lastKnownPrice = price;
 
     const body = {
       symbol,
       side: side.toUpperCase(),
-      type: "market",
-      qty: amount,
+      type: "MARKET",
+
+      // 🔥 CORRECCIÓN CRÍTICA
+      quantity: quantity,   // <-- ANTES DECÍAS qty ❌
       price: Number(price)
     };
 
@@ -5181,10 +5169,12 @@ async function placeBrokerOrder(payload = {}) {
 
     const data = await res.json();
 
+    console.log("📩 BACKEND RESPONSE:", data);
+
     if (!res.ok) {
       console.error("❌ BACKEND ERROR:", data);
-      window.__ORDER_LOCK__ = false;
-      return;
+      window.__sendingOrder = false;
+      return alert(data?.error || "Error al abrir operación");
     }
 
     await loadPositions?.();
@@ -5192,11 +5182,12 @@ async function placeBrokerOrder(payload = {}) {
 
     console.log("✅ ORDER OK");
 
+    window.__sendingOrder = false;
+    return data;
+
   } catch (err) {
     console.error("❌ ORDER FAILED:", err);
-  } finally {
-    // 🔓 LIBERAR BLOQUEO SIEMPRE
-    window.__ORDER_LOCK__ = false;
+    window.__sendingOrder = false;
   }
 }
 /* =========================
