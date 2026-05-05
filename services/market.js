@@ -6,10 +6,10 @@ if (!POLYGON_KEY) {
 }
 
 /* =========================
-   CACHE SIMPLE EN MEMORIA
+   CACHE
 ========================= */
 const priceCache = new Map();
-const CACHE_TIME = 3000; // 🔥 más rápido para trading
+const CACHE_TIME = 3000;
 
 function setCache(symbol, data) {
   priceCache.set(symbol, {
@@ -31,58 +31,78 @@ function getCache(symbol) {
 }
 
 /* =========================
-   NORMALIZAR SYMBOL
+   🔥 MAPPING GLOBAL DE SIMBOLOS
 ========================= */
-export function normalizeSymbol(symbol) {
-  return String(symbol || "")
-    .trim()
-    .toUpperCase()
-    .replace("/", "")
-    .replace("-", "")
-    .replace("_", "");
+function mapSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase().trim();
+
+  const map = {
+    "TVC:GOLD": "XAUUSD",
+    "GOLD": "XAUUSD",
+    "XAU": "XAUUSD",
+    "NAS100": "NDX",
+    "US100": "NDX",
+    "SPX500": "SPX",
+    "US30": "DJI",
+    "BTC": "BTCUSD",
+    "BTCUSD": "BTCUSD",
+    "ETH": "ETHUSD",
+    "ETHUSD": "ETHUSD",
+    "EURUSD": "C:EURUSD",
+    "GBPUSD": "C:GBPUSD",
+    "USDJPY": "C:USDJPY"
+  };
+
+  return map[s] || s.replace("/", "").replace("-", "").replace("_", "");
 }
 
 /* =========================
-   OBTENER PRECIO REAL (POLYGON)
+   NORMALIZAR SYMBOL
+========================= */
+export function normalizeSymbol(symbol) {
+  return mapSymbol(symbol);
+}
+
+/* =========================
+   PRECIO REAL
 ========================= */
 export async function getPrice(symbol) {
-  symbol = normalizeSymbol(symbol);
+  const cleanSymbol = mapSymbol(symbol);
 
-  const cached = getCache(symbol);
+  const cached = getCache(cleanSymbol);
   if (cached) return cached;
 
   try {
-    const url = `${BASE_URL}/v2/last/trade/${symbol}?apiKey=${POLYGON_KEY}`;
+    const url = `${BASE_URL}/v2/last/trade/${cleanSymbol}?apiKey=${POLYGON_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
 
     const price = Number(data?.results?.p);
 
-    // 🔥 VALIDACIÓN REAL (CRÍTICA)
     if (!Number.isFinite(price) || price <= 0) {
       throw new Error("Precio inválido desde Polygon");
     }
 
     const result = {
-      symbol,
+      symbol: cleanSymbol,
       price,
       source: "polygon",
       time: Date.now()
     };
 
-    setCache(symbol, result);
+    setCache(cleanSymbol, result);
     return result;
 
   } catch (err) {
-    console.error("❌ Market price error:", err.message);
+    console.error("❌ Market price error:", cleanSymbol, err.message);
 
-    // 🚨 IMPORTANTE: NO SE INVENTA PRECIO
-    throw new Error("No se pudo obtener precio real del mercado");
+    // 🚨 NO INVENTAR PRECIO
+    throw new Error(`No se pudo obtener precio para ${cleanSymbol}`);
   }
 }
 
 /* =========================
-   SNAPSHOT MULTIPLE
+   MULTIPLE PRICES
 ========================= */
 export async function getPrices(symbols = []) {
   const results = [];
@@ -93,7 +113,7 @@ export async function getPrices(symbols = []) {
       results.push(price);
     } catch (err) {
       results.push({
-        symbol: normalizeSymbol(s),
+        symbol: mapSymbol(s),
         price: null,
         error: true,
         message: err.message
@@ -105,7 +125,7 @@ export async function getPrices(symbols = []) {
 }
 
 /* =========================
-   EJECUTAR ORDEN (BROKER ENGINE)
+   EJECUTAR ORDEN
 ========================= */
 export async function executeOrderOnBroker({
   symbol,
@@ -119,12 +139,7 @@ export async function executeOrderOnBroker({
     throw new Error("Datos incompletos para ejecutar orden");
   }
 
-  // 🔥 PRECIO REAL OBLIGATORIO
   const market = await getPrice(symbol);
-
-  if (!market?.price) {
-    throw new Error("Precio de mercado no disponible");
-  }
 
   const executionPrice =
     type === "market"
@@ -138,7 +153,7 @@ export async function executeOrderOnBroker({
   return {
     id: "ord_" + Math.random().toString(36).slice(2),
     userId,
-    symbol: normalizeSymbol(symbol),
+    symbol: market.symbol,
     side: side.toLowerCase(),
     type,
     quantity: Number(quantity),
@@ -149,7 +164,6 @@ export async function executeOrderOnBroker({
     status: "filled",
     liquidity: "market",
 
-    // 🔥 SLIPPAGE REAL (CONTROLADO)
     slippage: Number((executionPrice - market.price).toFixed(6)),
 
     source: market.source,
