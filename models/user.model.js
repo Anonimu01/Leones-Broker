@@ -20,7 +20,6 @@ const documentSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Main user schema
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -38,7 +37,6 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
-    // hashed password
     password: {
       type: String,
       required: true,
@@ -61,19 +59,16 @@ const userSchema = new mongoose.Schema(
       default: [],
     },
 
-    // balance principal usado por tu wallet / trading logic
     balance: {
       type: Number,
       default: 0,
     },
 
-    // crédito extra si tu sistema lo usa
     credit: {
       type: Number,
       default: 0,
     },
 
-    // factor de apalancamiento base si luego lo lees desde el usuario
     leverageFactor: {
       type: Number,
       default: 1,
@@ -85,11 +80,9 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
-    // nombre canónico para el token
     verifyToken: {
       type: String,
       default: null,
-      alias: "verificationToken",
       index: true,
     },
 
@@ -98,7 +91,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
-    // estado general del usuario
     active: {
       type: Boolean,
       default: true,
@@ -109,11 +101,31 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Índices útiles
-userSchema.index({ verifyToken: 1 }, { sparse: true });
-userSchema.index({ email: 1 });
+//
+// 🔥 VALIDACIÓN PREVIA (EVITA DATOS SUCIOS)
+//
+userSchema.pre("validate", function (next) {
+  if (this.balance != null && !Number.isFinite(this.balance)) {
+    this.invalidate("balance", "Balance inválido");
+  }
 
-// Limpieza ligera antes de guardar
+  if (this.credit != null && !Number.isFinite(this.credit)) {
+    this.invalidate("credit", "Credit inválido");
+  }
+
+  if (
+    this.leverageFactor != null &&
+    (!Number.isFinite(this.leverageFactor) || this.leverageFactor < 1)
+  ) {
+    this.invalidate("leverageFactor", "Leverage inválido");
+  }
+
+  next();
+});
+
+//
+// 🔥 NORMALIZACIÓN SEGURA ANTES DE GUARDAR
+//
 userSchema.pre("save", function (next) {
   if (typeof this.email === "string") {
     this.email = this.email.trim().toLowerCase();
@@ -123,13 +135,21 @@ userSchema.pre("save", function (next) {
     this.name = this.name.trim();
   }
 
+  // Evitar NaN silencioso (esto rompe wallets y trading)
   if (!Number.isFinite(this.balance)) this.balance = 0;
   if (!Number.isFinite(this.credit)) this.credit = 0;
+
   if (!Number.isFinite(this.leverageFactor) || this.leverageFactor < 1) {
     this.leverageFactor = 1;
   }
 
   next();
 });
+
+//
+// 🔥 ÍNDICES
+//
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ verifyToken: 1 }, { sparse: true });
 
 export default mongoose.model("User", userSchema);
