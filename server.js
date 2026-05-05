@@ -301,6 +301,11 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function toPositiveNumber(value, fallback = null) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
@@ -521,21 +526,31 @@ async function getUserDocFromBearer(req) {
   }
 }
 
-async function getWalletDocForUser(userId) {
-  let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+async function getWalletDocForUser(userId, session = null) {
+  let query = Wallet.findOne({ user: userId });
+  if (session) query = query.session(session);
+
+  let wallet = await query;
   if (!wallet) {
+    const userDoc = await User.findById(userId).session(session).catch(() => null);
+    const initialBalance = Number(userDoc?.balance ?? 1000) || 1000;
+    const initialCredit = Number(userDoc?.credit ?? 0) || 0;
+
     wallet = new Wallet({
       user: userId,
-      balanceOwn: 0,
-      balance: 0,
-      credit: 0,
+      balanceOwn: initialBalance,
+      balance: initialBalance,
+      credit: initialCredit,
       marginUsed: 0,
-      leverageFactor: 1,
-      equity: 0,
-      freeMargin: 0,
+      leverageFactor: Number(userDoc?.leverage ?? 1) || 1,
+      equity: initialBalance + initialCredit,
+      freeMargin: initialBalance + initialCredit,
       marginLevel: 0,
     });
+
+    await wallet.save({ session });
   }
+
   return wallet;
 }
 
@@ -545,8 +560,9 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
   const pnl = Number(openPnl ?? 0) || 0;
 
-  const equity = balanceOwn + marginUsed + pnl + credit;
-  const freeMargin = Math.max(balanceOwn + pnl + credit, 0);
+  // balance no baja al abrir; equity refleja balance + pnl flotante
+  const equity = balanceOwn + pnl + credit;
+  const freeMargin = Math.max(equity - marginUsed, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
   return {
@@ -962,29 +978,50 @@ async function syncLivePnLForSymbol(symbol) {
   }
 }
 
+/* ======================================================
+   CLOSE POSITION APPPLY
+   ====================================================== */
+
 async function applyCloseToPosition({ user, positionDoc, currentPrice, source = "api/trade/close" }) {
   const position = positionDoc?.toObject ? positionDoc.toObject() : positionDoc;
+
   const symbol = String(position.symbol || "").toUpperCase();
-  const side = normalizeSide(position.side || position.direction);
+  const sideRaw = String(position.side || position.direction || "").toUpperCase();
+
+  const side = sideRaw === "SELL" ? "SELL" : "BUY";
+  const direction = side === "SELL" ? -1 : 1;
+
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
-  const sign = side === "SELL" ? -1 : 1;
-  const closePx = Number(currentPrice) > 0 ? Number(currentPrice) : entryPrice;
 
-  const realizedPnl = (closePx - entryPrice) * qty * sign;
+  let closePrice = toPositiveNumber(currentPrice, null);
+  if (!closePrice) {
+    console.warn("⚠️ closePrice inválido, usando entryPrice");
+    closePrice = entryPrice || 1;
+  }
+
+  const realizedPnl = (closePrice - entryPrice) * qty * direction;
 
   const wallet = await getWalletDocForUser(user._id);
+
   const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
   const reservedMargin = Number(position.marginReserved ?? 0) || 0;
   const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
   const credit = Number(wallet.credit ?? 0) || 0;
 
+  // Balance no se incrementa por el margen porque no se descontó al abrir.
+  // El margen se libera ajustando marginUsed.
+  const newBalance = balanceBefore + realizedPnl;
+
+  wallet.balanceOwn = newBalance;
+  wallet.balance = newBalance;
+
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-  wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
-  wallet.balance = wallet.balanceOwn;
+
   wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
   wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
   wallet.updatedAt = new Date();
   await wallet.save();
 
@@ -992,12 +1029,14 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   await user.save();
 
   position.status = "CLOSED";
-  position.currentPrice = closePx;
-  position.closePrice = closePx;
+  position.currentPrice = closePrice;
+  position.closePrice = closePrice;
   position.realizedPnl = realizedPnl;
   position.pnl = realizedPnl;
+  position.profit = realizedPnl;
   position.closedAt = new Date();
   position.updatedAt = new Date();
+
   await positionDoc.save();
 
   const tx = await recordTransaction({
@@ -1014,7 +1053,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
       side,
       qty,
       entryPrice,
-      closePrice: closePx,
+      closePrice,
       marginReleased: reservedMargin,
       realizedPnl,
     },
@@ -1023,6 +1062,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
 
   const account = await safeBuildAccountForUser(user);
   const annotatedPosition = annotatePosition(position);
+
   emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
   return {
@@ -1031,7 +1071,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
     side,
     qty,
     entryPrice,
-    currentPrice: closePx,
+    currentPrice: closePrice,
     realizedPnl,
     balance: wallet.balanceOwn,
     account: account.account,
@@ -1162,7 +1202,6 @@ app.get("/api/latest", (req, res) => {
   }
 });
 
-app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/latest", (req, res) => {
   try {
     const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
@@ -1185,6 +1224,7 @@ app.get("/api/market/latest", (req, res) => {
   }
 });
 
+app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
 app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 
@@ -1500,14 +1540,11 @@ app.post("/api/trade/open", async (req, res) => {
       if (market && Number.isFinite(market) && market > 0) {
         price = market;
       } else {
-        const alt = Number(body.entryPrice || body.price || body.currentPrice || 1);
-        price = Number.isFinite(alt) && alt > 0 ? alt : null;
-        if (price) console.warn("⚠️ Usando precio fallback temporal:", price);
+        price = 1;
       }
     }
 
     if (!price || !Number.isFinite(price) || price <= 0) {
-      console.warn("❌ Precio final inválido:", price, { symbol, body });
       return res.status(400).json({
         ok: false,
         error: "price_invalid",
@@ -1524,12 +1561,12 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // Reservar margen solamente una vez
-    wallet.balanceOwn = balanceOwn - requiredMargin;
-    wallet.balance = wallet.balanceOwn;
+    // No se descuenta balance al abrir; solo se reserva marginUsed.
+    wallet.balanceOwn = balanceOwn;
+    wallet.balance = balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
+    wallet.equity = balanceOwn + credit;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
     await wallet.save();
@@ -1544,6 +1581,8 @@ app.post("/api/trade/open", async (req, res) => {
       marginReserved: requiredMargin,
       leverage,
       status: "OPEN",
+      pnl: 0,
+      profit: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -1580,7 +1619,9 @@ app.post("/api/trade/close", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const { positionId } = req.body || {};
-    if (!positionId) return res.status(400).json({ ok: false, error: "positionId_required" });
+    if (!positionId) {
+      return res.status(400).json({ ok: false, error: "positionId_required" });
+    }
 
     lockKey = makeCloseLockKey(user._id, positionId);
     if (!withOpenLock(lockKey, 2500)) {
@@ -1598,10 +1639,9 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     const body = req.body || {};
-    const price = resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol);
-
+    let price = resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol);
     if (!price || !Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
+      price = Number(position.entryPrice) || 1;
     }
 
     const result = await applyCloseToPosition({
@@ -1661,6 +1701,156 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+function socketCompactSymbol(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function socketSameSymbol(a = "", b = "") {
+  const x = socketCompactSymbol(a);
+  const y = socketCompactSymbol(b);
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+function socketExtractPrice(data = {}) {
+  const directCandidates = [
+    data.price,
+    data.last,
+    data.close,
+    data.value,
+    data.mark,
+    data.mid,
+    data.currentPrice,
+    data.current_price,
+    data.lastPrice,
+    data.last_price,
+    data.ask,
+    data.bid,
+  ];
+
+  for (const candidate of directCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const ask = Number(data.ask);
+  const bid = Number(data.bid);
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
+}
+
+function socketComputePnl(position = {}, currentPrice = 0) {
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
+  const side = String(position.side || position.direction || "").trim().toUpperCase();
+  const isShort = side === "SELL" || side === "SHORT";
+
+  if (!Number.isFinite(entry) || entry <= 0) return 0;
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return 0;
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+
+  return isShort
+    ? (entry - currentPrice) * qty
+    : (currentPrice - entry) * qty;
+}
+
+async function socketSyncOpenPositionsBySymbol(rawSymbol, currentPrice) {
+  try {
+    if (!rawSymbol || !currentPrice || currentPrice <= 0) return;
+
+    const openPositions = await Position.find({
+      status: { $in: ["OPEN", "open", "Open"] },
+    }).lean();
+
+    const matched = (openPositions || []).filter((pos) => {
+      const candidates = [
+        pos.symbol,
+        pos.tvSymbol,
+        pos.selectedSymbol,
+        pos.chartSymbol,
+        pos.instrument,
+        pos.marketSymbol,
+        pos.market,
+        pos.ticker,
+        pos.asset,
+      ].filter(Boolean);
+
+      return candidates.some((candidate) => socketSameSymbol(candidate, rawSymbol));
+    });
+
+    if (!matched.length) return;
+
+    const now = new Date();
+    const affectedUsers = new Set();
+
+    for (const pos of matched) {
+      const pnl = socketComputePnl(pos, currentPrice);
+
+      await Position.updateOne(
+        { _id: pos._id },
+        {
+          $set: {
+            currentPrice,
+            pnl,
+            profit: pnl,
+            unrealizedPnl: pnl,
+            updatedAt: now,
+          },
+        }
+      ).catch(() => null);
+
+      affectedUsers.add(String(pos.user || ""));
+
+      io.emit("position:update", {
+        id: pos._id,
+        user: pos.user,
+        symbol: pos.symbol,
+        price: currentPrice,
+        pnl,
+        currentPrice,
+        side: pos.side,
+      });
+
+      if (pos.user) {
+        io.to(`user:${String(pos.user)}`).emit("position:update", {
+          id: pos._id,
+          symbol: pos.symbol,
+          price: currentPrice,
+          pnl,
+          currentPrice,
+          side: pos.side,
+        });
+      }
+    }
+
+    for (const userId of affectedUsers) {
+      if (!userId) continue;
+
+      try {
+        if (typeof refreshUserWalletState === "function") {
+          await refreshUserWalletState(userId);
+        }
+
+        const userDoc = await User.findById(userId).catch(() => null);
+        if (userDoc) {
+          const account = await buildAccountForUser(userDoc);
+          emitStateUpdates(userId, account, account.positions || [], null);
+        }
+      } catch (err) {
+        console.warn("wallet/account sync error:", err?.message || err);
+      }
+    }
+  } catch (err) {
+    console.warn("socketSyncOpenPositionsBySymbol error:", err?.message || err);
+  }
+}
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1700,6 +1890,7 @@ io.on("connection", (socket) => {
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
+
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
@@ -1721,10 +1912,12 @@ io.on("connection", (socket) => {
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
       if (polygonSocket && typeof polygonSocket.subscribe === "function") {
         polygonSocket.subscribe(symbol, kind);
       }
+
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1734,10 +1927,12 @@ io.on("connection", (socket) => {
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
       if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
         polygonSocket.unsubscribe(symbol, kind);
       }
+
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1756,9 +1951,12 @@ try {
   } else {
     polygonSocket = new PolygonSocket({
       apiKey: process.env.POLYGON_API_KEY,
+
       onPrice: async (data) => {
         try {
-          priceHandler.handle(data);
+          if (priceHandler && typeof priceHandler.handle === "function") {
+            priceHandler.handle(data);
+          }
 
           const rawSymbol =
             data?.symbol ||
@@ -1768,13 +1966,22 @@ try {
             data?.instrument ||
             "";
 
+          const price = socketExtractPrice(data);
+
           if (rawSymbol) {
-            scheduleLivePnLSync(rawSymbol);
+            if (price && price > 0) {
+              await socketSyncOpenPositionsBySymbol(rawSymbol, price);
+            }
+
+            if (typeof scheduleLivePnLSync === "function") {
+              scheduleLivePnLSync(rawSymbol);
+            }
           }
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
       },
+
       onOpen: () => console.log("PolygonSocket abierto"),
       onClose: () => console.log("PolygonSocket cerrado"),
       onError: (err) => console.error("PolygonSocket error:", err),
