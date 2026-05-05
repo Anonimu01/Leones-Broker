@@ -1661,6 +1661,158 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+function socketCompactSymbol(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function socketSameSymbol(a = "", b = "") {
+  const x = socketCompactSymbol(a);
+  const y = socketCompactSymbol(b);
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+function socketExtractPrice(data = {}) {
+  const directCandidates = [
+    data.price,
+    data.last,
+    data.close,
+    data.value,
+    data.mark,
+    data.mid,
+    data.currentPrice,
+    data.current_price,
+    data.lastPrice,
+    data.last_price,
+    data.ask,
+    data.bid,
+  ];
+
+  for (const candidate of directCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const ask = Number(data.ask);
+  const bid = Number(data.bid);
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
+}
+
+function socketComputePnl(position = {}, currentPrice = 0) {
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
+  const side = String(position.side || position.direction || "").trim().toUpperCase();
+  const isShort = side === "SELL" || side === "SHORT";
+
+  if (!Number.isFinite(entry) || entry <= 0) return 0;
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return 0;
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+
+  return isShort
+    ? (entry - currentPrice) * qty
+    : (currentPrice - entry) * qty;
+}
+
+async function socketSyncOpenPositionsBySymbol(rawSymbol, currentPrice, data = {}) {
+  try {
+    if (!rawSymbol || !currentPrice || currentPrice <= 0) return;
+
+    const openPositions = await Position.find({
+      status: { $in: ["OPEN", "open", "Open"] },
+    }).lean();
+
+    const matched = (openPositions || []).filter((pos) => {
+      const candidates = [
+        pos.symbol,
+        pos.tvSymbol,
+        pos.selectedSymbol,
+        pos.chartSymbol,
+        pos.instrument,
+        pos.marketSymbol,
+        pos.market,
+        pos.ticker,
+        pos.asset,
+      ].filter(Boolean);
+
+      return candidates.some((candidate) => socketSameSymbol(candidate, rawSymbol));
+    });
+
+    if (!matched.length) return;
+
+    const now = new Date();
+    const affectedUsers = new Set();
+
+    for (const pos of matched) {
+      const pnl = socketComputePnl(pos, currentPrice);
+
+      await Position.updateOne(
+        { _id: pos._id },
+        {
+          $set: {
+            currentPrice,
+            pnl,
+            profit: pnl,
+            unrealizedPnl: pnl,
+            updatedAt: now,
+          },
+        }
+      ).catch(() => null);
+
+      affectedUsers.add(String(pos.user || ""));
+      
+      io.emit("position:update", {
+        id: pos._id,
+        user: pos.user,
+        symbol: pos.symbol,
+        price: currentPrice,
+        pnl,
+        currentPrice,
+        side: pos.side,
+      });
+
+      if (pos.user) {
+        io.to(`user:${String(pos.user)}`).emit("position:update", {
+          id: pos._id,
+          symbol: pos.symbol,
+          price: currentPrice,
+          pnl,
+          currentPrice,
+          side: pos.side,
+        });
+      }
+    }
+
+    for (const userId of affectedUsers) {
+      if (!userId) continue;
+
+      try {
+        if (typeof refreshUserWalletState === "function") {
+          await refreshUserWalletState(userId);
+        }
+
+        if (typeof User !== "undefined" && typeof buildAccountForUser === "function" && typeof emitStateUpdates === "function") {
+          const userDoc = await User.findById(userId).catch(() => null);
+          if (userDoc) {
+            const account = await buildAccountForUser(userDoc);
+            emitStateUpdates(userId, account, account.positions || [], null);
+          }
+        }
+      } catch (err) {
+        console.warn("wallet/account sync error:", err?.message || err);
+      }
+    }
+  } catch (err) {
+    console.warn("socketSyncOpenPositionsBySymbol error:", err?.message || err);
+  }
+}
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1700,6 +1852,7 @@ io.on("connection", (socket) => {
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
+
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
@@ -1721,10 +1874,12 @@ io.on("connection", (socket) => {
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
       if (polygonSocket && typeof polygonSocket.subscribe === "function") {
         polygonSocket.subscribe(symbol, kind);
       }
+
       socket.join(symbol);
       console.log("subscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1734,10 +1889,12 @@ io.on("connection", (socket) => {
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
       if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
         polygonSocket.unsubscribe(symbol, kind);
       }
+
       socket.leave(symbol);
       console.log("unsubscribe:", socket.id, symbol, kind || "trades");
     } catch (e) {
@@ -1756,9 +1913,12 @@ try {
   } else {
     polygonSocket = new PolygonSocket({
       apiKey: process.env.POLYGON_API_KEY,
+
       onPrice: async (data) => {
         try {
-          priceHandler.handle(data);
+          if (priceHandler && typeof priceHandler.handle === "function") {
+            priceHandler.handle(data);
+          }
 
           const rawSymbol =
             data?.symbol ||
@@ -1768,13 +1928,24 @@ try {
             data?.instrument ||
             "";
 
+          const price = socketExtractPrice(data);
+
           if (rawSymbol) {
-            scheduleLivePnLSync(rawSymbol);
+            // 1) refresca PnL de forma inmediata con el precio que acaba de entrar
+            if (price && price > 0) {
+              await socketSyncOpenPositionsBySymbol(rawSymbol, price, data);
+            }
+
+            // 2) mantiene tu flujo actual por si tienes más lógica externa
+            if (typeof scheduleLivePnLSync === "function") {
+              scheduleLivePnLSync(rawSymbol);
+            }
           }
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
       },
+
       onOpen: () => console.log("PolygonSocket abierto"),
       onClose: () => console.log("PolygonSocket cerrado"),
       onError: (err) => console.error("PolygonSocket error:", err),
