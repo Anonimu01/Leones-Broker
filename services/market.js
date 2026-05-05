@@ -56,11 +56,12 @@ export async function getPrice(symbol) {
     const res = await fetch(url);
     const data = await res.json();
 
-    if (!data?.results?.p) {
-      throw new Error("Precio no encontrado");
-    }
+    const price = Number(data?.results?.p);
 
-    const price = Number(data.results.p);
+    // 🔥 VALIDACIÓN ESTRICTA (IMPORTANTE)
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Precio inválido desde API");
+    }
 
     const result = {
       symbol,
@@ -71,15 +72,12 @@ export async function getPrice(symbol) {
 
     setCache(symbol, result);
     return result;
-  } catch (err) {
-    console.error("Market price error:", err.message);
 
-    return {
-      symbol,
-      price: Number((Math.random() * 100 + 10).toFixed(2)),
-      source: "fallback",
-      time: Date.now()
-    };
+  } catch (err) {
+    console.error("❌ Market price error:", err.message);
+
+    // 🚨 IMPORTANTE: NO usar precio falso
+    return null;
   }
 }
 
@@ -91,7 +89,15 @@ export async function getPrices(symbols = []) {
 
   for (const s of symbols) {
     try {
-      results.push(await getPrice(s));
+      const p = await getPrice(s);
+
+      results.push(
+        p || {
+          symbol: s,
+          price: null,
+          error: true
+        }
+      );
     } catch {
       results.push({
         symbol: s,
@@ -121,10 +127,17 @@ export async function executeOrderOnBroker({
 
   const market = await getPrice(symbol);
 
+  // 🔥 BLOQUEO SI NO HAY PRECIO REAL
+  if (!market || !market.price) {
+    throw new Error("No hay precio de mercado disponible");
+  }
+
   const executionPrice =
     type === "market"
       ? market.price
       : Number(price || market.price);
+
+  const execPrice = Number(executionPrice);
 
   return {
     id: "ord_" + Math.random().toString(36).slice(2),
@@ -134,10 +147,15 @@ export async function executeOrderOnBroker({
     type,
     quantity: Number(quantity),
     requestedPrice: price,
-    executedPrice: executionPrice,
+    executedPrice: execPrice,
     status: "filled",
     liquidity: "market",
-    slippage: Number((executionPrice - market.price).toFixed(5)),
+
+    // 🔥 EVITAR NaN
+    slippage: Number.isFinite(execPrice - market.price)
+      ? Number((execPrice - market.price).toFixed(5))
+      : 0,
+
     source: market.source,
     createdAt: new Date().toISOString()
   };
