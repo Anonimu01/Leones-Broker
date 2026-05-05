@@ -29,13 +29,20 @@ function getLivePriceSafe(symbol) {
     if (!store) return null;
 
     const entries =
-      store instanceof Map ? Array.from(store.entries()) : Object.entries(store);
+      store instanceof Map
+        ? Array.from(store.entries())
+        : Object.entries(store);
 
     const clean = normalizeSymbol(symbol);
     if (!clean) return null;
 
     for (const [key, val] of entries) {
-      const candidates = [key, val?.symbol, val?.ticker, val?.tvSymbol].filter(Boolean);
+      const candidates = [
+        key,
+        val?.symbol,
+        val?.ticker,
+        val?.tvSymbol,
+      ].filter(Boolean);
 
       const match = candidates.some((c) =>
         normalizeSymbol(c).includes(clean)
@@ -81,10 +88,7 @@ router.post("/open", authMiddleware, async (req, res) => {
       });
     }
 
-    // precio live
     if (!price) price = getLivePriceSafe(symbol);
-
-    // fallback seguro
     if (!price) price = 100;
 
     const result = await openTrade({
@@ -140,7 +144,6 @@ router.post("/close", authMiddleware, async (req, res) => {
     const result = await closeTrade({
       user,
       positionId,
-      symbol,
       price,
       closePrice: price,
     });
