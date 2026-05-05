@@ -5202,18 +5202,24 @@ window.__lastOrderTime = Date.now();
     }
 
     // intento 2
-    if (!price || price <= 0) {
+   if (!Number.isFinite(price) || price <= 0 || price === 1) {
       console.warn("⚠️ Reintentando precio...");
       await new Promise(r => setTimeout(r, 500));
       price = await syncLivePrice(symbol);
     }
 
     // ❌ si falla → no operar
-    if (!price || price <= 0) {
+ if (!Number.isFinite(price) || price <= 0 || price === 1) {
       console.error("❌ PRECIO FINAL FALLÓ:", price);
       window.__sendingOrder = false;
       return alert("No hay precio en tiempo real");
     }
+    price = Number(price);
+
+if (!Number.isFinite(price) || price <= 0) {
+  console.error("Precio inválido:", price);
+  return alert("Precio de mercado inválido");
+}
 
     // 🔥 GUARDAR PRECIO GLOBAL
     window.lastKnownPrice = price;
