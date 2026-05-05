@@ -30,6 +30,9 @@ import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
 import sendEmail from "./utils/sendEmail.js";
 
+/* 🔥 AÑADIDO - PRICE ROUTES */
+import priceRoutes from "./routes/price.routes.js";
+
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
@@ -141,6 +144,17 @@ const priceHandler = new PriceHandler(io);
 app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
+/* =========================
+   🔥 ROUTES (AQUÍ SE AGREGA)
+========================= */
+app.use("/api/price", priceRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/wallet", walletRoutes);
+app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
+app.use("/api/account", accountRoutes);
 /* ======================================================
    HELPERS
    ====================================================== */
