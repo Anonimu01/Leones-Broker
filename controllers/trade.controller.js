@@ -31,7 +31,9 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
   const exit = Number(exitPrice);
   const quantity = Number(qty);
 
-  if (!entry || !exit || !quantity) return 0;
+  if (!Number.isFinite(entry) || entry <= 0) return 0;
+  if (!Number.isFinite(exit) || exit <= 0) return 0;
+  if (!Number.isFinite(quantity) || quantity <= 0) return 0;
 
   return side === "SELL"
     ? (entry - exit) * quantity
@@ -45,14 +47,20 @@ async function getOrCreateWallet(userId, session = null) {
   let wallet = await Wallet.findOne({ user: userId }).session(session);
 
   if (!wallet) {
+    const userDoc = await User.findById(userId).session(session).catch(() => null);
+
+    const initialBalance = Number(userDoc?.balance ?? 1000) || 1000;
+    const initialCredit = Number(userDoc?.credit ?? 0) || 0;
+
     wallet = new Wallet({
       user: userId,
-      balanceOwn: 1000,
-      balance: 1000,
-      credit: 0,
+      balanceOwn: initialBalance,
+      balance: initialBalance,
+      credit: initialCredit,
       marginUsed: 0,
-      equity: 1000,
-      freeMargin: 1000,
+      equity: initialBalance + initialCredit,
+      freeMargin: initialBalance + initialCredit,
+      marginLevel: 0,
     });
 
     await wallet.save({ session });
@@ -86,53 +94,66 @@ async function recalculateWallet(userId, session = null) {
 
   wallet.marginUsed = marginUsed;
 
-  // 🔥 EQUITY = BALANCE + PNL
+  // equity = balance real + pnl flotante + crédito
   wallet.equity = balanceOwn + pnlFloating + credit;
 
-  // 🔥 FREE MARGIN
+  // free margin = equity - margen bloqueado
   wallet.freeMargin = wallet.equity - marginUsed;
 
   wallet.updatedAt = new Date();
-
   await wallet.save({ session });
 
   await User.updateOne(
     { _id: userId },
-    { balance: wallet.balanceOwn },
+    { $set: { balance: wallet.balanceOwn, updatedAt: new Date() } },
     session ? { session } : {}
-  );
+  ).catch(() => null);
 }
 
 // =======================
 // 📈 UPDATE LIVE PRICE
 // =======================
 export const updateLivePrice = async ({ symbol, price }) => {
-  const livePrice = normalizePrice(price);
-  if (!livePrice) return;
+  try {
+    const livePrice = normalizePrice(price);
+    if (!livePrice) return { ok: false, error: "Precio inválido" };
 
-  const positions = await Position.find({ status: "OPEN" });
+    const cleanSymbol = normalizeSymbol(symbol);
 
-  const users = new Set();
+    const positions = await Position.find({ status: "OPEN" });
 
-  for (const pos of positions) {
-    if (normalizeSymbol(pos.symbol) !== normalizeSymbol(symbol)) continue;
+    const users = new Set();
 
-    const pnl = computePnl({
-      side: pos.side,
-      entryPrice: pos.entryPrice,
-      exitPrice: livePrice,
-      qty: pos.qty,
-    });
+    for (const pos of positions) {
+      if (normalizeSymbol(pos.symbol) !== cleanSymbol) continue;
 
-    pos.currentPrice = livePrice;
-    pos.pnl = pnl;
-    await pos.save();
+      const pnl = computePnl({
+        side: pos.side,
+        entryPrice: pos.entryPrice,
+        exitPrice: livePrice,
+        qty: pos.qty,
+      });
 
-    users.add(String(pos.user));
-  }
+      pos.currentPrice = livePrice;
+      pos.pnl = pnl;
+      pos.profit = pnl;
+      pos.updatedAt = new Date();
 
-  for (const u of users) {
-    await recalculateWallet(u);
+      await pos.save();
+
+      if (pos.user) {
+        users.add(String(pos.user));
+      }
+    }
+
+    for (const u of users) {
+      await recalculateWallet(u);
+    }
+
+    return { ok: true };
+  } catch (err) {
+    console.error("❌ updateLivePrice error:", err);
+    return { ok: false, error: err?.message || "server_error" };
   }
 };
 
@@ -144,23 +165,34 @@ export const openTrade = async ({ user, order }) => {
   session.startTransaction();
 
   try {
-    const userId = user._id;
+    const userId = user?._id || user?.id;
+    if (!userId) throw new Error("Usuario inválido");
 
-    const symbol = normalizeSymbol(order.symbol);
-    const side = normalizeSide(order.side);
-    const qty = Number(order.quantity);
-    const price = normalizePrice(order.price);
+    let { symbol, side, type, quantity, price } = order || {};
 
-    if (!symbol || !qty || !price) {
-      throw new Error("datos invalidos");
+    symbol = normalizeSymbol(symbol);
+    side = normalizeSide(side);
+    type = String(type || "MARKET").toUpperCase();
+    quantity = Number(quantity);
+
+    const entryPrice = normalizePrice(price);
+
+    if (!symbol || !Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error("Datos inválidos");
+    }
+
+    if (!entryPrice || entryPrice <= 0) {
+      throw new Error("Precio de mercado inválido");
     }
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    const margin = qty * price;
+    const leverage = Math.max(Number(wallet.leverageFactor ?? 1), 1);
+    const margin = (quantity * entryPrice) / leverage;
 
-    // 🔥 NO TOCAR BALANCE
+    // 🔥 NO TOCAR BALANCE AL ABRIR
     wallet.marginUsed = Number(wallet.marginUsed || 0) + margin;
+    wallet.updatedAt = new Date();
 
     await wallet.save({ session });
 
@@ -170,12 +202,17 @@ export const openTrade = async ({ user, order }) => {
           user: userId,
           symbol,
           side,
-          qty,
-          entryPrice: price,
-          currentPrice: price,
+          type,
+          qty: quantity,
+          entryPrice,
+          currentPrice: entryPrice,
           marginReserved: margin,
+          leverage,
           status: "OPEN",
           pnl: 0,
+          profit: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ],
       { session }
@@ -184,25 +221,33 @@ export const openTrade = async ({ user, order }) => {
     await recalculateWallet(userId, session);
 
     await session.commitTransaction();
+    session.endSession();
 
-    return { ok: true, data: position[0] };
+    return {
+      ok: true,
+      data: position[0],
+    };
   } catch (err) {
     await session.abortTransaction();
-    return { ok: false, error: err.message };
-  } finally {
     session.endSession();
+
+    return {
+      ok: false,
+      error: err?.message || "server_error",
+    };
   }
 };
 
 // =======================
-// 🔴 CLOSE TRADE (SOLO PNL)
+// 🔴 CLOSE TRADE
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const userId = user._id;
+    const userId = user?._id || user?.id;
+    if (!userId) throw new Error("Usuario inválido");
 
     const position = await Position.findOne({
       _id: positionId,
@@ -214,7 +259,12 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    const exit = normalizePrice(closePrice);
+    // 🔥 fallback duro: nunca dejar el precio en null
+    let exit = normalizePrice(closePrice);
+    if (!exit) {
+      console.warn("⚠️ closePrice inválido, usando entryPrice");
+      exit = normalizePrice(position.entryPrice) || 1;
+    }
 
     const pnl = computePnl({
       side: position.side,
@@ -226,7 +276,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const margin = Number(position.marginReserved || 0);
 
     // =========================
-    // 🔥 SOLO SUMAR / RESTAR PNL
+    // 🔥 SOLO REALIZAR PNL
     // =========================
     const newBalance = Number(wallet.balanceOwn || 0) + pnl;
 
@@ -239,32 +289,41 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       Number(wallet.marginUsed || 0) - margin
     );
 
+    wallet.updatedAt = new Date();
     await wallet.save({ session });
 
     // 🔴 CERRAR POSICION
     position.status = "CLOSED";
     position.closePrice = exit;
+    position.currentPrice = exit;
     position.pnl = pnl;
+    position.profit = pnl;
     position.closedAt = new Date();
+    position.updatedAt = new Date();
 
     await position.save({ session });
 
     await recalculateWallet(userId, session);
 
     await session.commitTransaction();
+    session.endSession();
 
     return {
       ok: true,
       data: {
         pnl,
         balance: newBalance,
+        closePrice: exit,
       },
     };
   } catch (err) {
     await session.abortTransaction();
-    return { ok: false, error: err.message };
-  } finally {
     session.endSession();
+
+    return {
+      ok: false,
+      error: err?.message || "server_error",
+    };
   }
 };
 
