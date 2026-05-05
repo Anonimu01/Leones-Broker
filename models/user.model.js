@@ -1,19 +1,24 @@
 import mongoose from "mongoose";
 
-const documentSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true
+const documentSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    url: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  url: {
-    type: String,
-    required: true
-  },
-  uploadedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
+  { _id: false }
+);
 
 // Main user schema
 const userSchema = new mongoose.Schema(
@@ -21,7 +26,7 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
 
     email: {
@@ -29,58 +34,102 @@ const userSchema = new mongoose.Schema(
       required: true,
       unique: true,
       lowercase: true,
-      trim: true
+      trim: true,
+      index: true,
     },
 
-    // keep 'password' as the stored hashed password
+    // hashed password
     password: {
       type: String,
-      required: true
+      required: true,
     },
 
-    // optional fields
     phone: {
       type: String,
       trim: true,
-      default: ""
+      default: "",
     },
 
     address: {
       type: String,
       trim: true,
-      default: ""
+      default: "",
     },
 
-    documents: [documentSchema],
+    documents: {
+      type: [documentSchema],
+      default: [],
+    },
 
+    // balance principal usado por tu wallet / trading logic
     balance: {
       type: Number,
-      default: 0
+      default: 0,
+    },
+
+    // crédito extra si tu sistema lo usa
+    credit: {
+      type: Number,
+      default: 0,
+    },
+
+    // factor de apalancamiento base si luego lo lees desde el usuario
+    leverageFactor: {
+      type: Number,
+      default: 1,
+      min: 1,
     },
 
     verified: {
       type: Boolean,
-      default: false
+      default: false,
     },
 
-    // verifyToken is the canonical field used by the controller.
-    // Provide an alias 'verificationToken' so both names work.
+    // nombre canónico para el token
     verifyToken: {
       type: String,
       default: null,
-      alias: "verificationToken"
+      alias: "verificationToken",
+      index: true,
     },
 
-    // expiration date for the verification token
     verifyExpires: {
       type: Date,
-      default: null
-    }
+      default: null,
+    },
+
+    // estado general del usuario
+    active: {
+      type: Boolean,
+      default: true,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-// Optional: create an index for token lookups (speeds verification queries)
+// Índices útiles
 userSchema.index({ verifyToken: 1 }, { sparse: true });
+userSchema.index({ email: 1 });
+
+// Limpieza ligera antes de guardar
+userSchema.pre("save", function (next) {
+  if (typeof this.email === "string") {
+    this.email = this.email.trim().toLowerCase();
+  }
+
+  if (typeof this.name === "string") {
+    this.name = this.name.trim();
+  }
+
+  if (!Number.isFinite(this.balance)) this.balance = 0;
+  if (!Number.isFinite(this.credit)) this.credit = 0;
+  if (!Number.isFinite(this.leverageFactor) || this.leverageFactor < 1) {
+    this.leverageFactor = 1;
+  }
+
+  next();
+});
 
 export default mongoose.model("User", userSchema);
