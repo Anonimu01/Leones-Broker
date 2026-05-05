@@ -150,7 +150,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 // =======================
-// 🚀 OPEN TRADE (CORREGIDO)
+// 🚀 OPEN TRADE (FIX APLICADO)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -167,15 +167,19 @@ export const openTrade = async ({ user, order }) => {
     type = String(type || "MARKET").toUpperCase();
     quantity = Number(quantity);
 
-    let entryPrice = normalizePrice(price);
+    // ==============================
+    // 🔥 AQUÍ VA TU VALIDACIÓN REAL
+    // ==============================
+    const entryPrice = normalizePrice(price);
 
-    // 🔥 AQUÍ ESTÁ LA CORRECCIÓN IMPORTANTE
-    if (!entryPrice) {
+    if (!entryPrice || entryPrice <= 0) {
       await session.abortTransaction();
       session.endSession();
 
-      console.error("❌ No se puede abrir operación sin precio real");
-      return { ok: false, error: "Precio de mercado inválido" };
+      return {
+        ok: false,
+        error: "No se puede abrir sin precio real"
+      };
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -246,13 +250,12 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    let exit = normalizePrice(closePrice);
+    const exit = normalizePrice(closePrice);
 
     if (!exit) {
       await session.abortTransaction();
       session.endSession();
 
-      console.error("❌ closePrice inválido");
       return { ok: false, error: "Precio de cierre inválido" };
     }
 
