@@ -3,10 +3,16 @@ import mongoose from "mongoose";
 function normalizeSide(value) {
   const side = String(value || "").toUpperCase().trim();
 
-  if (side === "LONG") return "BUY";
-  if (side === "SHORT") return "SELL";
-  if (side === "SELL") return "SELL";
-  return "BUY";
+  switch (side) {
+    case "LONG":
+    case "BUY":
+      return "BUY";
+    case "SHORT":
+    case "SELL":
+      return "SELL";
+    default:
+      return "BUY";
+  }
 }
 
 const PositionSchema = new mongoose.Schema(
@@ -64,7 +70,6 @@ const PositionSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // margen reservado para esta posición
     marginReserved: {
       type: Number,
       default: 0,
@@ -77,7 +82,6 @@ const PositionSchema = new mongoose.Schema(
       min: 1,
     },
 
-    // estado: OPEN / CLOSED
     status: {
       type: String,
       enum: ["OPEN", "CLOSED"],
@@ -85,19 +89,16 @@ const PositionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // PnL flotante / actualizado en tiempo real
     pnl: {
       type: Number,
       default: 0,
     },
 
-    // utilidad extra por compatibilidad con tu código
     profit: {
       type: Number,
       default: 0,
     },
 
-    // PnL realizado al cerrar
     realizedPnl: {
       type: Number,
       default: 0,
@@ -113,15 +114,44 @@ const PositionSchema = new mongoose.Schema(
   }
 );
 
-// Mantener consistencia entre campos que tu backend ya usa
+//
+// 🔥 VALIDACIÓN ANTES DE GUARDAR (EVITA NaN + CRASHES)
+//
+PositionSchema.pre("validate", function (next) {
+  if (!Number.isFinite(this.qty)) {
+    this.invalidate("qty", "Qty inválido");
+  }
+
+  if (!Number.isFinite(this.entryPrice)) {
+    this.invalidate("entryPrice", "EntryPrice inválido");
+  }
+
+  if (this.currentPrice != null && !Number.isFinite(this.currentPrice)) {
+    this.invalidate("currentPrice", "CurrentPrice inválido");
+  }
+
+  if (this.closePrice != null && !Number.isFinite(this.closePrice)) {
+    this.invalidate("closePrice", "ClosePrice inválido");
+  }
+
+  next();
+});
+
+//
+// 🔥 NORMALIZACIÓN FINAL SEGURA
+//
 PositionSchema.pre("save", function (next) {
   if (this.side) {
     this.side = normalizeSide(this.side);
   }
 
-  if (this.pnl == null) this.pnl = 0;
-  if (this.profit == null) this.profit = this.pnl;
-  if (this.realizedPnl == null) this.realizedPnl = 0;
+  // Evitar NaN en producción (esto era causa silenciosa de bugs)
+  if (!Number.isFinite(this.pnl)) this.pnl = 0;
+  if (!Number.isFinite(this.profit)) this.profit = this.pnl;
+  if (!Number.isFinite(this.realizedPnl)) this.realizedPnl = 0;
+
+  // Seguridad extra para margen
+  if (!Number.isFinite(this.marginReserved)) this.marginReserved = 0;
 
   next();
 });
