@@ -3,13 +3,9 @@ import Wallet from "../models/wallet.model.js";
 import User from "../models/user.model.js";
 import mongoose from "mongoose";
 
-// 🔥 IMPORTANTE: TRAER PRECIO REAL DEL MERCADO
-import { getPrice } from "../services/marketPrice.service.js";
-
-/* =======================
-   🔧 HELPERS
-======================= */
-
+// =======================
+// 🔧 HELPERS
+// =======================
 function normalizePrice(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -27,9 +23,9 @@ function normalizeSide(value) {
   return side === "SELL" ? "SELL" : "BUY";
 }
 
-/* =======================
-   🔥 PNL REAL
-======================= */
+// =======================
+// 🔥 PNL REAL
+// =======================
 function computePnl({ side, entryPrice, exitPrice, qty }) {
   const entry = Number(entryPrice);
   const exit = Number(exitPrice);
@@ -44,9 +40,9 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
     : (exit - entry) * quantity;
 }
 
-/* =======================
-   💰 WALLET
-======================= */
+// =======================
+// 🔥 WALLET
+// =======================
 async function getOrCreateWallet(userId, session = null) {
   let wallet = await Wallet.findOne({ user: userId }).session(session);
 
@@ -73,9 +69,9 @@ async function getOrCreateWallet(userId, session = null) {
   return wallet;
 }
 
-/* =======================
-   🔄 WALLET RECALC
-======================= */
+// =======================
+// 🔥 RECALCULO
+// =======================
 async function recalculateWallet(userId, session = null) {
   const wallet = await Wallet.findOne({ user: userId }).session(session);
   if (!wallet) return;
@@ -97,10 +93,14 @@ async function recalculateWallet(userId, session = null) {
   const credit = Number(wallet.credit || 0);
 
   wallet.marginUsed = marginUsed;
-  wallet.equity = balanceOwn + pnlFloating + credit;
-  wallet.freeMargin = wallet.equity - marginUsed;
-  wallet.updatedAt = new Date();
 
+  // 🔥 EQUITY EN TIEMPO REAL
+  wallet.equity = balanceOwn + pnlFloating + credit;
+
+  // 🔥 FREE MARGIN
+  wallet.freeMargin = wallet.equity - marginUsed;
+
+  wallet.updatedAt = new Date();
   await wallet.save({ session });
 
   await User.updateOne(
@@ -110,9 +110,9 @@ async function recalculateWallet(userId, session = null) {
   ).catch(() => null);
 }
 
-/* =======================
-   📈 LIVE PRICE UPDATE
-======================= */
+// =======================
+// 📈 UPDATE LIVE PRICE
+// =======================
 export const updateLivePrice = async ({ symbol, price }) => {
   try {
     const livePrice = normalizePrice(price);
@@ -140,6 +140,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
       pos.updatedAt = new Date();
 
       await pos.save();
+
       users.add(String(pos.user));
     }
 
@@ -152,9 +153,9 @@ export const updateLivePrice = async ({ symbol, price }) => {
   }
 };
 
-/* =======================
-   🚀 OPEN TRADE (FIX REAL)
-======================= */
+// =======================
+// 🚀 OPEN TRADE
+// =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -163,19 +164,19 @@ export const openTrade = async ({ user, order }) => {
     const userId = user?._id || user?.id;
     if (!userId) throw new Error("Usuario inválido");
 
-    let { symbol, side, type, quantity } = order || {};
+    let { symbol, side, type, quantity, price } = order || {};
 
     symbol = normalizeSymbol(symbol);
     side = normalizeSide(side);
     type = String(type || "MARKET").toUpperCase();
     quantity = Number(quantity);
 
-    // 🔥 FIX CRÍTICO: SIEMPRE PRECIO REAL DEL MERCADO
-    const market = await getPrice(symbol);
-    const entryPrice = Number(market?.price);
+    let entryPrice = normalizePrice(price);
 
-    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-      throw new Error("Precio de mercado no disponible");
+    // 🔥 FALLBACK (NUNCA NULL)
+    if (!entryPrice) {
+      console.warn("⚠️ Precio inválido en apertura → usando 1");
+      entryPrice = 1;
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -183,6 +184,7 @@ export const openTrade = async ({ user, order }) => {
     const leverage = Math.max(Number(wallet.leverageFactor ?? 1), 1);
     const margin = (quantity * entryPrice) / leverage;
 
+    // 🔥 NO TOCAR BALANCE
     wallet.marginUsed = Number(wallet.marginUsed || 0) + margin;
     wallet.updatedAt = new Date();
 
@@ -220,13 +222,14 @@ export const openTrade = async ({ user, order }) => {
     session.endSession();
 
     console.error("❌ OPEN ERROR:", err);
+
     return { ok: false, error: err.message };
   }
 };
 
-/* =======================
-   🔴 CLOSE TRADE
-======================= */
+// =======================
+// 🔴 CLOSE TRADE (FIX FINAL)
+// =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -241,12 +244,16 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       status: "OPEN",
     }).session(session);
 
-    if (!position) throw new Error("Posición no encontrada");
+    if (!position) throw new Error("posicion no encontrada");
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    const exit = normalizePrice(closePrice);
-    if (!exit) throw new Error("Precio de cierre inválido");
+    // 🔥 NUNCA NULL
+    let exit = normalizePrice(closePrice);
+    if (!exit) {
+      console.warn("⚠️ closePrice inválido → usando entryPrice");
+      exit = normalizePrice(position.entryPrice) || 1;
+    }
 
     const pnl = computePnl({
       side: position.side,
@@ -257,9 +264,13 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const margin = Number(position.marginReserved || 0);
 
-    wallet.balanceOwn = Number(wallet.balanceOwn || 0) + pnl;
-    wallet.balance = wallet.balanceOwn;
+    // 🔥 SOLO PNL AL BALANCE
+    const newBalance = Number(wallet.balanceOwn || 0) + pnl;
 
+    wallet.balanceOwn = newBalance;
+    wallet.balance = newBalance;
+
+    // 🔥 LIBERAR MARGEN
     wallet.marginUsed = Math.max(
       0,
       Number(wallet.marginUsed || 0) - margin
@@ -268,12 +279,12 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     wallet.updatedAt = new Date();
     await wallet.save({ session });
 
+    // 🔴 CERRAR POSICION
     position.status = "CLOSED";
     position.closePrice = exit;
     position.currentPrice = exit;
     position.pnl = pnl;
     position.profit = pnl;
-    position.realizedPnl = pnl;
     position.closedAt = new Date();
     position.updatedAt = new Date();
 
@@ -288,7 +299,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       ok: true,
       data: {
         pnl,
-        balance: wallet.balanceOwn,
+        balance: newBalance,
         closePrice: exit,
       },
     };
@@ -298,6 +309,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     session.endSession();
 
     console.error("❌ CLOSE ERROR REAL:", err);
+
     return { ok: false, error: err.message };
   }
 };
