@@ -291,6 +291,7 @@ function normalizePrice(body = {}) {
     body.bid ??
     body.mark ??
     null;
+
   if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -344,6 +345,7 @@ function normalizeQuote(symbol, item = {}) {
     item.label ||
     item.name ||
     (symbol.split(":").pop() || symbol).replace("_", "/");
+
   return {
     symbol,
     label,
@@ -393,7 +395,14 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null };
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
 }
 
 function getCurrentPriceForSymbol(symbol) {
@@ -468,7 +477,9 @@ function resolveOrderPrice(body = {}, symbol = "") {
 }
 
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
@@ -515,11 +526,14 @@ async function getUserDocFromBearer(req) {
   try {
     const auth = req.headers.authorization || req.headers.Authorization || null;
     if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+
     const token = String(auth).split(" ")[1];
     if (!token || !process.env.JWT_SECRET) return null;
+
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const userId = payload && (payload.id || payload.sub || payload.userId || payload._id);
     if (!userId) return null;
+
     return await User.findById(userId).catch(() => null);
   } catch {
     return null;
@@ -560,7 +574,6 @@ function normalizeWalletSnapshot(wallet, openPnl = 0) {
   const marginUsed = Math.max(Number(wallet?.marginUsed ?? 0) || 0, 0);
   const pnl = Number(openPnl ?? 0) || 0;
 
-  // balance no baja al abrir; equity refleja balance + pnl flotante
   const equity = balanceOwn + pnl + credit;
   const freeMargin = Math.max(equity - marginUsed, 0);
   const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
@@ -633,6 +646,7 @@ async function recordTransaction({
       source,
       createdAt: new Date(),
     });
+
     return tx.toObject ? tx.toObject() : tx;
   } catch (err) {
     console.warn("recordTransaction fallback:", err?.message || err);
@@ -666,6 +680,7 @@ async function loadOpenPositionsForUser(userId) {
     .lean()
     .exec()
     .catch(() => []);
+
   return (rows || []).map((p) => {
     try {
       return annotatePosition(p);
@@ -676,7 +691,12 @@ async function loadOpenPositionsForUser(userId) {
 }
 
 async function loadAllPositionsForUser(userId) {
-  const rows = await Position.find({ user: userId }).sort({ createdAt: -1 }).lean().exec().catch(() => []);
+  const rows = await Position.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec()
+    .catch(() => []);
+
   return (rows || []).map((p) => {
     try {
       return annotatePosition(p);
@@ -977,110 +997,6 @@ async function syncLivePnLForSymbol(symbol) {
     console.warn("syncLivePnL failed:", e?.message || e);
   }
 }
-
-/* ======================================================
-   CLOSE POSITION APPPLY
-   ====================================================== */
-
-async function applyCloseToPosition({ user, positionDoc, currentPrice, source = "api/trade/close" }) {
-  const position = positionDoc?.toObject ? positionDoc.toObject() : positionDoc;
-
-  const symbol = String(position.symbol || "").toUpperCase();
-  const sideRaw = String(position.side || position.direction || "").toUpperCase();
-
-  const side = sideRaw === "SELL" ? "SELL" : "BUY";
-  const direction = side === "SELL" ? -1 : 1;
-
-  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
-  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
-
-  let closePrice = toPositiveNumber(currentPrice, null);
-  if (!closePrice) {
-    console.warn("⚠️ closePrice inválido, usando entryPrice");
-    closePrice = entryPrice || 1;
-  }
-
-  const realizedPnl = (closePrice - entryPrice) * qty * direction;
-
-  const wallet = await getWalletDocForUser(user._id);
-
-  const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-  const reservedMargin = Number(position.marginReserved ?? 0) || 0;
-  const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
-  const credit = Number(wallet.credit ?? 0) || 0;
-
-  // Balance no se incrementa por el margen porque no se descontó al abrir.
-  // El margen se libera ajustando marginUsed.
-  const newBalance = balanceBefore + realizedPnl;
-
-  wallet.balanceOwn = newBalance;
-  wallet.balance = newBalance;
-
-  wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-
-  wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-  wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
-  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-
-  wallet.updatedAt = new Date();
-  await wallet.save();
-
-  user.balance = wallet.balanceOwn;
-  await user.save();
-
-  position.status = "CLOSED";
-  position.currentPrice = closePrice;
-  position.closePrice = closePrice;
-  position.realizedPnl = realizedPnl;
-  position.pnl = realizedPnl;
-  position.profit = realizedPnl;
-  position.closedAt = new Date();
-  position.updatedAt = new Date();
-
-  await positionDoc.save();
-
-  const tx = await recordTransaction({
-    user,
-    type: "trade_close",
-    amount: realizedPnl,
-    status: "completed",
-    note: `${side} ${symbol}`,
-    balanceBefore,
-    balanceAfter: wallet.balanceOwn,
-    meta: {
-      positionId: String(position._id),
-      symbol,
-      side,
-      qty,
-      entryPrice,
-      closePrice,
-      marginReleased: reservedMargin,
-      realizedPnl,
-    },
-    source,
-  });
-
-  const account = await safeBuildAccountForUser(user);
-  const annotatedPosition = annotatePosition(position);
-
-  emitStateUpdates(user._id, account, [annotatedPosition], tx);
-
-  return {
-    positionId: position._id,
-    symbol,
-    side,
-    qty,
-    entryPrice,
-    currentPrice: closePrice,
-    realizedPnl,
-    balance: wallet.balanceOwn,
-    account: account.account,
-    wallet: account.wallet,
-    position: annotatedPosition,
-    transaction: tx,
-  };
-}
-
 /* ======================================================
    HEALTH / MAIL
    ====================================================== */
