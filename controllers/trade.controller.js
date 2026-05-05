@@ -9,7 +9,10 @@ function normalizePrice(value) {
 }
 
 function normalizeSymbol(value) {
-  return String(value || "").trim().toUpperCase().replace(/^OANDA:/, "");
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^OANDA:/, "");
 }
 
 function normalizeSide(value) {
@@ -40,11 +43,17 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
 }
 
 // 🔥 WALLET SEGURO
-async function getOrCreateWallet(userId, session) {
-  let wallet = await Wallet.findOne({ user: userId }).session(session);
+async function getOrCreateWallet(userId, session = null) {
+  let query = Wallet.findOne({ user: userId });
+  if (session) query = query.session(session);
+
+  let wallet = await query;
 
   if (!wallet) {
-    const userDoc = await User.findById(userId).session(session).catch(() => null);
+    let userQuery = User.findById(userId);
+    if (session) userQuery = userQuery.session(session);
+
+    const userDoc = await userQuery.catch(() => null);
 
     const initialBalance = Number(userDoc?.balance ?? 1000) || 1000;
     const initialLeverage = Number(userDoc?.leverage ?? 1) || 1;
@@ -67,6 +76,69 @@ async function getOrCreateWallet(userId, session) {
   return wallet;
 }
 
+// 🔥 RECALCULAR WALLET DESDE POSICIONES ABIERTAS
+async function recalculateWalletMetrics(userId, session = null) {
+  let walletQuery = Wallet.findOne({ user: userId });
+  if (session) walletQuery = walletQuery.session(session);
+
+  const wallet = await walletQuery;
+  if (!wallet) return null;
+
+  let positionsQuery = Position.find({
+    user: userId,
+    status: "OPEN",
+  }).select("marginReserved pnl profit");
+
+  if (session) positionsQuery = positionsQuery.session(session);
+
+  const openPositions = await positionsQuery;
+
+  const marginUsed = openPositions.reduce((sum, pos) => {
+    return sum + (Number(pos.marginReserved) || 0);
+  }, 0);
+
+  const openPnl = openPositions.reduce((sum, pos) => {
+    const value = pos.pnl ?? pos.profit ?? 0;
+    return sum + (Number(value) || 0);
+  }, 0);
+
+  const balanceOwn = Number(wallet.balanceOwn) || 0;
+  const credit = Number(wallet.credit) || 0;
+
+  // balance = dinero real disponible del usuario
+  wallet.balance = balanceOwn;
+
+  // margen total bloqueado por posiciones abiertas
+  wallet.marginUsed = marginUsed;
+
+  // equity = balance real + PnL flotante + crédito
+  wallet.equity = balanceOwn + openPnl + credit;
+
+  // freeMargin = dinero disponible sin contar PnL flotante
+  wallet.freeMargin = balanceOwn + credit;
+
+  wallet.marginLevel =
+    wallet.marginUsed > 0
+      ? (wallet.equity / wallet.marginUsed) * 100
+      : 0;
+
+  wallet.updatedAt = new Date();
+  await wallet.save({ session });
+
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        balance: wallet.balanceOwn,
+        updatedAt: new Date(),
+      },
+    },
+    session ? { session } : {}
+  ).catch(() => null);
+
+  return wallet;
+}
+
 // =======================
 // 📈 UPDATE LIVE PRICE
 // =======================
@@ -82,6 +154,8 @@ export const updateLivePrice = async ({ symbol, price }) => {
       status: "OPEN",
     });
 
+    const affectedUsers = new Set();
+
     for (const pos of positions) {
       const pnl = computePnl({
         side: pos.side,
@@ -96,6 +170,14 @@ export const updateLivePrice = async ({ symbol, price }) => {
       pos.updatedAt = new Date();
 
       await pos.save();
+
+      if (pos.user) {
+        affectedUsers.add(String(pos.user));
+      }
+    }
+
+    for (const userId of affectedUsers) {
+      await recalculateWalletMetrics(userId);
     }
 
     return { ok: true };
@@ -129,9 +211,6 @@ export const openTrade = async ({ user, order }) => {
       throw new Error("Datos inválidos");
     }
 
-    // =======================
-    // 🔥 VALIDACIÓN BASE
-    // =======================
     if (!entryPrice || entryPrice <= 0) {
       throw new Error("Precio de mercado inválido");
     }
@@ -186,9 +265,10 @@ export const openTrade = async ({ user, order }) => {
 
     const balanceOwn = Number(wallet.balanceOwn) || 0;
     const credit = Number(wallet.credit) || 0;
-    const marginUsed = Number(wallet.marginUsed) || 0;
 
-    const freeBalance = balanceOwn + credit - marginUsed;
+    // Con este modelo, balanceOwn ya representa dinero disponible,
+    // así que no se le resta marginUsed otra vez.
+    const freeBalance = balanceOwn + credit;
 
     if (freeBalance < requiredMargin) {
       throw new Error("Fondos insuficientes");
@@ -196,27 +276,23 @@ export const openTrade = async ({ user, order }) => {
 
     // 🔥 BLOQUEAR MARGEN
     wallet.balanceOwn = balanceOwn - requiredMargin;
-    wallet.marginUsed = marginUsed + requiredMargin;
-
     wallet.balance = wallet.balanceOwn;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-    wallet.freeMargin = wallet.balanceOwn + credit - wallet.marginUsed;
-    wallet.marginLevel =
-      wallet.marginUsed > 0
-        ? (wallet.equity / wallet.marginUsed) * 100
-        : 0;
-
     wallet.updatedAt = new Date();
 
     await wallet.save({ session });
 
     await User.updateOne(
       { _id: userId },
-      { $set: { balance: wallet.balanceOwn, updatedAt: new Date() } },
+      {
+        $set: {
+          balance: wallet.balanceOwn,
+          updatedAt: new Date(),
+        },
+      },
       { session }
     ).catch(() => null);
 
-    const positionDoc = await Position.create(
+    await Position.create(
       [
         {
           user: userId,
@@ -238,17 +314,18 @@ export const openTrade = async ({ user, order }) => {
       { session }
     );
 
+    // Recalcula wallet ya con la posición creada
+    await recalculateWalletMetrics(userId, session);
+
     await session.commitTransaction();
     session.endSession();
-
-    const position = positionDoc[0];
 
     return {
       ok: true,
       data: {
-        positionId: position._id,
+        positionId: String(Date.now()),
         symbol,
-        side: position.side,
+        side,
         qty: quantity,
         entryPrice,
         margin: requiredMargin,
@@ -306,30 +383,18 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       qty,
     });
 
-    wallet.marginUsed = Math.max(Number(wallet.marginUsed || 0) - margin, 0);
+    // =========================
+    // 🔥 DEVOLVER MARGEN + PNL
+    // =========================
     wallet.balanceOwn = Number(wallet.balanceOwn || 0) + margin + pnl;
-
     wallet.balance = wallet.balanceOwn;
-
-    const credit = Number(wallet.credit || 0);
-
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-    wallet.freeMargin = wallet.balanceOwn + credit - wallet.marginUsed;
-    wallet.marginLevel =
-      wallet.marginUsed > 0
-        ? (wallet.equity / wallet.marginUsed) * 100
-        : 0;
-
     wallet.updatedAt = new Date();
 
     await wallet.save({ session });
 
-    await User.updateOne(
-      { _id: userId },
-      { $set: { balance: wallet.balanceOwn, updatedAt: new Date() } },
-      { session }
-    ).catch(() => null);
-
+    // =========================
+    // 🔥 CERRAR POSICIÓN
+    // =========================
     position.status = "CLOSED";
     position.closePrice = exitPrice;
     position.currentPrice = exitPrice;
@@ -339,6 +404,9 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     position.updatedAt = new Date();
 
     await position.save({ session });
+
+    // Recalcula marginUsed, equity y freeMargin con las posiciones que quedan abiertas
+    await recalculateWalletMetrics(userId, session);
 
     await session.commitTransaction();
     session.endSession();
