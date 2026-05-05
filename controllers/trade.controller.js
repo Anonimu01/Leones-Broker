@@ -62,7 +62,7 @@ async function getOrCreateWallet(userId, session = null) {
 }
 
 // =======================
-// 🔥 RECALCULO CORRECTO
+// 🔥 RECALCULO (MODO SIMULADOR)
 // =======================
 async function recalculateWallet(userId, session = null) {
   const wallet = await Wallet.findOne({ user: userId }).session(session);
@@ -86,10 +86,10 @@ async function recalculateWallet(userId, session = null) {
 
   wallet.marginUsed = marginUsed;
 
-  // 🔥 EQUITY REAL
+  // 🔥 EQUITY = BALANCE + PNL
   wallet.equity = balanceOwn + pnlFloating + credit;
 
-  // 🔥 FREE MARGIN REAL
+  // 🔥 FREE MARGIN
   wallet.freeMargin = wallet.equity - marginUsed;
 
   wallet.updatedAt = new Date();
@@ -137,7 +137,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 // =======================
-// 🚀 OPEN TRADE
+// 🚀 OPEN TRADE (SIN TOCAR BALANCE)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -159,12 +159,9 @@ export const openTrade = async ({ user, order }) => {
 
     const margin = qty * price;
 
-    if (wallet.balanceOwn < margin) {
-      throw new Error("fondos insuficientes");
-    }
+    // 🔥 NO TOCAR BALANCE
+    wallet.marginUsed = Number(wallet.marginUsed || 0) + margin;
 
-    // 🔥 RESTAR MARGEN
-    wallet.balanceOwn -= margin;
     await wallet.save({ session });
 
     const position = await Position.create(
@@ -198,7 +195,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 // =======================
-// 🔴 CLOSE TRADE (🔥 CLAVE)
+// 🔴 CLOSE TRADE (SOLO PNL)
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
@@ -229,13 +226,18 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const margin = Number(position.marginReserved || 0);
 
     // =========================
-    // 🔥 AQUI ESTA LA MAGIA
+    // 🔥 SOLO SUMAR / RESTAR PNL
     // =========================
-    const newBalance =
-      Number(wallet.balanceOwn || 0) + margin + pnl;
+    const newBalance = Number(wallet.balanceOwn || 0) + pnl;
 
     wallet.balanceOwn = newBalance;
     wallet.balance = newBalance;
+
+    // 🔥 LIBERAR MARGEN
+    wallet.marginUsed = Math.max(
+      0,
+      Number(wallet.marginUsed || 0) - margin
+    );
 
     await wallet.save({ session });
 
@@ -247,7 +249,6 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     await position.save({ session });
 
-    // 🔥 RECIEN AQUI RECALCULAMOS
     await recalculateWallet(userId, session);
 
     await session.commitTransaction();
