@@ -129,8 +129,35 @@ export const openTrade = async ({ user, order }) => {
       throw new Error("Datos inválidos");
     }
 
-    if (!entryPrice) {
-      throw new Error("Precio inválido");
+    // =======================
+    // 🔥 VALIDACIÓN BASE
+    // =======================
+    if (!entryPrice || entryPrice <= 0) {
+      throw new Error("Precio de mercado inválido");
+    }
+
+    if (entryPrice === 1) {
+      throw new Error("Precio inválido (fallback detectado)");
+    }
+
+    if (entryPrice < 0.0001) {
+      throw new Error("Precio demasiado bajo (sync inválido)");
+    }
+
+    // =======================
+    // 🔥 VALIDACIÓN CONTRA MERCADO REAL
+    // =======================
+    const lastPrice = await Position.findOne({ symbol })
+      .sort({ createdAt: -1 })
+      .select("currentPrice")
+      .lean();
+
+    if (lastPrice?.currentPrice) {
+      const diff = Math.abs(lastPrice.currentPrice - entryPrice);
+
+      if (diff > lastPrice.currentPrice * 0.5) {
+        throw new Error("Precio fuera de rango de mercado");
+      }
     }
 
     // 🔥 ANTI DUPLICADO REAL (OBLIGATORIO)
