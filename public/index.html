@@ -5125,14 +5125,24 @@ async function closePosition(positionId, symbol) {
     symbol = normalizeSymbol(symbol || getActiveSymbol());
 
     let price = getLivePriceFallback();
-    if (!price) price = await syncLivePrice(symbol);
-    if (!price) price = 1;
+
+    if (!price) {
+      price = await syncLivePrice(symbol);
+    }
+
+    // 🔥 NUNCA DEJAR PRECIO NULL
+    if (!price || price <= 0) {
+      console.warn("⚠️ usando precio fallback");
+      price = 1;
+    }
 
     const body = {
       positionId,
       symbol,
       price: Number(price)
     };
+
+    console.log("📡 CLOSE PAYLOAD:", body);
 
     const res = await fetch("/api/trade/close", {
       method: "POST",
@@ -5145,33 +5155,17 @@ async function closePosition(positionId, symbol) {
 
     const data = await res.json();
 
-    if (!res.ok) {
-      alert(data?.error || "Error al cerrar");
+    // 🔥 VALIDACIÓN REAL
+    if (!res.ok || !data?.ok) {
+      console.error("❌ CLOSE ERROR BACKEND:", data);
+      alert(data?.error || "Error al cerrar operación");
       return;
     }
 
-    // 🔥 LIMPIAR TRADE LOCAL
-    const index = OPEN_TRADES.findIndex(t => t.id === positionId);
-    if (index !== -1) {
-      const trade = OPEN_TRADES[index];
-
-      const pnl = Number(trade.profit || 0);
-      const margin = Number(trade.amount || 0);
-
-      // ✅ FORMULA REAL
-      ACCOUNT.balance = ACCOUNT.balance + margin + pnl;
-
-      ACCOUNT.usedMargin -= margin;
-
-      OPEN_TRADES.splice(index, 1);
-    }
-
-    updateAccountMetrics();
+    console.log("✅ CLOSE REAL OK");
 
     await loadPositions?.();
     await loadAccount?.();
-
-    console.log("✅ CERRADO");
 
   } catch (err) {
     console.error("❌ CLOSE ERROR:", err);
