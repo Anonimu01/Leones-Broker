@@ -31,7 +31,7 @@ function getCache(symbol) {
 }
 
 /* =========================
-   🔥 MAPPING GLOBAL DE SIMBOLOS
+   🔥 MAPEO GLOBAL DE SÍMBOLOS
 ========================= */
 function mapSymbol(symbol) {
   const s = String(symbol || "").toUpperCase().trim();
@@ -64,7 +64,7 @@ export function normalizeSymbol(symbol) {
 }
 
 /* =========================
-   PRECIO REAL
+   🔥 OBTENER PRECIO REAL
 ========================= */
 export async function getPrice(symbol) {
   const cleanSymbol = mapSymbol(symbol);
@@ -79,8 +79,9 @@ export async function getPrice(symbol) {
 
     const price = Number(data?.results?.p);
 
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new Error("Precio inválido desde Polygon");
+    // 🔴 FIX CRÍTICO: validar respuesta real de API
+    if (!data?.results || !Number.isFinite(price) || price <= 0) {
+      throw new Error("Respuesta inválida de Polygon");
     }
 
     const result = {
@@ -96,21 +97,20 @@ export async function getPrice(symbol) {
   } catch (err) {
     console.error("❌ Market price error:", cleanSymbol, err.message);
 
-    // 🚨 NO INVENTAR PRECIO
-    throw new Error(`No se pudo obtener precio para ${cleanSymbol}`);
+    // 🚨 IMPORTANTE: NO SE INVENTA PRECIO
+    throw new Error(`No se pudo obtener precio real para ${cleanSymbol}`);
   }
 }
 
 /* =========================
-   MULTIPLE PRICES
+   MULTI PRICES
 ========================= */
 export async function getPrices(symbols = []) {
   const results = [];
 
   for (const s of symbols) {
     try {
-      const price = await getPrice(s);
-      results.push(price);
+      results.push(await getPrice(s));
     } catch (err) {
       results.push({
         symbol: mapSymbol(s),
@@ -125,7 +125,7 @@ export async function getPrices(symbols = []) {
 }
 
 /* =========================
-   EJECUTAR ORDEN
+   🚀 EJECUTAR ORDEN
 ========================= */
 export async function executeOrderOnBroker({
   symbol,
@@ -141,6 +141,10 @@ export async function executeOrderOnBroker({
 
   const market = await getPrice(symbol);
 
+  if (!market?.price) {
+    throw new Error("No hay precio de mercado disponible");
+  }
+
   const executionPrice =
     type === "market"
       ? market.price
@@ -154,7 +158,7 @@ export async function executeOrderOnBroker({
     id: "ord_" + Math.random().toString(36).slice(2),
     userId,
     symbol: market.symbol,
-    side: side.toLowerCase(),
+    side: String(side).toLowerCase(),
     type,
     quantity: Number(quantity),
 
