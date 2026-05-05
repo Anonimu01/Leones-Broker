@@ -8,15 +8,21 @@ function normalizePrice(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function normalizeSymbol(value) {
+  return String(value || "").trim().toUpperCase().replace(/^OANDA:/, "");
+}
+
 function normalizeSide(value) {
-  return String(value || "BUY").trim().toUpperCase();
+  const side = String(value || "BUY").trim().toUpperCase();
+  if (side === "SELL" || side === "SHORT") return "SHORT";
+  return "LONG";
 }
 
 function normalizeType(value) {
   return String(value || "MARKET").trim().toUpperCase();
 }
 
-// 🔥 PNL REAL (CORREGIDO)
+// 🔥 PNL REAL
 function computePnl({ side, entryPrice, exitPrice, qty }) {
   const entry = Number(entryPrice);
   const exit = Number(exitPrice);
@@ -62,15 +68,17 @@ async function getOrCreateWallet(userId, session) {
 }
 
 // =======================
-// 📈 UPDATE LIVE PRICE (PNL EN TIEMPO REAL)
+// 📈 UPDATE LIVE PRICE
 // =======================
 export const updateLivePrice = async ({ symbol, price }) => {
   try {
     const livePrice = normalizePrice(price);
-    if (!livePrice) return;
+    if (!livePrice) return { ok: false, error: "Precio inválido" };
+
+    const cleanSymbol = normalizeSymbol(symbol);
 
     const positions = await Position.find({
-      symbol: String(symbol).toUpperCase(),
+      symbol: cleanSymbol,
       status: "OPEN",
     });
 
@@ -92,8 +100,8 @@ export const updateLivePrice = async ({ symbol, price }) => {
 
     return { ok: true };
   } catch (err) {
-    console.error("Live price error:", err);
-    return { ok: false };
+    console.error("❌ updateLivePrice error:", err);
+    return { ok: false, error: err?.message || "server_error" };
   }
 };
 
@@ -110,7 +118,7 @@ export const openTrade = async ({ user, order }) => {
 
     let { symbol, side, type, quantity, price } = order || {};
 
-    symbol = String(symbol || "").trim().toUpperCase();
+    symbol = normalizeSymbol(symbol);
     side = normalizeSide(side);
     type = normalizeType(type);
     quantity = Number(quantity);
@@ -123,6 +131,17 @@ export const openTrade = async ({ user, order }) => {
 
     if (!entryPrice) {
       throw new Error("Precio inválido");
+    }
+
+    // 🔥 ANTI DOBLE OPERACIÓN
+    const existingOpen = await Position.findOne({
+      user: userId,
+      symbol,
+      status: "OPEN",
+    }).session(session);
+
+    if (existingOpen) {
+      throw new Error("Ya existe una posición abierta para este símbolo");
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -170,7 +189,8 @@ export const openTrade = async ({ user, order }) => {
         {
           user: userId,
           symbol,
-          side: side === "SELL" ? "SHORT" : "LONG",
+          side,
+          type,
           qty: quantity,
           entryPrice,
           currentPrice: entryPrice,
@@ -178,6 +198,7 @@ export const openTrade = async ({ user, order }) => {
           leverage,
           status: "OPEN",
           pnl: 0,
+          profit: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -216,7 +237,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 // =======================
-// 🔴 CLOSE TRADE (FIX REAL)
+// 🔴 CLOSE TRADE
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
@@ -244,7 +265,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const entryPrice = Number(position.entryPrice);
     const qty = Number(position.qty);
     const side = position.side;
-    const margin = Number(position.marginReserved);
+    const margin = Number(position.marginReserved || 0);
 
     // 🔥 CALCULAR PNL
     const pnl = computePnl({
@@ -255,8 +276,8 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     });
 
     // 🔥 DEVOLVER MARGEN + PNL
-    wallet.marginUsed = Math.max(wallet.marginUsed - margin, 0);
-    wallet.balanceOwn += margin + pnl;
+    wallet.marginUsed = Math.max(Number(wallet.marginUsed || 0) - margin, 0);
+    wallet.balanceOwn = Number(wallet.balanceOwn || 0) + margin + pnl;
 
     // 🔥 NORMALIZAR
     wallet.balance = wallet.balanceOwn;
@@ -315,6 +336,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 };
 
 export default {
+  updateLivePrice,
   openTrade,
   closeTrade,
 };
