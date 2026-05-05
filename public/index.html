@@ -4026,60 +4026,6 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     return null;
   }
 
-//esto es una prueva de pnl
-  
-  async function updatePnLRealTime() {
-  try {
-    const res = await fetch("/api/positions");
-    const data = await res.json();
-
-    const positions = data?.data || data || [];
-
-    positions.forEach(pos => {
-      const livePrice = window.lastKnownPrice;
-
-      if (!livePrice || !pos.entryPrice) return;
-
-      const pnl = pos.side === "LONG"
-        ? (livePrice - pos.entryPrice) * pos.qty
-        : (pos.entryPrice - livePrice) * pos.qty;
-
-      console.log("📈 PNL:", pnl);
-
-      // 🔥 OPCIONAL: guardarlo en la UI
-      pos.pnl = pnl;
-    });
-
-  } catch (err) {
-    console.error("❌ PNL ERROR:", err);
-  }
-}
-
-  // ✅ 2. interval
-setInterval(async () => {
-  if (!window.tvSymbol) return;
-
-  const symbol = cleanSymbol(window.tvSymbol);
-  const price = await syncLivePrice(symbol);
-
-  if (price && price > 0) {
-    window.lastKnownPrice = price;
-
-    // 🔥 ENVIAR AL BACKEND (CLAVE)
-    await fetch("/api/market/price", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        symbol,
-        price
-      })
-    });
-  }
-
-}, 1000);
-  
 async function loadPositions() {
   const endpoints = [
     '/positions',
@@ -4884,127 +4830,140 @@ async function loadPositions() {
     return true;
   }
 
-/* =========================
-   OPEN TRADE
-========================= */
-let priceSyncIntervalStarted = false;
+  function openTrade(symbol, amount, direction, price) {
+    if (amount > ACCOUNT.balance) {
+      alert('Fondos insuficientes');
+      return;
+    }
 
-/* =========================
-   OPEN TRADE (CORREGIDO)
-========================= */
-function openTrade(symbol, amount, direction, price) {
-  const cleanSymbol = setActiveSymbol(symbol || getActiveSymbol());
+    ACCOUNT.balance -= amount;
+    ACCOUNT.usedMargin += amount;
 
-  const entryPrice = Number(price) || Number(window.lastKnownPrice);
+    const trade = {
+      id: Date.now(),
+      symbol,
+      amount,
+      direction,
+      openPrice: price,
+      currentPrice: price,
+      profit: 0
+    };
 
-  if (!entryPrice || entryPrice <= 0) return;
-
-  if (amount > ACCOUNT.balance) {
-    alert("Fondos insuficientes");
-    return;
+    OPEN_TRADES.push(trade);
+    updateAccountMetrics();
   }
 
-  ACCOUNT.balance -= amount;
-  ACCOUNT.usedMargin += amount;
+  function renderBottomPanelsWrapper() {
+    renderBottomPanels();
+    const meta = getActiveSymbolMeta();
+    if (meta) {
+      renderSymbolDetails(meta);
+      requestRealtimeForSymbol(meta);
+    }
+  }
 
-  const trade = {
-    id: Date.now(),
-    symbol: cleanSymbol,
-    amount,
-    direction,
-    openPrice: entryPrice,
-    currentPrice: entryPrice,
-    profit: 0
-  };
+  function exposeAPI() {
+    window.startBrokerUI = initTradingUI;
+    window.refreshBrokerUI = requestBackendRefresh;
+    window.openBrokerTradingView = openTradingView;
+    window.selectBrokerSymbol = selectSymbol;
 
-  OPEN_TRADES.push(trade);
+    window.openTrade = openTrade;
+    window.placeBrokerOrder = placeBrokerOrder;
+    window.updateTradesPrices = updateTradesPrices;
+    window.updateAccountMetrics = updateAccountMetrics;
+    window.closeAllTrades = closeAllTrades;
+    window.adminDeposit = adminDeposit;
 
-  updateAccountMetrics();
-  requestRealtimeForSymbol(cleanSymbol);
+    window.__LEONES_BROKER_EXT2 = {
+      initTradingUI,
+      refreshBrokerUI: requestBackendRefresh,
+      openTradingView,
+      selectSymbol,
+      loadMarketsAndQuotes,
+      loadRealMarkets,
+      loadRealQuotes,
+      loadAccount,
+      loadPositions,
+      placeOrder,
+      placeBrokerOrder,
+      openTrade,
+      closePosition,
+      requestBackendRefresh,
+      positions: state.positions,
+      activeSymbol: state.activeSymbol,
+      activeMeta: TR.activeMeta || null,
+      symbolPrices: TR.symbolPrices || {}
+    };
+  }
+
+/* =========================
+   NORMALIZE SYMBOL
+========================= */
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .trim();
 }
 
 /* =========================
-   ACTIVE SYMBOL
+   FLAGS
+========================= */
+let sendingOrder = false;
+
+/* =========================
+   GET ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
+  const api = window.__LEONES_BROKER_EXT2 || {};
+
   return (
     window.tvSymbol ||
     window.selectedSymbol ||
-    window.__LEONES_BROKER_EXT2?.activeSymbol ||
+    api.activeSymbol ||
+    document.getElementById("tradingSymbol")?.textContent?.trim() ||
+    document.getElementById("op-symbol")?.textContent?.trim() ||
     ""
   );
 }
 
 /* =========================
-   SET ACTIVE SYMBOL (CRÍTICO)
-========================= */
-function setActiveSymbol(symbol, meta = null) {
-  const clean = normalizeSymbol(symbol);
-
-  window.tvSymbol = clean;
-  window.selectedSymbol = clean;
-
-  if (window.__LEONES_BROKER_EXT2) {
-    window.__LEONES_BROKER_EXT2.activeSymbol = clean;
-  }
-
-  requestRealtimeForSymbol(clean);
-  return clean;
-}
-
-/* =========================
-   NORMALIZE SYMBOL (FIX REAL)
-========================= */
-function normalizeSymbol(symbol = "") {
-  return String(symbol)
-    .trim()
-    .toUpperCase();
-}
-
-/* =========================
-   PRICE SYNC BACKEND
+   🔥 LIVE PRICE SYNC (FIXED)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const res = await fetch(`/api/market/price?symbol=${encodeURIComponent(symbol)}`);
+    // 🔥 PRIMERO intenta endpoint correcto
+    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
-    const price = Number(data?.price);
-
-    if (price > 0) {
-      window.lastKnownPrice = price;
-      return price;
+    if (data?.price && Number(data.price) > 0) {
+      window.tvPrice = Number(data.price);
+      return Number(data.price);
     }
-  } catch (e) {
-    console.error(e);
+
+    // 🔥 FALLBACK quotes
+    const res2 = await fetch("/api/quotes");
+    const quotes = await res2.json();
+
+    const normalized = normalizeSymbol(symbol);
+
+    const match = quotes.find(q =>
+      normalizeSymbol(q.symbol) === normalized
+    );
+
+    if (match?.price && Number(match.price) > 0) {
+      window.tvPrice = Number(match.price);
+      return Number(match.price);
+    }
+
+    return null;
+  } catch (err) {
+    console.warn("Precio sync error:", err);
+    return null;
   }
-  return null;
 }
 
-/* =========================
-   LOOP LIVE PRICE
-========================= */
-function startPriceLoop() {
-  if (priceSyncIntervalStarted) return;
-  priceSyncIntervalStarted = true;
-
-  setInterval(async () => {
-    const symbol = getActiveSymbol();
-    if (!symbol) return;
-
-    const price = await syncLivePrice(symbol);
-    if (price) window.lastKnownPrice = price;
-  }, 1000);
-}
-
-startPriceLoop();
-
-/* =========================
-   INIT HOOK
-========================= */
-startPriceSyncLoop();
-
-  
 /* =========================
    🔥 GET LIVE PRICE SAFE (MEJORADO)
 ========================= */
@@ -5121,105 +5080,44 @@ document.addEventListener("click", async (e) => {
 /* =========================
    🔥 FINAL BACKEND ORDER (FIXED)
 ========================= */
-// 🔥 LIMPIAR SYMBOL (CRÍTICO)
-function cleanSymbol(sym) {
-  if (!sym) return "";
-  return String(sym)
-    .replace("OANDA:", "")
-    .replace("OANDA", "")
-    .trim()
-    .toUpperCase();
-}
-
 async function placeBrokerOrder(payload = {}) {
   try {
-    
-    if (window.__lastOrderTime && Date.now() - window.__lastOrderTime < 1500) {
-  console.warn("⛔ Orden bloqueada por doble ejecución");
-  return;
-}
+    const symbol = normalizeSymbol(
+      payload.symbol || window.tvSymbol || window.selectedSymbol
+    );
 
-window.__lastOrderTime = Date.now();
-
-    // 🔒 EVITAR DOBLE CLICK
-    if (window.__sendingOrder) return;
-    window.__sendingOrder = true;
-
-    let rawSymbol =
-      payload.symbol || window.tvSymbol || window.selectedSymbol;
-
-    const symbol = cleanSymbol(rawSymbol);
-
-    const quantity = Number(payload.qty ?? payload.amount);
+    const amount = Number(payload.qty ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
     const user = getUser() || {};
 
     if (!user.token) {
       alert("No autenticado");
-      window.__sendingOrder = false;
       return;
     }
 
-    if (!symbol) {
-      window.__sendingOrder = false;
-      return alert("Símbolo inválido");
+    if (!symbol) return alert("Símbolo inválido");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+
+    // 🔥 PRECIO GARANTIZADO
+    let price = getLivePriceFallback();
+
+    if (!price) {
+      price = await syncLivePrice(symbol);
     }
 
-    if (!quantity || quantity <= 0) {
-      window.__sendingOrder = false;
-      return alert("Cantidad inválida");
-    }
-
-    if (!["buy", "sell"].includes(side)) {
-      window.__sendingOrder = false;
-      return alert("Dirección inválida");
-    }
-
-    // ============================
-    // 🔥 PRECIO REAL (FIX FUERTE)
-    // ============================
-
-    let price = Number(window.lastKnownPrice);
-
-    // intento 1
     if (!price || price <= 0) {
-      console.warn("⚠️ lastKnownPrice vacío, intentando sync...");
-      price = await syncLivePrice(symbol);
+      console.error("❌ Precio final inválido:", price);
+      alert("No hay precio disponible del mercado");
+      return;
     }
-
-    // intento 2
-   if (!Number.isFinite(price) || price <= 0 || price === 1) {
-      console.warn("⚠️ Reintentando precio...");
-      await new Promise(r => setTimeout(r, 500));
-      price = await syncLivePrice(symbol);
-    }
-
-    // ❌ si falla → no operar
- if (!Number.isFinite(price) || price <= 0 || price === 1) {
-      console.error("❌ PRECIO FINAL FALLÓ:", price);
-      window.__sendingOrder = false;
-      return alert("No hay precio en tiempo real");
-    }
-    price = Number(price);
-
-if (!Number.isFinite(price) || price <= 0) {
-  console.error("Precio inválido:", price);
-  return alert("Precio de mercado inválido");
-}
-
-    // 🔥 GUARDAR PRECIO GLOBAL
-    window.lastKnownPrice = price;
-
-    // ============================
-    // 🚀 PAYLOAD CORRECTO
-    // ============================
 
     const body = {
       symbol,
       side: side.toUpperCase(),
-      type: "MARKET",
-      quantity: quantity,
+      type: "market",
+      qty: amount,
       price: Number(price)
     };
 
@@ -5240,22 +5138,18 @@ if (!Number.isFinite(price) || price <= 0) {
 
     if (!res.ok) {
       console.error("❌ BACKEND ERROR:", data);
-      window.__sendingOrder = false;
-      return alert(data?.error || "Error al abrir operación");
+      alert(data?.message || "Error al abrir operación");
+      return;
     }
 
-    // 🔄 REFRESH
     await loadPositions?.();
     await loadAccount?.();
 
     console.log("✅ ORDER OK");
-
-    window.__sendingOrder = false;
     return data;
 
   } catch (err) {
     console.error("❌ ORDER FAILED:", err);
-    window.__sendingOrder = false;
   }
 }
 /* =========================
@@ -5303,8 +5197,6 @@ setInterval(() => {
 
 log('EXT2 real loaded');
 })();
-
-  
 </script>
 
 
