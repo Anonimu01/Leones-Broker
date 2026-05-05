@@ -5115,12 +5115,20 @@ async function placeBrokerOrder(payload = {}) {
 }
 
 /* =========================
-🔥 CLOSE POSITION (REAL FIX)
+🔥 CLOSE POSITION (FIX REAL FINAL)
 ========================= */
 async function closePosition(positionId, symbol) {
   try {
     const user = getUser() || {};
     if (!user.token) return alert("No autenticado");
+
+    // 🔥 VALIDAR ID (EVITA ERROR 500)
+    if (!positionId) {
+      console.error("❌ positionId vacío");
+      return alert("Error: ID de posición inválido");
+    }
+
+    console.log("🆔 POSITION ID:", positionId);
 
     symbol = normalizeSymbol(symbol || getActiveSymbol());
 
@@ -5130,16 +5138,15 @@ async function closePosition(positionId, symbol) {
       price = await syncLivePrice(symbol);
     }
 
-    // 🔥 NUNCA DEJAR PRECIO NULL
+    // 🔥 NUNCA PRECIO NULL
     if (!price || price <= 0) {
       console.warn("⚠️ usando precio fallback");
       price = 1;
     }
 
     const body = {
-      positionId,
-      symbol,
-      price: Number(price)
+      positionId: String(positionId), // 🔥 FORZAR STRING
+      closePrice: Number(price)       // 🔥 NOMBRE CORRECTO
     };
 
     console.log("📡 CLOSE PAYLOAD:", body);
@@ -5155,7 +5162,6 @@ async function closePosition(positionId, symbol) {
 
     const data = await res.json();
 
-    // 🔥 VALIDACIÓN REAL
     if (!res.ok || !data?.ok) {
       console.error("❌ CLOSE ERROR BACKEND:", data);
       alert(data?.error || "Error al cerrar operación");
