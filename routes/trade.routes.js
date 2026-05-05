@@ -1,4 +1,3 @@
-// routes/trade.routes.js
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { openTrade, closeTrade } from "../controllers/trade.controller.js";
@@ -6,6 +5,38 @@ import { openTrade, closeTrade } from "../controllers/trade.controller.js";
 const router = express.Router();
 
 const idempotencyCache = new Map();
+const openOrderLocks = new Map();
+
+function cleanSymbolInput(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/^OANDA:/i, "")
+    .replace(/^OANDA/i, "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function extractSymbol(body = {}) {
+  const rawSymbol =
+    body.symbol ||
+    body.tvSymbol ||
+    body.selectedSymbol ||
+    body.chartSymbol ||
+    body.instrument ||
+    body.marketSymbol ||
+    body.market ||
+    body.ticker ||
+    body.asset ||
+    "";
+
+  return {
+    rawSymbol: String(rawSymbol).trim(),
+    symbol: cleanSymbolInput(rawSymbol),
+    tvSymbol: cleanSymbolInput(body.tvSymbol || rawSymbol),
+    chartSymbol: cleanSymbolInput(body.chartSymbol || rawSymbol),
+  };
+}
 
 function validateOrderBody(body) {
   if (!body || typeof body !== "object") return "body must be an object";
@@ -19,29 +50,14 @@ function validateOrderBody(body) {
   const q = Number(quantity);
   if (!Number.isFinite(q) || q <= 0) return "invalid quantity";
 
-  if (String(type).toLowerCase() === "limit") {
-    const p = Number(price);
-    if (!Number.isFinite(p) || p <= 0) return "invalid price";
-  }
+  const p = Number(price);
+  if (!Number.isFinite(p) || p <= 0) return "invalid price";
 
   return null;
 }
 
 function normalizeOrderBody(body = {}) {
-  const symbol = String(
-    body.symbol ||
-      body.tvSymbol ||
-      body.selectedSymbol ||
-      body.chartSymbol ||
-      body.instrument ||
-      body.marketSymbol ||
-      body.market ||
-      body.ticker ||
-      body.asset ||
-      ""
-  )
-    .trim()
-    .toUpperCase();
+  const symbolInfo = extractSymbol(body);
 
   const side = String(body.side || body.direction || body.positionSide || "buy")
     .trim()
@@ -83,7 +99,7 @@ function normalizeOrderBody(body = {}) {
     body.mark;
 
   return {
-    symbol,
+    ...symbolInfo,
     side,
     type,
     quantity: Number(quantityRaw),
@@ -91,7 +107,29 @@ function normalizeOrderBody(body = {}) {
   };
 }
 
+function withOpenLock(key, ttlMs = 1500) {
+  const now = Date.now();
+  const until = openOrderLocks.get(key) || 0;
+  if (until > now) return false;
+
+  openOrderLocks.set(key, now + ttlMs);
+
+  const t = setTimeout(() => {
+    const current = openOrderLocks.get(key) || 0;
+    if (current <= Date.now()) openOrderLocks.delete(key);
+  }, ttlMs + 100);
+
+  if (t && typeof t.unref === "function") t.unref();
+  return true;
+}
+
+function releaseOpenLock(key) {
+  openOrderLocks.delete(key);
+}
+
 router.post("/open", authMiddleware, async (req, res) => {
+  let lockKey = null;
+
   try {
     const user = req.user;
     if (!user) {
@@ -106,21 +144,30 @@ router.post("/open", authMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error });
     }
 
-    const idemKey = req.headers["idempotency-key"] || body.clientOrderId;
+    const idemKey = req.headers["idempotency-key"] || body.clientOrderId || body.orderId || body.clientOrderID;
 
     if (idemKey) {
       const key = `${user._id}::${idemKey}`;
       if (idempotencyCache.has(key)) {
+        const cached = idempotencyCache.get(key);
         return res.json({
           ok: true,
-          data: idempotencyCache.get(key),
+          data: cached,
           idempotent: true,
         });
       }
     }
 
+    lockKey = `${user._id}:${normalized.symbol}:${normalized.side}:${normalized.quantity}:${normalized.price}`;
+    if (!withOpenLock(lockKey, 2500)) {
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
+    }
+
     const order = {
       symbol: normalized.symbol,
+      tvSymbol: normalized.tvSymbol,
+      chartSymbol: normalized.chartSymbol,
+      rawSymbol: normalized.rawSymbol,
       side: normalized.side.toUpperCase(),
       type: normalized.type.toUpperCase(),
       quantity: Number(normalized.quantity),
@@ -130,7 +177,6 @@ router.post("/open", authMiddleware, async (req, res) => {
     console.log("🚀 ORDER BACKEND:", order);
 
     let result;
-
     for (let i = 0; i < 3; i++) {
       try {
         result = await openTrade({ user, order });
@@ -152,15 +198,24 @@ router.post("/open", authMiddleware, async (req, res) => {
       });
     }
 
+    const responseData = {
+      ...(result.data || {}),
+      symbol: normalized.symbol,
+      tvSymbol: normalized.tvSymbol || normalized.symbol,
+      chartSymbol: normalized.chartSymbol || normalized.symbol,
+      rawSymbol: normalized.rawSymbol || normalized.symbol,
+      displaySymbol: normalized.tvSymbol || normalized.chartSymbol || normalized.symbol,
+    };
+
     if (idemKey) {
       const key = `${user._id}::${idemKey}`;
-      idempotencyCache.set(key, result.data);
+      idempotencyCache.set(key, responseData);
     }
 
     return res.json({
       ok: true,
       msg: "Operación abierta",
-      data: result.data,
+      data: responseData,
     });
   } catch (err) {
     console.error("Trade open error:", err);
@@ -168,6 +223,8 @@ router.post("/open", authMiddleware, async (req, res) => {
       ok: false,
       error: err?.message || "server_error",
     });
+  } finally {
+    if (lockKey) releaseOpenLock(lockKey);
   }
 });
 
@@ -180,6 +237,7 @@ router.post("/close", authMiddleware, async (req, res) => {
 
     const body = req.body || {};
     const positionId = String(body.positionId || body.id || body.position || "").trim();
+
     const closePriceRaw =
       body.price ??
       body.closePrice ??
