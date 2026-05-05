@@ -7,6 +7,67 @@ const router = express.Router();
 const idempotencyCache = new Map();
 const openOrderLocks = new Map();
 
+// =========================
+// 🔥 HELPERS PRECIO REAL
+// =========================
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function getPriceStore() {
+  try {
+    const raw = global.priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    return raw;
+  } catch {
+    return {};
+  }
+}
+
+function extractPrice(item = {}) {
+  return (
+    Number(item.price) ||
+    Number(item.last) ||
+    Number(item.close) ||
+    Number(item.bid) ||
+    Number(item.ask) ||
+    null
+  );
+}
+
+function findLivePrice(symbol) {
+  const store = getPriceStore();
+  const target = compactSymbol(symbol);
+
+  for (const [key, val] of Object.entries(store)) {
+    const candidates = [
+      key,
+      val?.symbol,
+      val?.ticker,
+      val?.tvSymbol,
+      val?.instrument,
+    ];
+
+    const match = candidates.some((c) =>
+      compactSymbol(c).includes(target)
+    );
+
+    if (match) {
+      const price = extractPrice(val);
+      if (price && price > 0) return price;
+    }
+  }
+
+  return null;
+}
+
+// =========================
+// 🔧 NORMALIZACIÓN
+// =========================
 function cleanSymbolInput(value) {
   if (!value) return "";
   return String(value)
@@ -21,13 +82,9 @@ function extractSymbol(body = {}) {
   const rawSymbol =
     body.symbol ||
     body.tvSymbol ||
-    body.selectedSymbol ||
     body.chartSymbol ||
     body.instrument ||
-    body.marketSymbol ||
-    body.market ||
     body.ticker ||
-    body.asset ||
     "";
 
   return {
@@ -41,17 +98,14 @@ function extractSymbol(body = {}) {
 function validateOrderBody(body) {
   if (!body || typeof body !== "object") return "body must be an object";
 
-  const { symbol, side, type, quantity, price } = body;
+  const { symbol, side, type, quantity } = body;
 
-  if (!symbol || typeof symbol !== "string") return "symbol required";
+  if (!symbol) return "symbol required";
   if (!["buy", "sell"].includes(String(side).toLowerCase())) return "invalid side";
   if (!["market", "limit"].includes(String(type).toLowerCase())) return "invalid type";
 
   const q = Number(quantity);
   if (!Number.isFinite(q) || q <= 0) return "invalid quantity";
-
-  const p = Number(price);
-  if (!Number.isFinite(p) || p <= 0) return "invalid price";
 
   return null;
 }
@@ -59,54 +113,18 @@ function validateOrderBody(body) {
 function normalizeOrderBody(body = {}) {
   const symbolInfo = extractSymbol(body);
 
-  const side = String(body.side || body.direction || body.positionSide || "buy")
-    .trim()
-    .toLowerCase();
-
-  const type = String(body.type || body.orderType || "market")
-    .trim()
-    .toLowerCase();
-
-  const quantityRaw =
-    body.quantity ??
-    body.qty ??
-    body.amount ??
-    body.positionSize ??
-    body.notional ??
-    body.size ??
-    body.volume ??
-    body.lots ??
-    body.contracts ??
-    body.units ??
-    body.lotSize;
-
-  const priceRaw =
-    body.price ??
-    body.entryPrice ??
-    body.entry_price ??
-    body.currentPrice ??
-    body.current_price ??
-    body.lastPrice ??
-    body.last_price ??
-    body.marketPrice ??
-    body.market_price ??
-    body.quotePrice ??
-    body.quote_price ??
-    body.executionPrice ??
-    body.execution_price ??
-    body.ask ??
-    body.bid ??
-    body.mark;
-
   return {
     ...symbolInfo,
-    side,
-    type,
-    quantity: Number(quantityRaw),
-    price: Number(priceRaw),
+    side: String(body.side || "buy").toLowerCase(),
+    type: String(body.type || "market").toLowerCase(),
+    quantity: Number(body.quantity ?? body.qty ?? body.amount),
+    price: Number(body.price ?? body.entryPrice),
   };
 }
 
+// =========================
+// 🔒 LOCK
+// =========================
 function withOpenLock(key, ttlMs = 1500) {
   const now = Date.now();
   const until = openOrderLocks.get(key) || 0;
@@ -114,12 +132,7 @@ function withOpenLock(key, ttlMs = 1500) {
 
   openOrderLocks.set(key, now + ttlMs);
 
-  const t = setTimeout(() => {
-    const current = openOrderLocks.get(key) || 0;
-    if (current <= Date.now()) openOrderLocks.delete(key);
-  }, ttlMs + 100);
-
-  if (t && typeof t.unref === "function") t.unref();
+  setTimeout(() => openOrderLocks.delete(key), ttlMs);
   return true;
 }
 
@@ -127,134 +140,71 @@ function releaseOpenLock(key) {
   openOrderLocks.delete(key);
 }
 
+// =========================
+// 🚀 OPEN
+// =========================
 router.post("/open", authMiddleware, async (req, res) => {
   let lockKey = null;
 
   try {
     const user = req.user;
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
-    const body = req.body || {};
-    const normalized = normalizeOrderBody(body);
+    const normalized = normalizeOrderBody(req.body);
 
     const error = validateOrderBody(normalized);
-    if (error) {
-      return res.status(400).json({ ok: false, error });
-    }
+    if (error) return res.status(400).json({ ok: false, error });
 
-    const idemKey = req.headers["idempotency-key"] || body.clientOrderId || body.orderId || body.clientOrderID;
-
-    if (idemKey) {
-      const key = `${user._id}::${idemKey}`;
-      if (idempotencyCache.has(key)) {
-        const cached = idempotencyCache.get(key);
-        return res.json({
-          ok: true,
-          data: cached,
-          idempotent: true,
-        });
-      }
-    }
-
-    lockKey = `${user._id}:${normalized.symbol}:${normalized.side}:${normalized.quantity}:${normalized.price}`;
-    if (!withOpenLock(lockKey, 2500)) {
+    lockKey = `${user._id}:${normalized.symbol}`;
+    if (!withOpenLock(lockKey)) {
       return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
 
-    const order = {
-      symbol: normalized.symbol,
-      tvSymbol: normalized.tvSymbol,
-      chartSymbol: normalized.chartSymbol,
-      rawSymbol: normalized.rawSymbol,
-      side: normalized.side.toUpperCase(),
-      type: normalized.type.toUpperCase(),
-      quantity: Number(normalized.quantity),
-      price: Number.isFinite(normalized.price) && normalized.price > 0 ? Number(normalized.price) : null,
-    };
-
-    console.log("🚀 ORDER BACKEND:", order);
-
-    let result;
-    for (let i = 0; i < 3; i++) {
-      try {
-        result = await openTrade({ user, order });
-        break;
-      } catch (err) {
-        if (err?.message?.includes("Write conflict")) {
-          console.warn(`⚠️ Write conflict, retry ${i + 1}`);
-          await new Promise((r) => setTimeout(r, 120));
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    if (!result || !result.ok) {
-      return res.status(400).json({
-        ok: false,
-        error: result?.error || "Trade failed",
-      });
-    }
-
-    const responseData = {
-      ...(result.data || {}),
-      symbol: normalized.symbol,
-      tvSymbol: normalized.tvSymbol || normalized.symbol,
-      chartSymbol: normalized.chartSymbol || normalized.symbol,
-      rawSymbol: normalized.rawSymbol || normalized.symbol,
-      displaySymbol: normalized.tvSymbol || normalized.chartSymbol || normalized.symbol,
-    };
-
-    if (idemKey) {
-      const key = `${user._id}::${idemKey}`;
-      idempotencyCache.set(key, responseData);
-    }
-
-    return res.json({
-      ok: true,
-      msg: "Operación abierta",
-      data: responseData,
+    const result = await openTrade({
+      user,
+      order: {
+        symbol: normalized.symbol,
+        side: normalized.side.toUpperCase(),
+        type: normalized.type.toUpperCase(),
+        quantity: normalized.quantity,
+        price: normalized.price || findLivePrice(normalized.symbol),
+      },
     });
+
+    return res.json({ ok: true, data: result.data });
+
   } catch (err) {
-    console.error("Trade open error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "server_error",
-    });
+    console.error(err);
+    res.status(500).json({ ok: false });
   } finally {
     if (lockKey) releaseOpenLock(lockKey);
   }
 });
 
+// =========================
+// 🔥 CLOSE (AQUI ESTA LO CLAVE)
+// =========================
 router.post("/close", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
-
     const body = req.body || {};
-    const positionId = String(body.positionId || body.id || body.position || "").trim();
 
-    const closePriceRaw =
-      body.price ??
-      body.closePrice ??
-      body.currentPrice ??
-      body.current_price ??
-      body.exitPrice ??
-      body.exit_price ??
-      body.mark;
-
-    const closePrice = Number(closePriceRaw);
+    const positionId = String(body.positionId || "").trim();
 
     if (!positionId) {
       return res.status(400).json({ ok: false, error: "positionId_required" });
     }
 
+    // 🔥 SI NO VIENE PRECIO → LO BUSCA SOLO
+    let closePrice = Number(body.price);
+
     if (!Number.isFinite(closePrice) || closePrice <= 0) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
+      closePrice = findLivePrice(body.symbol);
+    }
+
+    if (!closePrice || closePrice <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "no_live_price_available",
+      });
     }
 
     const result = await closeTrade({
@@ -263,29 +213,21 @@ router.post("/close", authMiddleware, async (req, res) => {
       closePrice,
     });
 
-    if (!result || !result.ok) {
-      return res.status(400).json({
-        ok: false,
-        error: result?.error || "Close trade failed",
-      });
-    }
-
     return res.json({
       ok: true,
       msg: "Operación cerrada",
       data: result.data,
     });
+
   } catch (err) {
-    console.error("Trade close error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "server_error",
-    });
+    console.error("close error:", err);
+    res.status(500).json({ ok: false });
   }
 });
 
+// =========================
 router.get("/health", (req, res) => {
-  res.json({ ok: true, module: "trade.routes" });
+  res.json({ ok: true });
 });
 
 export default router;
