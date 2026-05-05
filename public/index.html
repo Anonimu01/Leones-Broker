@@ -4056,7 +4056,29 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 }
 
   // ✅ 2. interval
-setInterval(updatePnLRealTime, 1000);
+setInterval(async () => {
+  if (!window.tvSymbol) return;
+
+  const symbol = cleanSymbol(window.tvSymbol);
+  const price = await syncLivePrice(symbol);
+
+  if (price && price > 0) {
+    window.lastKnownPrice = price;
+
+    // 🔥 ENVIAR AL BACKEND (CLAVE)
+    await fetch("/api/market/price", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        symbol,
+        price
+      })
+    });
+  }
+
+}, 1000);
   
 async function loadPositions() {
   const endpoints = [
@@ -5124,6 +5146,14 @@ function cleanSymbol(sym) {
 
 async function placeBrokerOrder(payload = {}) {
   try {
+    
+    if (window.__lastOrderTime && Date.now() - window.__lastOrderTime < 1500) {
+  console.warn("⛔ Orden bloqueada por doble ejecución");
+  return;
+}
+
+window.__lastOrderTime = Date.now();
+
     // 🔒 EVITAR DOBLE CLICK
     if (window.__sendingOrder) return;
     window.__sendingOrder = true;
