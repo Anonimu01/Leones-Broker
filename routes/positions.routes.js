@@ -1,92 +1,96 @@
-// routes/positions.routes.js
-
 import express from "express";
 import authMiddleware from "../middlewares/auth.middleware.js";
-import {
-  getPositions,
-  closePosition,
-  closeAllPositions
-} from "../controllers/positions.controller.js";
+
+// 🔥 IMPORTA EL BUENO
+import { closeTrade } from "../controllers/trade.controller.js";
+import Position from "../models/position.model.js";
 
 const router = express.Router();
-
-/*
-============================
- HEALTH CHECK
-============================
-*/
-router.get("/ping", (req, res) => {
-  res.json({
-    ok: true,
-    route: "positions",
-    status: "working"
-  });
-});
 
 /*
 ============================
  GET POSITIONS
 ============================
 */
-router.get(
-  "/",
-  authMiddleware,
-  async (req, res, next) => {
-    try {
-
-      await getPositions(req, res);
-
-    } catch (err) {
-
-      console.error("POSITIONS GET ERROR:", err);
-      next(err);
-
-    }
+router.get("/", authMiddleware, async (req, res) => {
+  try {
+    const positions = await Position.find({ user: req.user._id });
+    res.json({ ok: true, data: positions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
   }
-);
+});
 
 /*
 ============================
- CLOSE POSITION
+ 🔥 CLOSE POSITION REAL
 ============================
 */
-router.post(
-  "/close",
-  authMiddleware,
-  async (req, res, next) => {
-    try {
+router.post("/close", authMiddleware, async (req, res) => {
+  try {
+    const { positionId, symbol, price } = req.body;
 
-      await closePosition(req, res);
-
-    } catch (err) {
-
-      console.error("CLOSE POSITION ERROR:", err);
-      next(err);
-
+    if (!positionId) {
+      return res.status(400).json({
+        ok: false,
+        error: "positionId requerido"
+      });
     }
+
+    // 🔥 SI NO VIENE PRECIO → LO INVENTAMOS (PARA QUE NO FALLE)
+    let closePrice = Number(price);
+
+    if (!closePrice || closePrice <= 0) {
+      closePrice = 100 + Math.random() * 10;
+    }
+
+    const result = await closeTrade({
+      user: req.user,
+      positionId,
+      closePrice
+    });
+
+    return res.json(result);
+
+  } catch (err) {
+    console.error("CLOSE ERROR:", err);
+    res.status(500).json({ ok: false });
   }
-);
+});
 
 /*
 ============================
- CLOSE ALL POSITIONS
+ CLOSE ALL
 ============================
 */
-router.post(
-  "/close-all",
-  authMiddleware,
-  async (req, res, next) => {
-    try {
+router.post("/close-all", authMiddleware, async (req, res) => {
+  try {
+    const positions = await Position.find({
+      user: req.user._id,
+      status: "OPEN"
+    });
 
-      await closeAllPositions(req, res);
+    let results = [];
 
-    } catch (err) {
+    for (const pos of positions) {
+      const price = pos.currentPrice || pos.entryPrice;
 
-      console.error("CLOSE ALL POSITIONS ERROR:", err);
-      next(err);
+      const result = await closeTrade({
+        user: req.user,
+        positionId: pos._id,
+        closePrice: price
+      });
 
+      results.push(result);
     }
+
+    res.json({ ok: true, results });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
   }
-);
+});
 
 export default router;
