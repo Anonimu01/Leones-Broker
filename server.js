@@ -964,42 +964,72 @@ async function syncLivePnLForSymbol(symbol) {
 
 async function applyCloseToPosition({ user, positionDoc, currentPrice, source = "api/trade/close" }) {
   const position = positionDoc?.toObject ? positionDoc.toObject() : positionDoc;
+
   const symbol = String(position.symbol || "").toUpperCase();
-  const side = normalizeSide(position.side || position.direction);
+  const sideRaw = String(position.side || position.direction || "").toUpperCase();
+
+  const side = sideRaw === "SELL" ? "SELL" : "BUY";
+  const direction = side === "SELL" ? -1 : 1;
+
   const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
   const qty = Number(position.qty ?? position.quantity ?? position.amount ?? 0) || 0;
-  const sign = side === "SELL" ? -1 : 1;
-  const closePx = Number(currentPrice) > 0 ? Number(currentPrice) : entryPrice;
 
-  const realizedPnl = (closePx - entryPrice) * qty * sign;
+  const closePrice = Number(currentPrice) > 0 ? Number(currentPrice) : entryPrice;
 
+  // =========================
+  // 🔥 PnL REAL (TIEMPO REAL)
+  // =========================
+  const realizedPnl = (closePrice - entryPrice) * qty * direction;
+
+  // =========================
+  // 🔥 WALLET
+  // =========================
   const wallet = await getWalletDocForUser(user._id);
+
   const balanceBefore = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+
   const reservedMargin = Number(position.marginReserved ?? 0) || 0;
   const marginUsedBefore = Number(wallet.marginUsed ?? 0) || 0;
   const credit = Number(wallet.credit ?? 0) || 0;
 
+  // =========================
+  // 🔥 CLAVE REAL (LO QUE PEDISTE)
+  // =========================
+  // balance += margen + pnl
+  const newBalance = balanceBefore + reservedMargin + realizedPnl;
+
+  // liberar margen
   wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
-  wallet.balanceOwn = balanceBefore + reservedMargin + realizedPnl;
-  wallet.balance = wallet.balanceOwn;
+
+  wallet.balanceOwn = newBalance;
+  wallet.balance = newBalance;
+
   wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
   wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
   wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
   wallet.updatedAt = new Date();
   await wallet.save();
 
   user.balance = wallet.balanceOwn;
   await user.save();
 
+  // =========================
+  // 🔥 CERRAR POSICIÓN
+  // =========================
   position.status = "CLOSED";
-  position.currentPrice = closePx;
-  position.closePrice = closePx;
+  position.currentPrice = closePrice;
+  position.closePrice = closePrice;
   position.realizedPnl = realizedPnl;
   position.pnl = realizedPnl;
   position.closedAt = new Date();
   position.updatedAt = new Date();
+
   await positionDoc.save();
 
+  // =========================
+  // 🔥 TRANSACTION
+  // =========================
   const tx = await recordTransaction({
     user,
     type: "trade_close",
@@ -1014,7 +1044,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
       side,
       qty,
       entryPrice,
-      closePrice: closePx,
+      closePrice,
       marginReleased: reservedMargin,
       realizedPnl,
     },
@@ -1023,6 +1053,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
 
   const account = await safeBuildAccountForUser(user);
   const annotatedPosition = annotatePosition(position);
+
   emitStateUpdates(user._id, account, [annotatedPosition], tx);
 
   return {
@@ -1031,7 +1062,7 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
     side,
     qty,
     entryPrice,
-    currentPrice: closePx,
+    currentPrice: closePrice,
     realizedPnl,
     balance: wallet.balanceOwn,
     account: account.account,
