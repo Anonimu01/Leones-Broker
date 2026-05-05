@@ -15,10 +15,24 @@ function normalizeSymbol(value) {
     .replace(/^OANDA:/, "");
 }
 
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function sameMarketSymbol(a = "", b = "") {
+  const x = compactSymbol(a);
+  const y = compactSymbol(b);
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
 function normalizeSide(value) {
   const side = String(value || "BUY").trim().toUpperCase();
-  if (side === "SELL" || side === "SHORT") return "SHORT";
-  return "LONG";
+  if (side === "SELL" || side === "SHORT") return "SELL";
+  return "BUY";
 }
 
 function normalizeType(value) {
@@ -35,9 +49,9 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
   if (!Number.isFinite(exit) || exit <= 0) return 0;
   if (!Number.isFinite(quantity) || quantity <= 0) return 0;
 
-  const isShort = String(side).toUpperCase() === "SHORT";
+  const isSell = String(side).toUpperCase() === "SELL";
 
-  return isShort
+  return isSell
     ? (entry - exit) * quantity
     : (exit - entry) * quantity;
 }
@@ -76,6 +90,49 @@ async function getOrCreateWallet(userId, session = null) {
   return wallet;
 }
 
+async function findLatestKnownPriceForSymbol(symbol) {
+  const target = normalizeSymbol(symbol);
+  if (!target) return null;
+
+  const rows = await Position.find({})
+    .sort({ createdAt: -1 })
+    .select("symbol currentPrice entryPrice price openPrice")
+    .lean()
+    .exec()
+    .catch(() => []);
+
+  for (const row of rows || []) {
+    const rowSymbol = row?.symbol || "";
+    if (!sameMarketSymbol(rowSymbol, target)) continue;
+
+    const px =
+      normalizePrice(row.currentPrice) ||
+      normalizePrice(row.entryPrice) ||
+      normalizePrice(row.price) ||
+      normalizePrice(row.openPrice);
+
+    if (px) return px;
+  }
+
+  return null;
+}
+
+function matchesAnySymbol(pos = {}, targetSymbol = "") {
+  const candidates = [
+    pos.symbol,
+    pos.tvSymbol,
+    pos.selectedSymbol,
+    pos.chartSymbol,
+    pos.instrument,
+    pos.marketSymbol,
+    pos.market,
+    pos.ticker,
+    pos.asset,
+  ].filter(Boolean);
+
+  return candidates.some((candidate) => sameMarketSymbol(candidate, targetSymbol));
+}
+
 // 🔥 RECALCULAR WALLET DESDE POSICIONES ABIERTAS
 async function recalculateWalletMetrics(userId, session = null) {
   let walletQuery = Wallet.findOne({ user: userId });
@@ -105,16 +162,16 @@ async function recalculateWalletMetrics(userId, session = null) {
   const balanceOwn = Number(wallet.balanceOwn) || 0;
   const credit = Number(wallet.credit) || 0;
 
-  // balance = dinero real disponible del usuario
+  // balance = dinero disponible del usuario
   wallet.balance = balanceOwn;
 
   // margen total bloqueado por posiciones abiertas
   wallet.marginUsed = marginUsed;
 
-  // equity = balance real + PnL flotante + crédito
-  wallet.equity = balanceOwn + openPnl + credit;
+  // equity = balance disponible + margen bloqueado + PnL flotante + crédito
+  wallet.equity = balanceOwn + marginUsed + openPnl + credit;
 
-  // freeMargin = dinero disponible sin contar PnL flotante
+  // freeMargin = balance disponible sin contar margen bloqueado
   wallet.freeMargin = balanceOwn + credit;
 
   wallet.marginLevel =
@@ -150,13 +207,14 @@ export const updateLivePrice = async ({ symbol, price }) => {
     const cleanSymbol = normalizeSymbol(symbol);
 
     const positions = await Position.find({
-      symbol: cleanSymbol,
       status: "OPEN",
     });
 
     const affectedUsers = new Set();
 
     for (const pos of positions) {
+      if (!matchesAnySymbol(pos, cleanSymbol)) continue;
+
       const pnl = computePnl({
         side: pos.side,
         entryPrice: pos.entryPrice,
@@ -226,15 +284,12 @@ export const openTrade = async ({ user, order }) => {
     // =======================
     // 🔥 VALIDACIÓN CONTRA MERCADO REAL
     // =======================
-    const lastPrice = await Position.findOne({ symbol })
-      .sort({ createdAt: -1 })
-      .select("currentPrice")
-      .lean();
+    const lastPrice = await findLatestKnownPriceForSymbol(symbol);
 
-    if (lastPrice?.currentPrice) {
-      const diff = Math.abs(lastPrice.currentPrice - entryPrice);
+    if (lastPrice) {
+      const diff = Math.abs(lastPrice - entryPrice);
 
-      if (diff > lastPrice.currentPrice * 0.5) {
+      if (diff > lastPrice * 0.5) {
         throw new Error("Precio fuera de rango de mercado");
       }
     }
@@ -266,8 +321,6 @@ export const openTrade = async ({ user, order }) => {
     const balanceOwn = Number(wallet.balanceOwn) || 0;
     const credit = Number(wallet.credit) || 0;
 
-    // Con este modelo, balanceOwn ya representa dinero disponible,
-    // así que no se le resta marginUsed otra vez.
     const freeBalance = balanceOwn + credit;
 
     if (freeBalance < requiredMargin) {
@@ -292,7 +345,7 @@ export const openTrade = async ({ user, order }) => {
       { session }
     ).catch(() => null);
 
-    await Position.create(
+    const created = await Position.create(
       [
         {
           user: userId,
@@ -314,16 +367,17 @@ export const openTrade = async ({ user, order }) => {
       { session }
     );
 
-    // Recalcula wallet ya con la posición creada
     await recalculateWalletMetrics(userId, session);
 
     await session.commitTransaction();
     session.endSession();
 
+    const position = created?.[0];
+
     return {
       ok: true,
       data: {
-        positionId: String(Date.now()),
+        positionId: position?._id || String(Date.now()),
         symbol,
         side,
         qty: quantity,
@@ -385,6 +439,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     // =========================
     // 🔥 DEVOLVER MARGEN + PNL
+    // balance += margen bloqueado + PnL realizado
     // =========================
     wallet.balanceOwn = Number(wallet.balanceOwn || 0) + margin + pnl;
     wallet.balance = wallet.balanceOwn;
