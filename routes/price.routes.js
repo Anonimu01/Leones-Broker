@@ -1,12 +1,8 @@
 import express from "express";
-import { getPrice } from "../services/market.service.js";
+import { getPrice } from "../services/market.js";
 
 const router = express.Router();
 
-/* =========================
-   📊 PRECIO DE MERCADO
-   GET /api/price?symbol=
-========================= */
 router.get("/", async (req, res) => {
   try {
     const symbol = req.query.symbol;
@@ -30,16 +26,15 @@ router.get("/", async (req, res) => {
     return res.json({
       ok: true,
       symbol: data.symbol,
-      price: data.price,
-      source: data.source
+      price: data.price
     });
 
   } catch (err) {
-    console.error("❌ PRICE ROUTE ERROR:", err);
+    console.error("❌ PRICE ERROR:", err);
 
     return res.status(500).json({
       ok: false,
-      error: "Error interno del servidor"
+      error: "Error interno"
     });
   }
 });
