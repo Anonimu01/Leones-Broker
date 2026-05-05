@@ -71,8 +71,55 @@ async function getOrCreateWallet(userId, session = null) {
   return wallet;
 }
 
+// ======================================================
+// 🚨 OPEN TRADE (FIX PARA QUE NO CRASHEE)
+// ======================================================
+export const openTrade = async ({ user, order }) => {
+  try {
+    const userId = user?._id || user?.id;
+    if (!userId) throw new Error("Usuario inválido");
+
+    const symbol = order?.symbol;
+    const side = normalizeSide(order?.side);
+    const qty = toNumber(order?.qty || order?.quantity);
+    const price = toNumber(order?.price);
+
+    if (!symbol || !qty || !price) {
+      throw new Error("Datos inválidos para abrir trade");
+    }
+
+    const wallet = await getOrCreateWallet(userId);
+
+    const position = await Position.create({
+      user: userId,
+      symbol,
+      side,
+      qty,
+      entryPrice: price,
+      currentPrice: price,
+      status: "OPEN",
+      pnl: 0,
+      profit: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return {
+      ok: true,
+      data: position,
+      wallet,
+    };
+  } catch (err) {
+    console.error("❌ OPEN TRADE ERROR:", err);
+    return {
+      ok: false,
+      error: err.message || "Error abriendo operación",
+    };
+  }
+};
+
 // =======================
-// 🔴 CLOSE TRADE FIXED
+// 🔴 CLOSE TRADE (YA FUNCIONABA)
 // =======================
 export const closeTrade = async ({ user, positionId, price, closePrice }) => {
   const session = await mongoose.startSession();
@@ -83,7 +130,6 @@ export const closeTrade = async ({ user, positionId, price, closePrice }) => {
     const userId = user?._id || user?.id;
     if (!userId) throw new Error("Usuario inválido");
 
-    // 🔥 VALIDACIÓN ID
     if (!positionId || !mongoose.Types.ObjectId.isValid(positionId)) {
       throw new Error("positionId inválido");
     }
@@ -100,7 +146,6 @@ export const closeTrade = async ({ user, positionId, price, closePrice }) => {
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    // 🔥 PRECIO SEGURO
     let exit =
       normalizePrice(closePrice) ||
       normalizePrice(price) ||
@@ -120,7 +165,6 @@ export const closeTrade = async ({ user, positionId, price, closePrice }) => {
     const balanceBefore = toNumber(wallet.balanceOwn, 0);
     const newBalance = balanceBefore + pnl;
 
-    // 🔥 WALLET UPDATE
     wallet.balanceOwn = newBalance;
     wallet.balance = newBalance;
     wallet.marginUsed = Math.max(0, wallet.marginUsed - margin);
@@ -130,7 +174,6 @@ export const closeTrade = async ({ user, positionId, price, closePrice }) => {
 
     await wallet.save({ session });
 
-    // 🔴 POSITION CLOSE
     position.status = "CLOSED";
     position.closePrice = exit;
     position.currentPrice = exit;
@@ -166,4 +209,4 @@ export const closeTrade = async ({ user, positionId, price, closePrice }) => {
   }
 };
 
-export default { closeTrade };
+export default { openTrade, closeTrade };
