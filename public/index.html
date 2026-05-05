@@ -5112,15 +5112,26 @@ document.addEventListener("click", async (e) => {
 /* =========================
    🔥 FINAL BACKEND ORDER (FIXED)
 ========================= */
+// 🔥 LIMPIAR SYMBOL (CRÍTICO)
+function cleanSymbol(sym) {
+  if (!sym) return "";
+  return String(sym)
+    .replace("OANDA:", "")
+    .replace("OANDA", "")
+    .trim()
+    .toUpperCase();
+}
+
 async function placeBrokerOrder(payload = {}) {
   try {
     // 🔒 EVITAR DOBLE CLICK
     if (window.__sendingOrder) return;
     window.__sendingOrder = true;
 
-    const symbol = normalizeSymbol(
-      payload.symbol || window.tvSymbol || window.selectedSymbol
-    );
+    let rawSymbol =
+      payload.symbol || window.tvSymbol || window.selectedSymbol;
+
+    const symbol = cleanSymbol(rawSymbol);
 
     const quantity = Number(payload.qty ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
@@ -5154,31 +5165,27 @@ async function placeBrokerOrder(payload = {}) {
 
     let price = Number(window.lastKnownPrice);
 
-    // Intento 1: usar precio actual en memoria
+    // intento 1
     if (!price || price <= 0) {
       console.warn("⚠️ lastKnownPrice vacío, intentando sync...");
-
       price = await syncLivePrice(symbol);
     }
 
-    // Intento 2: reintento corto
+    // intento 2
     if (!price || price <= 0) {
-      console.warn("⚠️ Reintentando obtener precio...");
-
+      console.warn("⚠️ Reintentando precio...");
       await new Promise(r => setTimeout(r, 500));
-
       price = await syncLivePrice(symbol);
     }
 
-    // ❌ SI FALLA → NO OPERA
+    // ❌ si falla → no operar
     if (!price || price <= 0) {
-      console.error("❌ PRECIO FINAL FALLÓ TOTALMENTE:", price);
-
+      console.error("❌ PRECIO FINAL FALLÓ:", price);
       window.__sendingOrder = false;
-      return alert("No hay precio en tiempo real. Espera unos segundos.");
+      return alert("No hay precio en tiempo real");
     }
 
-    // 🔥 GUARDAR GLOBAL
+    // 🔥 GUARDAR PRECIO GLOBAL
     window.lastKnownPrice = price;
 
     // ============================
@@ -5214,7 +5221,7 @@ async function placeBrokerOrder(payload = {}) {
       return alert(data?.error || "Error al abrir operación");
     }
 
-    // 🔄 RECARGAR DATOS
+    // 🔄 REFRESH
     await loadPositions?.();
     await loadAccount?.();
 
