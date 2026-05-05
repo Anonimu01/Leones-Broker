@@ -57,6 +57,9 @@ export default function marketRoutesFactory(deps = {}) {
   const polygonSocket = deps.polygonSocket || null;
   const priceHandler = deps.priceHandler || global.priceHandler || null;
 
+  // =========================
+  // 🔥 STORE DE PRECIOS
+  // =========================
   function getPriceStore() {
     try {
       const raw = priceHandler?.prices;
@@ -69,6 +72,9 @@ export default function marketRoutesFactory(deps = {}) {
     }
   }
 
+  // =========================
+  // 🔥 BUSCAR PRECIO REAL
+  // =========================
   function findLivePriceForSymbol(symbol) {
     const targetCompact = compactSymbol(symbol);
     if (!targetCompact) return null;
@@ -109,8 +115,6 @@ export default function marketRoutesFactory(deps = {}) {
     return null;
   }
 
-  // router.use(authMiddleware);
-
   // =========================
   // 📡 SUBSCRIBE
   // =========================
@@ -133,11 +137,7 @@ export default function marketRoutesFactory(deps = {}) {
     try {
       symbols.forEach((s) => polygonSocket.subscribe(s, kind));
 
-      return res.json({
-        ok: true,
-        subscribed: symbols,
-        kind,
-      });
+      return res.json({ ok: true, subscribed: symbols, kind });
     } catch (e) {
       console.error("market.subscribe error:", e);
       return res.status(500).json({ ok: false, msg: String(e) });
@@ -166,11 +166,7 @@ export default function marketRoutesFactory(deps = {}) {
     try {
       symbols.forEach((s) => polygonSocket.unsubscribe(s, kind));
 
-      return res.json({
-        ok: true,
-        unsubscribed: symbols,
-        kind,
-      });
+      return res.json({ ok: true, unsubscribed: symbols, kind });
     } catch (e) {
       console.error("market.unsubscribe error:", e);
       return res.status(500).json({ ok: false, msg: String(e) });
@@ -200,7 +196,6 @@ export default function marketRoutesFactory(deps = {}) {
   router.get("/price", async (req, res) => {
     try {
       let { symbol } = req.query;
-
       symbol = normalizeSymbolInput(symbol);
 
       if (!symbol) {
@@ -213,7 +208,7 @@ export default function marketRoutesFactory(deps = {}) {
         return res.status(503).json({
           ok: false,
           symbol,
-          msg: "No live price available for this symbol",
+          msg: "No live price available",
         });
       }
 
@@ -229,42 +224,44 @@ export default function marketRoutesFactory(deps = {}) {
   });
 
   // =========================
-  // 🔥 POST PRECIO (ACTUALIZA PNL)
+  // 🔥 POST PRECIO → PNL REAL
   // =========================
   router.post("/price", async (req, res) => {
     try {
       let { symbol, price } = req.body || {};
-
       symbol = normalizeSymbolInput(symbol);
 
       if (!symbol) {
-        return res.status(400).json({
-          ok: false,
-          msg: "symbol requerido",
-        });
+        return res.status(400).json({ ok: false, msg: "symbol requerido" });
       }
 
       let finalPrice = Number(price);
 
+      // 🔥 SI NO VIENE PRECIO → USA REAL
       if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
         finalPrice = findLivePriceForSymbol(symbol);
       }
 
-      if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
+      if (!finalPrice) {
         return res.status(503).json({
           ok: false,
-          symbol,
-          msg: "No se pudo resolver un precio válido para el símbolo",
+          msg: "Precio no disponible",
         });
       }
 
-      await updateLivePrice({ symbol, price: finalPrice });
+      // =========================
+      // 🔥 AQUI SE CALCULA EL PNL
+      // =========================
+      await updateLivePrice({
+        symbol,
+        price: finalPrice,
+      });
 
       return res.json({
         ok: true,
         symbol,
         price: finalPrice,
-        msg: "Precio actualizado y PnL recalculado",
+        msg: "PnL actualizado en tiempo real",
       });
     } catch (err) {
       console.error("market.price error:", err);
