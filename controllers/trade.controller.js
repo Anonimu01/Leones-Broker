@@ -133,7 +133,7 @@ export const openTrade = async ({ user, order }) => {
       throw new Error("Precio inválido");
     }
 
-    // 🔥 ANTI DOBLE OPERACIÓN
+    // 🔥 ANTI DUPLICADO REAL (OBLIGATORIO)
     const existingOpen = await Position.findOne({
       user: userId,
       symbol,
@@ -141,7 +141,13 @@ export const openTrade = async ({ user, order }) => {
     }).session(session);
 
     if (existingOpen) {
-      throw new Error("Ya existe una posición abierta para este símbolo");
+      await session.abortTransaction();
+      session.endSession();
+
+      return {
+        ok: false,
+        error: "Ya tienes una operación abierta en este símbolo",
+      };
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -165,7 +171,6 @@ export const openTrade = async ({ user, order }) => {
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.marginUsed = marginUsed + requiredMargin;
 
-    // 🔥 ACTUALIZACIÓN CORRECTA
     wallet.balance = wallet.balanceOwn;
     wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
     wallet.freeMargin = wallet.balanceOwn + credit - wallet.marginUsed;
@@ -267,7 +272,6 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const side = position.side;
     const margin = Number(position.marginReserved || 0);
 
-    // 🔥 CALCULAR PNL
     const pnl = computePnl({
       side,
       entryPrice,
@@ -275,11 +279,9 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       qty,
     });
 
-    // 🔥 DEVOLVER MARGEN + PNL
     wallet.marginUsed = Math.max(Number(wallet.marginUsed || 0) - margin, 0);
     wallet.balanceOwn = Number(wallet.balanceOwn || 0) + margin + pnl;
 
-    // 🔥 NORMALIZAR
     wallet.balance = wallet.balanceOwn;
 
     const credit = Number(wallet.credit || 0);
@@ -301,7 +303,6 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       { session }
     ).catch(() => null);
 
-    // 🔒 CERRAR POSICIÓN
     position.status = "CLOSED";
     position.closePrice = exitPrice;
     position.currentPrice = exitPrice;
