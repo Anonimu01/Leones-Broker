@@ -9,7 +9,7 @@ if (!POLYGON_KEY) {
    CACHE SIMPLE EN MEMORIA
 ========================= */
 const priceCache = new Map();
-const CACHE_TIME = 5000;
+const CACHE_TIME = 3000; // 🔥 más rápido para trading
 
 function setCache(symbol, data) {
   priceCache.set(symbol, {
@@ -43,7 +43,7 @@ export function normalizeSymbol(symbol) {
 }
 
 /* =========================
-   OBTENER PRECIO ACTUAL
+   OBTENER PRECIO REAL (POLYGON)
 ========================= */
 export async function getPrice(symbol) {
   symbol = normalizeSymbol(symbol);
@@ -56,11 +56,12 @@ export async function getPrice(symbol) {
     const res = await fetch(url);
     const data = await res.json();
 
-    if (!data?.results?.p) {
-      throw new Error("Precio no encontrado");
-    }
+    const price = Number(data?.results?.p);
 
-    const price = Number(data.results.p);
+    // 🔥 VALIDACIÓN REAL (CRÍTICA)
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Precio inválido desde Polygon");
+    }
 
     const result = {
       symbol,
@@ -71,15 +72,12 @@ export async function getPrice(symbol) {
 
     setCache(symbol, result);
     return result;
-  } catch (err) {
-    console.error("Market price error:", err.message);
 
-    return {
-      symbol,
-      price: Number((Math.random() * 100 + 10).toFixed(2)),
-      source: "fallback",
-      time: Date.now()
-    };
+  } catch (err) {
+    console.error("❌ Market price error:", err.message);
+
+    // 🚨 IMPORTANTE: NO SE INVENTA PRECIO
+    throw new Error("No se pudo obtener precio real del mercado");
   }
 }
 
@@ -91,12 +89,14 @@ export async function getPrices(symbols = []) {
 
   for (const s of symbols) {
     try {
-      results.push(await getPrice(s));
-    } catch {
+      const price = await getPrice(s);
+      results.push(price);
+    } catch (err) {
       results.push({
-        symbol: s,
+        symbol: normalizeSymbol(s),
         price: null,
-        error: true
+        error: true,
+        message: err.message
       });
     }
   }
@@ -119,12 +119,21 @@ export async function executeOrderOnBroker({
     throw new Error("Datos incompletos para ejecutar orden");
   }
 
+  // 🔥 PRECIO REAL OBLIGATORIO
   const market = await getPrice(symbol);
+
+  if (!market?.price) {
+    throw new Error("Precio de mercado no disponible");
+  }
 
   const executionPrice =
     type === "market"
       ? market.price
-      : Number(price || market.price);
+      : Number(price);
+
+  if (!Number.isFinite(executionPrice) || executionPrice <= 0) {
+    throw new Error("Precio de ejecución inválido");
+  }
 
   return {
     id: "ord_" + Math.random().toString(36).slice(2),
@@ -133,11 +142,16 @@ export async function executeOrderOnBroker({
     side: side.toLowerCase(),
     type,
     quantity: Number(quantity),
+
     requestedPrice: price,
     executedPrice: executionPrice,
+
     status: "filled",
     liquidity: "market",
-    slippage: Number((executionPrice - market.price).toFixed(5)),
+
+    // 🔥 SLIPPAGE REAL (CONTROLADO)
+    slippage: Number((executionPrice - market.price).toFixed(6)),
+
     source: market.source,
     createdAt: new Date().toISOString()
   };
