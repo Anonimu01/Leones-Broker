@@ -3,6 +3,9 @@ import Wallet from "../models/wallet.model.js";
 import User from "../models/user.model.js";
 import mongoose from "mongoose";
 
+// 🔥 IMPORTANTE: TRAER PRECIO REAL DEL MERCADO
+import { getPrice } from "../services/marketPrice.service.js";
+
 /* =======================
    🔧 HELPERS
 ======================= */
@@ -25,7 +28,7 @@ function normalizeSide(value) {
 }
 
 /* =======================
-   🔥 PNL REAL (CORRECTO)
+   🔥 PNL REAL
 ======================= */
 function computePnl({ side, entryPrice, exitPrice, qty }) {
   const entry = Number(entryPrice);
@@ -36,7 +39,6 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
   if (!Number.isFinite(exit) || exit <= 0) return 0;
   if (!Number.isFinite(quantity) || quantity <= 0) return 0;
 
-  // 🔥 FIX REAL: BUY / SELL correcto
   return side === "SELL"
     ? (entry - exit) * quantity
     : (exit - entry) * quantity;
@@ -95,10 +97,7 @@ async function recalculateWallet(userId, session = null) {
   const credit = Number(wallet.credit || 0);
 
   wallet.marginUsed = marginUsed;
-
-  // 🔥 EQUITY REAL
   wallet.equity = balanceOwn + pnlFloating + credit;
-
   wallet.freeMargin = wallet.equity - marginUsed;
   wallet.updatedAt = new Date();
 
@@ -154,7 +153,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 /* =======================
-   🚀 OPEN TRADE
+   🚀 OPEN TRADE (FIX REAL)
 ======================= */
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -164,17 +163,19 @@ export const openTrade = async ({ user, order }) => {
     const userId = user?._id || user?.id;
     if (!userId) throw new Error("Usuario inválido");
 
-    let { symbol, side, type, quantity, price } = order || {};
+    let { symbol, side, type, quantity } = order || {};
 
     symbol = normalizeSymbol(symbol);
     side = normalizeSide(side);
     type = String(type || "MARKET").toUpperCase();
     quantity = Number(quantity);
 
-    const entryPrice = normalizePrice(price);
+    // 🔥 FIX CRÍTICO: SIEMPRE PRECIO REAL DEL MERCADO
+    const market = await getPrice(symbol);
+    const entryPrice = Number(market?.price);
 
-    if (!entryPrice) {
-      throw new Error("Precio de apertura inválido");
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+      throw new Error("Precio de mercado no disponible");
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -224,7 +225,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 /* =======================
-   🔴 CLOSE TRADE (FIX FINAL REAL)
+   🔴 CLOSE TRADE
 ======================= */
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
@@ -245,10 +246,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const wallet = await getOrCreateWallet(userId, session);
 
     const exit = normalizePrice(closePrice);
-
-    if (!exit) {
-      throw new Error("Precio de cierre inválido");
-    }
+    if (!exit) throw new Error("Precio de cierre inválido");
 
     const pnl = computePnl({
       side: position.side,
@@ -259,11 +257,9 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const margin = Number(position.marginReserved || 0);
 
-    // 🔥 ACTUALIZAR BALANCE REAL
     wallet.balanceOwn = Number(wallet.balanceOwn || 0) + pnl;
     wallet.balance = wallet.balanceOwn;
 
-    // 🔥 LIBERAR MARGEN
     wallet.marginUsed = Math.max(
       0,
       Number(wallet.marginUsed || 0) - margin
@@ -272,7 +268,6 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     wallet.updatedAt = new Date();
     await wallet.save({ session });
 
-    // 🔴 CERRAR POSICIÓN
     position.status = "CLOSED";
     position.closePrice = exit;
     position.currentPrice = exit;
@@ -303,7 +298,6 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     session.endSession();
 
     console.error("❌ CLOSE ERROR REAL:", err);
-
     return { ok: false, error: err.message };
   }
 };
