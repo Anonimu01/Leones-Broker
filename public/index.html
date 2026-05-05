@@ -4897,6 +4897,7 @@ async function loadPositions() {
     };
   }
 
+
 /* =========================
    NORMALIZE SYMBOL
 ========================= */
@@ -4933,8 +4934,9 @@ function getActiveSymbol() {
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    // 🔥 PRIMERO intenta endpoint correcto
-    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
+    const clean = normalizeSymbol(symbol);
+
+    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
     const data = await res.json();
 
     if (data?.price && Number(data.price) > 0) {
@@ -4942,14 +4944,11 @@ async function syncLivePrice(symbol) {
       return Number(data.price);
     }
 
-    // 🔥 FALLBACK quotes
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json();
 
-    const normalized = normalizeSymbol(symbol);
-
     const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === normalized
+      normalizeSymbol(q.symbol) === clean
     );
 
     if (match?.price && Number(match.price) > 0) {
@@ -4964,17 +4963,29 @@ async function syncLivePrice(symbol) {
   }
 }
 
-
-  async function getRealPrice(symbol) {
+/* =========================
+   🔥 GET REAL PRICE (UNIFICADO)
+========================= */
+async function getRealPrice(symbol) {
   try {
-    const res = await fetch(`/api/price?symbol=${symbol}`);
-    const data = await res.json();
+    const cleanSymbol = normalizeSymbol(symbol);
 
-    if (!data.price || data.price <= 0) {
+    const res = await fetch(`/api/price?symbol=${encodeURIComponent(cleanSymbol)}`);
+
+    if (!res.ok) {
       throw new Error("Precio inválido");
     }
 
-    return Number(data.price);
+    const data = await res.json();
+
+    const price = Number(data?.price);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Precio inválido");
+    }
+
+    return price;
+
   } catch (err) {
     console.error("❌ Error obteniendo precio real:", err);
     return null;
@@ -4982,7 +4993,7 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   🔥 GET LIVE PRICE SAFE (MEJORADO)
+   🔥 GET LIVE PRICE SAFE
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
@@ -5117,17 +5128,15 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 1. OBTENER PRECIO REAL DEL MERCADO (OBLIGATORIO)
+    // 🔥 PRECIO REAL O NADA
     let price = await getRealPrice(symbol);
 
-    // 🔥 2. VALIDACIÓN ESTRICTA
     if (!price || price <= 0) {
       console.error("❌ No se puede abrir operación sin precio real");
       alert("No hay precio real del mercado disponible");
       return;
     }
 
-    // 🔥 3. PAYLOAD FINAL (SIN FALLBACKS FALSOS)
     const body = {
       symbol,
       side: side.toUpperCase(),
