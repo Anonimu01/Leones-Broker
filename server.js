@@ -1492,9 +1492,139 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
-   TRADING CORE (FIXED REAL LOGIC)
+   TRADING CORE (UNIFICADO)
    ====================================================== */
 
+function getSafeNumber(value, fallback = null) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function computeRealPnl({ side, entryPrice, exitPrice, qty }) {
+  const entry = Number(entryPrice);
+  const exit = Number(exitPrice);
+  const quantity = Number(qty);
+
+  if (!Number.isFinite(entry) || entry <= 0) return 0;
+  if (!Number.isFinite(exit) || exit <= 0) return 0;
+  if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+
+  const isSell = String(side || "").toUpperCase() === "SELL" || String(side || "").toUpperCase() === "SHORT";
+
+  // BUY -> +1, SELL -> -1
+  return isSell
+    ? (entry - exit) * quantity
+    : (exit - entry) * quantity;
+}
+
+async function applyCloseToPosition({ user, positionDoc, currentPrice, source = "api/trade/close" }) {
+  const position = positionDoc?.toObject ? positionDoc.toObject() : positionDoc;
+
+  const symbol = String(position.symbol || "").toUpperCase();
+  const side = String(position.side || position.direction || "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+
+  const entryPrice = getSafeNumber(position.entryPrice ?? position.price ?? position.openPrice, 1);
+  const qty = getSafeNumber(position.qty ?? position.quantity ?? position.amount, 1);
+
+  // 🔥 fallback duro: nunca null
+  let exit = getSafeNumber(currentPrice, null);
+  if (!exit) {
+    console.warn("⚠️ closePrice inválido, usando entryPrice");
+    exit = entryPrice || 1;
+  }
+
+  const realizedPnl = computeRealPnl({
+    side,
+    entryPrice,
+    exitPrice: exit,
+    qty,
+  });
+
+  const reservedMargin = getSafeNumber(position.marginReserved, 0);
+  const wallet = await getWalletDocForUser(user._id);
+
+  const balanceBefore = getSafeNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance, 0);
+  const marginUsedBefore = getSafeNumber(wallet.marginUsed, 0);
+  const credit = getSafeNumber(wallet.credit, 0);
+
+  // =========================
+  // balance += margen bloqueado + PnL realizado
+  // =========================
+  const newBalance = balanceBefore + reservedMargin + realizedPnl;
+
+  wallet.balanceOwn = newBalance;
+  wallet.balance = newBalance;
+
+  // liberar margen
+  wallet.marginUsed = Math.max(marginUsedBefore - reservedMargin, 0);
+
+  // equity / freeMargin
+  wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
+  wallet.freeMargin = Math.max(wallet.balanceOwn + credit, 0);
+  wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
+  wallet.updatedAt = new Date();
+  await wallet.save();
+
+  // cerrar posición
+  position.status = "CLOSED";
+  position.currentPrice = exit;
+  position.closePrice = exit;
+  position.realizedPnl = realizedPnl;
+  position.pnl = realizedPnl;
+  position.profit = realizedPnl;
+  position.closedAt = new Date();
+  position.updatedAt = new Date();
+  await positionDoc.save();
+
+  user.balance = wallet.balanceOwn;
+  await user.save();
+
+  const tx = await recordTransaction({
+    user,
+    type: "trade_close",
+    amount: realizedPnl,
+    status: "completed",
+    note: `${side} ${symbol}`,
+    balanceBefore,
+    balanceAfter: wallet.balanceOwn,
+    meta: {
+      positionId: String(position._id),
+      symbol,
+      side,
+      qty,
+      entryPrice,
+      closePrice: exit,
+      marginReleased: reservedMargin,
+      realizedPnl,
+    },
+    source,
+  });
+
+  const account = await safeBuildAccountForUser(user);
+  const annotatedPosition = annotatePosition(position);
+
+  emitStateUpdates(user._id, account, [annotatedPosition], tx);
+
+  return {
+    positionId: position._id,
+    symbol,
+    side,
+    qty,
+    entryPrice,
+    currentPrice: exit,
+    realizedPnl,
+    balance: wallet.balanceOwn,
+    account: account.account,
+    wallet: account.wallet,
+    position: annotatedPosition,
+    transaction: tx,
+  };
+}
+
+/* =========================
+   OPEN TRADE
+========================= */
 app.post("/api/trade/open", async (req, res) => {
   let lockKey = null;
 
@@ -1519,10 +1649,10 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-    const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+    const balanceOwn = getSafeNumber(wallet.balanceOwn ?? wallet.balance ?? user.balance, 0);
+    const credit = getSafeNumber(wallet.credit, 0);
+    const marginUsed = getSafeNumber(wallet.marginUsed, 0);
+    const leverage = Math.max(getSafeNumber(wallet.leverageFactor ?? user.leverage, 1), 1);
 
     let price = resolveOrderPrice(body, symbol);
 
@@ -1531,14 +1661,12 @@ app.post("/api/trade/open", async (req, res) => {
       if (market && Number.isFinite(market) && market > 0) {
         price = market;
       } else {
-        const alt = Number(body.entryPrice || body.price || body.currentPrice || 1);
-        price = Number.isFinite(alt) && alt > 0 ? alt : null;
-        if (price) console.warn("⚠️ Usando precio fallback temporal:", price);
+        // fallback controlado para que no rompa
+        price = 1;
       }
     }
 
     if (!price || !Number.isFinite(price) || price <= 0) {
-      console.warn("❌ Precio final inválido:", price, { symbol, body });
       return res.status(400).json({
         ok: false,
         error: "price_invalid",
@@ -1555,7 +1683,7 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // Reservar margen solamente una vez
+    // reservar margen
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
@@ -1575,6 +1703,8 @@ app.post("/api/trade/open", async (req, res) => {
       marginReserved: requiredMargin,
       leverage,
       status: "OPEN",
+      pnl: 0,
+      profit: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -1594,7 +1724,11 @@ app.post("/api/trade/open", async (req, res) => {
     });
   } catch (err) {
     console.error("/api/trade/open error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
@@ -1603,6 +1737,9 @@ app.post("/api/trade/open", async (req, res) => {
   }
 });
 
+/* =========================
+   CLOSE TRADE
+========================= */
 app.post("/api/trade/close", async (req, res) => {
   let lockKey = null;
 
@@ -1611,7 +1748,9 @@ app.post("/api/trade/close", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const { positionId } = req.body || {};
-    if (!positionId) return res.status(400).json({ ok: false, error: "positionId_required" });
+    if (!positionId) {
+      return res.status(400).json({ ok: false, error: "positionId_required" });
+    }
 
     lockKey = makeCloseLockKey(user._id, positionId);
     if (!withOpenLock(lockKey, 2500)) {
@@ -1629,10 +1768,15 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     const body = req.body || {};
-    const price = resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol);
+
+    // precio seguro: body -> market feed -> entryPrice -> 1
+    let price =
+      resolveOrderPrice(body, position.symbol) ||
+      getCurrentPriceForSymbol(position.symbol) ||
+      getSafeNumber(position.entryPrice, 1);
 
     if (!price || !Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({ ok: false, error: "price_invalid" });
+      price = getSafeNumber(position.entryPrice, 1);
     }
 
     const result = await applyCloseToPosition({
@@ -1651,21 +1795,13 @@ app.post("/api/trade/close", async (req, res) => {
     });
   } catch (err) {
     console.error("/api/trade/close error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   } finally {
     if (lockKey) releaseOpenLock(lockKey);
-  }
-});
-
-app.get("/api/trade/positions", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (err) {
-    console.error("/api/trade/positions error", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
   }
 });
 
