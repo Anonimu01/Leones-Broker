@@ -4884,87 +4884,138 @@ async function loadPositions() {
     return true;
   }
 
-  function openTrade(symbol, amount, direction, price) {
-    if (amount > ACCOUNT.balance) {
-      alert('Fondos insuficientes');
-      return;
-    }
+/* =========================
+   OPEN TRADE
+========================= */
+function openTrade(symbol, amount, direction, price) {
+  const tradeSymbol = normalizeSymbol(symbol || getActiveSymbol());
 
-    ACCOUNT.balance -= amount;
-    ACCOUNT.usedMargin += amount;
-
-    const trade = {
-      id: Date.now(),
-      symbol,
-      amount,
-      direction,
-      openPrice: price,
-      currentPrice: price,
-      profit: 0
-    };
-
-    OPEN_TRADES.push(trade);
-    updateAccountMetrics();
+  if (!tradeSymbol) {
+    alert("No hay símbolo activo");
+    return;
   }
 
-  function renderBottomPanelsWrapper() {
-    renderBottomPanels();
-    const meta = getActiveSymbolMeta();
-    if (meta) {
-      renderSymbolDetails(meta);
-      requestRealtimeForSymbol(meta);
-    }
+  if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+    alert("Monto inválido");
+    return;
   }
 
-  function exposeAPI() {
-    window.startBrokerUI = initTradingUI;
-    window.refreshBrokerUI = requestBackendRefresh;
-    window.openBrokerTradingView = openTradingView;
-    window.selectBrokerSymbol = selectSymbol;
-
-    window.openTrade = openTrade;
-    window.placeBrokerOrder = placeBrokerOrder;
-    window.updateTradesPrices = updateTradesPrices;
-    window.updateAccountMetrics = updateAccountMetrics;
-    window.closeAllTrades = closeAllTrades;
-    window.adminDeposit = adminDeposit;
-
-    window.__LEONES_BROKER_EXT2 = {
-      initTradingUI,
-      refreshBrokerUI: requestBackendRefresh,
-      openTradingView,
-      selectSymbol,
-      loadMarketsAndQuotes,
-      loadRealMarkets,
-      loadRealQuotes,
-      loadAccount,
-      loadPositions,
-      placeOrder,
-      placeBrokerOrder,
-      openTrade,
-      closePosition,
-      requestBackendRefresh,
-      positions: state.positions,
-      activeSymbol: state.activeSymbol,
-      activeMeta: TR.activeMeta || null,
-      symbolPrices: TR.symbolPrices || {}
-    };
+  if (Number(amount) > Number(ACCOUNT.balance)) {
+    alert("Fondos insuficientes");
+    return;
   }
+
+  const entryPrice = Number(price) || Number(window.lastKnownPrice) || 0;
+
+  if (entryPrice <= 0) {
+    alert("No hay precio válido para abrir la operación");
+    return;
+  }
+
+  ACCOUNT.balance -= Number(amount);
+  ACCOUNT.usedMargin += Number(amount);
+
+  const trade = {
+    id: Date.now(),
+    symbol: tradeSymbol,
+    amount: Number(amount),
+    direction,
+    openPrice: entryPrice,
+    currentPrice: entryPrice,
+    profit: 0
+  };
+
+  OPEN_TRADES.push(trade);
+
+  window.tvSymbol = tradeSymbol;
+  window.selectedSymbol = tradeSymbol;
+  if (window.__LEONES_BROKER_EXT2) {
+    window.__LEONES_BROKER_EXT2.activeSymbol = tradeSymbol;
+  }
+
+  updateAccountMetrics();
+
+  // Mantiene el gráfico y el precio vivos aunque la orden se abra desde el chart
+  requestRealtimeForSymbol(tradeSymbol);
+  window.dispatchEvent(
+    new CustomEvent("broker:symbol-changed", {
+      detail: { symbol: tradeSymbol, source: "openTrade" }
+    })
+  );
+}
+
+/* =========================
+   RENDER BOTTOM PANELS
+========================= */
+function renderBottomPanelsWrapper() {
+  renderBottomPanels();
+
+  const meta = getActiveSymbolMeta();
+  if (meta) {
+    renderSymbolDetails(meta);
+    requestRealtimeForSymbol(meta);
+  } else {
+    const active = getActiveSymbol();
+    if (active) requestRealtimeForSymbol(active);
+  }
+}
+
+/* =========================
+   EXPOSE API
+========================= */
+function exposeAPI() {
+  window.startBrokerUI = initTradingUI;
+  window.refreshBrokerUI = requestBackendRefresh;
+  window.openBrokerTradingView = openTradingView;
+  window.selectBrokerSymbol = selectSymbol;
+
+  window.openTrade = openTrade;
+  window.placeBrokerOrder = placeBrokerOrder;
+  window.updateTradesPrices = updateTradesPrices;
+  window.updateAccountMetrics = updateAccountMetrics;
+  window.closeAllTrades = closeAllTrades;
+  window.adminDeposit = adminDeposit;
+  window.setBrokerActiveSymbol = setActiveSymbol;
+
+  window.__LEONES_BROKER_EXT2 = {
+    initTradingUI,
+    refreshBrokerUI: requestBackendRefresh,
+    openTradingView,
+    selectSymbol,
+    setActiveSymbol,
+    loadMarketsAndQuotes,
+    loadRealMarkets,
+    loadRealQuotes,
+    loadAccount,
+    loadPositions,
+    placeOrder,
+    placeBrokerOrder,
+    openTrade,
+    closePosition,
+    requestBackendRefresh,
+    positions: state.positions,
+    activeSymbol: state.activeSymbol,
+    activeMeta: TR.activeMeta || null,
+    symbolPrices: TR.symbolPrices || {}
+  };
+}
 
 /* =========================
    NORMALIZE SYMBOL
+   NO borra ":" ni "/"
 ========================= */
 function normalizeSymbol(symbol = "") {
   return String(symbol)
+    .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .trim();
+    .replace(/\s+/g, "");
 }
 
 /* =========================
    FLAGS
 ========================= */
 let sendingOrder = false;
+let priceSyncIntervalStarted = false;
 
 /* =========================
    GET ACTIVE SYMBOL
@@ -4972,7 +5023,7 @@ let sendingOrder = false;
 function getActiveSymbol() {
   const api = window.__LEONES_BROKER_EXT2 || {};
 
-  return (
+  return normalizeSymbol(
     window.tvSymbol ||
     window.selectedSymbol ||
     api.activeSymbol ||
@@ -4983,18 +5034,79 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (FIXED)
+   SET ACTIVE SYMBOL
+   Úsala cuando el usuario elija símbolo
+   desde el gráfico o desde una posición
+========================= */
+function setActiveSymbol(symbol, meta = null) {
+  const clean = normalizeSymbol(symbol);
+
+  if (!clean) return;
+
+  window.tvSymbol = clean;
+  window.selectedSymbol = clean;
+
+  if (window.__LEONES_BROKER_EXT2) {
+    window.__LEONES_BROKER_EXT2.activeSymbol = clean;
+    if (meta) {
+      window.__LEONES_BROKER_EXT2.activeMeta = meta;
+    }
+  }
+
+  state.activeSymbol = clean;
+  if (meta) {
+    TR.activeMeta = meta;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("broker:symbol-changed", {
+      detail: { symbol: clean, meta, source: "setActiveSymbol" }
+    })
+  );
+
+  requestRealtimeForSymbol(meta || clean);
+  return clean;
+}
+
+/* =========================
+   LIVE PRICE SYNC
+   El backend debe responder:
+   GET /api/market/price?symbol=AMZN
+   GET /api/market/price?symbol=OANDA:EURUSD
 ========================= */
 async function syncLivePrice(symbol) {
-  try {
-    const res = await fetch(`/api/market/price?symbol=${symbol}`);
-    const data = await res.json();
+  const clean = normalizeSymbol(symbol);
 
+  if (!clean) return null;
+
+  try {
+    const res = await fetch(`/api/market/price?symbol=${encodeURIComponent(clean)}`, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
     const price = Number(data?.price);
 
-    if (price && price > 0) {
+    if (Number.isFinite(price) && price > 0) {
       window.lastKnownPrice = price;
-      console.log("✅ Precio sincronizado:", price);
+
+      window.dispatchEvent(
+        new CustomEvent("broker:price-update", {
+          detail: {
+            symbol: clean,
+            price,
+            time: Date.now(),
+            source: "backend"
+          }
+        })
+      );
+
+      console.log("✅ Precio sincronizado:", clean, price);
       return price;
     }
 
@@ -5005,17 +5117,50 @@ async function syncLivePrice(symbol) {
   }
 }
 
+/* =========================
+   REQUEST REALTIME FOR SYMBOL
+   Sirve para que el chart siga vivo
+   aunque el símbolo venga desde:
+   - el gráfico
+   - una posición
+   - un panel
+========================= */
+async function requestRealtimeForSymbol(metaOrSymbol) {
+  const symbol =
+    typeof metaOrSymbol === "string"
+      ? metaOrSymbol
+      : metaOrSymbol?.symbol || metaOrSymbol?.ticker || metaOrSymbol?.name || "";
 
- // 🔥 AQUÍ VA (fuera de todo)
+  const clean = normalizeSymbol(symbol || getActiveSymbol());
+
+  if (!clean) return null;
+
+  setActiveSymbol(clean, typeof metaOrSymbol === "object" ? metaOrSymbol : null);
+  return await syncLivePrice(clean);
+}
+
+/* =========================
+   BACKGROUND PRICE LOOP
+========================= */
+function startPriceSyncLoop() {
+  if (priceSyncIntervalStarted) return;
+  priceSyncIntervalStarted = true;
+
   setInterval(async () => {
-    if (!window.tvSymbol) return;
+    const symbol = getActiveSymbol();
+    if (!symbol) return;
 
-    const price = await syncLivePrice(window.tvSymbol);
-
+    const price = await syncLivePrice(symbol);
     if (price) {
       window.lastKnownPrice = price;
     }
   }, 1000);
+}
+
+/* =========================
+   INIT HOOK
+========================= */
+startPriceSyncLoop();
 
   
 /* =========================
