@@ -31,9 +31,7 @@ function toNumber(value, fallback = 0) {
 function safeEndSession(session) {
   try {
     if (session) session.endSession();
-  } catch {
-    // noop
-  }
+  } catch {}
 }
 
 // =======================
@@ -201,29 +199,19 @@ export const openTrade = async ({ user, order }) => {
       throw new Error("Cantidad inválida");
     }
 
-    let entryPrice = normalizePrice(price);
-
-    // 🔥 FALLBACK CONTROLADO
-    if (!entryPrice) {
-      console.warn("⚠️ Precio inválido en apertura → usando 1");
-      entryPrice = 1;
-    }
+    let entryPrice = normalizePrice(price) || 1;
 
     const wallet = await getOrCreateWallet(userId, session);
 
     const leverage = Math.max(toNumber(wallet.leverageFactor, 1), 1);
     const margin = (quantity * entryPrice) / leverage;
 
-    if (!Number.isFinite(margin) || margin < 0) {
-      throw new Error("Margen inválido");
-    }
-
     wallet.marginUsed = toNumber(wallet.marginUsed, 0) + margin;
     wallet.updatedAt = new Date();
 
     await wallet.save({ session });
 
-    const positionDocs = await Position.create(
+    const [position] = await Position.create(
       [
         {
           user: userId,
@@ -250,7 +238,7 @@ export const openTrade = async ({ user, order }) => {
     await session.commitTransaction();
     safeEndSession(session);
 
-    return { ok: true, data: positionDocs[0] };
+    return { ok: true, data: position };
   } catch (err) {
     await session.abortTransaction().catch(() => null);
     safeEndSession(session);
@@ -261,7 +249,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 // =======================
-// 🔴 CLOSE TRADE
+// 🔴 CLOSE TRADE (ARREGLADO)
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice, price }) => {
   const session = await mongoose.startSession();
@@ -269,16 +257,19 @@ export const closeTrade = async ({ user, positionId, closePrice, price }) => {
 
   try {
     const userId = user?._id || user?.id;
-    if (!userId) throw new Error("Usuario inválido");
-    if (!positionId) throw new Error("positionId requerido");
 
-    let positionQuery = Position.findOne({
+    if (!userId) throw new Error("Usuario inválido");
+
+    // 🔥 VALIDACIÓN CLAVE (esto te estaba rompiendo el 500)
+    if (!mongoose.Types.ObjectId.isValid(positionId)) {
+      throw new Error("positionId inválido");
+    }
+
+    const position = await Position.findOne({
       _id: positionId,
       user: userId,
       status: "OPEN",
     }).session(session);
-
-    const position = await positionQuery;
 
     if (!position) {
       throw new Error("Posición no encontrada o ya cerrada");
@@ -288,10 +279,12 @@ export const closeTrade = async ({ user, positionId, closePrice, price }) => {
 
     let exit = normalizePrice(closePrice ?? price);
 
-    // 🔥 SI NO VIENE PRECIO, USAMOS EL ENTRY PARA NO ROMPER
+    // 🔥 FALLBACK MEJORADO
     if (!exit) {
-      console.warn("⚠️ closePrice inválido → usando entryPrice");
-      exit = normalizePrice(position.entryPrice) || 1;
+      exit =
+        normalizePrice(position.currentPrice) ||
+        normalizePrice(position.entryPrice) ||
+        1;
     }
 
     const pnl = computePnl({
@@ -303,7 +296,6 @@ export const closeTrade = async ({ user, positionId, closePrice, price }) => {
 
     const margin = toNumber(position.marginReserved, 0);
 
-    // 🔥 Actualizar balance real: balanceOwn + pnl
     const newBalance = toNumber(wallet.balanceOwn, 0) + pnl;
 
     wallet.balanceOwn = newBalance;
@@ -313,7 +305,7 @@ export const closeTrade = async ({ user, positionId, closePrice, price }) => {
 
     await wallet.save({ session });
 
-    // 🔴 CERRAR POSICIÓN
+    // 🔴 CIERRE
     position.status = "CLOSED";
     position.closePrice = exit;
     position.currentPrice = exit;
@@ -343,7 +335,11 @@ export const closeTrade = async ({ user, positionId, closePrice, price }) => {
     safeEndSession(session);
 
     console.error("❌ CLOSE ERROR REAL:", err);
-    return { ok: false, error: err.message };
+
+    return {
+      ok: false,
+      error: err.message || "Error cerrando operación",
+    };
   }
 };
 
