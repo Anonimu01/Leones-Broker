@@ -4964,6 +4964,23 @@ async function syncLivePrice(symbol) {
   }
 }
 
+
+  async function getRealPrice(symbol) {
+  try {
+    const res = await fetch(`/api/price?symbol=${symbol}`);
+    const data = await res.json();
+
+    if (!data.price || data.price <= 0) {
+      throw new Error("Precio inválido");
+    }
+
+    return Number(data.price);
+  } catch (err) {
+    console.error("❌ Error obteniendo precio real:", err);
+    return null;
+  }
+}
+
 /* =========================
    🔥 GET LIVE PRICE SAFE (MEJORADO)
 ========================= */
@@ -5100,19 +5117,17 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO GARANTIZADO
-    let price = getLivePriceFallback();
+    // 🔥 1. OBTENER PRECIO REAL DEL MERCADO (OBLIGATORIO)
+    let price = await getRealPrice(symbol);
 
-    if (!price) {
-      price = await syncLivePrice(symbol);
-    }
-
+    // 🔥 2. VALIDACIÓN ESTRICTA
     if (!price || price <= 0) {
-      console.error("❌ Precio final inválido:", price);
-      alert("No hay precio disponible del mercado");
+      console.error("❌ No se puede abrir operación sin precio real");
+      alert("No hay precio real del mercado disponible");
       return;
     }
 
+    // 🔥 3. PAYLOAD FINAL (SIN FALLBACKS FALSOS)
     const body = {
       symbol,
       side: side.toUpperCase(),
