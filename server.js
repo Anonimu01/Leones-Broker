@@ -1676,7 +1676,13 @@ io.on("connection", (socket) => {
 
       if (!uid && token && process.env.JWT_SECRET) {
         const payload = jwt.verify(String(token), process.env.JWT_SECRET);
-        uid = String(payload?.id || payload?.sub || payload?.userId || payload?._id || "").trim();
+        uid = String(
+          payload?.id ||
+          payload?.sub ||
+          payload?.userId ||
+          payload?._id ||
+          ""
+        ).trim();
       }
 
       if (!uid) return;
@@ -1684,7 +1690,7 @@ io.on("connection", (socket) => {
       socket.join(`user:${uid}`);
       socket.data.userId = uid;
       socket.emit("room_joined", { ok: true, userId: uid });
-    } catch (err) {
+    } catch {
       socket.emit("room_joined", { ok: false, error: "invalid_token" });
     }
   });
@@ -1700,6 +1706,7 @@ io.on("connection", (socket) => {
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
+
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
@@ -1721,12 +1728,16 @@ io.on("connection", (socket) => {
 
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
-      if (polygonSocket && typeof polygonSocket.subscribe === "function") {
-        polygonSocket.subscribe(symbol, kind);
+      const cleanSymbol = String(symbol).toUpperCase().trim();
+
+      if (polygonSocket?.subscribe) {
+        polygonSocket.subscribe(cleanSymbol, kind);
       }
-      socket.join(symbol);
-      console.log("subscribe:", socket.id, symbol, kind || "trades");
+
+      socket.join(cleanSymbol);
+      console.log("subscribe:", socket.id, cleanSymbol, kind || "trades");
     } catch (e) {
       console.warn("subscribe error:", e);
     }
@@ -1734,12 +1745,16 @@ io.on("connection", (socket) => {
 
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
+
     try {
-      if (polygonSocket && typeof polygonSocket.unsubscribe === "function") {
-        polygonSocket.unsubscribe(symbol, kind);
+      const cleanSymbol = String(symbol).toUpperCase().trim();
+
+      if (polygonSocket?.unsubscribe) {
+        polygonSocket.unsubscribe(cleanSymbol, kind);
       }
-      socket.leave(symbol);
-      console.log("unsubscribe:", socket.id, symbol, kind || "trades");
+
+      socket.leave(cleanSymbol);
+      console.log("unsubscribe:", socket.id, cleanSymbol, kind || "trades");
     } catch (e) {
       console.warn("unsubscribe error:", e);
     }
@@ -1750,37 +1765,79 @@ io.on("connection", (socket) => {
   );
 });
 
+/* ======================================================
+   POLYGON SOCKET
+   ====================================================== */
+
+function extractSymbol(data) {
+  return String(
+    data?.symbol ||
+    data?.ticker ||
+    data?.sym ||
+    data?.T ||
+    data?.s ||
+    data?.instrument ||
+    ""
+  ).toUpperCase().trim();
+}
+
+function extractPrice(data) {
+  return (
+    data?.price ||
+    data?.p ||
+    data?.last ||
+    data?.c ||
+    data?.close ||
+    data?.lastPrice ||
+    null
+  );
+}
+
 try {
   if (!process.env.POLYGON_API_KEY) {
-    console.warn("⚠️ POLYGON_API_KEY no definido — realtime de mercado limitado");
+    console.warn("⚠️ POLYGON_API_KEY no definido — realtime limitado");
   } else {
     polygonSocket = new PolygonSocket({
       apiKey: process.env.POLYGON_API_KEY,
+
       onPrice: async (data) => {
         try {
-          priceHandler.handle(data);
+          // 🔥 DEBUG (IMPORTANTE)
+          console.log("📊 PRICE RAW:", data);
 
-          const rawSymbol =
-            data?.symbol ||
-            data?.ticker ||
-            data?.tvSymbol ||
-            data?.s ||
-            data?.instrument ||
-            "";
-
-          if (rawSymbol) {
-            scheduleLivePnLSync(rawSymbol);
+          // 1. Handler principal
+          if (priceHandler?.handle) {
+            priceHandler.handle(data);
           }
+
+          // 2. Normalizar datos
+          const symbol = extractSymbol(data);
+          const price = extractPrice(data);
+
+          if (!symbol) return;
+
+          // 3. Guardar directamente en fallback store si existe
+          if (price && typeof updatePriceStore === "function") {
+            updatePriceStore(symbol, price);
+          }
+
+          // 4. Trigger PnL sync seguro
+          if (symbol) {
+            scheduleLivePnLSync(symbol);
+          }
+
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
       },
+
       onOpen: () => console.log("PolygonSocket abierto"),
       onClose: () => console.log("PolygonSocket cerrado"),
       onError: (err) => console.error("PolygonSocket error:", err),
     });
 
     const maybe = polygonSocket.connect();
+
     if (maybe && typeof maybe.then === "function") {
       maybe.catch((err) => {
         console.warn("PolygonSocket.connect() rejected:", err);
@@ -1794,7 +1851,6 @@ try {
   console.error("Error inicializando PolygonSocket:", err);
   polygonSocket = null;
 }
-
 /* ======================================================
    STATIC
    ====================================================== */
