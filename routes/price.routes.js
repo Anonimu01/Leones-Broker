@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const symbol = req.query.symbol;
+    let symbol = req.query.symbol;
 
     if (!symbol) {
       return res.status(400).json({
@@ -13,6 +13,12 @@ router.get("/", async (req, res) => {
         error: "Symbol requerido"
       });
     }
+
+    // 🔥 FIX CRÍTICO: normalización del símbolo
+    symbol = symbol
+      .replace("OANDA:", "")
+      .replace("/", "")
+      .toUpperCase();
 
     const data = await getPrice(symbol);
 
