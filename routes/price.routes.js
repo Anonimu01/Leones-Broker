@@ -1,19 +1,8 @@
 import express from "express";
 import { getPrice } from "../services/market.js";
+import { normalizeSymbol } from "../utils/symbol.js";
 
 const router = express.Router();
-
-function normalizeSymbol(symbol) {
-  return String(symbol)
-    .toUpperCase()
-    // elimina TODO lo relacionado a OANDA sin importar posición
-    .replace(/OANDA:?/g, "")
-    // elimina barras
-    .replace(/\//g, "")
-    // limpia espacios
-    .replace(/\s+/g, "")
-    .trim();
-}
 
 router.get("/", async (req, res) => {
   try {
@@ -26,6 +15,7 @@ router.get("/", async (req, res) => {
       });
     }
 
+    // 🔥 NORMALIZACIÓN CENTRALIZADA (ÚNICA FUENTE DE VERDAD)
     symbol = normalizeSymbol(symbol);
 
     console.log("📊 Symbol FINAL normalizado:", symbol);
