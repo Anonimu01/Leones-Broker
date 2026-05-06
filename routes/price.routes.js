@@ -6,9 +6,12 @@ const router = express.Router();
 function normalizeSymbol(symbol) {
   return String(symbol)
     .toUpperCase()
-    .replace("OANDA:", "")
-    .replace("OANDA", "")
-    .replace("/", "")
+    // elimina TODO lo relacionado a OANDA sin importar posición
+    .replace(/OANDA:?/g, "")
+    // elimina barras
+    .replace(/\//g, "")
+    // limpia espacios
+    .replace(/\s+/g, "")
     .trim();
 }
 
@@ -23,10 +26,9 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // 🔥 FIX ROBUSTO
     symbol = normalizeSymbol(symbol);
 
-    console.log("📊 Symbol normalizado:", symbol);
+    console.log("📊 Symbol FINAL normalizado:", symbol);
 
     const data = await getPrice(symbol);
 
