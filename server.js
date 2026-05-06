@@ -1118,6 +1118,45 @@ app.post("/api/_send_test_email", async (req, res) => {
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
+app.get("/api/price", (req, res) => {
+  try {
+    let symbol = String(req.query.symbol || "").trim();
+
+    if (!symbol) {
+      return res.status(400).json({ ok: false, error: "symbol requerido" });
+    }
+
+    // 🔥 LIMPIAR SYMBOL (MUY IMPORTANTE)
+    symbol = symbol
+      .replace("OANDA:", "")
+      .replace("OANDA", "")
+      .replace("/", "")
+      .toUpperCase();
+
+    const price = getCurrentPriceForSymbol(symbol);
+
+    if (!price || isNaN(price)) {
+      return res.status(404).json({ ok: false, error: "Precio inválido" });
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      updatedAt: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.error("/api/price error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+});
+
+
+
 
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
