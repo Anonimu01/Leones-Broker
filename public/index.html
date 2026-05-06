@@ -4971,54 +4971,29 @@ async function syncLivePrice(symbol) {
 ========================= */
 async function getRealPrice(symbol) {
   try {
-    // 🔥 FIX CRÍTICO: limpiar símbolo real
-    const cleanSymbol = normalizeSymbol(symbol)
-      .replace("OANDA:", "")
-      .replace("/", "")
-      .trim();
+    // 🔥 NORMALIZACIÓN CRÍTICA (ESTO ES LO QUE TE ESTABA ROMPIENDO TODO)
+    const cleanSymbol = String(symbol)
+      .toUpperCase()
+      .replace(/OANDA:?/g, "")
+      .replace(/\//g, "")
+      .replace(/\s+/g, "");
 
-    const res = await fetch(`/api/price?symbol=${encodeURIComponent(cleanSymbol)}`);
+    console.log("📊 Symbol enviado a backend:", cleanSymbol);
 
-    if (!res.ok) {
-      throw new Error("Precio inválido");
-    }
-
+    const res = await fetch(`/api/price?symbol=${cleanSymbol}`);
     const data = await res.json();
 
-    const price = Number(data?.price);
-
-    if (!Number.isFinite(price) || price <= 0) {
+    if (!data.ok || !data.price) {
       throw new Error("Precio inválido");
     }
 
-    return price;
+    return data.price;
 
   } catch (err) {
     console.error("❌ Error obteniendo precio real:", err);
-    return null;
+    throw err;
   }
 }
-
-/* =========================
-   🔥 GET LIVE PRICE SAFE
-========================= */
-function getLivePriceFallback() {
-  const candidates = [
-    window.tvPrice,
-    window.lastPrice,
-    window.currentPrice,
-    window.entryPrice,
-    window.marketPrice,
-  ];
-
-  for (const v of candidates) {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return null;
-}
-
 /* =========================
    PLACE ORDER CONTROLLER
 ========================= */
