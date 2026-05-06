@@ -6,6 +6,19 @@ if (!POLYGON_KEY) {
 }
 
 /* =========================
+   MAPEO DE SÍMBOLOS (FIX CLAVE)
+========================= */
+const SYMBOL_MAP = {
+  GOLD: "XAUUSD",
+  SILVER: "XAGUSD",
+  OIL: "CL.1",
+  BTC: "X:BTCUSD",
+  ETH: "X:ETHUSD",
+  EURUSD: "C:EURUSD",
+  USDJPY: "C:USDJPY"
+};
+
+/* =========================
    CACHE SIMPLE EN MEMORIA
 ========================= */
 const priceCache = new Map();
@@ -31,10 +44,10 @@ function getCache(symbol) {
 }
 
 /* =========================
-   NORMALIZAR SYMBOL (MEJORADO)
+   NORMALIZAR SYMBOL (FIXED)
 ========================= */
 export function normalizeSymbol(symbol) {
-  return String(symbol || "")
+  let s = String(symbol || "")
     .trim()
     .toUpperCase()
     .replace("TVC:", "")
@@ -42,10 +55,17 @@ export function normalizeSymbol(symbol) {
     .replace("/", "")
     .replace("-", "")
     .replace("_", "");
+
+  // 🔥 MAPEO INTELIGENTE
+  if (SYMBOL_MAP[s]) {
+    s = SYMBOL_MAP[s];
+  }
+
+  return s;
 }
 
 /* =========================
-   OBTENER PRECIO ACTUAL
+   OBTENER PRECIO ACTUAL (FIX REAL)
 ========================= */
 export async function getPrice(symbol) {
   symbol = normalizeSymbol(symbol);
@@ -54,14 +74,41 @@ export async function getPrice(symbol) {
   if (cached) return cached;
 
   try {
-    const url = `${BASE_URL}/v2/last/trade/${symbol}?apiKey=${POLYGON_KEY}`;
+    // 🔥 intentamos varios formatos compatibles con Polygon
+    const candidates = [
+      symbol,
+      `C:${symbol}`,
+      `X:${symbol}`,
+      `O:${symbol}`
+    ];
 
-    const res = await fetch(url);
-    const data = await res.json();
+    let data = null;
 
-    // 🔥 VALIDACIÓN REAL (IMPORTANTE)
+    for (const sym of candidates) {
+      const url = `${BASE_URL}/v2/last/trade/${sym}?apiKey=${POLYGON_KEY}`;
+
+      try {
+        const res = await fetch(url);
+        const json = await res.json();
+
+        if (json?.results?.p) {
+          data = json;
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    // ❌ si no hay data válida
     if (!data || !data.results || typeof data.results.p !== "number") {
-      throw new Error(`Precio inválido de Polygon para ${symbol}`);
+      return {
+        symbol,
+        price: null,
+        source: "polygon_fail",
+        error: true,
+        time: Date.now()
+      };
     }
 
     const price = Number(data.results.p);
@@ -79,8 +126,6 @@ export async function getPrice(symbol) {
   } catch (err) {
     console.error("Market price error:", err.message);
 
-    // ❌ IMPORTANTE: ya NO inventamos precio real
-    // solo devolvemos null para evitar trades falsos
     return {
       symbol,
       price: null,
@@ -130,9 +175,9 @@ export async function executeOrderOnBroker({
 
   const market = await getPrice(symbol);
 
-  // 🔥 BLOQUEO DE SEGURIDAD
+  // 🔥 SEGURIDAD REAL
   if (!market || market.price === null) {
-    throw new Error("No se pudo obtener precio de mercado");
+    throw new Error(`No se pudo obtener precio de mercado para ${symbol}`);
   }
 
   const executionPrice =
