@@ -1130,6 +1130,7 @@ app.get("/api/price", (req, res) => {
     symbol = symbol
       .replace("OANDA:", "")
       .replace("OANDA", "")
+      .replace("TVC:", "")
       .replace("/", "")
       .toUpperCase();
 
@@ -1185,44 +1186,7 @@ app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
 /* =========================
    🔥 GET PRICE (FIX REAL)
 ========================= */
-app.get("/api/price", (req, res) => {
-  try {
-    const symbol = String(req.query.symbol || "").trim();
-
-    if (!symbol) {
-      return res.status(400).json({
-        ok: false,
-        error: "symbol_required",
-      });
-    }
-
-    const price = getCurrentPriceForSymbol(symbol);
-
-    if (!price) {
-      return res.status(404).json({
-        ok: false,
-        error: "price_not_found",
-        symbol,
-      });
-    }
-
-    return res.json({
-      ok: true,
-      symbol,
-      price,
-      last: price,
-      currentPrice: price,
-      updatedAt: new Date().toISOString(),
-    });
-
-  } catch (err) {
-    console.error("/api/price error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-    });
-  }
-});
+// ⚠️ ELIMINADO DUPLICADO DE /api/price (YA EXISTE ARRIBA)
 
 /* =========================
    EXISTENTE (NO TOCAR)
@@ -1310,7 +1274,6 @@ app.get("/api/symbols", (req, res) => {
     return res.json(SAMPLE_SYMBOLS);
   }
 });
-
 /* ======================================================
    ACCOUNT / WALLET / POSITIONS
    ====================================================== */
