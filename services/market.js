@@ -31,52 +31,65 @@ function getCache(symbol) {
 }
 
 /* =========================
-   NORMALIZAR SYMBOL
+   NORMALIZAR SYMBOL (CORREGIDO)
 ========================= */
 export function normalizeSymbol(symbol) {
   return String(symbol || "")
-    .trim()
     .toUpperCase()
-    .replace("/", "")
-    .replace("-", "")
-    .replace("_", "");
+    .replace("OANDA:", "")
+    .replace("OANDA", "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+/* =========================
+   FORMATO POLYGON (CLAVE)
+========================= */
+function formatPolygonSymbol(symbol) {
+  const clean = normalizeSymbol(symbol);
+
+  // EURUSD → C:EURUSD
+  if (clean.length === 6) {
+    return `C:${clean.slice(0, 3)}${clean.slice(3)}`;
+  }
+
+  return clean;
 }
 
 /* =========================
    OBTENER PRECIO ACTUAL
 ========================= */
 export async function getPrice(symbol) {
-  symbol = normalizeSymbol(symbol);
+  const cleanSymbol = normalizeSymbol(symbol);
 
-  const cached = getCache(symbol);
+  const cached = getCache(cleanSymbol);
   if (cached) return cached;
 
   try {
-    const url = `${BASE_URL}/v2/last/trade/${symbol}?apiKey=${POLYGON_KEY}`;
+    const polySymbol = formatPolygonSymbol(cleanSymbol);
+
+    const url = `${BASE_URL}/v2/last/trade/${polySymbol}?apiKey=${POLYGON_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
 
     const price = Number(data?.results?.p);
 
-    // 🔥 VALIDACIÓN ESTRICTA (IMPORTANTE)
     if (!Number.isFinite(price) || price <= 0) {
       throw new Error("Precio inválido desde API");
     }
 
     const result = {
-      symbol,
+      symbol: cleanSymbol,
       price,
       source: "polygon",
       time: Date.now()
     };
 
-    setCache(symbol, result);
+    setCache(cleanSymbol, result);
     return result;
 
   } catch (err) {
     console.error("❌ Market price error:", err.message);
-
-    // 🚨 IMPORTANTE: NO usar precio falso
     return null;
   }
 }
@@ -111,7 +124,7 @@ export async function getPrices(symbols = []) {
 }
 
 /* =========================
-   EJECUTAR ORDEN (BROKER ENGINE)
+   EJECUTAR ORDEN
 ========================= */
 export async function executeOrderOnBroker({
   symbol,
@@ -127,7 +140,6 @@ export async function executeOrderOnBroker({
 
   const market = await getPrice(symbol);
 
-  // 🔥 BLOQUEO SI NO HAY PRECIO REAL
   if (!market || !market.price) {
     throw new Error("No hay precio de mercado disponible");
   }
@@ -151,7 +163,6 @@ export async function executeOrderOnBroker({
     status: "filled",
     liquidity: "market",
 
-    // 🔥 EVITAR NaN
     slippage: Number.isFinite(execPrice - market.price)
       ? Number((execPrice - market.price).toFixed(5))
       : 0,
