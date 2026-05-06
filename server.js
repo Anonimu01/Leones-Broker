@@ -1122,11 +1122,14 @@ app.post("/api/_send_test_email", async (req, res) => {
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
 );
+
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
 
 try {
   if (typeof marketRoutesFactory === "function") {
@@ -1140,9 +1143,58 @@ try {
 
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
 
+/* =========================
+   🔥 GET PRICE (FIX REAL)
+========================= */
+app.get("/api/price", (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "").trim();
+
+    if (!symbol) {
+      return res.status(400).json({
+        ok: false,
+        error: "symbol_required",
+      });
+    }
+
+    const price = getCurrentPriceForSymbol(symbol);
+
+    if (!price) {
+      return res.status(404).json({
+        ok: false,
+        error: "price_not_found",
+        symbol,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      last: price,
+      currentPrice: price,
+      updatedAt: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.error("/api/price error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+    });
+  }
+});
+
+/* =========================
+   EXISTENTE (NO TOCAR)
+========================= */
+
 app.get("/api/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
+
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
       return res.json({
@@ -1155,6 +1207,7 @@ app.get("/api/latest", (req, res) => {
         updatedAt: new Date().toISOString(),
       });
     }
+
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
     console.error("/api/latest error:", e);
@@ -1163,9 +1216,13 @@ app.get("/api/latest", (req, res) => {
 });
 
 app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
+
 app.get("/api/market/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
+    const symbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+    ).trim();
+
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
       return res.json({
@@ -1178,6 +1235,7 @@ app.get("/api/market/latest", (req, res) => {
         updatedAt: new Date().toISOString(),
       });
     }
+
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
     console.error("/api/market/latest error:", e);
@@ -1185,12 +1243,18 @@ app.get("/api/market/latest", (req, res) => {
   }
 });
 
-app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
-app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/market/polygon/quotes", (req, res) =>
+  res.json(buildMarketPayload())
+);
+
+app.get("/api/market/polygon/symbols", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
 
 app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
+
     if (prices && Object.keys(prices).length) {
       return res.json(
         Object.keys(prices).map((k) => ({
@@ -1200,6 +1264,7 @@ app.get("/api/symbols", (req, res) => {
         }))
       );
     }
+
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
     console.error("api/symbols error:", err);
