@@ -3,6 +3,15 @@ import { getPrice } from "../services/market.js";
 
 const router = express.Router();
 
+function normalizeSymbol(symbol) {
+  return String(symbol)
+    .toUpperCase()
+    .replace("OANDA:", "")
+    .replace("OANDA", "")
+    .replace("/", "")
+    .trim();
+}
+
 router.get("/", async (req, res) => {
   try {
     let symbol = req.query.symbol;
@@ -14,18 +23,18 @@ router.get("/", async (req, res) => {
       });
     }
 
-    // 🔥 FIX CRÍTICO: normalización del símbolo
-    symbol = symbol
-      .replace("OANDA:", "")
-      .replace("/", "")
-      .toUpperCase();
+    // 🔥 FIX ROBUSTO
+    symbol = normalizeSymbol(symbol);
+
+    console.log("📊 Symbol normalizado:", symbol);
 
     const data = await getPrice(symbol);
 
-    if (!data || !data.price) {
+    if (!data || !data.price || isNaN(data.price)) {
       return res.status(404).json({
         ok: false,
-        error: "Precio no disponible"
+        error: "Precio no disponible",
+        symbol
       });
     }
 
