@@ -209,10 +209,16 @@ function compactSymbol(value) {
 }
 
 function normalizeSymbol(value) {
-  return compactSymbol(value)
-    .replace("OANDA", "")
-    .replace("TVC", "")
-    .replace("C", "");
+  let s = String(value || "").trim().toUpperCase();
+
+  if (!s) return "";
+
+  // toma la parte después del prefijo si viene tipo OANDA:EUR_USD, C:CADJPY, BINANCE:BTCUSDT, etc.
+  if (s.includes(":")) {
+    s = s.split(":").pop();
+  }
+
+  return compactSymbol(s);
 }
 
 function sameMarketSymbol(a = "", b = "") {
@@ -234,7 +240,7 @@ function normalizeSide(value) {
 }
 
 function normalizePositionSymbol(body = {}) {
-  return String(
+  return normalizeSymbol(
     body.symbol ||
       body.tvSymbol ||
       body.selectedSymbol ||
@@ -245,9 +251,7 @@ function normalizePositionSymbol(body = {}) {
       body.ticker ||
       body.asset ||
       ""
-  )
-    .trim()
-    .toUpperCase();
+  );
 }
 
 function normalizeQty(body = {}) {
@@ -316,10 +320,22 @@ function savePrice(symbol, price) {
   if (!priceHandler?.prices) return;
 
   const clean = normalizeSymbol(symbol);
+  const numeric = Number(price);
 
-  priceHandler.prices.set(clean, Number(price));
+  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
 
-  console.log("📥 PRICE UPDATE:", clean, price);
+  const payload = {
+    price: numeric,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (priceHandler.prices instanceof Map) {
+    priceHandler.prices.set(clean, payload);
+  } else if (typeof priceHandler.prices === "object") {
+    priceHandler.prices[clean] = payload;
+  }
+
+  console.log("📥 PRICE UPDATE:", clean, numeric);
 }
 
 /* =========================
@@ -327,6 +343,10 @@ function savePrice(symbol, price) {
    ========================= */
 
 function extractQuotePrice(item = {}) {
+  // soporta número directo, string numérico o objeto
+  const primitive = toNumber(item);
+  if (Number.isFinite(primitive) && primitive > 0) return primitive;
+
   const direct =
     toNumber(item.price) ??
     toNumber(item.last) ??
@@ -425,6 +445,16 @@ function getCurrentPriceForSymbol(symbol) {
 
   const store = getPriceStore();
 
+  // 1) búsqueda exacta por key normalizada
+  for (const [key, item] of Object.entries(store)) {
+    const keyNorm = normalizeSymbol(key);
+    if (keyNorm === target) {
+      const px = extractQuotePrice(item);
+      if (Number.isFinite(px) && px > 0) return px;
+    }
+  }
+
+  // 2) búsqueda por candidatos asociados al item
   for (const [key, item] of Object.entries(store)) {
     const candidates = [
       key,
@@ -435,6 +465,7 @@ function getCurrentPriceForSymbol(symbol) {
       item?.instrument,
       item?.marketSymbol,
       item?.asset,
+      item?.name,
     ].filter(Boolean);
 
     const match = candidates.some((c) => {
@@ -442,7 +473,8 @@ function getCurrentPriceForSymbol(symbol) {
       return (
         clean === target ||
         clean.includes(target) ||
-        target.includes(clean)
+        target.includes(clean) ||
+        sameMarketSymbol(clean, target)
       );
     });
 
@@ -454,6 +486,7 @@ function getCurrentPriceForSymbol(symbol) {
 
   return null;
 }
+
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
@@ -1145,29 +1178,28 @@ app.post("/api/_send_test_email", async (req, res) => {
    ====================================================== */
 app.get("/api/price", (req, res) => {
   try {
-    let symbol = String(req.query.symbol || "").trim();
+    const symbol = normalizeSymbol(
+      String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
+    );
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, error: "symbol requerido" });
+      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
     }
-
-    // 🔥 NORMALIZAR SYMBOL
-    symbol = normalizeSymbol(symbol);
 
     console.log("📊 PRICE REQUEST:", symbol);
 
     const price = getCurrentPriceForSymbol(symbol);
 
-    // 🔍 DEBUG MEMORIA
     if (priceHandler?.prices) {
-      const keys = priceHandler.prices instanceof Map
-        ? Array.from(priceHandler.prices.keys())
-        : Object.keys(priceHandler.prices);
+      const keys =
+        priceHandler.prices instanceof Map
+          ? Array.from(priceHandler.prices.keys())
+          : Object.keys(priceHandler.prices);
 
       console.log("📦 KEYS EN MEMORIA:", keys);
     }
 
-    if (price === null || price === undefined || isNaN(price)) {
+    if (price === null || price === undefined || !Number.isFinite(Number(price)) || Number(price) <= 0) {
       return res.status(404).json({
         ok: false,
         error: "Precio no disponible",
@@ -1178,19 +1210,17 @@ app.get("/api/price", (req, res) => {
     return res.json({
       ok: true,
       symbol,
-      price,
-      currentPrice: price,
-      last: price,
-      close: price,
+      price: Number(price),
+      currentPrice: Number(price),
+      last: Number(price),
+      close: Number(price),
       updatedAt: new Date().toISOString(),
     });
-
   } catch (err) {
     console.error("/api/price error:", err);
     return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
-
 
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
@@ -1830,7 +1860,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = String(symbol).toUpperCase().trim();
+      const cleanSymbol = normalizeSymbol(symbol);
 
       if (polygonSocket?.subscribe) {
         polygonSocket.subscribe(cleanSymbol, kind);
@@ -1847,7 +1877,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = String(symbol).toUpperCase().trim();
+      const cleanSymbol = normalizeSymbol(symbol);
 
       if (polygonSocket?.unsubscribe) {
         polygonSocket.unsubscribe(cleanSymbol, kind);
@@ -1870,7 +1900,7 @@ io.on("connection", (socket) => {
    ====================================================== */
 
 function extractSymbol(data) {
-  return String(
+  return normalizeSymbol(
     data?.symbol ||
     data?.ticker ||
     data?.sym ||
@@ -1878,7 +1908,7 @@ function extractSymbol(data) {
     data?.s ||
     data?.instrument ||
     ""
-  ).toUpperCase().trim();
+  );
 }
 
 function extractPrice(data) {
@@ -1902,48 +1932,36 @@ try {
 
       onPrice: async (data) => {
         try {
-          // 🔥 DEBUG (IMPORTANTE)
           console.log("📊 PRICE RAW:", data);
-
-          // =========================================
-          // 2. NORMALIZAR + GUARDAR PRECIO (FIX REAL)
-          // =========================================
 
           const symbol = extractSymbol(data);
           const price = extractPrice(data);
 
           if (!symbol || !price) return;
 
-          // 🔥 GUARDAR PRECIO DIRECTO (FIX REAL)
           if (priceHandler?.prices) {
+            const payload = {
+              price: Number(price),
+              updatedAt: new Date().toISOString(),
+              raw: data,
+            };
+
             if (priceHandler.prices instanceof Map) {
-              priceHandler.prices.set(symbol, {
-                price,
-                updatedAt: new Date().toISOString(),
-                raw: data,
-              });
+              priceHandler.prices.set(symbol, payload);
             } else {
-              priceHandler.prices[symbol] = {
-                price,
-                updatedAt: new Date().toISOString(),
-                raw: data,
-              };
+              priceHandler.prices[symbol] = payload;
             }
           }
 
-          // 🔥 OPCIONAL: seguir usando handler
           if (priceHandler?.handle) {
             priceHandler.handle(data);
           }
 
-          // 🔥 TAMBIÉN guarda en tu fallback (por si lo usas)
           if (typeof updatePriceStore === "function") {
             updatePriceStore(symbol, price);
           }
 
-          // 🔥 Sync PnL SIEMPRE
           scheduleLivePnLSync(symbol);
-
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
@@ -1969,6 +1987,7 @@ try {
   console.error("Error inicializando PolygonSocket:", err);
   polygonSocket = null;
 }
+
 /* ======================================================
    STATIC
    ====================================================== */
@@ -2074,15 +2093,15 @@ app.get("*", (req, res) => {
   });
 });
 
+/* =========================
+   GET REAL PRICE (FIX)
+========================= */
 
-// ======================================================
-// GET REAL PRICE (FIX)
-// ======================================================
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || "")
-      .toUpperCase()
-      .trim();
+    const symbol = normalizeSymbol(
+      String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
+    );
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
@@ -2090,7 +2109,6 @@ app.get("/api/price", (req, res) => {
 
     let priceData = null;
 
-    // 🔥 leer desde priceHandler
     if (priceHandler?.prices) {
       if (priceHandler.prices instanceof Map) {
         priceData = priceHandler.prices.get(symbol);
@@ -2099,26 +2117,29 @@ app.get("/api/price", (req, res) => {
       }
     }
 
-    if (!priceData || !priceData.price) {
-      return res.status(404).json({ ok: false, error: "Precio inválido" });
+    // si el store guarda el número directo
+    const directPrice = extractQuotePrice(priceData);
+    const price = Number.isFinite(directPrice) && directPrice > 0 ? directPrice : null;
+
+    if (!price) {
+      return res.status(404).json({ ok: false, error: "Precio inválido", symbol });
     }
 
     return res.json({
       ok: true,
       symbol,
-      price: priceData.price,
-      updatedAt: priceData.updatedAt,
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      updatedAt: new Date().toISOString(),
     });
-
   } catch (err) {
     console.error("Error /api/price:", err);
     res.status(500).json({ ok: false, error: "Error interno" });
   }
 });
 
-
-// ❌ SIEMPRE AL FINAL
-app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
 /* ======================================================
    START / SHUTDOWN
    ====================================================== */
