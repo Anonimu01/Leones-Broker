@@ -149,6 +149,10 @@ const openTradeLocks = new Map();
 const liveSyncTimers = new Map();
 const activeOrders = new Set();
 
+/* =========================
+   LOCK SYSTEM
+   ========================= */
+
 function makeOpenLockKey(userId, symbol, side, qty) {
   return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}:${String(qty || "")}`;
 }
@@ -193,6 +197,10 @@ function releaseActiveOrder(key) {
   activeOrders.delete(key);
 }
 
+/* =========================
+   SYMBOL NORMALIZATION
+   ========================= */
+
 function compactSymbol(value) {
   return String(value || "")
     .trim()
@@ -200,20 +208,11 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function symbolVariants(value) {
-  const raw = String(value || "").trim().toUpperCase();
-  const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
-  const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
-  const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
-
-  return [
-    ...new Set([
-      compactSymbol(raw),
-      compactSymbol(afterColon),
-      compactSymbol(afterSlash),
-      compactSymbol(afterDash),
-    ]),
-  ].filter(Boolean);
+function normalizeSymbol(value) {
+  return compactSymbol(value)
+    .replace("OANDA", "")
+    .replace("TVC", "")
+    .replace("C", "");
 }
 
 function sameMarketSymbol(a = "", b = "") {
@@ -222,6 +221,10 @@ function sameMarketSymbol(a = "", b = "") {
   if (!x || !y) return false;
   return x === y || x.includes(y) || y.includes(x);
 }
+
+/* =========================
+   NORMALIZERS
+   ========================= */
 
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
@@ -268,30 +271,16 @@ function normalizePrice(body = {}) {
   const raw =
     body.price ??
     body.entryPrice ??
-    body.entry_price ??
     body.currentPrice ??
-    body.current_price ??
     body.limitPrice ??
-    body.limit_price ??
     body.stopPrice ??
-    body.stop_price ??
-    body.openPrice ??
-    body.open_price ??
-    body.tvPrice ??
-    body.tv_price ??
     body.lastPrice ??
-    body.last_price ??
     body.marketPrice ??
-    body.market_price ??
-    body.quotePrice ??
-    body.quote_price ??
-    body.executionPrice ??
-    body.execution_price ??
     body.ask ??
     body.bid ??
     body.mark ??
     null;
-  if (raw === null || raw === undefined || raw === "") return null;
+
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -301,17 +290,41 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/* =========================
+   PRICE STORE (FIX CRÍTICO)
+   ========================= */
+
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
     if (!raw) return {};
+
     if (raw instanceof Map) return Object.fromEntries(raw.entries());
     if (typeof raw === "object") return raw;
+
     return {};
   } catch {
     return {};
   }
 }
+
+/* =========================
+   PRICE WRITER (🔥 FIX REAL)
+   ========================= */
+
+function savePrice(symbol, price) {
+  if (!priceHandler?.prices) return;
+
+  const clean = normalizeSymbol(symbol);
+
+  priceHandler.prices.set(clean, Number(price));
+
+  console.log("📥 PRICE UPDATE:", clean, price);
+}
+
+/* =========================
+   PRICE EXTRACTOR
+   ========================= */
 
 function extractQuotePrice(item = {}) {
   const direct =
@@ -334,14 +347,14 @@ function extractQuotePrice(item = {}) {
   return null;
 }
 
+/* =========================
+   QUOTES NORMALIZER
+   ========================= */
+
 function normalizeQuote(symbol, item = {}) {
-  const label =
-    item.label ||
-    item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
   return {
     symbol,
-    label,
+    label: item.label || symbol,
     market: item.market || "Unknown",
     price: extractQuotePrice(item),
     bid: toNumber(item.bid),
@@ -352,21 +365,25 @@ function normalizeQuote(symbol, item = {}) {
     volume: toNumber(item.volume),
     change: toNumber(item.change),
     changePercent: toNumber(item.changePercent),
-    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
     raw: item,
   };
 }
+
+/* =========================
+   SAMPLE DATA
+   ========================= */
 
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
   { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
   { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
-  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
-  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
+
+/* =========================
+   MARKET BUILDER
+   ========================= */
 
 function buildQuotesArray() {
   const store = getPriceStore();
@@ -388,12 +405,23 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null };
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
 }
 
+/* =========================
+   🔥 FIX FINAL DEL BUG
+   ========================= */
+
 function getCurrentPriceForSymbol(symbol) {
-  const targetCompact = compactSymbol(symbol);
-  if (!targetCompact) return null;
+  const target = normalizeSymbol(symbol);
+  if (!target) return null;
 
   const store = getPriceStore();
 
@@ -409,26 +437,23 @@ function getCurrentPriceForSymbol(symbol) {
       item?.asset,
     ].filter(Boolean);
 
-    const matched = candidates.some((candidate) => {
-      const c = compactSymbol(candidate);
-      if (!c) return false;
+    const match = candidates.some((c) => {
+      const clean = normalizeSymbol(c);
       return (
-        c === targetCompact ||
-        c.includes(targetCompact) ||
-        targetCompact.includes(c) ||
-        sameMarketSymbol(c, targetCompact)
+        clean === target ||
+        clean.includes(target) ||
+        target.includes(clean)
       );
     });
 
-    if (!matched) continue;
+    if (!match) continue;
 
-    const px = extractQuotePrice(item);
-    if (Number.isFinite(px) && px > 0) return px;
+    const price = extractQuotePrice(item);
+    if (Number.isFinite(price) && price > 0) return price;
   }
 
   return null;
 }
-
 function resolveOrderPrice(body = {}, symbol = "") {
   const direct = normalizePrice(body);
   if (direct) return direct;
@@ -1127,30 +1152,21 @@ app.get("/api/price", (req, res) => {
     }
 
     // 🔥 NORMALIZAR SYMBOL
-    symbol = symbol
-      .toUpperCase()
-      .replace("OANDA:", "")
-      .replace("OANDA", "")
-      .replace("TVC:", "")
-      .replace("C:", "")
-      .replace("/", "")
-      .trim();
+    symbol = normalizeSymbol(symbol);
 
     console.log("📊 PRICE REQUEST:", symbol);
 
     const price = getCurrentPriceForSymbol(symbol);
 
-    // 🔍 DEBUG (te ayuda a ver si hay datos en memoria)
-    if (typeof priceHandler !== "undefined" && priceHandler?.prices) {
-      const keys =
-        priceHandler.prices instanceof Map
-          ? Array.from(priceHandler.prices.keys())
-          : Object.keys(priceHandler.prices);
+    // 🔍 DEBUG MEMORIA
+    if (priceHandler?.prices) {
+      const keys = priceHandler.prices instanceof Map
+        ? Array.from(priceHandler.prices.keys())
+        : Object.keys(priceHandler.prices);
 
       console.log("📦 KEYS EN MEMORIA:", keys);
     }
 
-    // ⚠️ mejor validación (evita falsos negativos con 0 o valores válidos)
     if (price === null || price === undefined || isNaN(price)) {
       return res.status(404).json({
         ok: false,
@@ -1162,10 +1178,10 @@ app.get("/api/price", (req, res) => {
     return res.json({
       ok: true,
       symbol,
-      price: Number(price),
-      currentPrice: Number(price),
-      last: Number(price),
-      close: Number(price),
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
       updatedAt: new Date().toISOString(),
     });
 
@@ -1174,7 +1190,6 @@ app.get("/api/price", (req, res) => {
     return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
-
 
 
 app.get("/api/markets", (req, res) =>
