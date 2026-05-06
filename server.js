@@ -2041,8 +2041,51 @@ app.get("*", (req, res) => {
   });
 });
 
-app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
 
+// ======================================================
+// GET REAL PRICE (FIX)
+// ======================================================
+app.get("/api/price", (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "")
+      .toUpperCase()
+      .trim();
+
+    if (!symbol) {
+      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
+    }
+
+    let priceData = null;
+
+    // 🔥 leer desde priceHandler
+    if (priceHandler?.prices) {
+      if (priceHandler.prices instanceof Map) {
+        priceData = priceHandler.prices.get(symbol);
+      } else {
+        priceData = priceHandler.prices[symbol];
+      }
+    }
+
+    if (!priceData || !priceData.price) {
+      return res.status(404).json({ ok: false, error: "Precio inválido" });
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price: priceData.price,
+      updatedAt: priceData.updatedAt,
+    });
+
+  } catch (err) {
+    console.error("Error /api/price:", err);
+    res.status(500).json({ ok: false, error: "Error interno" });
+  }
+});
+
+
+// ❌ SIEMPRE AL FINAL
+app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
 /* ======================================================
    START / SHUTDOWN
    ====================================================== */
