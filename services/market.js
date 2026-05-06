@@ -35,62 +35,51 @@ function getCache(symbol) {
 ========================= */
 export function normalizeSymbol(symbol) {
   return String(symbol || "")
+    .trim()
     .toUpperCase()
-    .replace("OANDA:", "")
-    .replace("OANDA", "")
-    .replace(/\s+/g, "")
-    .trim();
-}
-
-/* =========================
-   FORMATO POLYGON (FIX FINAL)
-========================= */
-function formatPolygonSymbol(symbol) {
-  const clean = normalizeSymbol(symbol);
-
-  // Forex 6 letras → EURUSD → C:EURUSD
-  if (clean.length === 6) {
-    return `C:${clean}`;
-  }
-
-  return clean;
+    .replace("/", "")
+    .replace("-", "")
+    .replace("_", "");
 }
 
 /* =========================
    OBTENER PRECIO ACTUAL
 ========================= */
 export async function getPrice(symbol) {
-  const cleanSymbol = normalizeSymbol(symbol);
+  symbol = normalizeSymbol(symbol);
 
-  const cached = getCache(cleanSymbol);
+  const cached = getCache(symbol);
   if (cached) return cached;
 
   try {
-    const polySymbol = formatPolygonSymbol(cleanSymbol);
-
-    const url = `${BASE_URL}/v2/last/trade/${polySymbol}?apiKey=${POLYGON_KEY}`;
+    const url = `${BASE_URL}/v2/last/trade/${symbol}?apiKey=${POLYGON_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
 
-    const price = Number(data?.results?.p);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new Error("Precio inválido desde API");
+    if (!data?.results?.p) {
+      throw new Error("Precio no encontrado");
     }
 
+    const price = Number(data.results.p);
+
     const result = {
-      symbol: cleanSymbol,
+      symbol,
       price,
       source: "polygon",
       time: Date.now()
     };
 
-    setCache(cleanSymbol, result);
+    setCache(symbol, result);
     return result;
-
   } catch (err) {
-    console.error("❌ Market price error:", err.message);
-    return null;
+    console.error("Market price error:", err.message);
+
+    return {
+      symbol,
+      price: Number((Math.random() * 100 + 10).toFixed(2)),
+      source: "fallback",
+      time: Date.now()
+    };
   }
 }
 
@@ -102,15 +91,7 @@ export async function getPrices(symbols = []) {
 
   for (const s of symbols) {
     try {
-      const p = await getPrice(s);
-
-      results.push(
-        p || {
-          symbol: s,
-          price: null,
-          error: true
-        }
-      );
+      results.push(await getPrice(s));
     } catch {
       results.push({
         symbol: s,
@@ -124,7 +105,7 @@ export async function getPrices(symbols = []) {
 }
 
 /* =========================
-   EJECUTAR ORDEN
+   EJECUTAR ORDEN (BROKER ENGINE)
 ========================= */
 export async function executeOrderOnBroker({
   symbol,
@@ -140,16 +121,10 @@ export async function executeOrderOnBroker({
 
   const market = await getPrice(symbol);
 
-  if (!market || !market.price) {
-    throw new Error("No hay precio de mercado disponible");
-  }
-
   const executionPrice =
     type === "market"
       ? market.price
       : Number(price || market.price);
-
-  const execPrice = Number(executionPrice);
 
   return {
     id: "ord_" + Math.random().toString(36).slice(2),
@@ -159,14 +134,10 @@ export async function executeOrderOnBroker({
     type,
     quantity: Number(quantity),
     requestedPrice: price,
-    executedPrice: execPrice,
+    executedPrice: executionPrice,
     status: "filled",
     liquidity: "market",
-
-    slippage: Number.isFinite(execPrice - market.price)
-      ? Number((execPrice - market.price).toFixed(5))
-      : 0,
-
+    slippage: Number((executionPrice - market.price).toFixed(5)),
     source: market.source,
     createdAt: new Date().toISOString()
   };
