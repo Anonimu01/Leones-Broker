@@ -3,19 +3,15 @@ import Wallet from "../models/wallet.model.js";
 import User from "../models/user.model.js";
 import mongoose from "mongoose";
 
+// 🔥 IMPORT CENTRAL (ÚNICA FUENTE DE VERDAD)
+import { normalizeSymbol } from "../utils/symbol.js";
+
 // =======================
 // 🔧 HELPERS
 // =======================
 function normalizePrice(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function normalizeSymbol(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/^OANDA:/, "");
 }
 
 function normalizeSide(value) {
@@ -114,6 +110,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
     const livePrice = normalizePrice(price);
     if (!livePrice) return;
 
+    // 🔥 NORMALIZADO GLOBAL
     const cleanSymbol = normalizeSymbol(symbol);
 
     const positions = await Position.find({ status: "OPEN" });
@@ -150,7 +147,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 // =======================
-// 🚀 OPEN TRADE (FIX APLICADO)
+// 🚀 OPEN TRADE
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -162,14 +159,12 @@ export const openTrade = async ({ user, order }) => {
 
     let { symbol, side, type, quantity, price } = order || {};
 
+    // 🔥 AQUÍ SE APLICA EL FIX REAL
     symbol = normalizeSymbol(symbol);
     side = normalizeSide(side);
     type = String(type || "MARKET").toUpperCase();
     quantity = Number(quantity);
 
-    // ==============================
-    // 🔥 AQUÍ VA TU VALIDACIÓN REAL
-    // ==============================
     const entryPrice = normalizePrice(price);
 
     if (!entryPrice || entryPrice <= 0) {
