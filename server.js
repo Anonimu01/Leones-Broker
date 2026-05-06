@@ -1872,26 +1872,44 @@ try {
           // 🔥 DEBUG (IMPORTANTE)
           console.log("📊 PRICE RAW:", data);
 
-          // 1. Handler principal
+          // =========================================
+          // 2. NORMALIZAR + GUARDAR PRECIO (FIX REAL)
+          // =========================================
+
+          const symbol = extractSymbol(data);
+          const price = extractPrice(data);
+
+          if (!symbol || !price) return;
+
+          // 🔥 GUARDAR PRECIO DIRECTO (FIX REAL)
+          if (priceHandler?.prices) {
+            if (priceHandler.prices instanceof Map) {
+              priceHandler.prices.set(symbol, {
+                price,
+                updatedAt: new Date().toISOString(),
+                raw: data,
+              });
+            } else {
+              priceHandler.prices[symbol] = {
+                price,
+                updatedAt: new Date().toISOString(),
+                raw: data,
+              };
+            }
+          }
+
+          // 🔥 OPCIONAL: seguir usando handler
           if (priceHandler?.handle) {
             priceHandler.handle(data);
           }
 
-          // 2. Normalizar datos
-          const symbol = extractSymbol(data);
-          const price = extractPrice(data);
-
-          if (!symbol) return;
-
-          // 3. Guardar directamente en fallback store si existe
-          if (price && typeof updatePriceStore === "function") {
+          // 🔥 TAMBIÉN guarda en tu fallback (por si lo usas)
+          if (typeof updatePriceStore === "function") {
             updatePriceStore(symbol, price);
           }
 
-          // 4. Trigger PnL sync seguro
-          if (symbol) {
-            scheduleLivePnLSync(symbol);
-          }
+          // 🔥 Sync PnL SIEMPRE
+          scheduleLivePnLSync(symbol);
 
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
