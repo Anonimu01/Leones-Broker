@@ -15,7 +15,12 @@ const SYMBOL_MAP = {
   BTC: "X:BTCUSD",
   ETH: "X:ETHUSD",
   EURUSD: "C:EURUSD",
-  USDJPY: "C:USDJPY"
+  USDJPY: "C:USDJPY",
+  GBPUSD: "C:GBPUSD",
+  AUDUSD: "C:AUDUSD",
+  NZDUSD: "C:NZDUSD",
+  CADJPY: "C:CADJPY",
+  EURJPY: "C:EURJPY"
 };
 
 /* =========================
@@ -52,6 +57,8 @@ export function normalizeSymbol(symbol) {
     .toUpperCase()
     .replace("TVC:", "")
     .replace("OANDA:", "")
+    .replace("FOREX:", "")
+    .replace("FX:", "")
     .replace("/", "")
     .replace("-", "")
     .replace("_", "");
@@ -74,12 +81,13 @@ export async function getPrice(symbol) {
   if (cached) return cached;
 
   try {
-    // 🔥 intentamos varios formatos compatibles con Polygon
+    // 🔥 formatos compatibles Polygon
     const candidates = [
       symbol,
       `C:${symbol}`,
       `X:${symbol}`,
-      `O:${symbol}`
+      `O:${symbol}`,
+      `FX:${symbol}`
     ];
 
     let data = null;
@@ -89,6 +97,9 @@ export async function getPrice(symbol) {
 
       try {
         const res = await fetch(url);
+
+        if (!res.ok) continue;
+
         const json = await res.json();
 
         if (json?.results?.p) {
