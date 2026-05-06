@@ -31,7 +31,7 @@ function getCache(symbol) {
 }
 
 /* =========================
-   NORMALIZAR SYMBOL (CORREGIDO)
+   NORMALIZAR SYMBOL
 ========================= */
 export function normalizeSymbol(symbol) {
   return String(symbol || "")
@@ -43,14 +43,14 @@ export function normalizeSymbol(symbol) {
 }
 
 /* =========================
-   FORMATO POLYGON (CLAVE)
+   FORMATO POLYGON (FIX FINAL)
 ========================= */
 function formatPolygonSymbol(symbol) {
   const clean = normalizeSymbol(symbol);
 
-  // EURUSD → C:EURUSD
+  // Forex 6 letras → EURUSD → C:EURUSD
   if (clean.length === 6) {
-    return `C:${clean.slice(0, 3)}${clean.slice(3)}`;
+    return `C:${clean}`;
   }
 
   return clean;
