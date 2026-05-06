@@ -3398,80 +3398,95 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     syncOrderFields();
   }
 
-  function submitOrder(direction) {
-    const side = String(direction || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-    const symbolMeta = getActiveSymbolMeta();
-    const amount = Number(
-      document.getElementById('brokerOrderSize')?.value ||
-      document.getElementById('brokerOrderSizeBottom')?.value ||
-      0
-    );
-    const type = getOrderType();
-    const price = getOrderPrice();
+ async function submitOrder(direction) {
+  const side = String(direction || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
 
-    if (!amount || amount <= 0) {
-      alert('Coloca un monto válido');
-      return Promise.resolve(null);
-    }
+  const symbolMeta = getActiveSymbolMeta();
 
-    if (!symbolMeta?.symbol) {
-      alert('Selecciona un símbolo');
-      return Promise.resolve(null);
-    }
+  const amount = Number(
+    document.getElementById('brokerOrderSize')?.value ||
+    document.getElementById('brokerOrderSizeBottom')?.value ||
+    0
+  );
 
-    LAST_AMOUNT = String(amount);
+  const type = getOrderType();
 
-    const amountInputs = [document.getElementById('brokerOrderSize'), document.getElementById('brokerOrderSizeBottom')].filter(Boolean);
-    amountInputs.forEach(input => (input.value = amount));
+  // 🔥 FIX REAL: esperar precio + limpiar símbolo
+  const clean = cleanSymbol(symbolMeta?.symbol);
+  const price = await getOrderPrice(clean);
 
-    const typeInputs = [document.getElementById('order-type'), document.getElementById('order-type-bottom')].filter(Boolean);
-    typeInputs.forEach(input => (input.value = type));
-
-    if (Number.isFinite(price)) {
-      const priceInputs = [document.getElementById('order-price'), document.getElementById('order-price-bottom')].filter(Boolean);
-      priceInputs.forEach(input => (input.value = price));
-    }
-
-    syncOrderTypeBoxes(type);
-
-    return (async () => {
-      try {
-        if (typeof window.__LEONES_BROKER_EXT2?.placeOrder === 'function') {
-          const result = await window.__LEONES_BROKER_EXT2.placeOrder(side);
-          return result;
-        }
-
-        if (typeof window.placeBrokerOrder === 'function') {
-          const result = await window.placeBrokerOrder({
-            symbol: symbolMeta.symbol,
-            tvSymbol: symbolMeta.tvSymbol,
-            amount,
-            direction: side,
-            type,
-            price: Number.isFinite(price) ? price : null
-          });
-          return result;
-        }
-
-        if (typeof window.openTrade === 'function') {
-          const result = await window.openTrade(
-            symbolMeta.symbol,
-            amount,
-            side,
-            Number.isFinite(price) ? price : null
-          );
-          return result;
-        }
-
-        alert('La orden no está disponible en este momento.');
-        return null;
-      } catch (err) {
-        console.warn('[BROKER-UI-FIX] submitOrder', err);
-        alert(err?.message || 'No se pudo enviar la orden');
-        return null;
-      }
-    })();
+  if (!amount || amount <= 0) {
+    alert('Coloca un monto válido');
+    return Promise.resolve(null);
   }
+
+  if (!symbolMeta?.symbol) {
+    alert('Selecciona un símbolo');
+    return Promise.resolve(null);
+  }
+
+  LAST_AMOUNT = String(amount);
+
+  const amountInputs = [
+    document.getElementById('brokerOrderSize'),
+    document.getElementById('brokerOrderSizeBottom')
+  ].filter(Boolean);
+
+  amountInputs.forEach(input => (input.value = amount));
+
+  const typeInputs = [
+    document.getElementById('order-type'),
+    document.getElementById('order-type-bottom')
+  ].filter(Boolean);
+
+  typeInputs.forEach(input => (input.value = type));
+
+  // 🔥 ahora sí entra correctamente
+  if (Number.isFinite(price)) {
+    const priceInputs = [
+      document.getElementById('order-price'),
+      document.getElementById('order-price-bottom')
+    ].filter(Boolean);
+
+    priceInputs.forEach(input => (input.value = price));
+  }
+
+  syncOrderTypeBoxes(type);
+
+  try {
+    if (typeof window.__LEONES_BROKER_EXT2?.placeOrder === 'function') {
+      return await window.__LEONES_BROKER_EXT2.placeOrder(side);
+    }
+
+    if (typeof window.placeBrokerOrder === 'function') {
+      return await window.placeBrokerOrder({
+        symbol: clean, // 🔥 usar limpio
+        tvSymbol: symbolMeta.tvSymbol,
+        amount,
+        direction: side,
+        type,
+        price: Number.isFinite(price) ? price : null
+      });
+    }
+
+    if (typeof window.openTrade === 'function') {
+      return await window.openTrade(
+        clean, // 🔥 usar limpio
+        amount,
+        side,
+        Number.isFinite(price) ? price : null
+      );
+    }
+
+    alert('La orden no está disponible en este momento.');
+    return null;
+
+  } catch (err) {
+    console.warn('[BROKER-UI-FIX] submitOrder', err);
+    alert(err?.message || 'No se pudo enviar la orden');
+    return null;
+  }
+}
 
   function mirrorMarketPanel() {
     const source = document.getElementById('brokerSymbolsPanel');
@@ -3543,15 +3558,12 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
  function updateTradesPrices(prices) {
   OPEN_TRADES.forEach(trade => {
 
-    const cleanSymbol = String(trade.symbol)
-      .toUpperCase()
-      .replace("/", "")
-      .trim();
+    const clean = cleanSymbol(trade.symbol);
 
     const newPrice =
-      prices[cleanSymbol] ||
+      prices[clean] ||
       prices[trade.symbol] ||
-      prices[trade.symbol?.replace("/", "")];
+      prices[clean.replace("/", "")];
 
     if (newPrice === undefined || newPrice === null) return;
 
@@ -3561,13 +3573,11 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
     if (trade.direction === 'sell') diff *= -1;
 
-    // puedes ajustar multiplicador luego
     trade.profit = diff * trade.amount * 10;
   });
 
   updateAccountMetrics();
 }
-
   function updateAccountMetrics() {
     const totalProfit = OPEN_TRADES.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
 
@@ -4206,12 +4216,8 @@ async function loadPositions() {
     '/api/trade/positions'
   ];
 
-  const normalizeSymbol = (sym) =>
-    String(sym || "")
-      .toUpperCase()
-      .replace("/", "")
-      .replace("-", "")
-      .trim();
+  // 🔥 USAR MISMA LÓGICA GLOBAL
+  const normalizeSymbol = (sym) => cleanSymbol(sym);
 
   for (const ep of endpoints) {
     try {
@@ -4230,6 +4236,7 @@ async function loadPositions() {
       list = (list || [])
         .filter((p) => p && typeof p === "object")
         .map((p) => {
+
           const rawSymbol = String(p.symbol || p.tvSymbol || p.ticker || "").trim();
           const symbol = normalizeSymbol(rawSymbol);
 
@@ -4241,11 +4248,12 @@ async function loadPositions() {
           const entryRaw = Number(p.entryPrice ?? p.price ?? p.openPrice ?? p.avgPrice ?? 0);
           const entryPrice = Number.isFinite(entryRaw) ? entryRaw : 0;
 
-          // 🔥 BUSCAR PRECIO CORRECTO (MEJORADO)
+          // 🔥 PRECIO CONSISTENTE
+          const clean = normalizeSymbol(rawSymbol);
+
           const storedPrice =
-            TR.symbolPrices?.[symbol]?.price ||
+            TR.symbolPrices?.[clean]?.price ||
             TR.symbolPrices?.[rawSymbol]?.price ||
-            TR.symbolPrices?.[normalizeSymbol(rawSymbol)]?.price ||
             null;
 
           let currentPrice = Number(
@@ -4255,12 +4263,12 @@ async function loadPositions() {
             storedPrice
           );
 
-          // 🔥 SI NO HAY PRECIO → NO FORZAR ENTRY (evita PnL congelado)
+          // 🔥 NO INVENTAR PRECIO (evita PnL falso)
           if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-            currentPrice = storedPrice || entryPrice;
+            currentPrice = storedPrice ?? null;
           }
 
-          // 🔥 PNL DINÁMICO REAL
+          // 🔥 PNL SOLO SI HAY DATOS REALES
           const pnl =
             qty && entryPrice && currentPrice
               ? (currentPrice - entryPrice) * qty * (side === "SELL" ? -1 : 1)
@@ -4268,7 +4276,7 @@ async function loadPositions() {
 
           return {
             id: p.id || p._id || p.positionId || p.tradeId || null,
-            symbol,
+            symbol, // 🔥 limpio SIEMPRE
             side,
             qty,
             entryPrice,
@@ -4319,27 +4327,33 @@ async function loadPositions() {
 
   return [];
 }
-  async function loadMarketsAndQuotes() {
-    await loadRealMarkets();
-    await loadRealQuotes();
-    renderMarketTabs();
-    renderSymbolsGrid();
-    renderBottomPanels();
 
-    const meta = getActiveSymbolMeta();
-    if (meta) {
-      renderSymbolDetails(meta);
-    } else if (getSymbols().length) {
-      const first = getSymbols()[0];
-      state.activeSymbol = first.symbol;
-      TR.activeSymbol = first.symbol;
-      TR.activeMeta = first;
-      renderSymbolDetails(first);
-    }
 
-    return getSymbols();
+
+async function loadMarketsAndQuotes() {
+  await loadRealMarkets();
+  await loadRealQuotes();
+
+  renderMarketTabs();
+  renderSymbolsGrid();
+  renderBottomPanels();
+
+  const meta = getActiveSymbolMeta();
+
+  if (meta) {
+    renderSymbolDetails(meta);
+  } else if (getSymbols().length) {
+    const first = getSymbols()[0];
+
+    state.activeSymbol = cleanSymbol(first.symbol);
+    TR.activeSymbol = cleanSymbol(first.symbol);
+    TR.activeMeta = first;
+
+    renderSymbolDetails(first);
   }
 
+  return getSymbols();
+}
  async function requestBackendRefresh() {
   try {
     // 🔥 cargar datos base
@@ -5158,11 +5172,25 @@ function getActiveSymbol() {
 }
 
 /* =========================
+   🔥 CLEAN SYMBOL (FIX REAL GLOBAL)
+========================= */
+function cleanSymbol(symbol) {
+  return String(symbol || "")
+    .replace("OANDA:", "")
+    .replace("OANDA", "")
+    .replace("TVC:", "")
+    .replace("/", "")
+    .replace("-", "")
+    .toUpperCase()
+    .trim();
+}
+
+/* =========================
    🔥 LIVE PRICE SYNC (FIXED)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const clean = normalizeSymbol(symbol);
+    const clean = cleanSymbol(symbol);
 
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
     const data = await res.json();
@@ -5176,7 +5204,7 @@ async function syncLivePrice(symbol) {
     const quotes = await res2.json();
 
     const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === clean
+      cleanSymbol(q.symbol) === clean
     );
 
     if (match?.price && Number(match.price) > 0) {
@@ -5196,11 +5224,11 @@ async function syncLivePrice(symbol) {
 ========================= */
 async function getRealPrice(symbol) {
   try {
-    let cleanSymbol = normalizeSymbol(symbol);
+    let clean = cleanSymbol(symbol);
 
-    console.log("📊 Symbol enviado:", cleanSymbol);
+    console.log("📊 Symbol limpio enviado:", clean);
 
-    const res = await fetch(`/api/price?symbol=${cleanSymbol}`);
+    const res = await fetch(`/api/price?symbol=${clean}`);
     const data = await res.json();
 
     if (!data?.ok || !data?.price) {
@@ -5261,7 +5289,7 @@ async function placeOrder(input) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!side) return alert("Dirección inválida");
 
-    symbol = normalizeSymbol(symbol);
+    symbol = cleanSymbol(symbol);
     side = String(side).toLowerCase();
 
     const payload = {
@@ -5313,7 +5341,7 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(
+    const symbol = cleanSymbol(
       payload.symbol || window.tvSymbol || window.selectedSymbol
     );
 
