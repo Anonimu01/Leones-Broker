@@ -4934,7 +4934,10 @@ function getActiveSymbol() {
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const clean = normalizeSymbol(symbol);
+    const clean = normalizeSymbol(symbol)
+      .replace("OANDA:", "")
+      .replace("/", "")
+      .trim();
 
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
     const data = await res.json();
@@ -4968,7 +4971,11 @@ async function syncLivePrice(symbol) {
 ========================= */
 async function getRealPrice(symbol) {
   try {
-    const cleanSymbol = normalizeSymbol(symbol);
+    // 🔥 FIX CRÍTICO: limpiar símbolo real
+    const cleanSymbol = normalizeSymbol(symbol)
+      .replace("OANDA:", "")
+      .replace("/", "")
+      .trim();
 
     const res = await fetch(`/api/price?symbol=${encodeURIComponent(cleanSymbol)}`);
 
@@ -5112,7 +5119,7 @@ async function placeBrokerOrder(payload = {}) {
   try {
     const symbol = normalizeSymbol(
       payload.symbol || window.tvSymbol || window.selectedSymbol
-    );
+    ).replace("OANDA:", "").replace("/", "").trim();
 
     const amount = Number(payload.qty ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
