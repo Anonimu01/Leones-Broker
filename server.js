@@ -1126,27 +1126,46 @@ app.get("/api/price", (req, res) => {
       return res.status(400).json({ ok: false, error: "symbol requerido" });
     }
 
-    // 🔥 LIMPIAR SYMBOL (MUY IMPORTANTE)
+    // 🔥 NORMALIZAR SYMBOL
     symbol = symbol
+      .toUpperCase()
       .replace("OANDA:", "")
       .replace("OANDA", "")
       .replace("TVC:", "")
+      .replace("C:", "")
       .replace("/", "")
-      .toUpperCase();
+      .trim();
+
+    console.log("📊 PRICE REQUEST:", symbol);
 
     const price = getCurrentPriceForSymbol(symbol);
 
-    if (!price || isNaN(price)) {
-      return res.status(404).json({ ok: false, error: "Precio inválido" });
+    // 🔍 DEBUG (te ayuda a ver si hay datos en memoria)
+    if (typeof priceHandler !== "undefined" && priceHandler?.prices) {
+      const keys =
+        priceHandler.prices instanceof Map
+          ? Array.from(priceHandler.prices.keys())
+          : Object.keys(priceHandler.prices);
+
+      console.log("📦 KEYS EN MEMORIA:", keys);
+    }
+
+    // ⚠️ mejor validación (evita falsos negativos con 0 o valores válidos)
+    if (price === null || price === undefined || isNaN(price)) {
+      return res.status(404).json({
+        ok: false,
+        error: "Precio no disponible",
+        symbol,
+      });
     }
 
     return res.json({
       ok: true,
       symbol,
-      price,
-      currentPrice: price,
-      last: price,
-      close: price,
+      price: Number(price),
+      currentPrice: Number(price),
+      last: Number(price),
+      close: Number(price),
       updatedAt: new Date().toISOString(),
     });
 
@@ -1155,7 +1174,6 @@ app.get("/api/price", (req, res) => {
     return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
-
 
 
 
