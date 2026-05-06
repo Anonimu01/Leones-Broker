@@ -4971,14 +4971,13 @@ async function syncLivePrice(symbol) {
 ========================= */
 async function getRealPrice(symbol) {
   try {
-    // 🔥 NORMALIZACIÓN CRÍTICA (ESTO ES LO QUE TE ESTABA ROMPIENDO TODO)
-    const cleanSymbol = String(symbol)
+    // 🔥 SOLO LIMPIA OANDA, NO ROMPAS EL PAIR
+    let cleanSymbol = String(symbol)
       .toUpperCase()
       .replace(/OANDA:?/g, "")
-      .replace(/\//g, "")
-      .replace(/\s+/g, "");
+      .trim();
 
-    console.log("📊 Symbol enviado a backend:", cleanSymbol);
+    console.log("📊 Symbol enviado:", cleanSymbol);
 
     const res = await fetch(`/api/price?symbol=${cleanSymbol}`);
     const data = await res.json();
