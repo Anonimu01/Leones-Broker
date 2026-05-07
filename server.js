@@ -1742,7 +1742,9 @@ app.post("/api/trade/open", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
     const body = req.body || {};
     const symbol = normalizePositionSymbol(body);
@@ -1766,127 +1768,82 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
-   /////////////////////////////////////////////////////////
-// FIX REAL DEL PRECIO
-/////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////
+    // FIX REAL DEL PRECIO
+    /////////////////////////////////////////////////////////
 
-let price = null;
+    let price = null;
 
-// 1. PRECIO DIRECTO DEL BODY
-const directCandidates = [
-  body.price,
-  body.entryPrice,
-  body.currentPrice,
-  body.marketPrice,
-  body.lastPrice,
-  body.close,
-  body.ask,
-  body.bid,
-];
+    // 1. PRECIO DIRECTO DEL BODY
+    const directCandidates = [
+      body.price,
+      body.entryPrice,
+      body.currentPrice,
+      body.marketPrice,
+      body.lastPrice,
+      body.close,
+      body.ask,
+      body.bid,
+    ];
 
-for (const value of directCandidates) {
-  const n = Number(value);
-
-  if (Number.isFinite(n) && n > 0) {
-    price = n;
-    break;
-  }
-}
-
-/////////////////////////////////////////////////////////
-// 2. GET CURRENT PRICE
-/////////////////////////////////////////////////////////
-
-if (
-  !Number.isFinite(price) ||
-  price <= 0
-) {
-  try {
-    const marketPrice = getCurrentPriceForSymbol(symbol);
-
-    if (
-      Number.isFinite(marketPrice) &&
-      marketPrice > 0
-    ) {
-      price = marketPrice;
-
-      console.log(
-        "✅ Precio obtenido desde getCurrentPriceForSymbol:",
-        price
-      );
-    }
-  } catch {}
-}
-
-/////////////////////////////////////////////////////////
-// 3. PRICE STORE
-/////////////////////////////////////////////////////////
-
-if (
-  !Number.isFinite(price) ||
-  price <= 0
-) {
-  try {
-    const store = getPriceStore?.() || {};
-
-    const found = findBestPriceMatch(
-      symbol,
-      store
-    );
-
-    if (found) {
-      const extracted =
-        extractQuotePrice(found);
-
-      if (
-        Number.isFinite(extracted) &&
-        extracted > 0
-      ) {
-        price = extracted;
-
-        console.log(
-          "✅ Precio encontrado desde store:",
-          price
-        );
+    for (const value of directCandidates) {
+      const n = Number(value);
+      if (Number.isFinite(n) && n > 0) {
+        price = n;
+        break;
       }
     }
-  } catch {}
-}
 
-/////////////////////////////////////////////////////////
-// 4. FALLBACK CONTROLADO
-/////////////////////////////////////////////////////////
+    // 2. GET CURRENT PRICE
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        const marketPrice = getCurrentPriceForSymbol(symbol);
+        if (Number.isFinite(marketPrice) && marketPrice > 0) {
+          price = marketPrice;
+          console.log("✅ Precio obtenido desde getCurrentPriceForSymbol:", price);
+        }
+      } catch {}
+    }
 
-if (
-  !Number.isFinite(price) ||
-  price <= 0
-) {
-  const fallback =
-    Number(body.entryPrice) ||
-    Number(body.price) ||
-    Number(body.currentPrice);
+    // 3. PRICE STORE
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        const store = getPriceStore?.() || {};
+        const found = findBestPriceMatch(symbol, store);
 
-  if (
-    Number.isFinite(fallback) &&
-    fallback > 0
-  ) {
-    price = fallback;
+        if (found) {
+          const extracted = extractQuotePrice(found);
+          if (Number.isFinite(extracted) && extracted > 0) {
+            price = extracted;
+            console.log("✅ Precio encontrado desde store:", price);
+          }
+        }
+      } catch {}
+    }
 
-    console.warn(
-      "⚠️ Precio no disponible, usando entry temporal:",
-      price
-    );
-  }
-}
+    // 4. FALLBACK CONTROLADO
+    if (!Number.isFinite(price) || price <= 0) {
+      const fallback =
+        Number(body.entryPrice) ||
+        Number(body.price) ||
+        Number(body.currentPrice);
 
-/////////////////////////////////////////////////////////
-// VALIDACIÓN FINAL
-/////////////////////////////////////////////////////////
+      if (Number.isFinite(fallback) && fallback > 0) {
+        price = fallback;
+        console.warn("⚠️ Precio no disponible, usando entry temporal:", price);
+      }
+    }
 
-if (
-  !Number.isFinite(price) ||
-  price <= 0
-) {
+    // VALIDACIÓN FINAL
+    if (!Number.isFinite(price) || price <= 0) {
+      console.warn("❌ Precio final inválido:", price, { symbol, body });
+      return res.status(400).json({
+        ok: false,
+        error: "price_invalid",
+        symbol,
+        receivedPrice: price,
+      });
+    }
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
@@ -1934,7 +1891,11 @@ if (
     });
   } catch (err) {
     console.error("/api/trade/open error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
@@ -1948,10 +1909,14 @@ app.post("/api/trade/close", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
     const { positionId } = req.body || {};
-    if (!positionId) return res.status(400).json({ ok: false, error: "positionId_required" });
+    if (!positionId) {
+      return res.status(400).json({ ok: false, error: "positionId_required" });
+    }
 
     lockKey = makeCloseLockKey(user._id, positionId);
     if (!withOpenLock(lockKey, 2500)) {
@@ -1969,7 +1934,9 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     const body = req.body || {};
-    const price = resolveOrderPrice(body, position.symbol) || getCurrentPriceForSymbol(position.symbol);
+    const price =
+      resolveOrderPrice(body, position.symbol) ||
+      getCurrentPriceForSymbol(position.symbol);
 
     if (!price || !Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ ok: false, error: "price_invalid" });
@@ -1991,7 +1958,11 @@ app.post("/api/trade/close", async (req, res) => {
     });
   } catch (err) {
     console.error("/api/trade/close error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   } finally {
     if (lockKey) releaseOpenLock(lockKey);
   }
@@ -2000,15 +1971,27 @@ app.post("/api/trade/close", async (req, res) => {
 app.get("/api/trade/positions", async (req, res) => {
   try {
     const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
     const positions = await safeLoadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
   } catch (err) {
     console.error("/api/trade/positions error", err);
-    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
   }
 });
-
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
