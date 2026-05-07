@@ -2258,23 +2258,40 @@ function extractSymbol(data) {
   );
 }
 
-function extractPrice(data) {
-  const direct =
-    Number(data?.price) ||
-    Number(data?.p) ||
-    Number(data?.last) ||
-    Number(data?.c) ||
-    Number(data?.close) ||
-    Number(data?.lastPrice) ||
-    Number(data?.mark) ||
-    Number(data?.mid);
+function extractPrice(data = {}) {
+  const candidates = [
+    data?.price,
+    data?.p,
+    data?.last,
+    data?.lastPrice,
+    data?.close,
+    data?.c,
+    data?.mark,
+    data?.mid,
+    data?.value,
+    data?.currentPrice,
+    data?.executionPrice,
+    data?.bp,
+    data?.ap,
+  ];
 
-  if (Number.isFinite(direct) && direct > 0) return direct;
+  for (const value of candidates) {
+    const n = Number(value);
 
-  const ask = Number(data?.ask);
-  const bid = Number(data?.bid);
+    if (Number.isFinite(n) && n > 0) {
+      return n;
+    }
+  }
 
-  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+  const ask = Number(data?.ask || data?.a);
+  const bid = Number(data?.bid || data?.b);
+
+  if (
+    Number.isFinite(ask) &&
+    Number.isFinite(bid) &&
+    ask > 0 &&
+    bid > 0
+  ) {
     return (ask + bid) / 2;
   }
 
@@ -2290,49 +2307,166 @@ try {
 
       onPrice: async (data) => {
         try {
-          console.log("📊 PRICE RAW:", data);
+          console.log(
+            "📊 PRICE RAW:",
+            JSON.stringify(data, null, 2)
+          );
 
           const symbol = extractSymbol(data);
           const price = extractPrice(data);
 
-          if (!symbol) return;
+          console.log("🔥 EXTRACTED PRICE:", price);
+
+          if (!symbol) {
+            console.warn("❌ SYMBOL INVALID:", data);
+            return;
+          }
 
           let finalPrice = price;
 
-          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
-            const fallback = await fetchPolygonLastPrice(symbol);
-            finalPrice = fallback?.price || null;
-            if (finalPrice) storePrice(symbol, finalPrice, fallback.raw);
+          //////////////////////////////////////////////////////
+          // FALLBACK POLYGON REST
+          //////////////////////////////////////////////////////
+
+          if (
+            !finalPrice ||
+            !Number.isFinite(finalPrice) ||
+            finalPrice <= 0
+          ) {
+            try {
+              console.warn(
+                "⚠️ SOCKET PRICE INVALID -> FETCH FALLBACK:",
+                symbol
+              );
+
+              const fallback = await fetchPolygonLastPrice(symbol);
+
+              finalPrice = fallback?.price || null;
+
+              if (
+                finalPrice &&
+                Number.isFinite(finalPrice) &&
+                finalPrice > 0
+              ) {
+                storePrice(symbol, finalPrice, fallback.raw);
+
+                console.log(
+                  "✅ STORE UPDATED FALLBACK:",
+                  symbol,
+                  finalPrice
+                );
+              }
+            } catch (fallbackErr) {
+              console.warn(
+                "❌ FALLBACK FETCH ERROR:",
+                fallbackErr?.message || fallbackErr
+              );
+            }
           }
 
-          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) return;
+          //////////////////////////////////////////////////////
+          // VALIDACIÓN FINAL
+          //////////////////////////////////////////////////////
+
+          if (
+            !finalPrice ||
+            !Number.isFinite(finalPrice) ||
+            finalPrice <= 0
+          ) {
+            console.warn(
+              "❌ FINAL PRICE INVALID:",
+              symbol,
+              finalPrice
+            );
+
+            return;
+          }
+
+          //////////////////////////////////////////////////////
+          // STORE PRICE
+          //////////////////////////////////////////////////////
 
           storePrice(symbol, Number(finalPrice), data);
 
+          console.log(
+            "✅ STORE UPDATED:",
+            symbol,
+            finalPrice
+          );
+
+          //////////////////////////////////////////////////////
+          // PRICE HANDLER
+          //////////////////////////////////////////////////////
+
           if (priceHandler?.handle) {
-            priceHandler.handle(data);
+            try {
+              priceHandler.handle({
+                ...data,
+                symbol,
+                price: Number(finalPrice),
+              });
+            } catch (handlerErr) {
+              console.warn(
+                "priceHandler.handle error:",
+                handlerErr?.message || handlerErr
+              );
+            }
           }
+
+          //////////////////////////////////////////////////////
+          // EXTRA STORE UPDATE
+          //////////////////////////////////////////////////////
 
           if (typeof updatePriceStore === "function") {
-            updatePriceStore(symbol, Number(finalPrice));
+            try {
+              updatePriceStore(symbol, Number(finalPrice));
+            } catch (storeErr) {
+              console.warn(
+                "updatePriceStore error:",
+                storeErr?.message || storeErr
+              );
+            }
           }
 
+          //////////////////////////////////////////////////////
+          // LIVE PNL
+          //////////////////////////////////////////////////////
+
           scheduleLivePnLSync(symbol);
+
         } catch (err) {
-          console.warn("onPrice handler error:", err?.message || err);
+          console.warn(
+            "onPrice handler error:",
+            err?.message || err
+          );
         }
       },
 
-      onOpen: () => console.log("PolygonSocket abierto"),
-      onClose: () => console.log("PolygonSocket cerrado"),
-      onError: (err) => console.error("PolygonSocket error:", err),
+      onOpen: () => {
+        console.log("✅ PolygonSocket abierto");
+      },
+
+      onClose: () => {
+        console.log("❌ PolygonSocket cerrado");
+      },
+
+      onError: (err) => {
+        console.error(
+          "❌ PolygonSocket error:",
+          err?.message || err
+        );
+      },
     });
 
     const maybe = polygonSocket.connect();
 
     if (maybe && typeof maybe.then === "function") {
       maybe.catch((err) => {
-        console.warn("PolygonSocket.connect() rejected:", err);
+        console.warn(
+          "❌ PolygonSocket.connect() rejected:",
+          err?.message || err
+        );
+
         polygonSocket = null;
       });
     }
@@ -2340,7 +2474,11 @@ try {
     console.log("🔌 Intentando conectar PolygonSocket...");
   }
 } catch (err) {
-  console.error("Error inicializando PolygonSocket:", err);
+  console.error(
+    "❌ Error inicializando PolygonSocket:",
+    err?.message || err
+  );
+
   polygonSocket = null;
 }
 
