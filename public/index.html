@@ -2994,122 +2994,6 @@ if (window.__LEONES_BOOTED__) {
     const market = normalizeMarketName(item.market);
 
     return `
-      <button class="broker-symbol-card ${isActive ? 'active' : ''}" data-symbol="${escapeHtml(item.symbol)}" data-polygon="${escapeHtml(item.polygonSymbol || '')}" data-market="${escapeHtml(market)}">
-        <div style="display:flex; gap:12px; align-items:flex-start;">
-          <div class="symbol-icon">${escapeHtml(icon)}</div>
-          <div style="flex:1; min-width:0;">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
-              <strong style="font-size:14px; line-height:1.2;">${escapeHtml(item.label || displayLabel(item.symbol))}</strong>
-              <span class="market-pill">${escapeHtml(market)}</span>
-            </div>
-            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
-              <span class="provider-pill">${escapeHtml(provider)}</span>
-              <span class="provider-pill">${escapeHtml(item.polygonSymbol || item.tvSymbol || item.symbol)}</span>
-            </div>
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-              <span style="color:rgba(255,255,255,.72); font-size:12px;">Precio</span>
-              <strong>${price !== null && price !== undefined ? formatNumber(price, 6) : '--'}</strong>
-            </div>
-          </div>
-        </div>
-      </button>
-    `;
-  }
-
-  function renderSymbolList(list = null, hostId = 'brokerSymbolsGrid') {
-    const host = document.getElementById(hostId);
-    if (!host) return;
-    const items = uniqueBySymbol(list || getSymbols());
-
-    const filtered = items.filter(item => {
-      const marketOk = state.marketFilter === 'All' || normalizeMarketName(item.market) === state.marketFilter;
-      const search = String(state.marketSearch || '').trim().toLowerCase();
-      const searchOk = !search || [
-        item.symbol,
-        item.polygonSymbol,
-        item.tvSymbol,
-        item.label,
-        item.market
-      ].some(v => String(v || '').toLowerCase().includes(search));
-      return marketOk && searchOk;
-    });
-
-    host.innerHTML = filtered.map(symbolCardHtml).join('') || `<div style="opacity:.7;padding:12px;">No hay símbolos.</div>`;
-  }
-
-  async function getRealPrice(symbol, market = '') {
-    const candidates = buildPolygonCandidates(symbol, market);
-    const tried = new Set();
-
-    for (const candidate of candidates) {
-      if (!candidate || tried.has(candidate)) continue;
-      tried.add(candidate);
-
-      try {
-        const res = await apiFetch(`/api/price?symbol=${encodeURIComponent(candidate)}`);
-        const px = Number(res?.price ?? res?.currentPrice ?? res?.last ?? res?.close);
-        if (Number.isFinite(px) && px > 0) {
-          return {
-            ok: true,
-            symbol: normalizeSymbol(symbol),
-            polygonSymbol: candidate,
-            price: px,
-            raw: res
-          };
-        }
-      } catch (err) {
-        continue;
-      }
-    }
-
-    throw new Error(`Precio inválido para ${symbol}`);
-  }
-
-  async function placeOrderWithPolygonSymbol(payload = {}) {
-    const symbol = normalizeSymbol(payload.symbol || payload.tvSymbol || payload.selectedSymbol || '');
-    const market = payload.market || inferMarketBySymbol(symbol);
-    const polygonSymbol = polygonSymbolFromInput(symbol, market);
-
-    const body = {
-      ...payload,
-      symbol,
-      tvSymbol: polygonSymbol,
-      selectedSymbol: symbol,
-      market,
-      polygonSymbol
-    };
-
-    return await apiFetch('/trade/open', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
-  }
-
-  window.__LEONES_BROKER_EXT2_POLYGON = {
-    POLYGON_MARKET_SYMBOLS,
-    POLYGON_ALIAS_MAP,
-    DEFAULT_SYMBOLS,
-    getSymbols,
-    normalizeSymbol,
-    normalizeMarketName,
-    inferMarketBySymbol,
-    polygonSymbolFromInput,
-    buildPolygonCandidates,
-    displayLabel,
-    uniqueBySymbol,
-    mergeQuotes,
-    currentQuote,
-    renderMarketTabs,
-    renderSymbolList,
-    getRealPrice,
-    placeOrderWithPolygonSymbol,
-    syncAccountView,
-    syncOrderFields,
-    renderMargin,
-    getActiveSymbolMeta
-  };
-})();
-    return `
       <button class="broker-symbol-card" data-symbol="${escapeHtml(item.symbol)}" data-tv-symbol="${escapeHtml(item.tvSymbol)}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
           <div style="display:flex;gap:10px;align-items:flex-start;min-width:0;">
@@ -3336,6 +3220,14 @@ if (window.__LEONES_BOOTED__) {
           withdateranges: true,
           save_image: false
         });
+
+        resolve(tv);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
 
         resolve(tv);
       } catch (e) {
