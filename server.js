@@ -208,47 +208,17 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeSymbolSafe(symbol = "") {
-  let s = String(symbol).trim().toUpperCase();
+function normalizeSymbol(value) {
+  let s = String(value || "").trim().toUpperCase();
 
   if (!s) return "";
 
-  s = s
-    .replace(/^T\./, "")
-    .replace(/^Q\./, "")
-    .replace(/^A\./, "")
-    .replace(/^XNAS:/, "")
-    .replace(/^NASDAQ:/, "")
-    .replace(/^NYSE:/, "")
-    .replace(/^C:/, "")
-    .replace(/^OANDA:/, "")
-    .replace(/^FX:/, "")
-    .replace(/^FOREX:/, "");
-
+  // toma la parte después del prefijo si viene tipo OANDA:EUR_USD, C:CADJPY, BINANCE:BTCUSDT, etc.
   if (s.includes(":")) {
     s = s.split(":").pop();
   }
 
   return compactSymbol(s);
-}
-
-function normalizeSymbol(value) {
-  return normalizeSymbolSafe(value);
-}
-
-function symbolVariants(value) {
-  const raw = String(value || "").trim().toUpperCase();
-  const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
-  const afterDot = afterColon.includes(".") ? afterColon.split(".").pop() : afterColon;
-
-  return [...new Set([
-    compactSymbol(raw),
-    compactSymbol(afterColon),
-    compactSymbol(afterDot),
-    normalizeSymbolSafe(raw),
-    normalizeSymbolSafe(afterColon),
-    normalizeSymbolSafe(afterDot),
-  ])].filter(Boolean);
 }
 
 function sameMarketSymbol(a = "", b = "") {
@@ -359,17 +329,10 @@ function savePrice(symbol, price) {
     updatedAt: new Date().toISOString(),
   };
 
-  const keys = symbolVariants(symbol);
-  keys.push(clean);
-
   if (priceHandler.prices instanceof Map) {
-    for (const key of [...new Set(keys)]) {
-      priceHandler.prices.set(key, payload);
-    }
+    priceHandler.prices.set(clean, payload);
   } else if (typeof priceHandler.prices === "object") {
-    for (const key of [...new Set(keys)]) {
-      priceHandler.prices[key] = payload;
-    }
+    priceHandler.prices[clean] = payload;
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
@@ -380,6 +343,7 @@ function savePrice(symbol, price) {
    ========================= */
 
 function extractQuotePrice(item = {}) {
+  // soporta número directo, string numérico o objeto
   const primitive = toNumber(item);
   if (Number.isFinite(primitive) && primitive > 0) return primitive;
 
@@ -479,15 +443,12 @@ function getCurrentPriceForSymbol(symbol) {
   const target = normalizeSymbol(symbol);
   if (!target) return null;
 
-  const targetVariants = symbolVariants(symbol);
-
   const store = getPriceStore();
 
   // 1) búsqueda exacta por key normalizada
   for (const [key, item] of Object.entries(store)) {
-    const keyVariants = symbolVariants(key);
-    const exact = keyVariants.some((v) => targetVariants.includes(v) || v === target);
-    if (exact) {
+    const keyNorm = normalizeSymbol(key);
+    if (keyNorm === target) {
       const px = extractQuotePrice(item);
       if (Number.isFinite(px) && px > 0) return px;
     }
@@ -508,13 +469,11 @@ function getCurrentPriceForSymbol(symbol) {
     ].filter(Boolean);
 
     const match = candidates.some((c) => {
-      const clean = normalizeSymbolSafe(c);
-      const cVariants = symbolVariants(c);
+      const clean = normalizeSymbol(c);
       return (
         clean === target ||
         clean.includes(target) ||
         target.includes(clean) ||
-        cVariants.some((v) => targetVariants.includes(v)) ||
         sameMarketSymbol(clean, target)
       );
     });
@@ -1219,7 +1178,7 @@ app.post("/api/_send_test_email", async (req, res) => {
    ====================================================== */
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = normalizeSymbolSafe(
+    const symbol = normalizeSymbol(
       String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
     );
 
@@ -1695,6 +1654,7 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
+    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
@@ -1831,6 +1791,91 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+function buildSymbolAliases(symbol = "") {
+  const raw = String(symbol || "").trim().toUpperCase();
+  const noSpaces = raw.replace(/\s+/g, "");
+  const noPrefix = noSpaces.includes(":") ? noSpaces.split(":").pop() : noSpaces;
+
+  const compact = String(noPrefix)
+    .replace(/[^A-Z0-9]/g, "");
+
+  const aliases = new Set([
+    raw,
+    noSpaces,
+    noPrefix,
+    compact,
+    raw.replace(/^OANDA:/, ""),
+    raw.replace(/^TVC:/, ""),
+    raw.replace(/^C:/, ""),
+    raw.replace(/^X:/, ""),
+    raw.replace(/^FX:/, ""),
+    raw.replace(/^BINANCE:/, ""),
+    raw.replace(/^NASDAQ:/, ""),
+    raw.replace(/^FOREX:/, ""),
+  ]);
+
+  return [...aliases].filter(Boolean).map((s) => String(s).trim().toUpperCase());
+}
+
+function findBestPriceMatch(symbol, store = {}) {
+  const wanted = buildSymbolAliases(symbol);
+  const keys = Object.keys(store || {});
+
+  for (const key of keys) {
+    const keyAliases = buildSymbolAliases(key);
+    const keyMatch = keyAliases.some((k) => wanted.some((w) => k === w || k.includes(w) || w.includes(k)));
+    if (keyMatch) return store[key];
+  }
+
+  for (const key of keys) {
+    const item = store[key];
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.ticker,
+      item?.sym,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+      item?.name,
+      item?.label,
+    ].filter(Boolean);
+
+    const found = candidates.some((candidate) => {
+      const cAliases = buildSymbolAliases(candidate);
+      return cAliases.some((c) => wanted.some((w) => c === w || c.includes(w) || w.includes(c)));
+    });
+
+    if (found) return item;
+  }
+
+  return null;
+}
+
+function storePrice(symbol, price, rawData = null) {
+  if (!priceHandler?.prices) return;
+
+  const clean = normalizeSymbol(symbol);
+  const numeric = Number(price);
+
+  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
+
+  const payload = {
+    price: numeric,
+    updatedAt: new Date().toISOString(),
+    raw: rawData || null,
+  };
+
+  if (priceHandler.prices instanceof Map) {
+    priceHandler.prices.set(clean, payload);
+  } else if (typeof priceHandler.prices === "object") {
+    priceHandler.prices[clean] = payload;
+  }
+
+  console.log("📥 PRICE UPDATE:", clean, numeric);
+}
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1900,7 +1945,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = normalizeSymbolSafe(symbol);
+      const cleanSymbol = normalizeSymbol(symbol);
 
       if (polygonSocket?.subscribe) {
         polygonSocket.subscribe(cleanSymbol, kind);
@@ -1917,7 +1962,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = normalizeSymbolSafe(symbol);
+      const cleanSymbol = normalizeSymbol(symbol);
 
       if (polygonSocket?.unsubscribe) {
         polygonSocket.unsubscribe(cleanSymbol, kind);
@@ -1940,27 +1985,41 @@ io.on("connection", (socket) => {
    ====================================================== */
 
 function extractSymbol(data) {
-  return normalizeSymbolSafe(
+  return normalizeSymbol(
     data?.symbol ||
     data?.ticker ||
     data?.sym ||
     data?.T ||
     data?.s ||
     data?.instrument ||
+    data?.marketSymbol ||
+    data?.asset ||
+    data?.name ||
     ""
   );
 }
 
 function extractPrice(data) {
-  return (
-    data?.price ||
-    data?.p ||
-    data?.last ||
-    data?.c ||
-    data?.close ||
-    data?.lastPrice ||
-    null
-  );
+  const direct =
+    Number(data?.price) ||
+    Number(data?.p) ||
+    Number(data?.last) ||
+    Number(data?.c) ||
+    Number(data?.close) ||
+    Number(data?.lastPrice) ||
+    Number(data?.mark) ||
+    Number(data?.mid);
+
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const ask = Number(data?.ask);
+  const bid = Number(data?.bid);
+
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
 }
 
 try {
@@ -1977,9 +2036,9 @@ try {
           const symbol = extractSymbol(data);
           const price = extractPrice(data);
 
-          if (!symbol || !price) return;
+          if (!symbol || !price || !Number.isFinite(Number(price)) || Number(price) <= 0) return;
 
-          savePrice(symbol, price);
+          storePrice(symbol, price, data);
 
           if (priceHandler?.handle) {
             priceHandler.handle(data);
@@ -1989,9 +2048,7 @@ try {
             updatePriceStore(symbol, price);
           }
 
-          if (typeof scheduleLivePnLSync === "function") {
-            scheduleLivePnLSync(symbol);
-          }
+          scheduleLivePnLSync(symbol);
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
@@ -2024,6 +2081,7 @@ try {
 
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
+
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
   try {
@@ -2052,9 +2110,11 @@ function stripScriptWrappers(source) {
   const trimmed = text.trim();
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/.test(trimmed);
+
   if (startsWithScript && endsWithScript) {
     text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
   }
+
   return text;
 }
 
@@ -2063,18 +2123,25 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/"))
+
+  if (normalized.startsWith("/public/js/")) {
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/"))
+
+  if (normalized.startsWith("/public/")) {
     candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
+
   const uniqueCandidates = [...new Set(candidates)];
   return uniqueCandidates.find((p) => {
     try {
@@ -2088,14 +2155,17 @@ function resolveJsCandidate(requestPath) {
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
+
   try {
     const candidate = resolveJsCandidate(pathname);
+
     if (candidate) {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
+
     res
       .status(404)
       .type("application/javascript; charset=utf-8")
@@ -2114,6 +2184,7 @@ app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
     return res.status(404).json({ error: "API endpoint not found" });
   }
+
   const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -2127,84 +2198,9 @@ app.get("*", (req, res) => {
    GET REAL PRICE (FIX)
 ========================= */
 
-function extractQuotePrice(item = {}) {
-  const primitive = toNumber(item);
-  if (Number.isFinite(primitive) && primitive > 0) return primitive;
-
-  const direct =
-    toNumber(item?.price) ??
-    toNumber(item?.last) ??
-    toNumber(item?.close) ??
-    toNumber(item?.value) ??
-    toNumber(item?.mark) ??
-    toNumber(item?.mid);
-
-  if (Number.isFinite(direct) && direct > 0) return direct;
-
-  const ask = toNumber(item?.ask);
-  const bid = toNumber(item?.bid);
-
-  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
-    return (ask + bid) / 2;
-  }
-
-  return null;
-}
-
-function getCurrentPriceForSymbol(symbol) {
-  const target = normalizeSymbolSafe(symbol);
-  if (!target) return null;
-
-  const targetVariants = symbolVariants(symbol);
-
-  const store = getPriceStore();
-
-  for (const [key, item] of Object.entries(store)) {
-    const keyVariants = symbolVariants(key);
-    const exact = keyVariants.some((v) => targetVariants.includes(v) || v === target);
-    if (exact) {
-      const px = extractQuotePrice(item);
-      if (Number.isFinite(px) && px > 0) return px;
-    }
-  }
-
-  for (const [key, item] of Object.entries(store)) {
-    const candidates = [
-      key,
-      item?.symbol,
-      item?.label,
-      item?.ticker,
-      item?.tvSymbol,
-      item?.instrument,
-      item?.marketSymbol,
-      item?.asset,
-      item?.name,
-    ].filter(Boolean);
-
-    const match = candidates.some((c) => {
-      const clean = normalizeSymbolSafe(c);
-      const cVariants = symbolVariants(c);
-      return (
-        clean === target ||
-        clean.includes(target) ||
-        target.includes(clean) ||
-        cVariants.some((v) => targetVariants.includes(v)) ||
-        sameMarketSymbol(clean, target)
-      );
-    });
-
-    if (!match) continue;
-
-    const price = extractQuotePrice(item);
-    if (Number.isFinite(price) && price > 0) return price;
-  }
-
-  return null;
-}
-
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = normalizeSymbolSafe(
+    const symbol = normalizeSymbol(
       String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
     );
 
@@ -2212,39 +2208,38 @@ app.get("/api/price", (req, res) => {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
     }
 
-    console.log("📊 PRICE REQUEST:", symbol);
-
-    const price = getCurrentPriceForSymbol(symbol);
+    let priceData = null;
 
     if (priceHandler?.prices) {
-      const keys =
-        priceHandler.prices instanceof Map
-          ? Array.from(priceHandler.prices.keys())
-          : Object.keys(priceHandler.prices);
+      const store = priceHandler.prices instanceof Map
+        ? Object.fromEntries(priceHandler.prices.entries())
+        : priceHandler.prices;
 
-      console.log("📦 KEYS EN MEMORIA:", keys);
+      priceData = findBestPriceMatch(symbol, store || {});
     }
 
-    if (price === null || price === undefined || !Number.isFinite(Number(price)) || Number(price) <= 0) {
-      return res.status(404).json({
-        ok: false,
-        error: "Precio no disponible",
-        symbol,
-      });
+    if (!priceData && typeof getPriceStore === "function") {
+      priceData = findBestPriceMatch(symbol, getPriceStore() || {});
+    }
+
+    const price = extractPrice(priceData);
+
+    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
+      return res.status(404).json({ ok: false, error: "Precio inválido", symbol });
     }
 
     return res.json({
       ok: true,
       symbol,
-      price: Number(price),
-      currentPrice: Number(price),
-      last: Number(price),
-      close: Number(price),
-      updatedAt: new Date().toISOString(),
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      updatedAt: priceData?.updatedAt || new Date().toISOString(),
     });
   } catch (err) {
-    console.error("/api/price error:", err);
-    return res.status(500).json({ ok: false, error: "server_error" });
+    console.error("Error /api/price:", err);
+    res.status(500).json({ ok: false, error: "Error interno" });
   }
 });
 
@@ -2262,6 +2257,7 @@ const server = httpServer.listen(PORT, "0.0.0.0", () => {
   console.log("MONGO:", !!process.env.MONGO_URI);
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
+
   if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
   if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
