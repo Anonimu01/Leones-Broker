@@ -1795,9 +1795,7 @@ function buildSymbolAliases(symbol = "") {
   const raw = String(symbol || "").trim().toUpperCase();
   const noSpaces = raw.replace(/\s+/g, "");
   const noPrefix = noSpaces.includes(":") ? noSpaces.split(":").pop() : noSpaces;
-
-  const compact = String(noPrefix)
-    .replace(/[^A-Z0-9]/g, "");
+  const compact = String(noPrefix).replace(/[^A-Z0-9]/g, "");
 
   const aliases = new Set([
     raw,
@@ -1812,9 +1810,14 @@ function buildSymbolAliases(symbol = "") {
     raw.replace(/^BINANCE:/, ""),
     raw.replace(/^NASDAQ:/, ""),
     raw.replace(/^FOREX:/, ""),
+    raw.replace(/^INDEX:/, ""),
+    raw.replace(/^I:/, ""),
+    raw.replace(/^B:{1}/, ""),
   ]);
 
-  return [...aliases].filter(Boolean).map((s) => String(s).trim().toUpperCase());
+  return [...aliases]
+    .filter(Boolean)
+    .map((s) => String(s).trim().toUpperCase());
 }
 
 function findBestPriceMatch(symbol, store = {}) {
@@ -1823,7 +1826,9 @@ function findBestPriceMatch(symbol, store = {}) {
 
   for (const key of keys) {
     const keyAliases = buildSymbolAliases(key);
-    const keyMatch = keyAliases.some((k) => wanted.some((w) => k === w || k.includes(w) || w.includes(k)));
+    const keyMatch = keyAliases.some((k) =>
+      wanted.some((w) => k === w || k.includes(w) || w.includes(k))
+    );
     if (keyMatch) return store[key];
   }
 
@@ -1844,7 +1849,9 @@ function findBestPriceMatch(symbol, store = {}) {
 
     const found = candidates.some((candidate) => {
       const cAliases = buildSymbolAliases(candidate);
-      return cAliases.some((c) => wanted.some((w) => c === w || c.includes(w) || w.includes(c)));
+      return cAliases.some((c) =>
+        wanted.some((w) => c === w || c.includes(w) || w.includes(c))
+      );
     });
 
     if (found) return item;
@@ -1995,6 +2002,7 @@ function extractSymbol(data) {
     data?.marketSymbol ||
     data?.asset ||
     data?.name ||
+    data?.label ||
     ""
   );
 }
@@ -2036,16 +2044,19 @@ try {
           const symbol = extractSymbol(data);
           const price = extractPrice(data);
 
-          if (!symbol || !price || !Number.isFinite(Number(price)) || Number(price) <= 0) return;
+          if (!symbol || price === null || price === undefined) return;
 
-          storePrice(symbol, price, data);
+          const numericPrice = Number(price);
+          if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
+
+          storePrice(symbol, numericPrice, data);
 
           if (priceHandler?.handle) {
             priceHandler.handle(data);
           }
 
           if (typeof updatePriceStore === "function") {
-            updatePriceStore(symbol, price);
+            updatePriceStore(symbol, numericPrice);
           }
 
           scheduleLivePnLSync(symbol);
@@ -2172,7 +2183,10 @@ app.use(async (req, res, next) => {
       .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
@@ -2200,13 +2214,17 @@ app.get("*", (req, res) => {
 
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = normalizeSymbol(
-      String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
+    const rawSymbol = String(
+      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
     );
+
+    const symbol = normalizeSymbol(rawSymbol);
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
     }
+
+    console.log("📊 PRICE REQUEST:", symbol);
 
     let priceData = null;
 
@@ -2218,14 +2236,23 @@ app.get("/api/price", (req, res) => {
       priceData = findBestPriceMatch(symbol, store || {});
     }
 
-    if (!priceData && typeof getPriceStore === "function") {
+    if (!priceData) {
       priceData = findBestPriceMatch(symbol, getPriceStore() || {});
     }
 
     const price = extractPrice(priceData);
 
-    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
-      return res.status(404).json({ ok: false, error: "Precio inválido", symbol });
+    if (
+      price === null ||
+      price === undefined ||
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      return res.status(404).json({
+        ok: false,
+        error: "Precio inválido",
+        symbol,
+      });
     }
 
     return res.json({
