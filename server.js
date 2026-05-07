@@ -1791,6 +1791,117 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+function normalizeSymbolSafe(symbol = "") {
+  let s = String(symbol).toUpperCase().trim();
+
+  if (!s) return "";
+
+  s = s
+    .replace(/^T:/, "")
+    .replace(/^XNAS:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/^NYSE:/, "")
+    .replace(/^C:/, "")
+    .replace(/^OANDA:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^FOREX:/, "");
+
+  if (s.includes(":")) {
+    s = s.split(":").pop();
+  }
+
+  return s.replace(/[^A-Z0-9]/g, "");
+}
+
+function compactSymbol(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeSymbol(value) {
+  return normalizeSymbolSafe(value);
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractSymbol(data = {}) {
+  return normalizeSymbolSafe(
+    data?.symbol ||
+    data?.ticker ||
+    data?.sym ||
+    data?.T ||
+    data?.s ||
+    data?.instrument ||
+    data?.marketSymbol ||
+    data?.asset ||
+    ""
+  );
+}
+
+function extractPrice(data = {}) {
+  return (
+    toNumber(data?.price) ??
+    toNumber(data?.p) ??
+    toNumber(data?.last) ??
+    toNumber(data?.c) ??
+    toNumber(data?.close) ??
+    toNumber(data?.lastPrice) ??
+    null
+  );
+}
+
+function getPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function savePrice(symbol, price, raw = null) {
+  if (!priceHandler?.prices) return;
+
+  const clean = normalizeSymbolSafe(symbol);
+  const numeric = Number(price);
+
+  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
+
+  const payload = {
+    price: numeric,
+    updatedAt: new Date().toISOString(),
+    raw,
+  };
+
+  if (priceHandler.prices instanceof Map) {
+    priceHandler.prices.set(clean, payload);
+  } else if (typeof priceHandler.prices === "object") {
+    priceHandler.prices[clean] = payload;
+  }
+
+  console.log("📥 PRICE SAVED:", clean, numeric);
+}
+
+function handleIncomingPrice(data = {}) {
+  const symbol = extractSymbol(data);
+  const price = extractPrice(data);
+
+  if (!symbol || !price) return null;
+
+  savePrice(symbol, price, data);
+  return { symbol, price };
+}
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1860,7 +1971,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = normalizeSymbol(symbol);
+      const cleanSymbol = normalizeSymbolSafe(symbol);
 
       if (polygonSocket?.subscribe) {
         polygonSocket.subscribe(cleanSymbol, kind);
@@ -1877,7 +1988,7 @@ io.on("connection", (socket) => {
     if (!symbol) return;
 
     try {
-      const cleanSymbol = normalizeSymbol(symbol);
+      const cleanSymbol = normalizeSymbolSafe(symbol);
 
       if (polygonSocket?.unsubscribe) {
         polygonSocket.unsubscribe(cleanSymbol, kind);
@@ -1899,30 +2010,6 @@ io.on("connection", (socket) => {
    POLYGON SOCKET
    ====================================================== */
 
-function extractSymbol(data) {
-  return normalizeSymbol(
-    data?.symbol ||
-    data?.ticker ||
-    data?.sym ||
-    data?.T ||
-    data?.s ||
-    data?.instrument ||
-    ""
-  );
-}
-
-function extractPrice(data) {
-  return (
-    data?.price ||
-    data?.p ||
-    data?.last ||
-    data?.c ||
-    data?.close ||
-    data?.lastPrice ||
-    null
-  );
-}
-
 try {
   if (!process.env.POLYGON_API_KEY) {
     console.warn("⚠️ POLYGON_API_KEY no definido — realtime limitado");
@@ -1934,24 +2021,10 @@ try {
         try {
           console.log("📊 PRICE RAW:", data);
 
-          const symbol = extractSymbol(data);
-          const price = extractPrice(data);
+          const result = handleIncomingPrice(data);
+          if (!result) return;
 
-          if (!symbol || !price) return;
-
-          if (priceHandler?.prices) {
-            const payload = {
-              price: Number(price),
-              updatedAt: new Date().toISOString(),
-              raw: data,
-            };
-
-            if (priceHandler.prices instanceof Map) {
-              priceHandler.prices.set(symbol, payload);
-            } else {
-              priceHandler.prices[symbol] = payload;
-            }
-          }
+          const { symbol, price } = result;
 
           if (priceHandler?.handle) {
             priceHandler.handle(data);
@@ -1961,7 +2034,9 @@ try {
             updatePriceStore(symbol, price);
           }
 
-          scheduleLivePnLSync(symbol);
+          if (typeof scheduleLivePnLSync === "function") {
+            scheduleLivePnLSync(symbol);
+          }
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
         }
@@ -2097,9 +2172,79 @@ app.get("*", (req, res) => {
    GET REAL PRICE (FIX)
 ========================= */
 
+function extractQuotePrice(item = {}) {
+  const primitive = toNumber(item);
+  if (Number.isFinite(primitive) && primitive > 0) return primitive;
+
+  const direct =
+    toNumber(item?.price) ??
+    toNumber(item?.last) ??
+    toNumber(item?.close) ??
+    toNumber(item?.value) ??
+    toNumber(item?.mark) ??
+    toNumber(item?.mid);
+
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const ask = toNumber(item?.ask);
+  const bid = toNumber(item?.bid);
+
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
+}
+
+function getCurrentPriceForSymbol(symbol) {
+  const target = normalizeSymbolSafe(symbol);
+  if (!target) return null;
+
+  const store = getPriceStore();
+
+  for (const [key, item] of Object.entries(store)) {
+    const keyNorm = normalizeSymbolSafe(key);
+    if (keyNorm === target) {
+      const px = extractQuotePrice(item);
+      if (Number.isFinite(px) && px > 0) return px;
+    }
+  }
+
+  for (const [key, item] of Object.entries(store)) {
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.label,
+      item?.ticker,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+      item?.name,
+    ].filter(Boolean);
+
+    const match = candidates.some((c) => {
+      const clean = normalizeSymbolSafe(c);
+      return (
+        clean === target ||
+        clean.includes(target) ||
+        target.includes(clean) ||
+        sameMarketSymbol(clean, target)
+      );
+    });
+
+    if (!match) continue;
+
+    const price = extractQuotePrice(item);
+    if (Number.isFinite(price) && price > 0) return price;
+  }
+
+  return null;
+}
+
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = normalizeSymbol(
+    const symbol = normalizeSymbolSafe(
       String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
     );
 
@@ -2107,34 +2252,39 @@ app.get("/api/price", (req, res) => {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
     }
 
-    let priceData = null;
+    console.log("📊 PRICE REQUEST:", symbol);
+
+    const price = getCurrentPriceForSymbol(symbol);
 
     if (priceHandler?.prices) {
-      if (priceHandler.prices instanceof Map) {
-        priceData = priceHandler.prices.get(symbol);
-      } else {
-        priceData = priceHandler.prices[symbol];
-      }
+      const keys =
+        priceHandler.prices instanceof Map
+          ? Array.from(priceHandler.prices.keys())
+          : Object.keys(priceHandler.prices);
+
+      console.log("📦 KEYS EN MEMORIA:", keys);
     }
 
-    const price = extractPrice(priceData);
-
-    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
-      return res.status(404).json({ ok: false, error: "Precio inválido", symbol });
+    if (price === null || price === undefined || !Number.isFinite(Number(price)) || Number(price) <= 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "Precio no disponible",
+        symbol,
+      });
     }
 
     return res.json({
       ok: true,
       symbol,
-      price,
-      currentPrice: price,
-      last: price,
-      close: price,
-      updatedAt: priceData?.updatedAt || new Date().toISOString(),
+      price: Number(price),
+      currentPrice: Number(price),
+      last: Number(price),
+      close: Number(price),
+      updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("Error /api/price:", err);
-    res.status(500).json({ ok: false, error: "Error interno" });
+    console.error("/api/price error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
 
