@@ -1171,77 +1171,297 @@ app.post("/api/_send_test_email", async (req, res) => {
    ====================================================== */
 
 app.get("/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
+  res.json({
+    markets: [
+      "Crypto",
+      "Stocks",
+      "Forex",
+      "Indices",
+      "Futures",
+      "Bonds",
+    ],
+  })
 );
-app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
+
+app.get("/api/market/list", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
+
+app.get("/api/market/symbols", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
+
+app.get("/api/markets/symbols", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
+
+app.get("/api/api/symbols", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
+
+app.get("/api/api/markets", (req, res) =>
+  res.json({
+    markets: [
+      "Crypto",
+      "Stocks",
+      "Forex",
+      "Indices",
+    ],
+  })
+);
 
 try {
   if (typeof marketRoutesFactory === "function") {
-    app.use("/api/market", marketRoutesFactory({ polygonSocket: null, priceHandler }));
+    app.use(
+      "/api/market",
+      marketRoutesFactory({
+        polygonSocket: null,
+        priceHandler,
+      })
+    );
   } else {
     app.use("/api/market", marketRoutesFactory);
   }
 } catch (e) {
-  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
+  console.warn(
+    "No se pudo montar /api/market:",
+    e && e.message ? e.message : e
+  );
 }
 
-app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
+app.get("/api/quotes", (req, res) =>
+  res.json(buildMarketPayload().quotes)
+);
+
+/* ======================================================
+   FIX /api/latest
+   ====================================================== */
 
 app.get("/api/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
-    if (symbol) {
-      const price = getCurrentPriceForSymbol(symbol);
+    const rawSymbol =
+      req.query.symbol ||
+      req.query.tvSymbol ||
+      req.query.selectedSymbol ||
+      "";
+
+    const symbol = normalizeSymbol(
+      String(rawSymbol || "")
+        .trim()
+        .toUpperCase()
+    );
+
+    //////////////////////////////////////////////////////
+    // SI NO HAY SYMBOL
+    //////////////////////////////////////////////////////
+
+    if (!symbol) {
       return res.json({
         ok: true,
+        symbol: null,
+        price: null,
+        currentPrice: null,
+        close: null,
+        last: null,
+        updatedAt: new Date().toISOString(),
+        message: "symbol_missing",
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // BUSCAR PRECIO
+    //////////////////////////////////////////////////////
+
+    let price = null;
+
+    try {
+      price = getCurrentPriceForSymbol(symbol);
+    } catch {}
+
+    //////////////////////////////////////////////////////
+    // FALLBACK STORE
+    //////////////////////////////////////////////////////
+
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      try {
+        const store = getPriceStore?.() || {};
+        const found = findBestPriceMatch(symbol, store);
+
+        if (found) {
+          price = extractQuotePrice(found);
+        }
+      } catch {}
+    }
+
+    //////////////////////////////////////////////////////
+    // VALIDAR
+    //////////////////////////////////////////////////////
+
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      return res.json({
+        ok: false,
+        error: "price_not_found",
         symbol,
-        price,
-        last: price,
-        currentPrice: price,
-        close: price,
+        price: null,
+        currentPrice: null,
+        close: null,
+        last: null,
         updatedAt: new Date().toISOString(),
       });
     }
-    return res.json(buildMarketPayload().latest || {});
+
+    //////////////////////////////////////////////////////
+    // OK
+    //////////////////////////////////////////////////////
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      currentPrice: price,
+      close: price,
+      last: price,
+      updatedAt: new Date().toISOString(),
+    });
+
   } catch (e) {
     console.error("/api/latest error:", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
+
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+    });
   }
 });
 
-app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
+app.get("/api/market/quotes", (req, res) =>
+  res.json(buildMarketPayload())
+);
+
+/* ======================================================
+   FIX /api/market/latest
+   ====================================================== */
+
 app.get("/api/market/latest", (req, res) => {
   try {
-    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
-    if (symbol) {
-      const price = getCurrentPriceForSymbol(symbol);
+    const rawSymbol =
+      req.query.symbol ||
+      req.query.tvSymbol ||
+      req.query.selectedSymbol ||
+      "";
+
+    // 🔥 NORMALIZAR
+    const symbol = normalizeSymbol(
+      String(rawSymbol || "")
+        .trim()
+        .toUpperCase()
+    );
+
+    //////////////////////////////////////////////////////
+    // SI NO HAY SYMBOL -> NO ROMPER FRONTEND
+    //////////////////////////////////////////////////////
+
+    if (!symbol) {
       return res.json({
         ok: true,
+        symbol: null,
+        price: null,
+        currentPrice: null,
+        close: null,
+        last: null,
+        updatedAt: new Date().toISOString(),
+        message: "symbol_missing",
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // BUSCAR PRECIO REAL
+    //////////////////////////////////////////////////////
+
+    let price = null;
+
+    // 1. PRICE STORE
+    try {
+      price = getCurrentPriceForSymbol(symbol);
+    } catch {}
+
+    // 2. FALLBACK PRICE STORE
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      try {
+        const store = getPriceStore?.() || {};
+        const found = findBestPriceMatch(symbol, store);
+
+        if (found) {
+          price = extractQuotePrice(found);
+        }
+      } catch {}
+    }
+
+    //////////////////////////////////////////////////////
+    // VALIDAR
+    //////////////////////////////////////////////////////
+
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      return res.json({
+        ok: false,
+        error: "price_not_found",
         symbol,
-        price,
-        last: price,
-        currentPrice: price,
-        close: price,
+        price: null,
+        currentPrice: null,
+        close: null,
+        last: null,
         updatedAt: new Date().toISOString(),
       });
     }
-    return res.json(buildMarketPayload().latest || {});
+
+    //////////////////////////////////////////////////////
+    // OK
+    //////////////////////////////////////////////////////
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      currentPrice: price,
+      close: price,
+      last: price,
+      updatedAt: new Date().toISOString(),
+    });
+
   } catch (e) {
     console.error("/api/market/latest error:", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
+
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+    });
   }
 });
 
-app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
-app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/market/polygon/quotes", (req, res) =>
+  res.json(buildMarketPayload())
+);
+
+app.get("/api/market/polygon/symbols", (req, res) =>
+  res.json(SAMPLE_SYMBOLS)
+);
 
 app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
+
     if (prices && Object.keys(prices).length) {
       return res.json(
         Object.keys(prices).map((k) => ({
@@ -1251,13 +1471,15 @@ app.get("/api/symbols", (req, res) => {
         }))
       );
     }
+
     return res.json(SAMPLE_SYMBOLS);
+
   } catch (err) {
     console.error("api/symbols error:", err);
+
     return res.json(SAMPLE_SYMBOLS);
   }
 });
-
 /* ======================================================
    ACCOUNT / WALLET / POSITIONS
    ====================================================== */
