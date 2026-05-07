@@ -4690,7 +4690,7 @@ async function loadPositions() {
     root.appendChild(columns);
   }
 
-  function attachGlobalDelegation() {
+ function attachGlobalDelegation() {
     if (window.__LEONES_EXT2_GLOBAL_DELEGATION__) return;
     window.__LEONES_EXT2_GLOBAL_DELEGATION__ = true;
 
@@ -4713,128 +4713,102 @@ async function loadPositions() {
         }
 
         const symbolCard = ev.target.closest && ev.target.closest('.broker-symbol-card');
-if (symbolCard) {
-  ev.preventDefault();
-  const symbol = symbolCard.dataset.symbol || '';
-  const meta =
-    symbolMap().get(String(symbol).toUpperCase()) ||
-    getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
-    null;
+        if (symbolCard) {
+          ev.preventDefault();
+          const symbol = symbolCard.dataset.symbol || '';
+          const meta =
+            symbolMap().get(String(symbol).toUpperCase()) ||
+            getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
+            null;
 
-  if (meta) {
-    state.activeSymbol = meta.symbol;
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
-    window.selectedSymbol = meta.symbol;
-    window.tvSymbol = meta.tvSymbol || toPolygonSymbol(meta.symbol);
+          if (meta) selectSymbol(meta, { openChart: true });
+          return;
+        }
 
-    selectSymbol(meta, { openChart: true });
+        const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
+        if (closeBtn) {
+          ev.preventDefault();
+          const pid = closeBtn.dataset.closePosition;
+          const sym = closeBtn.dataset.symbol;
+          const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
+          await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
 
-    if (typeof openTradingView === 'function') {
-      await openTradingView(meta, 'tv_chart_container').catch(() => {});
-      await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
-    }
+        const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
+        if (!actionTarget) return;
 
-    if (typeof requestRealtimeForSymbol === 'function') {
-      requestRealtimeForSymbol(meta);
-    }
-  }
+        const action = actionTarget.dataset.action;
 
-  return;
-}
+        if (action === 'buy') {
+          ev.preventDefault();
+          await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
 
-const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
-if (closeBtn) {
-  ev.preventDefault();
-  const pid = closeBtn.dataset.closePosition;
-  const sym = closeBtn.dataset.symbol;
-  const pos = (state.positions || []).find(p => String(p.id || p._id || p.positionId || p.tradeId || '') === String(pid)) || { symbol: sym };
-  await closePosition(pos).catch(e => setMessage(e?.message || 'No se pudo cerrar la posición', 'error'));
-  await requestBackendRefresh().catch(() => {});
-  return;
-}
+        if (action === 'sell') {
+          ev.preventDefault();
+          await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
+          await requestBackendRefresh().catch(() => {});
+          return;
+        }
 
-const actionTarget = ev.target.closest && ev.target.closest('[data-action]');
-if (!actionTarget) return;
+        if (action === 'open-chart') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container');
+          return;
+        }
 
-const action = actionTarget.dataset.action;
+        if (action === 'open-chart-bottom') {
+          ev.preventDefault();
+          const meta = getActiveSymbolMeta();
+          if (meta) await openTradingView(meta, 'tv_chart_container_bottom');
+          return;
+        }
 
-if (action === 'buy') {
-  ev.preventDefault();
-  await placeOrder('buy').catch(e => setMessage(e?.message || 'No se pudo comprar', 'error'));
-  await requestBackendRefresh().catch(() => {});
-  return;
-}
+        if (action === 'refresh-all') {
+          ev.preventDefault();
+          await requestBackendRefresh();
+          return;
+        }
 
-if (action === 'sell') {
-  ev.preventDefault();
-  await placeOrder('sell').catch(e => setMessage(e?.message || 'No se pudo vender', 'error'));
-  await requestBackendRefresh().catch(() => {});
-  return;
-}
+        if (action === 'refresh-symbols') {
+          ev.preventDefault();
+          await loadRealMarkets();
+          renderMarketTabs();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
 
-if (action === 'open-chart') {
-  ev.preventDefault();
-  const meta = getActiveSymbolMeta();
-  if (meta) {
-    window.selectedSymbol = meta.symbol;
-    window.tvSymbol = meta.tvSymbol || toPolygonSymbol(meta.symbol);
-    await openTradingView(meta, 'tv_chart_container');
-  }
-  return;
-}
+        if (action === 'refresh-quotes') {
+          ev.preventDefault();
+          await loadRealQuotes();
+          renderSymbolsGrid();
+          renderBottomPanels();
+          const meta = getActiveSymbolMeta();
+          if (meta) renderSymbolDetails(meta);
+          return;
+        }
 
-if (action === 'open-chart-bottom') {
-  ev.preventDefault();
-  const meta = getActiveSymbolMeta();
-  if (meta) {
-    window.selectedSymbol = meta.symbol;
-    window.tvSymbol = meta.tvSymbol || toPolygonSymbol(meta.symbol);
-    await openTradingView(meta, 'tv_chart_container_bottom');
-  }
-  return;
-}
+        if (action === 'refresh-account') {
+          ev.preventDefault();
+          await loadAccount();
+          renderBottomPanels();
+          return;
+        }
 
-if (action === 'refresh-all') {
-  ev.preventDefault();
-  await requestBackendRefresh();
-  return;
-}
-
-if (action === 'refresh-symbols') {
-  ev.preventDefault();
-  await loadRealMarkets();
-  renderMarketTabs();
-  renderSymbolsGrid();
-  renderBottomPanels();
-  const meta = getActiveSymbolMeta();
-  if (meta) renderSymbolDetails(meta);
-  return;
-}
-
-if (action === 'refresh-quotes') {
-  ev.preventDefault();
-  await loadRealQuotes();
-  renderSymbolsGrid();
-  renderBottomPanels();
-  const meta = getActiveSymbolMeta();
-  if (meta) renderSymbolDetails(meta);
-  return;
-}
-
-if (action === 'refresh-account') {
-  ev.preventDefault();
-  await loadAccount();
-  renderBottomPanels();
-  return;
-}
-
-if (action === 'refresh-positions') {
-  ev.preventDefault();
-  await loadPositions();
-  renderBottomPanels();
-  return;
-}
+        if (action === 'refresh-positions') {
+          ev.preventDefault();
+          await loadPositions();
+          renderBottomPanels();
+          return;
+        }
       } catch (e) {
         warn('global click delegation', e);
       }
@@ -4965,13 +4939,11 @@ if (action === 'refresh-positions') {
       state.activeSymbol = meta.symbol;
       TR.activeSymbol = meta.symbol;
       TR.activeMeta = meta;
-      window.selectedSymbol = meta.symbol;
-      window.tvSymbol = meta.tvSymbol || toPolygonSymbol(meta.symbol);
 
       renderSymbolDetails(meta);
       renderBottomPanels();
 
-      if (!state.lastChartSymbol || state.lastChartSymbol !== window.tvSymbol) {
+      if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
         await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
         await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
       }
@@ -5051,415 +5023,293 @@ if (action === 'refresh-positions') {
       symbolPrices: TR.symbolPrices || {}
     };
   }
-
   function toPolygonSymbol(sym = "") {
-    const raw = String(sym || '').trim().toUpperCase();
-    if (!raw) return '';
+  sym = normalizeSymbol(sym);
 
-    if (/^(C|X|I|TVC|OANDA|BINANCE|NASDAQ|NYSE|CME):/.test(raw)) {
-      return raw;
+  const map = {
+    EURUSD: 'C:EURUSD',
+    GBPUSD: 'C:GBPUSD',
+    USDJPY: 'C:USDJPY',
+    USDCHF: 'C:USDCHF',
+    AUDUSD: 'C:AUDUSD',
+    NZDUSD: 'C:NZDUSD',
+    USDCAD: 'C:USDCAD',
+
+    BTCUSDT: 'X:BTCUSD',
+    ETHUSDT: 'X:ETHUSD',
+
+    XAUUSD: 'C:XAUUSD',
+    XAGUSD: 'C:XAGUSD',
+
+    // 🔥 INDICES CRÍTICOS (TE FALTABAN)
+    SPX500: 'I:SPX',
+    NAS100: 'I:NDX',
+    US30: 'I:DJI',
+    GER40: 'I:DAX',
+    UK100: 'I:FTSE'
+  };
+
+  return map[sym] || sym;
+}
+
+/* =========================
+   NORMALIZE SYMBOL
+========================= */
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .trim();
+}
+
+/* =========================
+   FLAGS
+========================= */
+let sendingOrder = false;
+
+/* =========================
+   GET ACTIVE SYMBOL
+========================= */
+function getActiveSymbol() {
+  const api = window.__LEONES_BROKER_EXT2 || {};
+
+  return (
+    window.tvSymbol ||
+    window.selectedSymbol ||
+    api.activeSymbol ||
+    document.getElementById("tradingSymbol")?.textContent?.trim() ||
+    document.getElementById("op-symbol")?.textContent?.trim() ||
+    ""
+  );
+}
+
+    
+
+  
+/* =========================
+   🔥 LIVE PRICE SYNC (FIXED)
+========================= */
+async function syncLivePrice(symbol) {
+  try {
+    // 🔥 PRIMERO intenta endpoint correcto
+    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
+    const data = await res.json();
+
+    if (data?.price && Number(data.price) > 0) {
+      window.tvPrice = Number(data.price);
+      return Number(data.price);
     }
 
-    const key = normalizeSymbol(raw);
+    // 🔥 FALLBACK quotes
+    const res2 = await fetch("/api/quotes");
+    const quotes = await res2.json();
 
-    if (typeof POLYGON_ALIAS_MAP === 'object' && POLYGON_ALIAS_MAP && POLYGON_ALIAS_MAP[key]) {
-      const mapped = String(POLYGON_ALIAS_MAP[key]).trim().toUpperCase();
-      if (mapped) return mapped;
-    }
+    const normalized = normalizeSymbol(symbol);
 
-    const map = {
-      /* Forex */
-      EURUSD: 'C:EURUSD',
-      GBPUSD: 'C:GBPUSD',
-      USDJPY: 'C:USDJPY',
-      USDCHF: 'C:USDCHF',
-      AUDUSD: 'C:AUDUSD',
-      NZDUSD: 'C:NZDUSD',
-      USDCAD: 'C:USDCAD',
-      EURGBP: 'C:EURGBP',
-      EURJPY: 'C:EURJPY',
-      GBPJPY: 'C:GBPJPY',
-      EURAUD: 'C:EURAUD',
-      AUDJPY: 'C:AUDJPY',
-      CHFJPY: 'C:CHFJPY',
-      CADJPY: 'C:CADJPY',
-      EURCAD: 'C:EURCAD',
-      EURNZD: 'C:EURNZD',
-      GBPCAD: 'C:GBPCAD',
-      GBPAUD: 'C:GBPAUD',
-      GBPNZD: 'C:GBPNZD',
-      NZDJPY: 'C:NZDJPY',
-
-      /* Crypto */
-      BTCUSDT: 'X:BTCUSD',
-      ETHUSDT: 'X:ETHUSD',
-      BNBUSDT: 'X:BNBUSD',
-      SOLUSDT: 'X:SOLUSD',
-      XRPUSDT: 'X:XRPUSD',
-      ADAUSDT: 'X:ADAUSD',
-      DOGEUSDT: 'X:DOGEUSD',
-      DOTUSDT: 'X:DOTUSD',
-      LTCUSDT: 'X:LTCUSD',
-      LINKUSDT: 'X:LINKUSD',
-      BCHUSDT: 'X:BCHUSD',
-      AVAXUSDT: 'X:AVAXUSD',
-      TRXUSDT: 'X:TRXUSD',
-      TONUSDT: 'X:TONUSD',
-      SHIBUSDT: 'X:SHIBUSD',
-
-      /* Stocks */
-      AAPL: 'AAPL',
-      MSFT: 'MSFT',
-      AMZN: 'AMZN',
-      TSLA: 'TSLA',
-      NVDA: 'NVDA',
-      META: 'META',
-      GOOGL: 'GOOGL',
-      NFLX: 'NFLX',
-      AMD: 'AMD',
-      PYPL: 'PYPL',
-      INTC: 'INTC',
-      DIS: 'DIS',
-      BA: 'BA',
-      KO: 'KO',
-      MCD: 'MCD',
-      XOM: 'XOM',
-      JPM: 'JPM',
-      BAC: 'BAC',
-      ORCL: 'ORCL',
-      CRM: 'CRM',
-
-      /* Indices */
-      SPX500: 'I:SPX',
-      SP500: 'I:SPX',
-      SPX: 'I:SPX',
-      NAS100: 'I:NDX',
-      NASDAQ100: 'I:NDX',
-      NDX100: 'I:NDX',
-      US30: 'I:DJI',
-      DOWJONES: 'I:DJI',
-      GER40: 'I:DAX',
-      DAX40: 'I:DAX',
-      UK100: 'I:FTSE',
-      FTSE100: 'I:FTSE',
-      FRA40: 'I:CAC',
-      CAC40: 'I:CAC',
-      JPN225: 'I:NIKKEI',
-      NIKKEI225: 'I:NIKKEI',
-      AUS200: 'I:ASX',
-      ASX200: 'I:ASX',
-      HK50: 'I:HSI',
-      HANGSENG: 'I:HSI',
-
-      /* Commodities */
-      GOLD: 'C:XAUUSD',
-      XAUUSD: 'C:XAUUSD',
-      SILVER: 'C:XAGUSD',
-      XAGUSD: 'C:XAGUSD',
-      PLATINUM: 'C:XPTUSD',
-      XPTUSD: 'C:XPTUSD',
-      PALLADIUM: 'C:XPDUSD',
-      XPDUSD: 'C:XPDUSD',
-      USOIL: 'C:USOIL',
-      WTI: 'C:USOIL',
-      OIL: 'C:USOIL',
-      UKOIL: 'C:UKOIL',
-      BRENT: 'C:UKOIL',
-      NATGAS: 'C:NATGAS',
-      GAS: 'C:NATGAS',
-      COPPER: 'C:COPPER',
-      COCOA: 'C:COCOA',
-      COFFEE: 'C:COFFEE',
-      WHEAT: 'C:WHEAT',
-      CORN: 'C:CORN'
-    };
-
-    return map[key] || key;
-  }
-
-  /* =========================
-     NORMALIZE SYMBOL
-  ========================= */
-  function normalizeSymbol(symbol = "") {
-    const raw = String(symbol || '').trim().toUpperCase();
-    if (!raw) return '';
-
-    const direct = raw.includes(':') ? raw.split(':').pop() : raw;
-    const compact = direct.replace(/[^A-Z0-9]/g, '').trim();
-
-    if (!compact) return '';
-
-    if (typeof POLYGON_ALIAS_MAP === 'object' && POLYGON_ALIAS_MAP && POLYGON_ALIAS_MAP[compact]) {
-      return String(POLYGON_ALIAS_MAP[compact]).replace(/[^A-Z0-9:]/g, '').trim();
-    }
-
-    return compact;
-  }
-
-  /* =========================
-     FLAGS
-  ========================= */
-  let sendingOrder = false;
-
-  /* =========================
-     GET ACTIVE SYMBOL
-  ========================= */
-  function getActiveSymbol() {
-    const api = window.__LEONES_BROKER_EXT2 || {};
-
-    return (
-      window.tvSymbol ||
-      window.selectedSymbol ||
-      api.activeMeta?.tvSymbol ||
-      api.activeSymbol ||
-      document.getElementById("tradingSymbol")?.textContent?.trim() ||
-      document.getElementById("op-symbol")?.textContent?.trim() ||
-      ""
+    const match = quotes.find(q =>
+      normalizeSymbol(q.symbol) === normalized
     );
-  }
 
-  /* =========================
-     🔥 LIVE PRICE SYNC (FIXED)
-  ========================= */
-  async function syncLivePrice(symbol) {
-    try {
-      const normalized = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(normalized);
-
-      const tries = [
-        `/api/price?symbol=${encodeURIComponent(polygonSymbol)}`,
-        `/api/latest?symbol=${encodeURIComponent(polygonSymbol)}`,
-        `/api/price?symbol=${encodeURIComponent(normalized)}`,
-        `/api/latest?symbol=${encodeURIComponent(normalized)}`
-      ];
-
-      for (const url of tries) {
-        try {
-          const res = await fetch(url);
-          const data = await res.json();
-
-          const px = Number(data?.price || data?.currentPrice || data?.last || data?.close);
-          if (Number.isFinite(px) && px > 0) {
-            window.tvPrice = px;
-            window.currentPrice = px;
-            return px;
-          }
-        } catch (e) {}
-      }
-
-      const res2 = await fetch("/api/quotes");
-      const quotes = await res2.json();
-      const list = Array.isArray(quotes) ? quotes : Array.isArray(quotes?.quotes) ? quotes.quotes : [];
-
-      const match = list.find(q => {
-        const qSymbol = String(q?.symbol || q?.tvSymbol || q?.ticker || '').trim().toUpperCase();
-        return normalizeSymbol(qSymbol) === normalized || normalizeSymbol(qSymbol) === normalizeSymbol(polygonSymbol);
-      });
-
-      const matchPrice = Number(match?.price || match?.currentPrice || match?.last || match?.close);
-      if (Number.isFinite(matchPrice) && matchPrice > 0) {
-        window.tvPrice = matchPrice;
-        window.currentPrice = matchPrice;
-        return matchPrice;
-      }
-
-      return null;
-    } catch (err) {
-      console.warn("Precio sync error:", err);
-      return null;
-    }
-  }
-
-  /* =========================
-     🔥 GET LIVE PRICE SAFE (MEJORADO)
-  ========================= */
-  function getLivePriceFallback() {
-    const candidates = [
-      window.tvPrice,
-      window.lastPrice,
-      window.currentPrice,
-      window.entryPrice,
-      window.marketPrice,
-    ];
-
-    for (const v of candidates) {
-      const n = Number(v);
-      if (Number.isFinite(n) && n > 0) return n;
+    if (match?.price && Number(match.price) > 0) {
+      window.tvPrice = Number(match.price);
+      return Number(match.price);
     }
 
     return null;
+  } catch (err) {
+    console.warn("Precio sync error:", err);
+    return null;
+  }
+}
+
+/* =========================
+   🔥 GET LIVE PRICE SAFE (MEJORADO)
+========================= */
+function getLivePriceFallback() {
+  const candidates = [
+    window.tvPrice,
+    window.lastPrice,
+    window.currentPrice,
+    window.entryPrice,
+    window.marketPrice,
+  ];
+
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
-  /* =========================
-     PLACE ORDER CONTROLLER
-  ========================= */
-  async function placeOrder(input) {
-    if (sendingOrder) return;
+  return null;
+}
 
-    try {
-      sendingOrder = true;
+/* =========================
+   PLACE ORDER CONTROLLER
+========================= */
+async function placeOrder(input) {
+  if (sendingOrder) return;
 
-      const api = window.__LEONES_BROKER_EXT2 || {};
-      let side, symbol, amount, type, price;
+  try {
+    sendingOrder = true;
 
-      if (typeof input === "string") {
-        side = input;
-        symbol = getActiveSymbol();
+    const api = window.__LEONES_BROKER_EXT2 || {};
+    let side, symbol, amount, type, price;
 
-        const sizeInput =
-          document.getElementById("brokerOrderSize") ||
-          document.getElementById("brokerOrderSizeBottom");
+    if (typeof input === "string") {
+      side = input;
+      symbol = getActiveSymbol();
 
-        amount = parseFloat(sizeInput?.value);
+      const sizeInput =
+        document.getElementById("brokerOrderSize") ||
+        document.getElementById("brokerOrderSizeBottom");
 
-        type =
-          document.getElementById("order-type")?.value ||
-          document.getElementById("order-type-bottom")?.value ||
-          "Market";
+      amount = parseFloat(sizeInput?.value);
 
-        if (String(type).toLowerCase() !== "market") {
-          const priceInput =
-            document.getElementById("order-price") ||
-            document.getElementById("order-price-bottom");
+      type =
+        document.getElementById("order-type")?.value ||
+        document.getElementById("order-type-bottom")?.value ||
+        "Market";
 
-          price = parseFloat(priceInput?.value);
-        }
-      } else {
-        side = input?.side || input?.direction;
-        symbol = input?.symbol || getActiveSymbol();
-        amount = Number(input?.amount);
-        type = input?.type || "Market";
-        price = input?.price;
+      if (String(type).toLowerCase() !== "market") {
+        const priceInput =
+          document.getElementById("order-price") ||
+          document.getElementById("order-price-bottom");
+
+        price = parseFloat(priceInput?.value);
       }
-
-      if (!symbol) return alert("Selecciona símbolo");
-      if (!amount || amount <= 0) return alert("Cantidad inválida");
-      if (!side) return alert("Dirección inválida");
-
-      symbol = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(symbol);
-      side = String(side).toLowerCase();
-
-      const payload = {
-        symbol: polygonSymbol,
-        tvSymbol: polygonSymbol,
-        direction: side,
-        type: String(type).toLowerCase(),
-        qty: amount
-      };
-
-      if (price && Number(price) > 0) {
-        payload.price = Number(price);
-      }
-
-      console.log("🚀 ORDER INIT:", payload);
-
-      if (typeof api.placeBrokerOrder === "function") {
-        return await api.placeBrokerOrder(payload);
-      }
-
-      return await placeBrokerOrder(payload);
-
-    } catch (err) {
-      console.error("❌ ORDER ERROR:", err);
-    } finally {
-      setTimeout(() => (sendingOrder = false), 800);
+    } else {
+      side = input?.side || input?.direction;
+      symbol = input?.symbol || getActiveSymbol();
+      amount = Number(input?.amount);
+      type = input?.type || "Market";
+      price = input?.price;
     }
-  }
 
-  /* =========================
-     CLICK BUY/SELL
-  ========================= */
-  document.addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-action]");
-    if (!btn) return;
+    if (!symbol) return alert("Selecciona símbolo");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!side) return alert("Dirección inválida");
 
-    const action = btn.dataset.action;
-    if (!["buy", "sell"].includes(action)) return;
+    symbol = normalizeSymbol(symbol);
+    side = String(side).toLowerCase();
 
-    e.preventDefault();
-    e.stopPropagation();
+    const payload = {
+      symbol,
+      direction: side,
+      type: String(type).toLowerCase(),
+      qty: amount
+    };
 
-    if (sendingOrder) return;
-
-    await placeOrder(action);
-  });
-
-  /* =========================
-     🔥 FINAL BACKEND ORDER (FIXED)
-  ========================= */
-  async function placeBrokerOrder(payload = {}) {
-    try {
-      const rawSymbol = String(payload.symbol || window.tvSymbol || window.selectedSymbol || '').trim();
-      const normalizedSymbol = normalizeSymbol(rawSymbol);
-      const polygonSymbol = toPolygonSymbol(rawSymbol || normalizedSymbol);
-
-      const amount = Number(payload.qty ?? payload.amount);
-      const side = String(payload.direction || payload.side || "buy").toLowerCase();
-
-      const user = getUser() || {};
-
-      if (!user.token) {
-        alert("No autenticado");
-        return;
-      }
-
-      if (!polygonSymbol) return alert("Símbolo inválido");
-      if (!amount || amount <= 0) return alert("Cantidad inválida");
-      if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
-
-      let price = getLivePriceFallback();
-
-      if (!price) {
-        price = await syncLivePrice(polygonSymbol);
-      }
-
-      if (!price || price <= 0) {
-        console.error("❌ Precio final inválido:", price);
-        alert("No hay precio disponible del mercado");
-        return;
-      }
-
-      const body = {
-        symbol: polygonSymbol,
-        tvSymbol: polygonSymbol,
-        side: side.toUpperCase(),
-        type: "market",
-        qty: amount,
-        price: Number(price)
-      };
-
-      console.log("🚀 FINAL PAYLOAD:", body);
-
-      const res = await fetch("/api/trade/open", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + user.token
-        },
-        body: JSON.stringify(body)
-      });
-
-      const data = await res.json();
-
-      console.log("📩 BACKEND RESPONSE:", data);
-
-      if (!res.ok) {
-        console.error("❌ BACKEND ERROR:", data);
-        alert(data?.message || "Error al abrir operación");
-        return;
-      }
-
-      await loadPositions?.();
-      await loadAccount?.();
-
-      console.log("✅ ORDER OK");
-      return data;
-
-    } catch (err) {
-      console.error("❌ ORDER FAILED:", err);
+    if (price && Number(price) > 0) {
+      payload.price = Number(price);
     }
+
+    console.log("🚀 ORDER INIT:", payload);
+
+    if (typeof api.placeBrokerOrder === "function") {
+      return await api.placeBrokerOrder(payload);
+    }
+
+    return await placeBrokerOrder(payload);
+
+  } catch (err) {
+    console.error("❌ ORDER ERROR:", err);
+  } finally {
+    setTimeout(() => (sendingOrder = false), 800);
   }
+}
+
+/* =========================
+   CLICK BUY/SELL
+========================= */
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  if (!["buy", "sell"].includes(action)) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (sendingOrder) return;
+
+  await placeOrder(action);
+});
+
+/* =========================
+   🔥 FINAL BACKEND ORDER (FIXED)
+========================= */
+async function placeBrokerOrder(payload = {}) {
+  try {
+    const symbol = normalizeSymbol(
+      payload.symbol || window.tvSymbol || window.selectedSymbol
+    );
+
+    const amount = Number(payload.qty ?? payload.amount);
+    const side = String(payload.direction || payload.side || "buy").toLowerCase();
+
+    const user = getUser() || {};
+
+    if (!user.token) {
+      alert("No autenticado");
+      return;
+    }
+
+    if (!symbol) return alert("Símbolo inválido");
+    if (!amount || amount <= 0) return alert("Cantidad inválida");
+    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+
+    // 🔥 PRECIO GARANTIZADO
+    let price = getLivePriceFallback();
+
+    if (!price) {
+      price = await syncLivePrice(symbol);
+    }
+
+    if (!price || price <= 0) {
+      console.error("❌ Precio final inválido:", price);
+      alert("No hay precio disponible del mercado");
+      return;
+    }
+
+    const body = {
+      symbol,
+      side: side.toUpperCase(),
+      type: "market",
+      qty: amount,
+      price: Number(price)
+    };
+
+    console.log("🚀 FINAL PAYLOAD:", body);
+
+    const res = await fetch("/api/trade/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + user.token
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+
+    console.log("📩 BACKEND RESPONSE:", data);
+
+    if (!res.ok) {
+      console.error("❌ BACKEND ERROR:", data);
+      alert(data?.message || "Error al abrir operación");
+      return;
+    }
+
+    await loadPositions?.();
+    await loadAccount?.();
+
+    console.log("✅ ORDER OK");
+    return data;
+
+  } catch (err) {
+    console.error("❌ ORDER FAILED:", err);
+  }
+}
 /* =========================
    🔥 BOOT SISTEMA
 ========================= */
@@ -6322,3 +6172,4 @@ function createFloatingTradesPanel() {
 
 </body>
 </html>
+
