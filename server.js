@@ -208,17 +208,47 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeSymbol(value) {
-  let s = String(value || "").trim().toUpperCase();
+function normalizeSymbolSafe(symbol = "") {
+  let s = String(symbol).trim().toUpperCase();
 
   if (!s) return "";
 
-  // toma la parte después del prefijo si viene tipo OANDA:EUR_USD, C:CADJPY, BINANCE:BTCUSDT, etc.
+  s = s
+    .replace(/^T\./, "")
+    .replace(/^Q\./, "")
+    .replace(/^A\./, "")
+    .replace(/^XNAS:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/^NYSE:/, "")
+    .replace(/^C:/, "")
+    .replace(/^OANDA:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^FOREX:/, "");
+
   if (s.includes(":")) {
     s = s.split(":").pop();
   }
 
   return compactSymbol(s);
+}
+
+function normalizeSymbol(value) {
+  return normalizeSymbolSafe(value);
+}
+
+function symbolVariants(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
+  const afterDot = afterColon.includes(".") ? afterColon.split(".").pop() : afterColon;
+
+  return [...new Set([
+    compactSymbol(raw),
+    compactSymbol(afterColon),
+    compactSymbol(afterDot),
+    normalizeSymbolSafe(raw),
+    normalizeSymbolSafe(afterColon),
+    normalizeSymbolSafe(afterDot),
+  ])].filter(Boolean);
 }
 
 function sameMarketSymbol(a = "", b = "") {
@@ -329,10 +359,17 @@ function savePrice(symbol, price) {
     updatedAt: new Date().toISOString(),
   };
 
+  const keys = symbolVariants(symbol);
+  keys.push(clean);
+
   if (priceHandler.prices instanceof Map) {
-    priceHandler.prices.set(clean, payload);
+    for (const key of [...new Set(keys)]) {
+      priceHandler.prices.set(key, payload);
+    }
   } else if (typeof priceHandler.prices === "object") {
-    priceHandler.prices[clean] = payload;
+    for (const key of [...new Set(keys)]) {
+      priceHandler.prices[key] = payload;
+    }
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
@@ -343,7 +380,6 @@ function savePrice(symbol, price) {
    ========================= */
 
 function extractQuotePrice(item = {}) {
-  // soporta número directo, string numérico o objeto
   const primitive = toNumber(item);
   if (Number.isFinite(primitive) && primitive > 0) return primitive;
 
@@ -443,12 +479,15 @@ function getCurrentPriceForSymbol(symbol) {
   const target = normalizeSymbol(symbol);
   if (!target) return null;
 
+  const targetVariants = symbolVariants(symbol);
+
   const store = getPriceStore();
 
   // 1) búsqueda exacta por key normalizada
   for (const [key, item] of Object.entries(store)) {
-    const keyNorm = normalizeSymbol(key);
-    if (keyNorm === target) {
+    const keyVariants = symbolVariants(key);
+    const exact = keyVariants.some((v) => targetVariants.includes(v) || v === target);
+    if (exact) {
       const px = extractQuotePrice(item);
       if (Number.isFinite(px) && px > 0) return px;
     }
@@ -469,11 +508,13 @@ function getCurrentPriceForSymbol(symbol) {
     ].filter(Boolean);
 
     const match = candidates.some((c) => {
-      const clean = normalizeSymbol(c);
+      const clean = normalizeSymbolSafe(c);
+      const cVariants = symbolVariants(c);
       return (
         clean === target ||
         clean.includes(target) ||
         target.includes(clean) ||
+        cVariants.some((v) => targetVariants.includes(v)) ||
         sameMarketSymbol(clean, target)
       );
     });
@@ -1178,7 +1219,7 @@ app.post("/api/_send_test_email", async (req, res) => {
    ====================================================== */
 app.get("/api/price", (req, res) => {
   try {
-    const symbol = normalizeSymbol(
+    const symbol = normalizeSymbolSafe(
       String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
     );
 
@@ -1654,7 +1695,6 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
@@ -1791,117 +1831,6 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
-function normalizeSymbolSafe(symbol = "") {
-  let s = String(symbol).toUpperCase().trim();
-
-  if (!s) return "";
-
-  s = s
-    .replace(/^T:/, "")
-    .replace(/^XNAS:/, "")
-    .replace(/^NASDAQ:/, "")
-    .replace(/^NYSE:/, "")
-    .replace(/^C:/, "")
-    .replace(/^OANDA:/, "")
-    .replace(/^FX:/, "")
-    .replace(/^FOREX:/, "");
-
-  if (s.includes(":")) {
-    s = s.split(":").pop();
-  }
-
-  return s.replace(/[^A-Z0-9]/g, "");
-}
-
-function compactSymbol(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
-
-function normalizeSymbol(value) {
-  return normalizeSymbolSafe(value);
-}
-
-function toNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function extractSymbol(data = {}) {
-  return normalizeSymbolSafe(
-    data?.symbol ||
-    data?.ticker ||
-    data?.sym ||
-    data?.T ||
-    data?.s ||
-    data?.instrument ||
-    data?.marketSymbol ||
-    data?.asset ||
-    ""
-  );
-}
-
-function extractPrice(data = {}) {
-  return (
-    toNumber(data?.price) ??
-    toNumber(data?.p) ??
-    toNumber(data?.last) ??
-    toNumber(data?.c) ??
-    toNumber(data?.close) ??
-    toNumber(data?.lastPrice) ??
-    null
-  );
-}
-
-function getPriceStore() {
-  try {
-    const raw = priceHandler?.prices;
-    if (!raw) return {};
-
-    if (raw instanceof Map) return Object.fromEntries(raw.entries());
-    if (typeof raw === "object") return raw;
-
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-function savePrice(symbol, price, raw = null) {
-  if (!priceHandler?.prices) return;
-
-  const clean = normalizeSymbolSafe(symbol);
-  const numeric = Number(price);
-
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
-
-  const payload = {
-    price: numeric,
-    updatedAt: new Date().toISOString(),
-    raw,
-  };
-
-  if (priceHandler.prices instanceof Map) {
-    priceHandler.prices.set(clean, payload);
-  } else if (typeof priceHandler.prices === "object") {
-    priceHandler.prices[clean] = payload;
-  }
-
-  console.log("📥 PRICE SAVED:", clean, numeric);
-}
-
-function handleIncomingPrice(data = {}) {
-  const symbol = extractSymbol(data);
-  const price = extractPrice(data);
-
-  if (!symbol || !price) return null;
-
-  savePrice(symbol, price, data);
-  return { symbol, price };
-}
-
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -2010,6 +1939,30 @@ io.on("connection", (socket) => {
    POLYGON SOCKET
    ====================================================== */
 
+function extractSymbol(data) {
+  return normalizeSymbolSafe(
+    data?.symbol ||
+    data?.ticker ||
+    data?.sym ||
+    data?.T ||
+    data?.s ||
+    data?.instrument ||
+    ""
+  );
+}
+
+function extractPrice(data) {
+  return (
+    data?.price ||
+    data?.p ||
+    data?.last ||
+    data?.c ||
+    data?.close ||
+    data?.lastPrice ||
+    null
+  );
+}
+
 try {
   if (!process.env.POLYGON_API_KEY) {
     console.warn("⚠️ POLYGON_API_KEY no definido — realtime limitado");
@@ -2021,10 +1974,12 @@ try {
         try {
           console.log("📊 PRICE RAW:", data);
 
-          const result = handleIncomingPrice(data);
-          if (!result) return;
+          const symbol = extractSymbol(data);
+          const price = extractPrice(data);
 
-          const { symbol, price } = result;
+          if (!symbol || !price) return;
+
+          savePrice(symbol, price);
 
           if (priceHandler?.handle) {
             priceHandler.handle(data);
@@ -2200,11 +2155,14 @@ function getCurrentPriceForSymbol(symbol) {
   const target = normalizeSymbolSafe(symbol);
   if (!target) return null;
 
+  const targetVariants = symbolVariants(symbol);
+
   const store = getPriceStore();
 
   for (const [key, item] of Object.entries(store)) {
-    const keyNorm = normalizeSymbolSafe(key);
-    if (keyNorm === target) {
+    const keyVariants = symbolVariants(key);
+    const exact = keyVariants.some((v) => targetVariants.includes(v) || v === target);
+    if (exact) {
       const px = extractQuotePrice(item);
       if (Number.isFinite(px) && px > 0) return px;
     }
@@ -2225,10 +2183,12 @@ function getCurrentPriceForSymbol(symbol) {
 
     const match = candidates.some((c) => {
       const clean = normalizeSymbolSafe(c);
+      const cVariants = symbolVariants(c);
       return (
         clean === target ||
         clean.includes(target) ||
         target.includes(clean) ||
+        cVariants.some((v) => targetVariants.includes(v)) ||
         sameMarketSymbol(clean, target)
       );
     });
