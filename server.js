@@ -200,30 +200,7 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeSymbol(value = "") {
-  let raw = String(value || "").trim().toUpperCase();
-  if (!raw) return "";
 
-  raw = raw
-    .replace(/\s+/g, "")
-    .replace(/\//g, "")
-    .replace(/-/g, "");
-
-  raw = raw
-    .replace(/^OANDA:/, "")
-    .replace(/^TVC:/, "")
-    .replace(/^C:/, "")
-    .replace(/^X:/, "")
-    .replace(/^FX:/, "")
-    .replace(/^BINANCE:/, "")
-    .replace(/^NASDAQ:/, "")
-    .replace(/^FOREX:/, "")
-    .replace(/^INDEX:/, "")
-    .replace(/^I:/, "")
-    .replace(/^B:/, "");
-
-  return raw;
-}
 
 function toPolygonSymbol(value = "") {
   const clean = normalizeSymbol(value);
