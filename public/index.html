@@ -2064,251 +2064,265 @@ if (window.__LEONES_BOOTED__) {
 (function () {
   'use strict';
 
-  if (window.__LEONES_BROKER_EXT2_POLYGON_READY__) {
-    console.warn('[BROKER-EXT2-POLYGON] already loaded, skipping.');
+  if (window.__LEONES_BROKER_EXT2_REAL_SAFE__) {
+    console.warn('[BROKER-EXT2-REAL] already loaded, skipping.');
     return;
   }
-  window.__LEONES_BROKER_EXT2_POLYGON_READY__ = true;
+  window.__LEONES_BROKER_EXT2_REAL_SAFE__ = true;
 
   const api = window.__LEONES_BROKER_EXT2 || {};
+
+  // 🔥 CAPTURA REAL SEGURA (NO SE PIERDE)
+  const ORIGINAL_PLACE_ORDER =
+    typeof api.__originalPlaceOrder === 'function'
+      ? api.__originalPlaceOrder
+      : (typeof api.placeOrder === 'function' ? api.placeOrder.bind(api) : null);
+
   const NS = window._LEONES = window._LEONES || {};
   const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
-  const API_BASE = String(
-    window.API_BASE ||
-    window.API ||
-    (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
-  ).replace(/\/+$/, '');
+const API_BASE = String(
+  window.API_BASE ||
+  window.API ||
+  (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
+).replace(/\/+$/, '');
 
-  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
-  const ROOT_ID = 'broker-ext2-root';
-  const DEFAULT_CURRENCY = 'US$';
+const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+const ROOT_ID = 'broker-ext2-root';
+const DEFAULT_CURRENCY = 'US$';
 
-  const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
+const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
 
-  const MARKET_ICONS = {
-    Forex: '🌍',
-    Crypto: '₿',
-    Indices: '📈',
-    Stocks: '🏢',
-    Commodities: '⛏️'
-  };
+const MARKET_ICONS = {
+  Forex: '🌍',
+  Crypto: '₿',
+  Indices: '📈',
+  Stocks: '🏢',
+  Commodities: '⛏️'
+};
 
-  const POLYGON_MARKET_SYMBOLS = {
-    Forex: [
-      { symbol: 'EURUSD', polygonSymbol: 'C:EURUSD', label: 'EUR/USD' },
-      { symbol: 'GBPUSD', polygonSymbol: 'C:GBPUSD', label: 'GBP/USD' },
-      { symbol: 'USDJPY', polygonSymbol: 'C:USDJPY', label: 'USD/JPY' },
-      { symbol: 'USDCHF', polygonSymbol: 'C:USDCHF', label: 'USD/CHF' },
-      { symbol: 'AUDUSD', polygonSymbol: 'C:AUDUSD', label: 'AUD/USD' },
-      { symbol: 'NZDUSD', polygonSymbol: 'C:NZDUSD', label: 'NZD/USD' },
-      { symbol: 'USDCAD', polygonSymbol: 'C:USDCAD', label: 'USD/CAD' },
-      { symbol: 'EURGBP', polygonSymbol: 'C:EURGBP', label: 'EUR/GBP' },
-      { symbol: 'EURJPY', polygonSymbol: 'C:EURJPY', label: 'EUR/JPY' },
-      { symbol: 'GBPJPY', polygonSymbol: 'C:GBPJPY', label: 'GBP/JPY' },
-      { symbol: 'EURAUD', polygonSymbol: 'C:EURAUD', label: 'EUR/AUD' },
-      { symbol: 'AUDJPY', polygonSymbol: 'C:AUDJPY', label: 'AUD/JPY' },
-      { symbol: 'CHFJPY', polygonSymbol: 'C:CHFJPY', label: 'CHF/JPY' },
-      { symbol: 'CADJPY', polygonSymbol: 'C:CADJPY', label: 'CAD/JPY' },
-      { symbol: 'EURCAD', polygonSymbol: 'C:EURCAD', label: 'EUR/CAD' },
-      { symbol: 'EURNZD', polygonSymbol: 'C:EURNZD', label: 'EUR/NZD' },
-      { symbol: 'GBPCAD', polygonSymbol: 'C:GBPCAD', label: 'GBP/CAD' },
-      { symbol: 'GBPAUD', polygonSymbol: 'C:GBPAUD', label: 'GBP/AUD' },
-      { symbol: 'GBPNZD', polygonSymbol: 'C:GBPNZD', label: 'GBP/NZD' },
-      { symbol: 'NZDJPY', polygonSymbol: 'C:NZDJPY', label: 'NZD/JPY' },
-    ],
+/* ======================================================
+   POLYGON ALIASES
+   ====================================================== */
 
-    Crypto: [
-      { symbol: 'BTCUSDT', polygonSymbol: 'X:BTCUSD', label: 'BTC/USDT' },
-      { symbol: 'ETHUSDT', polygonSymbol: 'X:ETHUSD', label: 'ETH/USDT' },
-      { symbol: 'BNBUSDT', polygonSymbol: 'X:BNBUSD', label: 'BNB/USDT' },
-      { symbol: 'SOLUSDT', polygonSymbol: 'X:SOLUSD', label: 'SOL/USDT' },
-      { symbol: 'XRPUSDT', polygonSymbol: 'X:XRPUSD', label: 'XRP/USDT' },
-      { symbol: 'ADAUSDT', polygonSymbol: 'X:ADAUSD', label: 'ADA/USDT' },
-      { symbol: 'DOGEUSDT', polygonSymbol: 'X:DOGEUSD', label: 'DOGE/USDT' },
-      { symbol: 'DOTUSDT', polygonSymbol: 'X:DOTUSD', label: 'DOT/USDT' },
-      { symbol: 'LTCUSDT', polygonSymbol: 'X:LTCUSD', label: 'LTC/USDT' },
-      { symbol: 'LINKUSDT', polygonSymbol: 'X:LINKUSD', label: 'LINK/USDT' },
-      { symbol: 'BCHUSDT', polygonSymbol: 'X:BCHUSD', label: 'BCH/USDT' },
-      { symbol: 'AVAXUSDT', polygonSymbol: 'X:AVAXUSD', label: 'AVAX/USDT' },
-      { symbol: 'TRXUSDT', polygonSymbol: 'X:TRXUSD', label: 'TRX/USDT' },
-      { symbol: 'TONUSDT', polygonSymbol: 'X:TONUSD', label: 'TON/USDT' },
-      { symbol: 'SHIBUSDT', polygonSymbol: 'X:SHIBUSD', label: 'SHIB/USDT' },
-    ],
+const POLYGON_ALIAS_MAP = {
+  GOLD: 'XAUUSD',
+  SILVER: 'XAGUSD',
+  PLATINUM: 'XPTUSD',
+  PALLADIUM: 'XPDUSD',
+  OIL: 'USOIL',
+  WTI: 'USOIL',
+  BRENT: 'UKOIL',
+  NATGAS: 'NATGAS',
+  GAS: 'NATGAS',
+  COPPER: 'COPPER',
+  COCOA: 'COCOA',
+  COFFEE: 'COFFEE',
+  WHEAT: 'WHEAT',
+  CORN: 'CORN',
 
-    Stocks: [
-      { symbol: 'AAPL', polygonSymbol: 'AAPL', label: 'Apple' },
-      { symbol: 'MSFT', polygonSymbol: 'MSFT', label: 'Microsoft' },
-      { symbol: 'AMZN', polygonSymbol: 'AMZN', label: 'Amazon' },
-      { symbol: 'TSLA', polygonSymbol: 'TSLA', label: 'Tesla' },
-      { symbol: 'NVDA', polygonSymbol: 'NVDA', label: 'NVIDIA' },
-      { symbol: 'META', polygonSymbol: 'META', label: 'Meta' },
-      { symbol: 'GOOGL', polygonSymbol: 'GOOGL', label: 'Alphabet' },
-      { symbol: 'NFLX', polygonSymbol: 'NFLX', label: 'Netflix' },
-      { symbol: 'AMD', polygonSymbol: 'AMD', label: 'AMD' },
-      { symbol: 'PYPL', polygonSymbol: 'PYPL', label: 'PayPal' },
-      { symbol: 'INTC', polygonSymbol: 'INTC', label: 'Intel' },
-      { symbol: 'DIS', polygonSymbol: 'DIS', label: 'Disney' },
-      { symbol: 'BA', polygonSymbol: 'BA', label: 'Boeing' },
-      { symbol: 'KO', polygonSymbol: 'KO', label: 'Coca-Cola' },
-      { symbol: 'MCD', polygonSymbol: 'MCD', label: 'McDonald’s' },
-      { symbol: 'XOM', polygonSymbol: 'XOM', label: 'Exxon Mobil' },
-      { symbol: 'JPM', polygonSymbol: 'JPM', label: 'JPMorgan Chase' },
-      { symbol: 'BAC', polygonSymbol: 'BAC', label: 'Bank of America' },
-      { symbol: 'ORCL', polygonSymbol: 'ORCL', label: 'Oracle' },
-      { symbol: 'CRM', polygonSymbol: 'CRM', label: 'Salesforce' },
-    ],
+  SP500: 'SPX500',
+  SPX: 'SPX500',
+  SPX500: 'SPX500',
+  NASDAQ100: 'NAS100',
+  NAS100: 'NAS100',
+  NDX100: 'NDX100',
+  US30: 'US30',
+  DOWJONES: 'US30',
+  DAX40: 'GER40',
+  GER40: 'GER40',
+  FTSE100: 'UK100',
+  UK100: 'UK100',
+  NIKKEI225: 'JPN225',
+  JPN225: 'JPN225',
+  ASX200: 'AUS200',
+  AUS200: 'AUS200',
+  HANGSENG: 'HK50',
+  HK50: 'HK50',
 
-    Indices: [
-      { symbol: 'SPX500', polygonSymbol: 'I:SPX', label: 'S&P 500' },
-      { symbol: 'NAS100', polygonSymbol: 'I:NDX', label: 'NASDAQ 100' },
-      { symbol: 'US30', polygonSymbol: 'I:DJI', label: 'US30' },
-      { symbol: 'UK100', polygonSymbol: 'I:FTSE', label: 'FTSE 100' },
-      { symbol: 'GER40', polygonSymbol: 'I:DAX', label: 'DAX 40' },
-      { symbol: 'FRA40', polygonSymbol: 'I:CAC', label: 'CAC 40' },
-      { symbol: 'JPN225', polygonSymbol: 'I:NIKKEI', label: 'Nikkei 225' },
-      { symbol: 'AUS200', polygonSymbol: 'I:ASX', label: 'ASX 200' },
-      { symbol: 'HK50', polygonSymbol: 'I:HSI', label: 'Hang Seng' },
-      { symbol: 'NDX100', polygonSymbol: 'I:NDX', label: 'NASDAQ 100' },
-    ],
+  EURUSD: 'EURUSD',
+  GBPUSD: 'GBPUSD',
+  USDJPY: 'USDJPY',
+  USDCHF: 'USDCHF',
+  AUDUSD: 'AUDUSD',
+  NZDUSD: 'NZDUSD',
+  USDCAD: 'USDCAD',
+  EURGBP: 'EURGBP',
+  EURJPY: 'EURJPY',
+  GBPJPY: 'GBPJPY',
+  EURAUD: 'EURAUD',
+  AUDJPY: 'AUDJPY',
+  CHFJPY: 'CHFJPY',
+  CADJPY: 'CADJPY',
+  EURCAD: 'EURCAD',
+  EURNZD: 'EURNZD',
+  GBPCAD: 'GBPCAD',
+  GBPAUD: 'GBPAUD',
+  GBPNZD: 'GBPNZD',
+  NZDJPY: 'NZDJPY',
+};
 
-    Commodities: [
-      { symbol: 'XAUUSD', polygonSymbol: 'GC', label: 'Gold' },
-      { symbol: 'XAGUSD', polygonSymbol: 'SI', label: 'Silver' },
-      { symbol: 'XPTUSD', polygonSymbol: 'PL', label: 'Platinum' },
-      { symbol: 'XPDUSD', polygonSymbol: 'PA', label: 'Palladium' },
-      { symbol: 'USOIL', polygonSymbol: 'CL', label: 'WTI Oil' },
-      { symbol: 'UKOIL', polygonSymbol: 'BZ', label: 'Brent Oil' },
-      { symbol: 'NATGAS', polygonSymbol: 'NG', label: 'Natural Gas' },
-      { symbol: 'COPPER', polygonSymbol: 'HG', label: 'Copper' },
-      { symbol: 'COCOA', polygonSymbol: 'CC', label: 'Cocoa' },
-      { symbol: 'COFFEE', polygonSymbol: 'KC', label: 'Coffee' },
-      { symbol: 'WHEAT', polygonSymbol: 'ZW', label: 'Wheat' },
-      { symbol: 'CORN', polygonSymbol: 'ZC', label: 'Corn' },
-    ]
-  };
+/* ======================================================
+   SYMBOL LABELS
+   ====================================================== */
 
-  const POLYGON_ALIAS_MAP = {
-    GOLD: 'XAUUSD',
-    SILVER: 'XAGUSD',
-    PLATINUM: 'XPTUSD',
-    PALLADIUM: 'XPDUSD',
-    OIL: 'USOIL',
-    WTI: 'USOIL',
-    BRENT: 'UKOIL',
-    NATURALGAS: 'NATGAS',
-    GAS: 'NATGAS',
-    COPPER: 'COPPER',
-    COCOA: 'COCOA',
-    COFFEE: 'COFFEE',
-    WHEAT: 'WHEAT',
-    CORN: 'CORN',
-    SP500: 'SPX500',
-    SPX: 'SPX500',
-    SPX500: 'SPX500',
-    NASDAQ100: 'NAS100',
-    NAS100: 'NAS100',
-    NDX100: 'NDX100',
-    US30: 'US30',
-    DOWJONES: 'US30',
-    DAX40: 'GER40',
-    GER40: 'GER40',
-    FTSE100: 'UK100',
-    UK100: 'UK100',
-    NIKKEI225: 'JPN225',
-    JPN225: 'JPN225',
-    ASX200: 'AUS200',
-    AUS200: 'AUS200',
-    HANGSENG: 'HK50',
-    HK50: 'HK50',
-  };
+const SYMBOL_LABELS = {
+  EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
+  NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
+  EURAUD: 'EUR/AUD', AUDJPY: 'AUD/JPY', CHFJPY: 'CHF/JPY', CADJPY: 'CAD/JPY', EURCAD: 'EUR/CAD',
+  EURNZD: 'EUR/NZD', GBPCAD: 'GBP/CAD', GBPAUD: 'GBP/AUD', GBPNZD: 'GBP/NZD', NZDJPY: 'NZD/JPY',
 
-  const POLYGON_DIRECT_TV_HINTS = {
-    EURUSD: 'C:EURUSD',
-    GBPUSD: 'C:GBPUSD',
-    USDJPY: 'C:USDJPY',
-    USDCHF: 'C:USDCHF',
-    AUDUSD: 'C:AUDUSD',
-    NZDUSD: 'C:NZDUSD',
-    USDCAD: 'C:USDCAD',
-    EURGBP: 'C:EURGBP',
-    EURJPY: 'C:EURJPY',
-    GBPJPY: 'C:GBPJPY',
-    EURAUD: 'C:EURAUD',
-    AUDJPY: 'C:AUDJPY',
-    CHFJPY: 'C:CHFJPY',
-    CADJPY: 'C:CADJPY',
-    EURCAD: 'C:EURCAD',
-    EURNZD: 'C:EURNZD',
-    GBPCAD: 'C:GBPCAD',
-    GBPAUD: 'C:GBPAUD',
-    GBPNZD: 'C:GBPNZD',
-    NZDJPY: 'C:NZDJPY',
+  BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT', SOLUSDT: 'SOL/USDT', XRPUSDT: 'XRP/USDT',
+  ADAUSDT: 'ADA/USDT', DOGEUSDT: 'DOGE/USDT', DOTUSDT: 'DOT/USDT', LTCUSDT: 'LTC/USDT', LINKUSDT: 'LINK/USDT',
+  BCHUSDT: 'BCH/USDT', AVAXUSDT: 'AVAX/USDT', TRXUSDT: 'TRX/USDT', TONUSDT: 'TON/USDT', SHIBUSDT: 'SHIB/USDT',
 
-    BTCUSDT: 'X:BTCUSD',
-    ETHUSDT: 'X:ETHUSD',
-    BNBUSDT: 'X:BNBUSD',
-    SOLUSDT: 'X:SOLUSD',
-    XRPUSDT: 'X:XRPUSD',
-    ADAUSDT: 'X:ADAUSD',
-    DOGEUSDT: 'X:DOGEUSD',
-    DOTUSDT: 'X:DOTUSD',
-    LTCUSDT: 'X:LTCUSD',
-    LINKUSDT: 'X:LINKUSD',
-    BCHUSDT: 'X:BCHUSD',
-    AVAXUSDT: 'X:AVAXUSD',
-    TRXUSDT: 'X:TRXUSD',
-    TONUSDT: 'X:TONUSD',
-    SHIBUSDT: 'X:SHIBUSD',
+  SPX500: 'S&P 500', NAS100: 'NASDAQ 100', US30: 'US30', UK100: 'FTSE 100', GER40: 'DAX 40',
+  FRA40: 'CAC 40', JPN225: 'Nikkei 225', AUS200: 'ASX 200', HK50: 'Hang Seng', NDX100: 'NASDAQ 100',
 
-    AAPL: 'AAPL',
-    MSFT: 'MSFT',
-    AMZN: 'AMZN',
-    TSLA: 'TSLA',
-    NVDA: 'NVDA',
-    META: 'META',
-    GOOGL: 'GOOGL',
-    NFLX: 'NFLX',
-    AMD: 'AMD',
-    PYPL: 'PYPL',
-    INTC: 'INTC',
-    DIS: 'DIS',
-    BA: 'BA',
-    KO: 'KO',
-    MCD: 'MCD',
-    XOM: 'XOM',
-    JPM: 'JPM',
-    BAC: 'BAC',
-    ORCL: 'ORCL',
-    CRM: 'CRM',
+  AAPL: 'Apple', MSFT: 'Microsoft', AMZN: 'Amazon', TSLA: 'Tesla', NVDA: 'NVIDIA', META: 'Meta',
+  GOOGL: 'Alphabet', NFLX: 'Netflix', AMD: 'AMD', PYPL: 'PayPal', INTC: 'Intel', DIS: 'Disney',
+  BA: 'Boeing', KO: 'Coca-Cola', MCD: 'McDonald’s', XOM: 'Exxon Mobil', JPM: 'JPMorgan Chase',
+  BAC: 'Bank of America', ORCL: 'Oracle', CRM: 'Salesforce',
 
-    SPX500: 'I:SPX',
-    NAS100: 'I:NDX',
-    US30: 'I:DJI',
-    UK100: 'I:FTSE',
-    GER40: 'I:DAX',
-    FRA40: 'I:CAC',
-    JPN225: 'I:NIKKEI',
-    AUS200: 'I:ASX',
-    HK50: 'I:HSI',
-    NDX100: 'I:NDX',
+  XAUUSD: 'Gold', XAGUSD: 'Silver', XPTUSD: 'Platinum', XPDUSD: 'Palladium',
+  USOIL: 'WTI Oil', UKOIL: 'Brent Oil', NATGAS: 'Natural Gas', COPPER: 'Copper',
+  COCOA: 'Cocoa', COFFEE: 'Coffee', WHEAT: 'Wheat', CORN: 'Corn'
+};
 
-    XAUUSD: 'GC',
-    XAGUSD: 'SI',
-    XPTUSD: 'PL',
-    XPDUSD: 'PA',
-    USOIL: 'CL',
-    UKOIL: 'BZ',
-    NATGAS: 'NG',
-    COPPER: 'HG',
-    COCOA: 'CC',
-    COFFEE: 'KC',
-    WHEAT: 'ZW',
-    CORN: 'ZC'
-  };
+/* ======================================================
+   POLYGON TV / SYMBOL HINTS
+   ====================================================== */
+
+const TV_HINTS = {
+  /* Forex -> Polygon C: */
+  EURUSD: 'C:EURUSD', GBPUSD: 'C:GBPUSD', USDJPY: 'C:USDJPY', USDCHF: 'C:USDCHF',
+  AUDUSD: 'C:AUDUSD', NZDUSD: 'C:NZDUSD', USDCAD: 'C:USDCAD', EURGBP: 'C:EURGBP',
+  EURJPY: 'C:EURJPY', GBPJPY: 'C:GBPJPY', EURAUD: 'C:EURAUD', AUDJPY: 'C:AUDJPY',
+  CHFJPY: 'C:CHFJPY', CADJPY: 'C:CADJPY', EURCAD: 'C:EURCAD', EURNZD: 'C:EURNZD',
+  GBPCAD: 'C:GBPCAD', GBPAUD: 'C:GBPAUD', GBPNZD: 'C:GBPNZD', NZDJPY: 'C:NZDJPY',
+
+  /* Crypto -> Polygon X: */
+  BTCUSDT: 'X:BTCUSD', ETHUSDT: 'X:ETHUSD', BNBUSDT: 'X:BNBUSD',
+  SOLUSDT: 'X:SOLUSD', XRPUSDT: 'X:XRPUSD', ADAUSDT: 'X:ADAUSD',
+  DOGEUSDT: 'X:DOGEUSD', DOTUSDT: 'X:DOTUSD', LTCUSDT: 'X:LTCUSD',
+  LINKUSDT: 'X:LINKUSD', BCHUSDT: 'X:BCHUSD', AVAXUSDT: 'X:AVAXUSD',
+  TRXUSDT: 'X:TRXUSD', TONUSDT: 'X:TONUSD', SHIBUSDT: 'X:SHIBUSD',
+
+  /* Stocks -> ticker directo */
+  AAPL: 'AAPL', MSFT: 'MSFT', AMZN: 'AMZN', TSLA: 'TSLA', NVDA: 'NVDA',
+  META: 'META', GOOGL: 'GOOGL', NFLX: 'NFLX', AMD: 'AMD', PYPL: 'PYPL',
+  INTC: 'INTC', DIS: 'DIS', BA: 'BA', KO: 'KO', MCD: 'MCD', XOM: 'XOM',
+  JPM: 'JPM', BAC: 'BAC', ORCL: 'ORCL', CRM: 'CRM',
+
+  /* Índices -> Polygon I: */
+  SPX500: 'I:SPX', NAS100: 'I:NDX', NDX100: 'I:NDX',
+  US30: 'I:DJI', UK100: 'I:FTSE', GER40: 'I:DAX', FRA40: 'I:CAC',
+  JPN225: 'I:NIKKEI', AUS200: 'I:ASX', HK50: 'I:HSI',
+
+  /* Commodities:
+     Polygon documenta cobertura real para Gold/Silver vía forex:
+     C:XAUUSD y C:XAGUSD. El resto queda como alias de UI/futuros. */
+  XAUUSD: 'C:XAUUSD',
+  XAGUSD: 'C:XAGUSD',
+  XPTUSD: 'PL',
+  XPDUSD: 'PA',
+  USOIL: 'CL',
+  UKOIL: 'BZ',
+  NATGAS: 'NG',
+  COPPER: 'HG',
+  COCOA: 'CC',
+  COFFEE: 'KC',
+  WHEAT: 'ZW',
+  CORN: 'ZC'
+};
+
+/* ======================================================
+   FALLBACK SEEDS
+   ====================================================== */
+
+const FALLBACK_SEEDS = {
+  Forex: [
+    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD',
+    'EURGBP', 'EURJPY', 'GBPJPY', 'EURAUD', 'AUDJPY', 'CHFJPY', 'CADJPY',
+    'EURCAD', 'EURNZD', 'GBPCAD', 'GBPAUD', 'GBPNZD', 'NZDJPY'
+  ],
+  Crypto: [
+    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT',
+    'DOGEUSDT', 'DOTUSDT', 'LTCUSDT', 'LINKUSDT', 'BCHUSDT', 'AVAXUSDT',
+    'TRXUSDT', 'TONUSDT', 'SHIBUSDT'
+  ],
+  Indices: [
+    'SPX500', 'NAS100', 'US30', 'UK100', 'GER40', 'FRA40',
+    'JPN225', 'AUS200', 'HK50', 'NDX100'
+  ],
+  Stocks: [
+    'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'GOOGL', 'NFLX',
+    'AMD', 'PYPL', 'INTC', 'DIS', 'BA', 'KO', 'MCD', 'XOM',
+    'JPM', 'BAC', 'ORCL', 'CRM'
+  ],
+  Commodities: [
+    'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'USOIL', 'UKOIL',
+    'NATGAS', 'COPPER', 'COCOA', 'COFFEE', 'WHEAT', 'CORN'
+  ]
+};
+
+/* ======================================================
+   DEFAULT SYMBOLS
+   ====================================================== */
+
+const DEFAULT_SYMBOLS = Object.entries(FALLBACK_SEEDS).flatMap(([market, items]) =>
+  items.map(sym => ({
+    symbol: sym,
+    tvSymbol: TV_HINTS[sym] || (
+      market === 'Crypto' ? `X:${sym.replace(/USDT$/i, 'USD')}` :
+      market === 'Stocks' ? sym :
+      market === 'Indices' ? `I:${sym}` :
+      market === 'Commodities' ? (sym === 'XAUUSD' || sym === 'XAGUSD' ? `C:${sym}` : sym) :
+      `C:${sym}`
+    ),
+    label: SYMBOL_LABELS[sym] || sym,
+    market,
+    leverage: 'N/A',
+    spread: 'Variable',
+    hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
+    contract: market === 'Commodities' ? 'Futures' : 'N/A',
+    volatility: 'N/A',
+    source: 'polygon'
+  }))
+);
+
+const state = {
+  started: false,
+  booted: false,
+  markets: [],
+  quotes: [],
+  account: null,
+  positions: [],
+  activeSymbol: null,
+  marketFilter: 'All',
+  marketSearch: '',
+  lastChartSymbol: null,
+  pollTimer: null
+};
+
+const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
+const warn = (...a) => { try { console.warn('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
+
+let ACCOUNT = {
+  balance: 1000,
+  equity: 1000,
+  usedMargin: 0,
+  freeMargin: 1000,
+  marginLevel: 100
+};
+
+  let OPEN_TRADES = [];
+  let marginWarningInterval = null;
+  let marginAlertVisible = false;
+  let LAST_AMOUNT = null;
 
   function safeParseJSON(v, fallback = null) {
-    try { return JSON.parse(v); } catch { return fallback; }
+    try { return JSON.parse(v); } catch (e) { return fallback; }
   }
 
   function escapeHtml(s) {
@@ -2321,203 +2335,12 @@ if (window.__LEONES_BOOTED__) {
     }[m]));
   }
 
-  function compactSymbol(value) {
-    return String(value || '')
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9:]/g, '')
-      .replace(/\s+/g, '');
-  }
-
-  function stripMarketPrefix(value) {
-    let s = compactSymbol(value);
-    if (!s) return '';
-    if (s.includes(':')) s = s.split(':').pop();
-    return s;
-  }
-
-  function normalizeSymbol(value) {
-    let s = String(value || '').trim().toUpperCase();
-    if (!s) return '';
-    if (POLYGON_ALIAS_MAP[s]) s = POLYGON_ALIAS_MAP[s];
-    if (s.includes(':')) return compactSymbol(s);
-    return compactSymbol(stripMarketPrefix(s));
-  }
-
-  function normalizeMarketName(market) {
-    const m = String(market || '').trim().toLowerCase();
-    if (!m) return 'Forex';
-    if (m.includes('forex') || m.includes('fx')) return 'Forex';
-    if (m.includes('crypto') || m.includes('coin') || m.includes('digital')) return 'Crypto';
-    if (m.includes('index')) return 'Indices';
-    if (m.includes('stock') || m.includes('equity') || m.includes('share')) return 'Stocks';
-    if (m.includes('commodity') || m.includes('metal') || m.includes('energy') || m.includes('oil') || m.includes('gas') || m.includes('futures')) return 'Commodities';
-    return 'Forex';
-  }
-
-  function inferMarketBySymbol(symbol, marketHint = '') {
-    const s = normalizeSymbol(symbol);
-    if (marketHint) return normalizeMarketName(marketHint);
-
-    if (s.startsWith('C:')) return 'Forex';
-    if (s.startsWith('X:')) return 'Crypto';
-    if (s.startsWith('I:')) return 'Indices';
-    if (/^(AAPL|MSFT|AMZN|TSLA|NVDA|META|GOOGL|NFLX|AMD|PYPL|INTC|DIS|BA|KO|MCD|XOM|JPM|BAC|ORCL|CRM)$/.test(s)) return 'Stocks';
-
-    if (/^(GC|SI|PL|PA|CL|BZ|NG|HG|CC|KC|ZW|ZC)$/.test(s)) return 'Commodities';
-    if (s.includes('/') || /^[A-Z]{6}$/.test(s)) return 'Forex';
-    if (s.endsWith('USDT') || s.endsWith('USD') && /BTC|ETH|BNB|SOL|XRP|ADA|DOGE|DOT|LTC|LINK|BCH|AVAX|TRX|TON|SHIB/i.test(s)) return 'Crypto';
-
-    return 'Forex';
-  }
-
-  function polygonSymbolFromInput(symbol, market = '') {
-    const s = normalizeSymbol(symbol);
-    if (!s) return '';
-
-    if (POLYGON_DIRECT_TV_HINTS[s]) return POLYGON_DIRECT_TV_HINTS[s];
-
-    const marketName = inferMarketBySymbol(s, market);
-    if (marketName === 'Forex') return `C:${stripMarketPrefix(s)}`;
-    if (marketName === 'Crypto') return `X:${stripMarketPrefix(s).replace(/USDT$/i, 'USD')}`;
-    if (marketName === 'Stocks') return stripMarketPrefix(s);
-    if (marketName === 'Indices') return s.startsWith('I:') ? s : `I:${stripMarketPrefix(s)}`;
-    if (marketName === 'Commodities') return stripMarketPrefix(s);
-
-    return stripMarketPrefix(s);
-  }
-
-  function buildPolygonCandidates(symbol, market = '') {
-    const raw = String(symbol || '').trim().toUpperCase();
-    const norm = normalizeSymbol(raw);
-    const strip = stripMarketPrefix(norm);
-    const marketName = inferMarketBySymbol(norm, market);
-    const out = new Set();
-
-    if (!raw) return [];
-
-    if (norm.startsWith('C:') || norm.startsWith('X:') || norm.startsWith('I:')) out.add(norm);
-    if (POLYGON_DIRECT_TV_HINTS[norm]) out.add(POLYGON_DIRECT_TV_HINTS[norm]);
-
-    if (marketName === 'Forex') {
-      const fx = strip.replace(/^C:/, '');
-      out.add(`C:${fx}`);
-      out.add(fx);
-    } else if (marketName === 'Crypto') {
-      const c = strip.replace(/^X:/, '').replace(/USDT$/i, 'USD');
-      out.add(`X:${c}`);
-      out.add(c);
-    } else if (marketName === 'Stocks') {
-      out.add(strip);
-    } else if (marketName === 'Indices') {
-      const idx = strip.replace(/^I:/, '');
-      out.add(`I:${idx}`);
-      out.add(idx);
-    } else if (marketName === 'Commodities') {
-      const com = strip.replace(/^FUT:/, '');
-      out.add(com);
-      out.add(POLYGON_DIRECT_TV_HINTS[strip] || '');
-    }
-
-    const alias = POLYGON_ALIAS_MAP[raw] || POLYGON_ALIAS_MAP[norm];
-    if (alias) {
-      out.add(alias);
-      const aliasPoly = polygonSymbolFromInput(alias, inferMarketBySymbol(alias));
-      if (aliasPoly) out.add(aliasPoly);
-    }
-
-    return Array.from(out).filter(Boolean);
-  }
-
-  function displayLabel(symbol) {
-    const s = normalizeSymbol(symbol);
-    const base = stripMarketPrefix(s);
-
-    const row = buildPolygonCatalog().find(x => x.symbol === s || x.polygonSymbol === s || x.aliases?.includes(s));
-    if (row) return row.label;
-
-    if (base.includes('/') ) return base;
-    if (s.startsWith('C:')) return base.replace(/([A-Z]{3})([A-Z]{3})/, '$1/$2');
-    if (s.startsWith('X:')) return base.replace(/([A-Z]{3})([A-Z]{3})/, '$1/$2');
-    if (s.startsWith('I:')) return base;
-    return base;
-  }
-
-  function getProviderLabel(tvSymbol = '') {
-    const s = String(tvSymbol || '').toUpperCase();
-    if (s.startsWith('C:')) return 'POLYGON FX';
-    if (s.startsWith('X:')) return 'POLYGON CRYPTO';
-    if (s.startsWith('I:')) return 'POLYGON INDEX';
-    return 'POLYGON';
-  }
-
-  function buildPolygonCatalog() {
-    const items = [];
-
-    for (const market of MARKET_ORDER) {
-      const rows = POLYGON_MARKET_SYMBOLS[market] || [];
-      rows.forEach(row => {
-        const symbol = normalizeSymbol(row.symbol);
-        const polygonSymbol = polygonSymbolFromInput(row.polygonSymbol || row.symbol, market);
-        const label = String(row.label || symbol).trim();
-        const aliases = buildPolygonCandidates(symbol, market);
-        items.push({
-          symbol,
-          polygonSymbol,
-          tvSymbol: polygonSymbol,
-          label,
-          market,
-          leverage: 'N/A',
-          spread: 'Variable',
-          hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
-          contract: market === 'Commodities' ? 'Futures' : 'N/A',
-          volatility: 'N/A',
-          source: 'polygon',
-          aliases
-        });
-      });
-    }
-
-    return items;
-  }
-
-  const DEFAULT_SYMBOLS = buildPolygonCatalog();
-
-  const state = {
-    started: false,
-    booted: false,
-    markets: [],
-    quotes: [],
-    account: null,
-    positions: [],
-    activeSymbol: null,
-    marketFilter: 'All',
-    marketSearch: '',
-    lastChartSymbol: null,
-    pollTimer: null
-  };
-
-  const log = (...a) => { try { console.log('[BROKER-EXT2-POLYGON]', ...a); } catch {} };
-  const warn = (...a) => { try { console.warn('[BROKER-EXT2-POLYGON]', ...a); } catch {} };
-
-  let ACCOUNT = {
-    balance: 1000,
-    equity: 1000,
-    usedMargin: 0,
-    freeMargin: 1000,
-    marginLevel: 100
-  };
-
-  let OPEN_TRADES = [];
-  let marginWarningInterval = null;
-  let marginAlertVisible = false;
-  let LAST_AMOUNT = null;
-
   function getToken() {
     try {
-      const user = safeParseJSON(localStorage.getItem(SESSION_KEY), null);
-      return user?.token || localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN') || null;
-    } catch {
+      return localStorage.getItem('token') ||
+        localStorage.getItem('BROKER_TOKEN') ||
+        (safeParseJSON(localStorage.getItem(SESSION_KEY), null)?.token || null);
+    } catch (e) {
       return null;
     }
   }
@@ -2530,10 +2353,19 @@ if (window.__LEONES_BOOTED__) {
   function getUser() {
     try {
       return safeParseJSON(localStorage.getItem(SESSION_KEY), null) || {};
-    } catch {
+    } catch (e) {
       return {};
     }
   }
+
+  function getToken() {
+  try {
+    const user = safeParseJSON(localStorage.getItem(SESSION_KEY), null);
+    return user?.token || null;
+  } catch {
+    return null;
+  }
+}
 
   function formatNumber(n, d = 6) {
     const num = Number(n);
@@ -2548,7 +2380,7 @@ if (window.__LEONES_BOOTED__) {
     if (!isFinite(num)) return '--';
     try {
       return currency + num.toLocaleString('es-DO');
-    } catch {
+    } catch (e) {
       return currency + String(num);
     }
   }
@@ -2567,38 +2399,100 @@ if (window.__LEONES_BOOTED__) {
     (Array.isArray(ids) ? ids : [ids]).forEach(id => setText(id, value, formatter));
   }
 
+  function parseLeverageValue(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const s = String(v).trim().toLowerCase();
+    const colon = s.match(/1\s*:\s*(\d+(?:\.\d+)?)/);
+    if (colon) return Number(colon[1]);
+    const x = s.match(/(\d+(?:\.\d+)?)\s*x/);
+    if (x) return Number(x[1]);
+    const n = Number(s.replace(/[^\d.]/g, ''));
+    return isFinite(n) && n > 0 ? n : null;
+  }
+
+  function normalizeMarketName(market) {
+    const m = String(market || '').trim().toLowerCase();
+    if (!m) return 'Forex';
+    if (m.includes('forex') || m.includes('fx')) return 'Forex';
+    if (m.includes('crypto') || m.includes('coin') || m.includes('digital')) return 'Crypto';
+    if (m.includes('index')) return 'Indices';
+    if (m.includes('stock') || m.includes('equity') || m.includes('share')) return 'Stocks';
+    if (m.includes('commodity') || m.includes('metal') || m.includes('energy') || m.includes('oil') || m.includes('gas')) return 'Commodities';
+    return 'Forex';
+  }
+
+  function inferMarketBySymbol(symbol, marketHint = '') {
+    const s = String(symbol || '').toUpperCase().trim();
+    if (marketHint) return normalizeMarketName(marketHint);
+
+    if (FALLBACK_SEEDS.Crypto.includes(s) || s.endsWith('USDT') || (s.endsWith('USD') && s.length > 6 && /BTC|ETH|BNB|SOL|XRP|ADA|DOGE|LTC|LINK|BCH|AVAX|TRX|TON|SHIB/i.test(s))) return 'Crypto';
+    if (FALLBACK_SEEDS.Indices.includes(s) || /SPX|NAS|US30|UK100|GER40|FRA40|JPN225|AUS200|HK50|NDX/i.test(s)) return 'Indices';
+    if (FALLBACK_SEEDS.Stocks.includes(s)) return 'Stocks';
+    if (FALLBACK_SEEDS.Commodities.includes(s) || /XAU|XAG|XPT|XPD|OIL|GAS|COPPER|COCOA|COFFEE|WHEAT|CORN/i.test(s)) return 'Commodities';
+    if (s.includes('/') || /^[A-Z]{6}$/.test(s) || /^[A-Z]{3}USD$/.test(s) || /^[A-Z]{3}JPY$/.test(s) || /^[A-Z]{3}CHF$/.test(s)) return 'Forex';
+    return 'Forex';
+  }
+
+  function resolveTvSymbol(symbol, market = '') {
+    const s = String(symbol || '').trim().toUpperCase();
+    if (!s) return '';
+    if (TV_HINTS[s]) return TV_HINTS[s];
+    if (String(symbol).includes(':')) return String(symbol).trim();
+    const m = inferMarketBySymbol(s, market);
+    if (m === 'Crypto') return `BINANCE:${s}`;
+    if (m === 'Stocks') return `NASDAQ:${s}`;
+    if (m === 'Indices') return `TVC:${s}`;
+    if (m === 'Commodities') return `TVC:${s}`;
+    return `OANDA:${s}`;
+  }
+
+  function displayLabel(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    return SYMBOL_LABELS[s] || (s.includes('/') ? s : s);
+  }
+
+  function getProviderFromTvSymbol(tvSymbol = '') {
+    const s = String(tvSymbol || '').toUpperCase();
+    if (s.startsWith('OANDA:')) return 'OANDA';
+    if (s.startsWith('BINANCE:')) return 'BINANCE';
+    if (s.startsWith('NASDAQ:')) return 'NASDAQ';
+    if (s.startsWith('NYSE:')) return 'NYSE';
+    if (s.startsWith('TVC:')) return 'TVC';
+    if (s.startsWith('CME:')) return 'CME';
+    return 'Proveedor';
+  }
+
+  function getMarketIcon(market) {
+    return MARKET_ICONS[normalizeMarketName(market)] || '●';
+  }
+
   function normalizeSymbolRow(x) {
     if (!x || typeof x !== 'object') return null;
-    const symbol = normalizeSymbol(x.symbol || x.code || x.ticker || x.s || x.tvSymbol || '');
+    const symbol = String(x.symbol || x.code || x.ticker || x.s || x.tvSymbol || '').trim().toUpperCase();
     if (!symbol) return null;
 
     const market = normalizeMarketName(x.market || x.type || x.assetClass || inferMarketBySymbol(symbol));
-    const polygonSymbol = polygonSymbolFromInput(x.polygonSymbol || x.tvSymbol || x.symbol || symbol, market);
-
     return {
       symbol,
-      polygonSymbol,
-      tvSymbol: polygonSymbol,
-      label: String(x.label || x.name || x.title || displayLabel(symbol) || symbol).trim(),
+      tvSymbol: String(x.tvSymbol || x.tradingView || x.tv || resolveTvSymbol(symbol, market) || symbol).trim(),
+      label: String(x.label || x.name || x.title || SYMBOL_LABELS[symbol] || symbol).trim(),
       market,
       leverage: String(x.leverage || x.maxLeverage || x.margin || 'N/A').trim(),
       spread: String(x.spread || x.spreadInfo || x.fees || 'Variable').trim(),
       hours: String(x.hours || x.session || x.tradingHours || (market === 'Forex' || market === 'Crypto' ? '24/5' : 'N/A')).trim(),
-      contract: String(x.contract || x.contractSize || x.unit || (market === 'Commodities' ? 'Futures' : 'N/A')).trim(),
+      contract: String(x.contract || x.contractSize || x.unit || 'N/A').trim(),
       volatility: String(x.volatility || x.risk || 'N/A').trim(),
-      source: String(x.source || x.provider || 'polygon').trim(),
-      aliases: buildPolygonCandidates(symbol, market)
+      source: String(x.source || x.provider || 'proveedor').trim(),
     };
   }
 
   function normalizeQuoteRow(x) {
     if (!x || typeof x !== 'object') return null;
-    const symbol = normalizeSymbol(x.symbol || x.code || x.ticker || x.s || '');
+    const symbol = String(x.symbol || x.code || x.ticker || x.s || '').trim().toUpperCase();
     if (!symbol) return null;
-    const price = x.price ?? x.last ?? x.close ?? x.c ?? x.p ?? x.value ?? x.mark ?? null;
+    const price = x.price ?? x.last ?? x.close ?? x.c ?? x.p ?? x.value ?? null;
     return {
       symbol,
-      polygonSymbol: polygonSymbolFromInput(x.polygonSymbol || x.tvSymbol || symbol, inferMarketBySymbol(symbol)),
       price: price !== null && price !== undefined ? Number(price) : null,
       change: x.change ?? x.chg ?? x.delta ?? null,
       changePct: x.changePct ?? x.percentChange ?? x.pct ?? null,
@@ -2615,7 +2509,7 @@ if (window.__LEONES_BOOTED__) {
       if (!map.has(key)) map.set(key, n);
       else {
         const prev = map.get(key);
-        map.set(key, { ...prev, ...n, source: n.source || prev.source || 'polygon' });
+        map.set(key, { ...prev, ...n, source: n.source || prev.source || 'proveedor' });
       }
     });
     return Array.from(map.values());
@@ -2660,7 +2554,7 @@ if (window.__LEONES_BOOTED__) {
     const res = await fetch(url, { credentials: 'include', ...opts, headers });
     const txt = await res.text().catch(() => null);
     let data = null;
-    try { data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
+    try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
 
     if (!res.ok) {
       const err = new Error((data && (data.message || data.msg || data.error)) || ('HTTP ' + res.status));
@@ -2704,30 +2598,182 @@ if (window.__LEONES_BOOTED__) {
     const style = document.createElement('style');
     style.id = 'leones-ext2-style';
     style.textContent = `
-      #${ROOT_ID}{ width:100%; max-width:1200px; margin:0 auto; padding:12px 12px 18px; display:block; }
-      #${ROOT_ID} .btn, #${ROOT_ID} button, #${ROOT_ID} input, #${ROOT_ID} select, #${ROOT_ID} textarea{ touch-action: manipulation; }
-      #${ROOT_ID} button:active, #${ROOT_ID} .btn:active, #${ROOT_ID} .broker-symbol-card:active{ transform: scale(.985); }
-      #${ROOT_ID} #brokerColumns{ display:grid; grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr); gap:12px; align-items:start; }
-      #${ROOT_ID} #tv_chart_container, #${ROOT_ID} #tv_chart_container_bottom{ width:100%; min-height:440px; height:clamp(460px, 68vh, 820px); background:#060606; border-radius:12px; overflow:hidden; }
-      #${ROOT_ID} #brokerSymbolsPanel, #${ROOT_ID} #brokerChartPanel, #${ROOT_ID} #brokerTicketPanel, #${ROOT_ID} #brokerAccountPanel, #${ROOT_ID} #brokerPositionsPanel, #${ROOT_ID} #brokerSymbolDetailsPanel{ min-width:0; }
-      #${ROOT_ID} #brokerSymbolsScroll, #${ROOT_ID} #brokerSymbolsScrollBottom{ max-height:clamp(340px, 55vh, 640px); overflow:auto; padding-right:4px; }
-      #${ROOT_ID} #brokerMarketTabs, #${ROOT_ID} #brokerMarketTabsBottom, #${ROOT_ID} #overviewMarketTabs, #${ROOT_ID} #overviewMarketsTabs, #${ROOT_ID} #marketTabs{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-      #${ROOT_ID} #brokerSymbolsGrid, #${ROOT_ID} #brokerSymbolsGridBottom, #${ROOT_ID} #overviewSymbolsGrid, #${ROOT_ID} #overviewMarketList, #${ROOT_ID} #overviewSymbolsList, #${ROOT_ID} #marketList, #${ROOT_ID} #marketGrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
-      #${ROOT_ID} .broker-symbol-card{ width:100%; text-align:left; padding:12px; border-radius:14px; border:1px solid rgba(255,255,255,.06); background:rgba(255,255,255,.03); color:#fff; cursor:pointer; transition:transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease; }
-      #${ROOT_ID} .broker-symbol-card:hover{ background:rgba(255,255,255,.05); border-color:rgba(240,194,75,.35); }
-      #${ROOT_ID} .broker-symbol-card .market-pill, #${ROOT_ID} .broker-symbol-card .provider-pill{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11px; line-height:1; white-space:nowrap; }
-      #${ROOT_ID} .broker-symbol-card .market-pill{ background:rgba(240,194,75,.12); color:#f0c24b; }
-      #${ROOT_ID} .broker-symbol-card .provider-pill{ background:rgba(255,255,255,.07); color:#fff; }
-      #${ROOT_ID} .broker-symbol-card .symbol-icon{ width:38px; height:38px; border-radius:12px; display:grid; place-items:center; flex:0 0 auto; background:rgba(255,255,255,.06); font-size:18px; }
-      #${ROOT_ID} input, #${ROOT_ID} textarea, #${ROOT_ID} select{ outline:none; border:1px solid rgba(255,255,255,.18); box-shadow:0 0 0 1px rgba(0,255,204,.35), 0 0 10px rgba(0,255,204,.12); transition:box-shadow .2s ease, border-color .2s ease, transform .2s ease; }
-      #${ROOT_ID} input:focus, #${ROOT_ID} textarea:focus, #${ROOT_ID} select:focus{ border-color:#00ffcc; box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 14px rgba(0,255,204,.22); }
-      #${ROOT_ID} .btn.flash, #${ROOT_ID} button.flash{ box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 16px rgba(0,255,204,.18) !important; }
+      #${ROOT_ID}{
+        width:100%;
+        max-width:1200px;
+        margin:0 auto;
+        padding:12px 12px 18px;
+        display:block;
+      }
+
+      #${ROOT_ID} .btn,
+      #${ROOT_ID} button,
+      #${ROOT_ID} input,
+      #${ROOT_ID} select,
+      #${ROOT_ID} textarea{
+        touch-action: manipulation;
+      }
+
+      #${ROOT_ID} button:active,
+      #${ROOT_ID} .btn:active,
+      #${ROOT_ID} .broker-symbol-card:active{
+        transform: scale(.985);
+      }
+
+      #${ROOT_ID} #brokerColumns{
+        display:grid;
+        grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);
+        gap:12px;
+        align-items:start;
+      }
+
+      #${ROOT_ID} #tv_chart_container,
+      #${ROOT_ID} #tv_chart_container_bottom{
+        width:100%;
+        min-height:440px;
+        height:clamp(460px, 68vh, 820px);
+        background:#060606;
+        border-radius:12px;
+        overflow:hidden;
+      }
+
+      #${ROOT_ID} #brokerSymbolsPanel,
+      #${ROOT_ID} #brokerChartPanel,
+      #${ROOT_ID} #brokerTicketPanel,
+      #${ROOT_ID} #brokerAccountPanel,
+      #${ROOT_ID} #brokerPositionsPanel,
+      #${ROOT_ID} #brokerSymbolDetailsPanel{
+        min-width:0;
+      }
+
+      #${ROOT_ID} #brokerSymbolsScroll,
+      #${ROOT_ID} #brokerSymbolsScrollBottom{
+        max-height:clamp(340px, 55vh, 640px);
+        overflow:auto;
+        padding-right:4px;
+      }
+
+      #${ROOT_ID} #brokerMarketTabs,
+      #${ROOT_ID} #brokerMarketTabsBottom,
+      #${ROOT_ID} #overviewMarketTabs,
+      #${ROOT_ID} #overviewMarketsTabs,
+      #${ROOT_ID} #marketTabs{
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+        margin-bottom:12px;
+      }
+
+      #${ROOT_ID} #brokerSymbolsGrid,
+      #${ROOT_ID} #brokerSymbolsGridBottom,
+      #${ROOT_ID} #overviewSymbolsGrid,
+      #${ROOT_ID} #overviewMarketList,
+      #${ROOT_ID} #overviewSymbolsList,
+      #${ROOT_ID} #marketList,
+      #${ROOT_ID} #marketGrid{
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+        gap:10px;
+      }
+
+      #${ROOT_ID} .broker-symbol-card{
+        width:100%;
+        text-align:left;
+        padding:12px;
+        border-radius:14px;
+        border:1px solid rgba(255,255,255,.06);
+        background:rgba(255,255,255,.03);
+        color:#fff;
+        cursor:pointer;
+        transition:transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+
+      #${ROOT_ID} .broker-symbol-card:hover{
+        background:rgba(255,255,255,.05);
+        border-color:rgba(240,194,75,.35);
+      }
+
+      #${ROOT_ID} .broker-symbol-card .market-pill,
+      #${ROOT_ID} .broker-symbol-card .provider-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:4px 8px;
+        border-radius:999px;
+        font-size:11px;
+        line-height:1;
+        white-space:nowrap;
+      }
+
+      #${ROOT_ID} .broker-symbol-card .market-pill{
+        background:rgba(240,194,75,.12);
+        color:#f0c24b;
+      }
+
+      #${ROOT_ID} .broker-symbol-card .provider-pill{
+        background:rgba(255,255,255,.07);
+        color:#fff;
+      }
+
+      #${ROOT_ID} .broker-symbol-card .symbol-icon{
+        width:38px;
+        height:38px;
+        border-radius:12px;
+        display:grid;
+        place-items:center;
+        flex:0 0 auto;
+        background:rgba(255,255,255,.06);
+        font-size:18px;
+      }
+
+      #${ROOT_ID} input,
+      #${ROOT_ID} textarea,
+      #${ROOT_ID} select{
+        outline:none;
+        border:1px solid rgba(255,255,255,.18);
+        box-shadow:0 0 0 1px rgba(0,255,204,.35), 0 0 10px rgba(0,255,204,.12);
+        transition:box-shadow .2s ease, border-color .2s ease, transform .2s ease;
+      }
+
+      #${ROOT_ID} input:focus,
+      #${ROOT_ID} textarea:focus,
+      #${ROOT_ID} select:focus{
+        border-color:#00ffcc;
+        box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 14px rgba(0,255,204,.22);
+      }
+
+      #${ROOT_ID} .btn.flash,
+      #${ROOT_ID} button.flash{
+        box-shadow:0 0 0 2px rgba(0,255,204,.35), 0 0 16px rgba(0,255,204,.18) !important;
+      }
+
       @media (max-width: 980px){
-        #${ROOT_ID} #brokerColumns{ grid-template-columns:1fr; }
-        #${ROOT_ID} #tv_chart_container, #${ROOT_ID} #tv_chart_container_bottom{ min-height:360px; height:58vh; }
+        #${ROOT_ID} #brokerColumns{
+          grid-template-columns:1fr;
+        }
+        #${ROOT_ID} #tv_chart_container,
+        #${ROOT_ID} #tv_chart_container_bottom{
+          min-height:360px;
+          height:58vh;
+        }
       }
     `;
     document.head.appendChild(style);
+  }
+
+  function ensureTradingViewScript() {
+    if (window.TradingView && typeof window.TradingView.widget === 'function') return Promise.resolve(true);
+    if (document.querySelector('script[data-leones-tv="1"]')) return Promise.resolve(true);
+
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://s3.tradingview.com/tv.js';
+      s.async = true;
+      s.dataset.leonesTv = '1';
+      s.onload = () => resolve(true);
+      s.onerror = () => reject(new Error('No se pudo cargar TradingView'));
+      document.head.appendChild(s);
+    });
   }
 
   function getSymbols() {
@@ -2758,7 +2804,7 @@ if (window.__LEONES_BOOTED__) {
     if (!list.length) return null;
     const active = String(state.activeSymbol || TR.activeSymbol || TR.activeMeta?.symbol || '').toUpperCase();
     if (!active) return list[0];
-    return list.find(x => String(x.symbol).toUpperCase() === active || String(x.tvSymbol).toUpperCase() === active || String(x.polygonSymbol).toUpperCase() === active) || list[0];
+    return list.find(x => String(x.symbol).toUpperCase() === active || String(x.tvSymbol).toUpperCase() === active) || list[0];
   }
 
   function effectiveLeverage(meta = null) {
@@ -2766,17 +2812,6 @@ if (window.__LEONES_BOOTED__) {
     const userLev = parseLeverageValue(acct.maxLeverage ?? acct.leverage ?? acct.marginLeverage ?? acct.allowedLeverage);
     const symbolLev = meta ? parseLeverageValue(meta.leverage) : null;
     return userLev || symbolLev || 1;
-  }
-
-  function parseLeverageValue(v) {
-    if (v === null || v === undefined || v === '') return null;
-    const s = String(v).trim().toLowerCase();
-    const colon = s.match(/1\s*:\s*(\d+(?:\.\d+)?)/);
-    if (colon) return Number(colon[1]);
-    const x = s.match(/(\d+(?:\.\d+)?)\s*x/);
-    if (x) return Number(x[1]);
-    const n = Number(s.replace(/[^\d.]/g, ''));
-    return isFinite(n) && n > 0 ? n : null;
   }
 
   function calcOperatingPower(balance = 0, leverage = 1) {
@@ -2794,7 +2829,7 @@ if (window.__LEONES_BOOTED__) {
     try {
       el.classList.add('flash');
       setTimeout(() => el.classList.remove('flash'), 180);
-    } catch {}
+    } catch (e) {}
   }
 
   function setMessage(text, type = 'info') {
@@ -2815,9 +2850,103 @@ if (window.__LEONES_BOOTED__) {
     el.textContent = '';
   }
 
+  function extractAccountSource(payload = {}) {
+    if (!payload || typeof payload !== 'object') return {};
+    return payload.account || payload.data?.account || payload.data || payload.user || payload;
+  }
+
+  function getAccountNameSource(account = {}) {
+    const user = getUser();
+    return (
+      account.name ||
+      account.fullName ||
+      account.displayName ||
+      account.alias ||
+      user.name ||
+      user.fullName ||
+      user.displayName ||
+      user.alias ||
+      user.email ||
+      'Cliente'
+    );
+  }
+
+  function syncAccountView(account = {}) {
+    const safeAccount = account && typeof account === 'object' ? account : {};
+    state.account = safeAccount;
+
+    const name = getAccountNameSource(safeAccount);
+    const email = safeAccount.email || getUser().email || '--';
+    const balance = safeAccount.balance ?? safeAccount.bal ?? safeAccount.walletBalance ?? safeAccount.deposit ?? safeAccount.funds ?? null;
+    const equity = safeAccount.equity ?? safeAccount.totalEquity ?? balance ?? null;
+    const pnl = safeAccount.pnl ?? safeAccount.profitLoss ?? safeAccount.unrealizedPnl ?? null;
+    const lev = effectiveLeverage(getActiveSymbolMeta());
+    const operating = calcOperatingPower(balance || 0, lev || 1);
+    const marginUsed = safeAccount.marginUsed ?? safeAccount.margin ?? safeAccount.usedMargin ?? null;
+
+    if (balance !== null && balance !== undefined && balance !== '') {
+      const num = Number(balance);
+      if (isFinite(num)) ACCOUNT.balance = num;
+    }
+    if (equity !== null && equity !== undefined && equity !== '') {
+      const num = Number(equity);
+      if (isFinite(num)) ACCOUNT.equity = num;
+    }
+    if (marginUsed !== null && marginUsed !== undefined && marginUsed !== '') {
+      const num = Number(marginUsed);
+      if (isFinite(num)) ACCOUNT.usedMargin = num;
+    }
+    ACCOUNT.freeMargin = Math.max(ACCOUNT.equity - ACCOUNT.usedMargin, 0);
+    ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0 ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100 : 100;
+
+    setTextAll(['brokerUserBadge', 'brokerUserBadgeBottom'], name);
+    setTextAll(['brokerBalanceBadge', 'brokerBalanceBadgeBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerLeverageBadge', 'brokerLeverageBadgeBottom'], lev ? `Apalancamiento: 1:${lev}` : 'Apalancamiento: --');
+    setTextAll(['brokerOperatingBadge', 'brokerOperatingBadgeBottom'], balance !== null && balance !== undefined ? `Operativo: ${formatMoney(operating, DEFAULT_CURRENCY)}` : 'Operativo: --');
+    setTextAll(['brokerMarginBadge', 'brokerMarginBadgeBottom'], marginUsed !== null && marginUsed !== undefined ? `Margen: ${formatMoney(marginUsed, DEFAULT_CURRENCY)}` : 'Margen: --');
+
+    setTextAll(['brokerAccountName', 'brokerAccountNameBottom'], name);
+    setTextAll(['brokerAccountEmail', 'brokerAccountEmailBottom'], email);
+    setTextAll(['brokerAccountBalance', 'brokerAccountBalanceBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountEquity', 'brokerAccountEquityBottom'], equity !== null && equity !== undefined ? formatMoney(equity, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountPnl', 'brokerAccountPnlBottom'], pnl !== null && pnl !== undefined ? formatMoney(pnl, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountLeverage', 'brokerAccountLeverageBottom'], lev ? `1:${lev}` : '--');
+    setTextAll(['brokerAccountOperating', 'brokerAccountOperatingBottom'], balance !== null && balance !== undefined ? formatMoney(operating, DEFAULT_CURRENCY) : '--');
+    setTextAll(['brokerAccountMargin', 'brokerAccountMarginBottom'], marginUsed !== null && marginUsed !== undefined ? formatMoney(marginUsed, DEFAULT_CURRENCY) : '--');
+
+    const welcomeSelectors = [
+      '#welcomeUser',
+      '.welcomeUser',
+      '[data-leones-user-name]',
+      '[data-user-name]',
+      '[data-welcome-name]'
+    ];
+    welcomeSelectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        try { el.textContent = name; } catch (e) {}
+      });
+    });
+
+    if (typeof window.applyAccountToUI === 'function') {
+      try { window.applyAccountToUI(safeAccount); } catch (e) {}
+    }
+
+    renderAccountUI();
+    renderMargin();
+    return safeAccount;
+  }
+
+  function calculateMargin(positionSize = 0, leverage = 1, entryPrice = 0) {
+    const pos = Number(positionSize) || 0;
+    const lev = Number(leverage) || 1;
+    const price = Number(entryPrice) || 0;
+    const requiredMargin = lev > 0 ? (pos / lev) : pos;
+    const qty = price > 0 ? pos / price : 0;
+    return { requiredMargin, qty, notional: pos };
+  }
+
   function currentQuote(symbol) {
-    const s = normalizeSymbol(symbol);
-    return quoteMap().get(s) || quoteMap().get(polygonSymbolFromInput(s)) || null;
+    return quoteMap().get(String(symbol || '').toUpperCase()) || null;
   }
 
   function getOrderType() {
@@ -2832,6 +2961,7 @@ if (window.__LEONES_BOOTED__) {
   function getOrderPrice() {
     const top = parseFloat(document.getElementById('order-price')?.value);
     const bottom = parseFloat(document.getElementById('order-price-bottom')?.value);
+
     if (Number.isFinite(top)) return top;
     if (Number.isFinite(bottom)) return bottom;
     return NaN;
@@ -2922,67 +3052,6 @@ if (window.__LEONES_BOOTED__) {
     renderMargin();
   }
 
-  function calculateMargin(positionSize = 0, leverage = 1, entryPrice = 0) {
-    const pos = Number(positionSize) || 0;
-    const lev = Number(leverage) || 1;
-    const price = Number(entryPrice) || 0;
-    const requiredMargin = lev > 0 ? (pos / lev) : pos;
-    const qty = price > 0 ? pos / price : 0;
-    return { requiredMargin, qty, notional: pos };
-  }
-
-  function syncAccountView(account = {}) {
-    const safeAccount = account && typeof account === 'object' ? account : {};
-    state.account = safeAccount;
-
-    const name = safeAccount.name || getUser().name || getUser().fullName || getUser().email || 'Cliente';
-    const email = safeAccount.email || getUser().email || '--';
-    const balance = safeAccount.balance ?? safeAccount.bal ?? safeAccount.walletBalance ?? safeAccount.deposit ?? safeAccount.funds ?? null;
-    const equity = safeAccount.equity ?? safeAccount.totalEquity ?? balance ?? null;
-    const pnl = safeAccount.pnl ?? safeAccount.profitLoss ?? safeAccount.unrealizedPnl ?? null;
-    const lev = effectiveLeverage(getActiveSymbolMeta());
-    const operating = calcOperatingPower(balance || 0, lev || 1);
-    const marginUsed = safeAccount.marginUsed ?? safeAccount.margin ?? safeAccount.usedMargin ?? null;
-
-    if (balance !== null && balance !== undefined && balance !== '') {
-      const num = Number(balance);
-      if (isFinite(num)) ACCOUNT.balance = num;
-    }
-    if (equity !== null && equity !== undefined && equity !== '') {
-      const num = Number(equity);
-      if (isFinite(num)) ACCOUNT.equity = num;
-    }
-    if (marginUsed !== null && marginUsed !== undefined && marginUsed !== '') {
-      const num = Number(marginUsed);
-      if (isFinite(num)) ACCOUNT.usedMargin = num;
-    }
-    ACCOUNT.freeMargin = Math.max(ACCOUNT.equity - ACCOUNT.usedMargin, 0);
-    ACCOUNT.marginLevel = ACCOUNT.usedMargin > 0 ? (ACCOUNT.equity / ACCOUNT.usedMargin) * 100 : 100;
-
-    setTextAll(['brokerUserBadge', 'brokerUserBadgeBottom'], name);
-    setTextAll(['brokerBalanceBadge', 'brokerBalanceBadgeBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerLeverageBadge', 'brokerLeverageBadgeBottom'], lev ? `Apalancamiento: 1:${lev}` : 'Apalancamiento: --');
-    setTextAll(['brokerOperatingBadge', 'brokerOperatingBadgeBottom'], balance !== null && balance !== undefined ? `Operativo: ${formatMoney(operating, DEFAULT_CURRENCY)}` : 'Operativo: --');
-    setTextAll(['brokerMarginBadge', 'brokerMarginBadgeBottom'], marginUsed !== null && marginUsed !== undefined ? `Margen: ${formatMoney(marginUsed, DEFAULT_CURRENCY)}` : 'Margen: --');
-
-    setTextAll(['brokerAccountName', 'brokerAccountNameBottom'], name);
-    setTextAll(['brokerAccountEmail', 'brokerAccountEmailBottom'], email);
-    setTextAll(['brokerAccountBalance', 'brokerAccountBalanceBottom'], balance !== null && balance !== undefined ? formatMoney(balance, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountEquity', 'brokerAccountEquityBottom'], equity !== null && equity !== undefined ? formatMoney(equity, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountPnl', 'brokerAccountPnlBottom'], pnl !== null && pnl !== undefined ? formatMoney(pnl, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountLeverage', 'brokerAccountLeverageBottom'], lev ? `1:${lev}` : '--');
-    setTextAll(['brokerAccountOperating', 'brokerAccountOperatingBottom'], balance !== null && balance !== undefined ? formatMoney(operating, DEFAULT_CURRENCY) : '--');
-    setTextAll(['brokerAccountMargin', 'brokerAccountMarginBottom'], marginUsed !== null && marginUsed !== undefined ? formatMoney(marginUsed, DEFAULT_CURRENCY) : '--');
-
-    if (typeof window.applyAccountToUI === 'function') {
-      try { window.applyAccountToUI(safeAccount); } catch {}
-    }
-
-    renderAccountUI();
-    renderMargin();
-    return safeAccount;
-  }
-
   function renderMargin() {
     const size = Number(document.getElementById('brokerOrderSize')?.value || document.getElementById('brokerOrderSizeBottom')?.value || 0);
     const meta = getActiveSymbolMeta();
@@ -3039,10 +3108,9 @@ if (window.__LEONES_BOOTED__) {
   function symbolCardHtml(item) {
     const q = currentQuote(item.symbol);
     const price = q?.price ?? TR.symbolPrices?.[item.symbol]?.price ?? null;
-    const provider = getProviderLabel(item.polygonSymbol || item.tvSymbol || item.symbol);
-    const icon = MARKET_ICONS[item.market] || '●';
-    const market = normalizeMarketName(item.market || inferMarketBySymbol(item.symbol));
-    const isActive = String(state.activeSymbol || '').toUpperCase() === String(item.symbol || '').toUpperCase();
+    const provider = getProviderFromTvSymbol(item.tvSymbol);
+    const icon = getMarketIcon(item.market);
+    const market = normalizeMarketName(item.market);
 
     return `
       <button class="broker-symbol-card ${isActive ? 'active' : ''}" data-symbol="${escapeHtml(item.symbol)}" data-polygon="${escapeHtml(item.polygonSymbol || '')}" data-market="${escapeHtml(market)}">
