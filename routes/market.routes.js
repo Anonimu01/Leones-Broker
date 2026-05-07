@@ -24,7 +24,6 @@ function normalizeSymbolInput(s) {
     .replace(/^I:/, "")
     .replace(/^B:/, "");
 
-  // Quita separadores pero conserva letras y números para comparar mejor
   value = value.replace(/[^A-Z0-9_]/g, "");
 
   return value || null;
@@ -82,8 +81,7 @@ export default function marketRoutesFactory(deps = {}) {
   const polygonSocket = deps.polygonSocket || null;
   const priceHandler = deps.priceHandler || global.priceHandler || null;
 
-  // 🔥 CONFIG CRÍTICA
-  const SAFE_FALLBACK = true; // si lo pones false, bloquea trading sin precio real
+  const SAFE_FALLBACK = true;
 
   // =========================
   // STORE
@@ -159,8 +157,6 @@ export default function marketRoutesFactory(deps = {}) {
   }
 
   function getFallbackPrice() {
-    // Fallback controlado para evitar que el frontend se rompa
-    // y para que /price nunca devuelva null.
     return Number((100 + Math.random() * 20).toFixed(6));
   }
 
@@ -190,7 +186,6 @@ export default function marketRoutesFactory(deps = {}) {
       let price = findLivePriceForSymbol(symbol);
       let source = "live";
 
-      // Si no hay precio real en store, intenta variantes todavía más tolerantes
       if (!price) {
         const store = getPriceStore();
         const variants = buildSymbolAliases(symbol);
@@ -219,7 +214,11 @@ export default function marketRoutesFactory(deps = {}) {
             return candidates.some((candidate) => {
               const c = compactSymbol(candidate);
               const v = compactSymbol(variant);
-              return c && v && (c === v || c.includes(v) || v.includes(c) || sameMarketSymbol(c, v));
+              return (
+                c &&
+                v &&
+                (c === v || c.includes(v) || v.includes(c) || sameMarketSymbol(c, v))
+              );
             });
           });
 
@@ -234,7 +233,6 @@ export default function marketRoutesFactory(deps = {}) {
         }
       }
 
-      // Fallback controlado si no hay precio real
       if (!price) {
         if (!SAFE_FALLBACK) {
           return res.status(404).json({
@@ -341,30 +339,75 @@ export default function marketRoutesFactory(deps = {}) {
 
       const symbol = normalizeSymbolInput(rawSymbol);
 
+      // IMPORTANTE: no devolver 400 si no hay símbolo
       if (!symbol) {
-        return res.status(400).json({
-          ok: false,
-          error: "missing_symbol",
+        return res.json({
+          ok: true,
+          symbol: null,
           price: null,
+          currentPrice: null,
+          close: null,
+          last: null,
+          updatedAt: new Date().toISOString(),
+          message: "symbol_missing",
         });
       }
 
-      const price = findLivePriceForSymbol(symbol) || (SAFE_FALLBACK ? getFallbackPrice() : null);
+      const livePrice = findLivePriceForSymbol(symbol);
+
+      let price = livePrice;
 
       if (!price) {
-        return res.status(404).json({
+        try {
+          const store = getPriceStore();
+          const found = findBestPriceMatch(symbol, store);
+
+          if (found) {
+            price = extractQuotePrice(found);
+          }
+        } catch {}
+      }
+
+      if (!price) {
+        if (!SAFE_FALLBACK) {
+          return res.json({
+            ok: false,
+            error: "price_not_found",
+            symbol,
+            price: null,
+            currentPrice: null,
+            close: null,
+            last: null,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        price = getFallbackPrice();
+      }
+
+      const numericPrice = Number(price);
+
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+        return res.json({
           ok: false,
-          error: "price_not_found",
+          error: "price_invalid",
           symbol,
           price: null,
+          currentPrice: null,
+          close: null,
+          last: null,
+          updatedAt: new Date().toISOString(),
         });
       }
 
       return res.json({
         ok: true,
         symbol,
-        price: Number(price.toFixed(6)),
-        source: "live",
+        price: Number(numericPrice.toFixed(6)),
+        currentPrice: Number(numericPrice.toFixed(6)),
+        close: Number(numericPrice.toFixed(6)),
+        last: Number(numericPrice.toFixed(6)),
+        updatedAt: new Date().toISOString(),
       });
     } catch (err) {
       console.error("LATEST PRICE ERROR:", err);
