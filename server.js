@@ -149,10 +149,6 @@ const openTradeLocks = new Map();
 const liveSyncTimers = new Map();
 const activeOrders = new Set();
 
-/* =========================
-   LOCK SYSTEM
-   ========================= */
-
 function makeOpenLockKey(userId, symbol, side, qty) {
   return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}:${String(qty || "")}`;
 }
@@ -197,10 +193,6 @@ function releaseActiveOrder(key) {
   activeOrders.delete(key);
 }
 
-/* =========================
-   SYMBOL NORMALIZATION
-   ========================= */
-
 function compactSymbol(value) {
   return String(value || "")
     .trim()
@@ -208,17 +200,20 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeSymbol(value) {
-  let s = String(value || "").trim().toUpperCase();
+function symbolVariants(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
+  const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
+  const afterDash = afterSlash.includes("-") ? afterSlash.split("-").join("") : afterSlash;
 
-  if (!s) return "";
-
-  // toma la parte después del prefijo si viene tipo OANDA:EUR_USD, C:CADJPY, BINANCE:BTCUSDT, etc.
-  if (s.includes(":")) {
-    s = s.split(":").pop();
-  }
-
-  return compactSymbol(s);
+  return [
+    ...new Set([
+      compactSymbol(raw),
+      compactSymbol(afterColon),
+      compactSymbol(afterSlash),
+      compactSymbol(afterDash),
+    ]),
+  ].filter(Boolean);
 }
 
 function sameMarketSymbol(a = "", b = "") {
@@ -228,10 +223,6 @@ function sameMarketSymbol(a = "", b = "") {
   return x === y || x.includes(y) || y.includes(x);
 }
 
-/* =========================
-   NORMALIZERS
-   ========================= */
-
 function normalizeSide(value) {
   const s = String(value || "").trim().toUpperCase();
   if (["BUY", "LONG", "BULL", "CALL"].includes(s)) return "BUY";
@@ -240,7 +231,7 @@ function normalizeSide(value) {
 }
 
 function normalizePositionSymbol(body = {}) {
-  return normalizeSymbol(
+  return String(
     body.symbol ||
       body.tvSymbol ||
       body.selectedSymbol ||
@@ -251,7 +242,9 @@ function normalizePositionSymbol(body = {}) {
       body.ticker ||
       body.asset ||
       ""
-  );
+  )
+    .trim()
+    .toUpperCase();
 }
 
 function normalizeQty(body = {}) {
@@ -275,16 +268,30 @@ function normalizePrice(body = {}) {
   const raw =
     body.price ??
     body.entryPrice ??
+    body.entry_price ??
     body.currentPrice ??
+    body.current_price ??
     body.limitPrice ??
+    body.limit_price ??
     body.stopPrice ??
+    body.stop_price ??
+    body.openPrice ??
+    body.open_price ??
+    body.tvPrice ??
+    body.tv_price ??
     body.lastPrice ??
+    body.last_price ??
     body.marketPrice ??
+    body.market_price ??
+    body.quotePrice ??
+    body.quote_price ??
+    body.executionPrice ??
+    body.execution_price ??
     body.ask ??
     body.bid ??
     body.mark ??
     null;
-
+  if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -294,59 +301,19 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/* =========================
-   PRICE STORE (FIX CRÍTICO)
-   ========================= */
-
 function getPriceStore() {
   try {
     const raw = priceHandler?.prices;
     if (!raw) return {};
-
     if (raw instanceof Map) return Object.fromEntries(raw.entries());
     if (typeof raw === "object") return raw;
-
     return {};
   } catch {
     return {};
   }
 }
 
-/* =========================
-   PRICE WRITER (🔥 FIX REAL)
-   ========================= */
-
-function savePrice(symbol, price) {
-  if (!priceHandler?.prices) return;
-
-  const clean = normalizeSymbol(symbol);
-  const numeric = Number(price);
-
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
-
-  const payload = {
-    price: numeric,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (priceHandler.prices instanceof Map) {
-    priceHandler.prices.set(clean, payload);
-  } else if (typeof priceHandler.prices === "object") {
-    priceHandler.prices[clean] = payload;
-  }
-
-  console.log("📥 PRICE UPDATE:", clean, numeric);
-}
-
-/* =========================
-   PRICE EXTRACTOR
-   ========================= */
-
 function extractQuotePrice(item = {}) {
-  // soporta número directo, string numérico o objeto
-  const primitive = toNumber(item);
-  if (Number.isFinite(primitive) && primitive > 0) return primitive;
-
   const direct =
     toNumber(item.price) ??
     toNumber(item.last) ??
@@ -367,14 +334,14 @@ function extractQuotePrice(item = {}) {
   return null;
 }
 
-/* =========================
-   QUOTES NORMALIZER
-   ========================= */
-
 function normalizeQuote(symbol, item = {}) {
+  const label =
+    item.label ||
+    item.name ||
+    (symbol.split(":").pop() || symbol).replace("_", "/");
   return {
     symbol,
-    label: item.label || symbol,
+    label,
     market: item.market || "Unknown",
     price: extractQuotePrice(item),
     bid: toNumber(item.bid),
@@ -385,25 +352,21 @@ function normalizeQuote(symbol, item = {}) {
     volume: toNumber(item.volume),
     change: toNumber(item.change),
     changePercent: toNumber(item.changePercent),
-    updatedAt: item.updatedAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
     raw: item,
   };
 }
-
-/* =========================
-   SAMPLE DATA
-   ========================= */
 
 const SAMPLE_SYMBOLS = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
   { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
   { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
 ];
-
-/* =========================
-   MARKET BUILDER
-   ========================= */
 
 function buildQuotesArray() {
   const store = getPriceStore();
@@ -425,36 +388,15 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest: quotes[0] || null,
-  };
+  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null };
 }
 
-/* =========================
-   🔥 FIX FINAL DEL BUG
-   ========================= */
-
 function getCurrentPriceForSymbol(symbol) {
-  const target = normalizeSymbol(symbol);
-  if (!target) return null;
+  const targetCompact = compactSymbol(symbol);
+  if (!targetCompact) return null;
 
   const store = getPriceStore();
 
-  // 1) búsqueda exacta por key normalizada
-  for (const [key, item] of Object.entries(store)) {
-    const keyNorm = normalizeSymbol(key);
-    if (keyNorm === target) {
-      const px = extractQuotePrice(item);
-      if (Number.isFinite(px) && px > 0) return px;
-    }
-  }
-
-  // 2) búsqueda por candidatos asociados al item
   for (const [key, item] of Object.entries(store)) {
     const candidates = [
       key,
@@ -465,23 +407,23 @@ function getCurrentPriceForSymbol(symbol) {
       item?.instrument,
       item?.marketSymbol,
       item?.asset,
-      item?.name,
     ].filter(Boolean);
 
-    const match = candidates.some((c) => {
-      const clean = normalizeSymbol(c);
+    const matched = candidates.some((candidate) => {
+      const c = compactSymbol(candidate);
+      if (!c) return false;
       return (
-        clean === target ||
-        clean.includes(target) ||
-        target.includes(clean) ||
-        sameMarketSymbol(clean, target)
+        c === targetCompact ||
+        c.includes(targetCompact) ||
+        targetCompact.includes(c) ||
+        sameMarketSymbol(c, targetCompact)
       );
     });
 
-    if (!match) continue;
+    if (!matched) continue;
 
-    const price = extractQuotePrice(item);
-    if (Number.isFinite(price) && price > 0) return price;
+    const px = extractQuotePrice(item);
+    if (Number.isFinite(px) && px > 0) return px;
   }
 
   return null;
@@ -1176,63 +1118,15 @@ app.post("/api/_send_test_email", async (req, res) => {
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
-app.get("/api/price", (req, res) => {
-  try {
-    const symbol = normalizeSymbol(
-      String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "")
-    );
-
-    if (!symbol) {
-      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
-    }
-
-    console.log("📊 PRICE REQUEST:", symbol);
-
-    const price = getCurrentPriceForSymbol(symbol);
-
-    if (priceHandler?.prices) {
-      const keys =
-        priceHandler.prices instanceof Map
-          ? Array.from(priceHandler.prices.keys())
-          : Object.keys(priceHandler.prices);
-
-      console.log("📦 KEYS EN MEMORIA:", keys);
-    }
-
-    if (price === null || price === undefined || !Number.isFinite(Number(price)) || Number(price) <= 0) {
-      return res.status(404).json({
-        ok: false,
-        error: "Precio no disponible",
-        symbol,
-      });
-    }
-
-    return res.json({
-      ok: true,
-      symbol,
-      price: Number(price),
-      currentPrice: Number(price),
-      last: Number(price),
-      close: Number(price),
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("/api/price error:", err);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
 
 app.get("/api/markets", (req, res) =>
   res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"] })
 );
-
 app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
-app.get("/api/api/markets", (req, res) =>
-  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
-);
+app.get("/api/api/markets", (req, res) => res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] }));
 
 try {
   if (typeof marketRoutesFactory === "function") {
@@ -1246,21 +1140,9 @@ try {
 
 app.get("/api/quotes", (req, res) => res.json(buildMarketPayload().quotes));
 
-/* =========================
-   🔥 GET PRICE (FIX REAL)
-========================= */
-// ⚠️ ELIMINADO DUPLICADO DE /api/price (YA EXISTE ARRIBA)
-
-/* =========================
-   EXISTENTE (NO TOCAR)
-========================= */
-
 app.get("/api/latest", (req, res) => {
   try {
-    const symbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
-    ).trim();
-
+    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
       return res.json({
@@ -1273,7 +1155,6 @@ app.get("/api/latest", (req, res) => {
         updatedAt: new Date().toISOString(),
       });
     }
-
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
     console.error("/api/latest error:", e);
@@ -1282,13 +1163,9 @@ app.get("/api/latest", (req, res) => {
 });
 
 app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
-
 app.get("/api/market/latest", (req, res) => {
   try {
-    const symbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
-    ).trim();
-
+    const symbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "").trim();
     if (symbol) {
       const price = getCurrentPriceForSymbol(symbol);
       return res.json({
@@ -1301,7 +1178,6 @@ app.get("/api/market/latest", (req, res) => {
         updatedAt: new Date().toISOString(),
       });
     }
-
     return res.json(buildMarketPayload().latest || {});
   } catch (e) {
     console.error("/api/market/latest error:", e);
@@ -1309,18 +1185,12 @@ app.get("/api/market/latest", (req, res) => {
   }
 });
 
-app.get("/api/market/polygon/quotes", (req, res) =>
-  res.json(buildMarketPayload())
-);
-
-app.get("/api/market/polygon/symbols", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
+app.get("/api/market/polygon/quotes", (req, res) => res.json(buildMarketPayload()));
+app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 
 app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
-
     if (prices && Object.keys(prices).length) {
       return res.json(
         Object.keys(prices).map((k) => ({
@@ -1330,13 +1200,13 @@ app.get("/api/symbols", (req, res) => {
         }))
       );
     }
-
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
     console.error("api/symbols error:", err);
     return res.json(SAMPLE_SYMBOLS);
   }
 });
+
 /* ======================================================
    ACCOUNT / WALLET / POSITIONS
    ====================================================== */
