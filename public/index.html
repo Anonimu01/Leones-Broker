@@ -2081,240 +2081,121 @@ if (window.__LEONES_BOOTED__) {
   const NS = window._LEONES = window._LEONES || {};
   const TR = window.__LEONES_TRADING__ = window.__LEONES_TRADING__ || {};
 
-const API_BASE = String(
-  window.API_BASE ||
-  window.API ||
-  (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
-).replace(/\/+$/, '');
+  const API_BASE = String(
+    window.API_BASE ||
+    window.API ||
+    (location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api')
+  ).replace(/\/+$/, '');
 
-const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
-const ROOT_ID = 'broker-ext2-root';
-const DEFAULT_CURRENCY = 'US$';
+  const SESSION_KEY = window.SESSION_KEY || 'BROKERPRO_SESSION_USER';
+  const ROOT_ID = 'broker-ext2-root';
+  const DEFAULT_CURRENCY = 'US$';
 
-const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
+  const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
 
-const MARKET_ICONS = {
-  Forex: '🌍',
-  Crypto: '₿',
-  Indices: '📈',
-  Stocks: '🏢',
-  Commodities: '⛏️'
-};
+  const MARKET_ICONS = {
+    Forex: '🌍',
+    Crypto: '₿',
+    Indices: '📈',
+    Stocks: '🏢',
+    Commodities: '⛏️'
+  };
+  const SYMBOL_LABELS = {
+    EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
+    NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
+    EURAUD: 'EUR/AUD', AUDJPY: 'AUD/JPY', CHFJPY: 'CHF/JPY', CADJPY: 'CAD/JPY', EURCAD: 'EUR/CAD',
+    EURNZD: 'EUR/NZD', GBPCAD: 'GBP/CAD', GBPAUD: 'GBP/AUD', GBPNZD: 'GBP/NZD', NZDJPY: 'NZD/JPY',
 
-/* ======================================================
-   POLYGON ALIASES
-   ====================================================== */
+    BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT', SOLUSDT: 'SOL/USDT', XRPUSDT: 'XRP/USDT',
+    ADAUSDT: 'ADA/USDT', DOGEUSDT: 'DOGE/USDT', DOTUSDT: 'DOT/USDT', LTCUSDT: 'LTC/USDT', LINKUSDT: 'LINK/USDT',
+    BCHUSDT: 'BCH/USDT', AVAXUSDT: 'AVAX/USDT', TRXUSDT: 'TRX/USDT', TONUSDT: 'TON/USDT', SHIBUSDT: 'SHIB/USDT',
 
-const POLYGON_ALIAS_MAP = {
-  GOLD: 'XAUUSD',
-  SILVER: 'XAGUSD',
-  PLATINUM: 'XPTUSD',
-  PALLADIUM: 'XPDUSD',
-  OIL: 'USOIL',
-  WTI: 'USOIL',
-  BRENT: 'UKOIL',
-  NATGAS: 'NATGAS',
-  GAS: 'NATGAS',
-  COPPER: 'COPPER',
-  COCOA: 'COCOA',
-  COFFEE: 'COFFEE',
-  WHEAT: 'WHEAT',
-  CORN: 'CORN',
+    SPX500: 'S&P 500', NAS100: 'NASDAQ 100', US30: 'US30', UK100: 'FTSE 100', GER40: 'DAX 40',
+    FRA40: 'CAC 40', JPN225: 'Nikkei 225', AUS200: 'ASX 200', HK50: 'Hang Seng', NDX100: 'NASDAQ 100',
 
-  SP500: 'SPX500',
-  SPX: 'SPX500',
-  SPX500: 'SPX500',
-  NASDAQ100: 'NAS100',
-  NAS100: 'NAS100',
-  NDX100: 'NDX100',
-  US30: 'US30',
-  DOWJONES: 'US30',
-  DAX40: 'GER40',
-  GER40: 'GER40',
-  FTSE100: 'UK100',
-  UK100: 'UK100',
-  NIKKEI225: 'JPN225',
-  JPN225: 'JPN225',
-  ASX200: 'AUS200',
-  AUS200: 'AUS200',
-  HANGSENG: 'HK50',
-  HK50: 'HK50',
+    AAPL: 'Apple', MSFT: 'Microsoft', AMZN: 'Amazon', TSLA: 'Tesla', NVDA: 'NVIDIA', META: 'Meta',
+    GOOGL: 'Alphabet', NFLX: 'Netflix', AMD: 'AMD', PYPL: 'PayPal', INTC: 'Intel', DIS: 'Disney',
+    BA: 'Boeing', KO: 'Coca-Cola', MCD: 'McDonald’s', XOM: 'Exxon Mobil', JPM: 'JPMorgan Chase',
+    BAC: 'Bank of America', ORCL: 'Oracle', CRM: 'Salesforce',
 
-  EURUSD: 'EURUSD',
-  GBPUSD: 'GBPUSD',
-  USDJPY: 'USDJPY',
-  USDCHF: 'USDCHF',
-  AUDUSD: 'AUDUSD',
-  NZDUSD: 'NZDUSD',
-  USDCAD: 'USDCAD',
-  EURGBP: 'EURGBP',
-  EURJPY: 'EURJPY',
-  GBPJPY: 'GBPJPY',
-  EURAUD: 'EURAUD',
-  AUDJPY: 'AUDJPY',
-  CHFJPY: 'CHFJPY',
-  CADJPY: 'CADJPY',
-  EURCAD: 'EURCAD',
-  EURNZD: 'EURNZD',
-  GBPCAD: 'GBPCAD',
-  GBPAUD: 'GBPAUD',
-  GBPNZD: 'GBPNZD',
-  NZDJPY: 'NZDJPY',
-};
+    XAUUSD: 'Gold', XAGUSD: 'Silver', XPTUSD: 'Platinum', XPDUSD: 'Palladium', USOIL: 'WTI Oil',
+    UKOIL: 'Brent Oil', NATGAS: 'Natural Gas', COPPER: 'Copper', COCOA: 'Cocoa', COFFEE: 'Coffee',
+    WHEAT: 'Wheat', CORN: 'Corn'
+  };
 
-/* ======================================================
-   SYMBOL LABELS
-   ====================================================== */
+  const TV_HINTS = {
+    EURUSD: 'OANDA:EURUSD', GBPUSD: 'OANDA:GBPUSD', USDJPY: 'OANDA:USDJPY', USDCHF: 'OANDA:USDCHF',
+    AUDUSD: 'OANDA:AUDUSD', NZDUSD: 'OANDA:NZDUSD', USDCAD: 'OANDA:USDCAD', EURGBP: 'OANDA:EURGBP',
+    EURJPY: 'OANDA:EURJPY', GBPJPY: 'OANDA:GBPJPY', EURAUD: 'OANDA:EURAUD', AUDJPY: 'OANDA:AUDJPY',
 
-const SYMBOL_LABELS = {
-  EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
-  NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
-  EURAUD: 'EUR/AUD', AUDJPY: 'AUD/JPY', CHFJPY: 'CHF/JPY', CADJPY: 'CAD/JPY', EURCAD: 'EUR/CAD',
-  EURNZD: 'EUR/NZD', GBPCAD: 'GBP/CAD', GBPAUD: 'GBP/AUD', GBPNZD: 'GBP/NZD', NZDJPY: 'NZD/JPY',
+    BTCUSDT: 'BINANCE:BTCUSDT', ETHUSDT: 'BINANCE:ETHUSDT', BNBUSDT: 'BINANCE:BNBUSDT',
+    SOLUSDT: 'BINANCE:SOLUSDT', XRPUSDT: 'BINANCE:XRPUSDT', ADAUSDT: 'BINANCE:ADAUSDT',
+    DOGEUSDT: 'BINANCE:DOGEUSDT', DOTUSDT: 'BINANCE:DOTUSDT', LTCUSDT: 'BINANCE:LTCUSDT',
+    LINKUSDT: 'BINANCE:LINKUSDT', BCHUSDT: 'BINANCE:BCHUSDT', AVAXUSDT: 'BINANCE:AVAXUSDT',
+    TRXUSDT: 'BINANCE:TRXUSDT', TONUSDT: 'BINANCE:TONUSDT', SHIBUSDT: 'BINANCE:SHIBUSDT',
 
-  BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT', SOLUSDT: 'SOL/USDT', XRPUSDT: 'XRP/USDT',
-  ADAUSDT: 'ADA/USDT', DOGEUSDT: 'DOGE/USDT', DOTUSDT: 'DOT/USDT', LTCUSDT: 'LTC/USDT', LINKUSDT: 'LINK/USDT',
-  BCHUSDT: 'BCH/USDT', AVAXUSDT: 'AVAX/USDT', TRXUSDT: 'TRX/USDT', TONUSDT: 'TON/USDT', SHIBUSDT: 'SHIB/USDT',
+    AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', AMZN: 'NASDAQ:AMZN', TSLA: 'NASDAQ:TSLA',
+    NVDA: 'NASDAQ:NVDA', META: 'NASDAQ:META', GOOGL: 'NASDAQ:GOOGL', NFLX: 'NASDAQ:NFLX',
+    AMD: 'NASDAQ:AMD', PYPL: 'NASDAQ:PYPL', INTC: 'NASDAQ:INTC', DIS: 'NYSE:DIS', BA: 'NYSE:BA',
+    KO: 'NYSE:KO', MCD: 'NYSE:MCD', XOM: 'NYSE:XOM', JPM: 'NYSE:JPM', BAC: 'NYSE:BAC',
+    ORCL: 'NYSE:ORCL', CRM: 'NYSE:CRM',
 
-  SPX500: 'S&P 500', NAS100: 'NASDAQ 100', US30: 'US30', UK100: 'FTSE 100', GER40: 'DAX 40',
-  FRA40: 'CAC 40', JPN225: 'Nikkei 225', AUS200: 'ASX 200', HK50: 'Hang Seng', NDX100: 'NASDAQ 100',
+    XAUUSD: 'TVC:GOLD', XAGUSD: 'TVC:SILVER', XPTUSD: 'TVC:PLATINUM', XPDUSD: 'TVC:PALLADIUM',
+    USOIL: 'TVC:USOIL', UKOIL: 'TVC:UKOIL', NATGAS: 'TVC:NATGAS', COPPER: 'TVC:COPPER'
+  };
 
-  AAPL: 'Apple', MSFT: 'Microsoft', AMZN: 'Amazon', TSLA: 'Tesla', NVDA: 'NVIDIA', META: 'Meta',
-  GOOGL: 'Alphabet', NFLX: 'Netflix', AMD: 'AMD', PYPL: 'PayPal', INTC: 'Intel', DIS: 'Disney',
-  BA: 'Boeing', KO: 'Coca-Cola', MCD: 'McDonald’s', XOM: 'Exxon Mobil', JPM: 'JPMorgan Chase',
-  BAC: 'Bank of America', ORCL: 'Oracle', CRM: 'Salesforce',
+  const FALLBACK_SEEDS = {
+    Forex: ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD', 'EURGBP', 'EURJPY', 'GBPJPY', 'EURAUD', 'AUDJPY', 'CHFJPY', 'CADJPY', 'EURCAD', 'EURNZD', 'GBPCAD', 'GBPAUD', 'GBPNZD', 'NZDJPY'],
+    Crypto: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT', 'LTCUSDT', 'LINKUSDT', 'BCHUSDT', 'AVAXUSDT', 'TRXUSDT', 'TONUSDT', 'SHIBUSDT'],
+    Indices: ['SPX500', 'NAS100', 'US30', 'UK100', 'GER40', 'FRA40', 'JPN225', 'AUS200', 'HK50', 'NDX100'],
+    Stocks: ['AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'GOOGL', 'NFLX', 'AMD', 'PYPL', 'INTC', 'DIS', 'BA', 'KO', 'MCD', 'XOM', 'JPM', 'BAC', 'ORCL', 'CRM'],
+    Commodities: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'USOIL', 'UKOIL', 'NATGAS', 'COPPER', 'COCOA', 'COFFEE', 'WHEAT', 'CORN']
+  };
 
-  XAUUSD: 'Gold', XAGUSD: 'Silver', XPTUSD: 'Platinum', XPDUSD: 'Palladium',
-  USOIL: 'WTI Oil', UKOIL: 'Brent Oil', NATGAS: 'Natural Gas', COPPER: 'Copper',
-  COCOA: 'Cocoa', COFFEE: 'Coffee', WHEAT: 'Wheat', CORN: 'Corn'
-};
+  const DEFAULT_SYMBOLS = Object.entries(FALLBACK_SEEDS).flatMap(([market, items]) =>
+    items.map(sym => ({
+      symbol: sym,
+      tvSymbol: TV_HINTS[sym] || (
+        market === 'Crypto' ? `BINANCE:${sym}` :
+        market === 'Stocks' ? `NASDAQ:${sym}` :
+        market === 'Indices' || market === 'Commodities' ? `TVC:${sym}` :
+        `OANDA:${sym}`
+      ),
+      label: SYMBOL_LABELS[sym] || sym,
+      market,
+      leverage: 'N/A',
+      spread: 'Variable',
+      hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
+      contract: 'N/A',
+      volatility: 'N/A',
+      source: 'catálogo'
+    }))
+  );
 
-/* ======================================================
-   POLYGON TV / SYMBOL HINTS
-   ====================================================== */
+  const state = {
+    started: false,
+    booted: false,
+    markets: [],
+    quotes: [],
+    account: null,
+    positions: [],
+    activeSymbol: null,
+    marketFilter: 'All',
+    marketSearch: '',
+    lastChartSymbol: null,
+    pollTimer: null
+  };
 
-const TV_HINTS = {
-  /* Forex -> Polygon C: */
-  EURUSD: 'C:EURUSD', GBPUSD: 'C:GBPUSD', USDJPY: 'C:USDJPY', USDCHF: 'C:USDCHF',
-  AUDUSD: 'C:AUDUSD', NZDUSD: 'C:NZDUSD', USDCAD: 'C:USDCAD', EURGBP: 'C:EURGBP',
-  EURJPY: 'C:EURJPY', GBPJPY: 'C:GBPJPY', EURAUD: 'C:EURAUD', AUDJPY: 'C:AUDJPY',
-  CHFJPY: 'C:CHFJPY', CADJPY: 'C:CADJPY', EURCAD: 'C:EURCAD', EURNZD: 'C:EURNZD',
-  GBPCAD: 'C:GBPCAD', GBPAUD: 'C:GBPAUD', GBPNZD: 'C:GBPNZD', NZDJPY: 'C:NZDJPY',
+  const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
+  const warn = (...a) => { try { console.warn('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
 
-  /* Crypto -> Polygon X: */
-  BTCUSDT: 'X:BTCUSD', ETHUSDT: 'X:ETHUSD', BNBUSDT: 'X:BNBUSD',
-  SOLUSDT: 'X:SOLUSD', XRPUSDT: 'X:XRPUSD', ADAUSDT: 'X:ADAUSD',
-  DOGEUSDT: 'X:DOGEUSD', DOTUSDT: 'X:DOTUSD', LTCUSDT: 'X:LTCUSD',
-  LINKUSDT: 'X:LINKUSD', BCHUSDT: 'X:BCHUSD', AVAXUSDT: 'X:AVAXUSD',
-  TRXUSDT: 'X:TRXUSD', TONUSDT: 'X:TONUSD', SHIBUSDT: 'X:SHIBUSD',
-
-  /* Stocks -> ticker directo */
-  AAPL: 'AAPL', MSFT: 'MSFT', AMZN: 'AMZN', TSLA: 'TSLA', NVDA: 'NVDA',
-  META: 'META', GOOGL: 'GOOGL', NFLX: 'NFLX', AMD: 'AMD', PYPL: 'PYPL',
-  INTC: 'INTC', DIS: 'DIS', BA: 'BA', KO: 'KO', MCD: 'MCD', XOM: 'XOM',
-  JPM: 'JPM', BAC: 'BAC', ORCL: 'ORCL', CRM: 'CRM',
-
-  /* Índices -> Polygon I: */
-  SPX500: 'I:SPX', NAS100: 'I:NDX', NDX100: 'I:NDX',
-  US30: 'I:DJI', UK100: 'I:FTSE', GER40: 'I:DAX', FRA40: 'I:CAC',
-  JPN225: 'I:NIKKEI', AUS200: 'I:ASX', HK50: 'I:HSI',
-
-  /* Commodities:
-     Polygon documenta cobertura real para Gold/Silver vía forex:
-     C:XAUUSD y C:XAGUSD. El resto queda como alias de UI/futuros. */
-  XAUUSD: 'C:XAUUSD',
-  XAGUSD: 'C:XAGUSD',
-  XPTUSD: 'PL',
-  XPDUSD: 'PA',
-  USOIL: 'CL',
-  UKOIL: 'BZ',
-  NATGAS: 'NG',
-  COPPER: 'HG',
-  COCOA: 'CC',
-  COFFEE: 'KC',
-  WHEAT: 'ZW',
-  CORN: 'ZC'
-};
-
-/* ======================================================
-   FALLBACK SEEDS
-   ====================================================== */
-
-const FALLBACK_SEEDS = {
-  Forex: [
-    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD',
-    'EURGBP', 'EURJPY', 'GBPJPY', 'EURAUD', 'AUDJPY', 'CHFJPY', 'CADJPY',
-    'EURCAD', 'EURNZD', 'GBPCAD', 'GBPAUD', 'GBPNZD', 'NZDJPY'
-  ],
-  Crypto: [
-    'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT',
-    'DOGEUSDT', 'DOTUSDT', 'LTCUSDT', 'LINKUSDT', 'BCHUSDT', 'AVAXUSDT',
-    'TRXUSDT', 'TONUSDT', 'SHIBUSDT'
-  ],
-  Indices: [
-    'SPX500', 'NAS100', 'US30', 'UK100', 'GER40', 'FRA40',
-    'JPN225', 'AUS200', 'HK50', 'NDX100'
-  ],
-  Stocks: [
-    'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'GOOGL', 'NFLX',
-    'AMD', 'PYPL', 'INTC', 'DIS', 'BA', 'KO', 'MCD', 'XOM',
-    'JPM', 'BAC', 'ORCL', 'CRM'
-  ],
-  Commodities: [
-    'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'USOIL', 'UKOIL',
-    'NATGAS', 'COPPER', 'COCOA', 'COFFEE', 'WHEAT', 'CORN'
-  ]
-};
-
-/* ======================================================
-   DEFAULT SYMBOLS
-   ====================================================== */
-
-const DEFAULT_SYMBOLS = Object.entries(FALLBACK_SEEDS).flatMap(([market, items]) =>
-  items.map(sym => ({
-    symbol: sym,
-    tvSymbol: TV_HINTS[sym] || (
-      market === 'Crypto' ? `X:${sym.replace(/USDT$/i, 'USD')}` :
-      market === 'Stocks' ? sym :
-      market === 'Indices' ? `I:${sym}` :
-      market === 'Commodities' ? (sym === 'XAUUSD' || sym === 'XAGUSD' ? `C:${sym}` : sym) :
-      `C:${sym}`
-    ),
-    label: SYMBOL_LABELS[sym] || sym,
-    market,
-    leverage: 'N/A',
-    spread: 'Variable',
-    hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
-    contract: market === 'Commodities' ? 'Futures' : 'N/A',
-    volatility: 'N/A',
-    source: 'polygon'
-  }))
-);
-
-const state = {
-  started: false,
-  booted: false,
-  markets: [],
-  quotes: [],
-  account: null,
-  positions: [],
-  activeSymbol: null,
-  marketFilter: 'All',
-  marketSearch: '',
-  lastChartSymbol: null,
-  pollTimer: null
-};
-
-const log = (...a) => { try { console.log('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
-const warn = (...a) => { try { console.warn('[BROKER-EXT2-REAL]', ...a); } catch (e) {} };
-
-let ACCOUNT = {
-  balance: 1000,
-  equity: 1000,
-  usedMargin: 0,
-  freeMargin: 1000,
-  marginLevel: 100
-};
+  let ACCOUNT = {
+    balance: 1000,
+    equity: 1000,
+    usedMargin: 0,
+    freeMargin: 1000,
+    marginLevel: 100
+  };
 
   let OPEN_TRADES = [];
   let marginWarningInterval = null;
