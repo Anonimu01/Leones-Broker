@@ -5023,34 +5023,6 @@ async function loadPositions() {
       symbolPrices: TR.symbolPrices || {}
     };
   }
-  function toPolygonSymbol(sym = "") {
-  sym = normalizeSymbol(sym);
-
-  const map = {
-    EURUSD: 'C:EURUSD',
-    GBPUSD: 'C:GBPUSD',
-    USDJPY: 'C:USDJPY',
-    USDCHF: 'C:USDCHF',
-    AUDUSD: 'C:AUDUSD',
-    NZDUSD: 'C:NZDUSD',
-    USDCAD: 'C:USDCAD',
-
-    BTCUSDT: 'X:BTCUSD',
-    ETHUSDT: 'X:ETHUSD',
-
-    XAUUSD: 'C:XAUUSD',
-    XAGUSD: 'C:XAGUSD',
-
-    // 🔥 INDICES CRÍTICOS (TE FALTABAN)
-    SPX500: 'I:SPX',
-    NAS100: 'I:NDX',
-    US30: 'I:DJI',
-    GER40: 'I:DAX',
-    UK100: 'I:FTSE'
-  };
-
-  return map[sym] || sym;
-}
 
 /* =========================
    NORMALIZE SYMBOL
@@ -5083,9 +5055,6 @@ function getActiveSymbol() {
   );
 }
 
-    
-
-  
 /* =========================
    🔥 LIVE PRICE SYNC (FIXED)
 ========================= */
@@ -6172,4 +6141,5 @@ function createFloatingTradesPanel() {
 
 </body>
 </html>
+
 
