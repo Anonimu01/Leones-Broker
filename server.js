@@ -1766,28 +1766,127 @@ app.post("/api/trade/open", async (req, res) => {
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
     const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
-    let price = resolveOrderPrice(body, symbol);
+   /////////////////////////////////////////////////////////
+// FIX REAL DEL PRECIO
+/////////////////////////////////////////////////////////
 
-    if (!price) {
-      const market = getCurrentPriceForSymbol(symbol);
-      if (market && Number.isFinite(market) && market > 0) {
-        price = market;
-      } else {
-        const alt = Number(body.entryPrice || body.price || body.currentPrice || 1);
-        price = Number.isFinite(alt) && alt > 0 ? alt : null;
-        if (price) console.warn("⚠️ Usando precio fallback temporal:", price);
+let price = null;
+
+// 1. PRECIO DIRECTO DEL BODY
+const directCandidates = [
+  body.price,
+  body.entryPrice,
+  body.currentPrice,
+  body.marketPrice,
+  body.lastPrice,
+  body.close,
+  body.ask,
+  body.bid,
+];
+
+for (const value of directCandidates) {
+  const n = Number(value);
+
+  if (Number.isFinite(n) && n > 0) {
+    price = n;
+    break;
+  }
+}
+
+/////////////////////////////////////////////////////////
+// 2. GET CURRENT PRICE
+/////////////////////////////////////////////////////////
+
+if (
+  !Number.isFinite(price) ||
+  price <= 0
+) {
+  try {
+    const marketPrice = getCurrentPriceForSymbol(symbol);
+
+    if (
+      Number.isFinite(marketPrice) &&
+      marketPrice > 0
+    ) {
+      price = marketPrice;
+
+      console.log(
+        "✅ Precio obtenido desde getCurrentPriceForSymbol:",
+        price
+      );
+    }
+  } catch {}
+}
+
+/////////////////////////////////////////////////////////
+// 3. PRICE STORE
+/////////////////////////////////////////////////////////
+
+if (
+  !Number.isFinite(price) ||
+  price <= 0
+) {
+  try {
+    const store = getPriceStore?.() || {};
+
+    const found = findBestPriceMatch(
+      symbol,
+      store
+    );
+
+    if (found) {
+      const extracted =
+        extractQuotePrice(found);
+
+      if (
+        Number.isFinite(extracted) &&
+        extracted > 0
+      ) {
+        price = extracted;
+
+        console.log(
+          "✅ Precio encontrado desde store:",
+          price
+        );
       }
     }
+  } catch {}
+}
 
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      console.warn("❌ Precio final inválido:", price, { symbol, body });
-      return res.status(400).json({
-        ok: false,
-        error: "price_invalid",
-        symbol,
-        receivedPrice: price,
-      });
-    }
+/////////////////////////////////////////////////////////
+// 4. FALLBACK CONTROLADO
+/////////////////////////////////////////////////////////
+
+if (
+  !Number.isFinite(price) ||
+  price <= 0
+) {
+  const fallback =
+    Number(body.entryPrice) ||
+    Number(body.price) ||
+    Number(body.currentPrice);
+
+  if (
+    Number.isFinite(fallback) &&
+    fallback > 0
+  ) {
+    price = fallback;
+
+    console.warn(
+      "⚠️ Precio no disponible, usando entry temporal:",
+      price
+    );
+  }
+}
+
+/////////////////////////////////////////////////////////
+// VALIDACIÓN FINAL
+/////////////////////////////////////////////////////////
+
+if (
+  !Number.isFinite(price) ||
+  price <= 0
+) {
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
