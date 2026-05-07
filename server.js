@@ -2567,40 +2567,88 @@ function extractSymbol(data) {
 }
 
 function extractPrice(data = {}) {
-  const candidates = [
-    data?.price,
-    data?.p,
-    data?.last,
-    data?.lastPrice,
-    data?.close,
-    data?.c,
-    data?.mark,
-    data?.mid,
-    data?.value,
-    data?.currentPrice,
-    data?.executionPrice,
-    data?.bp,
-    data?.ap,
+  if (!data) return null;
+
+  console.log(
+    "🔥 extractPrice INPUT:",
+    JSON.stringify(data, null, 2)
+  );
+
+  //////////////////////////////////////////////////////
+  // DIRECT FIELDS
+  //////////////////////////////////////////////////////
+
+  const directCandidates = [
+    data.price,
+    data.p,
+    data.lp,
+    data.last,
+    data.lastPrice,
+    data.close,
+    data.c,
+    data.mark,
+    data.mid,
+    data.value,
+    data.currentPrice,
+    data.executionPrice,
+
+    //////////////////////////////////////////////////////
+    // RAW
+    //////////////////////////////////////////////////////
+
+    data.raw?.price,
+    data.raw?.p,
+    data.raw?.lp,
+    data.raw?.last,
+    data.raw?.close,
+    data.raw?.c,
+
+    //////////////////////////////////////////////////////
+    // POLYGON COMMON
+    //////////////////////////////////////////////////////
+
+    data.bp,
+    data.ap,
   ];
 
-  for (const value of candidates) {
+  for (const value of directCandidates) {
     const n = Number(value);
-    if (Number.isFinite(n) && n > 0) {
+
+    if (
+      Number.isFinite(n) &&
+      n > 0
+    ) {
+      console.log("✅ PRICE FOUND:", n);
       return n;
     }
   }
 
-  const ask = Number(data?.ask || data?.a);
-  const bid = Number(data?.bid || data?.b);
+  //////////////////////////////////////////////////////
+  // BID / ASK MID
+  //////////////////////////////////////////////////////
+
+  const bid =
+    Number(data.bid) ||
+    Number(data.b);
+
+  const ask =
+    Number(data.ask) ||
+    Number(data.a);
 
   if (
-    Number.isFinite(ask) &&
     Number.isFinite(bid) &&
-    ask > 0 &&
-    bid > 0
+    Number.isFinite(ask) &&
+    bid > 0 &&
+    ask > 0
   ) {
-    return (ask + bid) / 2;
+    const mid = (bid + ask) / 2;
+
+    console.log("✅ MID PRICE:", mid);
+
+    return mid;
   }
+
+  console.warn("❌ extractPrice FAILED");
 
   return null;
 }
