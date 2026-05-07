@@ -2017,15 +2017,22 @@ let polygonSocket = null;
 
 function buildSymbolAliases(symbol = "") {
   const raw = String(symbol || "").trim().toUpperCase();
+
   const noSpaces = raw.replace(/\s+/g, "");
-  const noPrefix = noSpaces.includes(":") ? noSpaces.split(":").pop() : noSpaces;
-  const compact = String(noPrefix).replace(/[^A-Z0-9]/g, "");
+
+  const noPrefix = noSpaces.includes(":")
+    ? noSpaces.split(":").pop()
+    : noSpaces;
+
+  const compact = String(noPrefix)
+    .replace(/[^A-Z0-9]/g, "");
 
   const aliases = new Set([
     raw,
     noSpaces,
     noPrefix,
     compact,
+
     raw.replace(/^OANDA:/, ""),
     raw.replace(/^TVC:/, ""),
     raw.replace(/^C:/, ""),
@@ -2046,18 +2053,36 @@ function buildSymbolAliases(symbol = "") {
 
 function findBestPriceMatch(symbol, store = {}) {
   const wanted = buildSymbolAliases(symbol);
+
   const keys = Object.keys(store || {});
+
+  //////////////////////////////////////////////////////
+  // MATCH DIRECTO
+  //////////////////////////////////////////////////////
 
   for (const key of keys) {
     const keyAliases = buildSymbolAliases(key);
+
     const keyMatch = keyAliases.some((k) =>
-      wanted.some((w) => k === w || k.includes(w) || w.includes(k))
+      wanted.some((w) =>
+        k === w ||
+        k.includes(w) ||
+        w.includes(k)
+      )
     );
-    if (keyMatch) return store[key];
+
+    if (keyMatch) {
+      return store[key];
+    }
   }
+
+  //////////////////////////////////////////////////////
+  // MATCH PROFUNDO
+  //////////////////////////////////////////////////////
 
   for (const key of keys) {
     const item = store[key];
+
     const candidates = [
       key,
       item?.symbol,
@@ -2073,171 +2098,443 @@ function findBestPriceMatch(symbol, store = {}) {
 
     const found = candidates.some((candidate) => {
       const cAliases = buildSymbolAliases(candidate);
+
       return cAliases.some((c) =>
-        wanted.some((w) => c === w || c.includes(w) || w.includes(c))
+        wanted.some((w) =>
+          c === w ||
+          c.includes(w) ||
+          w.includes(c)
+        )
       );
     });
 
-    if (found) return item;
+    if (found) {
+      return item;
+    }
   }
 
   return null;
 }
 
 function storePrice(symbol, price, rawData = null) {
-  if (!priceHandler?.prices) return;
+  if (!priceHandler?.prices) {
+    console.warn("❌ priceHandler.prices unavailable");
+    return;
+  }
 
   const clean = normalizeSymbol(symbol);
+
   const numeric = Number(price);
 
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return;
+  if (
+    !clean ||
+    !Number.isFinite(numeric) ||
+    numeric <= 0
+  ) {
+    console.warn(
+      "❌ INVALID PRICE:",
+      clean,
+      price
+    );
+
+    return;
+  }
 
   const payload = {
+    symbol: clean,
     price: numeric,
     updatedAt: new Date().toISOString(),
     raw: rawData || null,
   };
 
+  //////////////////////////////////////////////////////
+  // MAP
+  //////////////////////////////////////////////////////
+
   if (priceHandler.prices instanceof Map) {
     priceHandler.prices.set(clean, payload);
-  } else if (typeof priceHandler.prices === "object") {
+  }
+
+  //////////////////////////////////////////////////////
+  // OBJECT
+  //////////////////////////////////////////////////////
+
+  else if (typeof priceHandler.prices === "object") {
     priceHandler.prices[clean] = payload;
   }
 
-  console.log("📥 PRICE UPDATE:", clean, numeric);
+  //////////////////////////////////////////////////////
+  // EXTRA GLOBAL STORE
+  //////////////////////////////////////////////////////
+
+  if (typeof updatePriceStore === "function") {
+    try {
+      updatePriceStore(clean, numeric);
+    } catch (err) {
+      console.warn(
+        "updatePriceStore error:",
+        err?.message || err
+      );
+    }
+  }
+
+  console.log(
+    "📥 PRICE UPDATE:",
+    clean,
+    numeric
+  );
 }
 
 async function fetchPolygonLastPrice(symbol) {
-  const clean = normalizeSymbol(symbol);
-  if (!clean || !process.env.POLYGON_API_KEY) return null;
+  try {
+    const clean = normalizeSymbol(symbol);
 
-  const polygonSymbol = toPolygonSymbol(clean);
-  if (!polygonSymbol) return null;
+    if (
+      !clean ||
+      !process.env.POLYGON_API_KEY
+    ) {
+      return null;
+    }
 
-  const url =
-    `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}` +
-    `?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
+    const polygonSymbol = toPolygonSymbol(clean);
 
-  const response = await fetch(url);
-  const data = await response.json();
+    if (!polygonSymbol) {
+      console.warn(
+        "❌ INVALID POLYGON SYMBOL:",
+        clean
+      );
 
-  const price = extractQuotePrice(data);
-  if (!price) return null;
+      return null;
+    }
 
-  return {
-    price,
-    raw: data,
-    symbol: clean,
-    polygonSymbol,
-  };
+    const url =
+      `https://api.polygon.io/v2/last/trade/${encodeURIComponent(
+        polygonSymbol
+      )}` +
+      `?apiKey=${encodeURIComponent(
+        process.env.POLYGON_API_KEY
+      )}`;
+
+    console.log(
+      "🌍 FETCH FALLBACK:",
+      polygonSymbol
+    );
+
+    const response = await fetch(url);
+
+    const data = await response.json();
+
+    console.log(
+      "🌍 FALLBACK RESPONSE:",
+      JSON.stringify(data, null, 2)
+    );
+
+    const price = extractQuotePrice(data);
+
+    if (
+      !price ||
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      console.warn(
+        "❌ FALLBACK PRICE INVALID:",
+        clean,
+        price
+      );
+
+      return null;
+    }
+
+    return {
+      price,
+      raw: data,
+      symbol: clean,
+      polygonSymbol,
+    };
+
+  } catch (err) {
+    console.warn(
+      "❌ fetchPolygonLastPrice error:",
+      err?.message || err
+    );
+
+    return null;
+  }
 }
 
 io.on("connection", (socket) => {
-  console.log("📡 Cliente conectado:", socket.id);
+  console.log(
+    "📡 Cliente conectado:",
+    socket.id
+  );
+
+  //////////////////////////////////////////////////////
+  // SNAPSHOT
+  //////////////////////////////////////////////////////
 
   try {
-    socket.emit("prices_snapshot", getPriceStore() || {});
+    socket.emit(
+      "prices_snapshot",
+      getPriceStore() || {}
+    );
   } catch {
     socket.emit("prices_snapshot", {});
   }
 
-  socket.on("join_user_room", async ({ token, userId } = {}) => {
-    try {
-      let uid = String(userId || "").trim();
+  //////////////////////////////////////////////////////
+  // USER ROOM
+  //////////////////////////////////////////////////////
 
-      if (!uid && token && process.env.JWT_SECRET) {
-        const payload = jwt.verify(String(token), process.env.JWT_SECRET);
-        uid = String(
-          payload?.id ||
-          payload?.sub ||
-          payload?.userId ||
-          payload?._id ||
-          ""
-        ).trim();
+  socket.on(
+    "join_user_room",
+    async ({ token, userId } = {}) => {
+      try {
+        let uid = String(userId || "").trim();
+
+        if (
+          !uid &&
+          token &&
+          process.env.JWT_SECRET
+        ) {
+          const payload = jwt.verify(
+            String(token),
+            process.env.JWT_SECRET
+          );
+
+          uid = String(
+            payload?.id ||
+            payload?.sub ||
+            payload?.userId ||
+            payload?._id ||
+            ""
+          ).trim();
+        }
+
+        if (!uid) return;
+
+        socket.join(`user:${uid}`);
+
+        socket.data.userId = uid;
+
+        socket.emit("room_joined", {
+          ok: true,
+          userId: uid,
+        });
+
+      } catch {
+        socket.emit("room_joined", {
+          ok: false,
+          error: "invalid_token",
+        });
       }
-
-      if (!uid) return;
-
-      socket.join(`user:${uid}`);
-      socket.data.userId = uid;
-      socket.emit("room_joined", { ok: true, userId: uid });
-    } catch {
-      socket.emit("room_joined", { ok: false, error: "invalid_token" });
     }
-  });
+  );
 
-  socket.on("request_prices_snapshot", () => {
-    try {
-      socket.emit("prices_snapshot", getPriceStore() || {});
-    } catch {
-      socket.emit("prices_snapshot", {});
+  //////////////////////////////////////////////////////
+  // REQUEST SNAPSHOT
+  //////////////////////////////////////////////////////
+
+  socket.on(
+    "request_prices_snapshot",
+    () => {
+      try {
+        socket.emit(
+          "prices_snapshot",
+          getPriceStore() || {}
+        );
+      } catch {
+        socket.emit("prices_snapshot", {});
+      }
     }
-  });
+  );
+
+  //////////////////////////////////////////////////////
+  // REQUEST SYMBOLS
+  //////////////////////////////////////////////////////
 
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
 
-      if (priceHandler && typeof priceHandler.getSymbols === "function") {
-        socket.emit("symbols_update", priceHandler.getSymbols() || []);
-      } else if (prices && Object.keys(prices).length) {
+      if (
+        priceHandler &&
+        typeof priceHandler.getSymbols ===
+          "function"
+      ) {
         socket.emit(
           "symbols_update",
+          priceHandler.getSymbols() || []
+        );
+      }
+
+      else if (
+        prices &&
+        Object.keys(prices).length
+      ) {
+        socket.emit(
+          "symbols_update",
+
           Object.keys(prices).map((k) => ({
             symbol: k,
-            label: (k.split(":").pop() || k).replace("_", "/"),
-            market: prices[k]?.market || "Unknown",
+
+            label: (
+              k.split(":").pop() || k
+            ).replace("_", "/"),
+
+            market:
+              prices[k]?.market ||
+              "Unknown",
           }))
         );
-      } else {
-        socket.emit("symbols_update", SAMPLE_SYMBOLS);
       }
+
+      else {
+        socket.emit(
+          "symbols_update",
+          SAMPLE_SYMBOLS
+        );
+      }
+
     } catch {
-      socket.emit("symbols_update", SAMPLE_SYMBOLS);
+      socket.emit(
+        "symbols_update",
+        SAMPLE_SYMBOLS
+      );
     }
   });
 
-  socket.on("subscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
+  //////////////////////////////////////////////////////
+  // SUBSCRIBE
+  //////////////////////////////////////////////////////
 
-    try {
-      const cleanSymbol = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(cleanSymbol);
+  socket.on(
+    "subscribe",
+    ({ symbol, kind } = {}) => {
+      if (!symbol) return;
 
-      if (polygonSocket?.subscribe && polygonSymbol) {
-        polygonSocket.subscribe(polygonSymbol, kind || "trades");
+      try {
+        const cleanSymbol =
+          normalizeSymbol(symbol);
+
+        const polygonSymbol =
+          toPolygonSymbol(cleanSymbol);
+
+        console.log(
+          "📡 SUBSCRIBE REQUEST:"
+        );
+
+        console.log("RAW:", symbol);
+
+        console.log(
+          "CLEAN:",
+          cleanSymbol
+        );
+
+        console.log(
+          "POLYGON:",
+          polygonSymbol
+        );
+
+        console.log(
+          "KIND:",
+          kind || "trades"
+        );
+
+        //////////////////////////////////////////////////
+        // POLYGON SUBSCRIBE
+        //////////////////////////////////////////////////
+
+        if (
+          polygonSocket?.subscribe &&
+          polygonSymbol
+        ) {
+          polygonSocket.subscribe(
+            polygonSymbol,
+            kind || "trades"
+          );
+
+          console.log(
+            "✅ POLYGON SUBSCRIBED:",
+            polygonSymbol
+          );
+        }
+
+        else {
+          console.warn(
+            "❌ polygonSocket.subscribe unavailable"
+          );
+        }
+
+        //////////////////////////////////////////////////
+        // SOCKET ROOM
+        //////////////////////////////////////////////////
+
+        socket.join(cleanSymbol);
+
+      } catch (e) {
+        console.warn(
+          "subscribe error:",
+          e
+        );
       }
-
-      socket.join(cleanSymbol);
-      console.log("subscribe:", socket.id, cleanSymbol, "->", polygonSymbol, kind || "trades");
-    } catch (e) {
-      console.warn("subscribe error:", e);
     }
-  });
-
-  socket.on("unsubscribe", ({ symbol, kind } = {}) => {
-    if (!symbol) return;
-
-    try {
-      const cleanSymbol = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(cleanSymbol);
-
-      if (polygonSocket?.unsubscribe && polygonSymbol) {
-        polygonSocket.unsubscribe(polygonSymbol, kind || "trades");
-      }
-
-      socket.leave(cleanSymbol);
-      console.log("unsubscribe:", socket.id, cleanSymbol, "->", polygonSymbol, kind || "trades");
-    } catch (e) {
-      console.warn("unsubscribe error:", e);
-    }
-  });
-
-  socket.on("disconnect", (reason) =>
-    console.log("❌ Cliente desconectado:", socket.id, "reason:", reason)
   );
-});
 
+  //////////////////////////////////////////////////////
+  // UNSUBSCRIBE
+  //////////////////////////////////////////////////////
+
+  socket.on(
+    "unsubscribe",
+    ({ symbol, kind } = {}) => {
+      if (!symbol) return;
+
+      try {
+        const cleanSymbol =
+          normalizeSymbol(symbol);
+
+        const polygonSymbol =
+          toPolygonSymbol(cleanSymbol);
+
+        if (
+          polygonSocket?.unsubscribe &&
+          polygonSymbol
+        ) {
+          polygonSocket.unsubscribe(
+            polygonSymbol,
+            kind || "trades"
+          );
+
+          console.log(
+            "❌ POLYGON UNSUBSCRIBED:",
+            polygonSymbol
+          );
+        }
+
+        socket.leave(cleanSymbol);
+
+      } catch (e) {
+        console.warn(
+          "unsubscribe error:",
+          e
+        );
+      }
+    }
+  );
+
+  //////////////////////////////////////////////////////
+  // DISCONNECT
+  //////////////////////////////////////////////////////
+
+  socket.on("disconnect", (reason) => {
+    console.log(
+      "❌ Cliente desconectado:",
+      socket.id,
+      "reason:",
+      reason
+    );
+  });
+});
 /* ======================================================
    POLYGON SOCKET
    ====================================================== */
@@ -2277,7 +2574,6 @@ function extractPrice(data = {}) {
 
   for (const value of candidates) {
     const n = Number(value);
-
     if (Number.isFinite(n) && n > 0) {
       return n;
     }
@@ -2296,6 +2592,31 @@ function extractPrice(data = {}) {
   }
 
   return null;
+}
+
+async function safeAutoSubscribeDefaults() {
+  if (!polygonSocket?.subscribe) return;
+
+  const symbols = [
+    "X:BTCUSD",
+    "X:ETHUSD",
+    "C:EURUSD",
+    "AAPL",
+    "I:SPX",
+  ];
+
+  for (const sym of symbols) {
+    try {
+      polygonSocket.subscribe(sym, "trades");
+      console.log("🔥 AUTO SUBSCRIBED:", sym);
+    } catch (subErr) {
+      console.warn(
+        "❌ AUTO SUBSCRIBE ERROR:",
+        sym,
+        subErr?.message || subErr
+      );
+    }
+  }
 }
 
 try {
@@ -2340,7 +2661,6 @@ try {
               );
 
               const fallback = await fetchPolygonLastPrice(symbol);
-
               finalPrice = fallback?.price || null;
 
               if (
@@ -2378,7 +2698,6 @@ try {
               symbol,
               finalPrice
             );
-
             return;
           }
 
@@ -2388,11 +2707,7 @@ try {
 
           storePrice(symbol, Number(finalPrice), data);
 
-          console.log(
-            "✅ STORE UPDATED:",
-            symbol,
-            finalPrice
-          );
+          console.log("✅ STORE UPDATED:", symbol, finalPrice);
 
           //////////////////////////////////////////////////////
           // PRICE HANDLER
@@ -2433,7 +2748,6 @@ try {
           //////////////////////////////////////////////////////
 
           scheduleLivePnLSync(symbol);
-
         } catch (err) {
           console.warn(
             "onPrice handler error:",
@@ -2442,8 +2756,16 @@ try {
         }
       },
 
-      onOpen: () => {
+      onOpen: async () => {
         console.log("✅ PolygonSocket abierto");
+        try {
+          await safeAutoSubscribeDefaults();
+        } catch (err) {
+          console.warn(
+            "❌ AUTO SUBSCRIBE FAILED:",
+            err?.message || err
+          );
+        }
       },
 
       onClose: () => {
@@ -2466,7 +2788,6 @@ try {
           "❌ PolygonSocket.connect() rejected:",
           err?.message || err
         );
-
         polygonSocket = null;
       });
     }
@@ -2478,10 +2799,8 @@ try {
     "❌ Error inicializando PolygonSocket:",
     err?.message || err
   );
-
   polygonSocket = null;
 }
-
 /* ======================================================
    STATIC
    ====================================================== */
