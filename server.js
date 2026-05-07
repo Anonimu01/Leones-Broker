@@ -200,6 +200,44 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeSymbol(value = "") {
+  let raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+
+  raw = raw
+    .replace(/\s+/g, "")
+    .replace(/\//g, "")
+    .replace(/-/g, "");
+
+  raw = raw
+    .replace(/^OANDA:/, "")
+    .replace(/^TVC:/, "")
+    .replace(/^C:/, "")
+    .replace(/^X:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^BINANCE:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/^FOREX:/, "")
+    .replace(/^INDEX:/, "")
+    .replace(/^I:/, "")
+    .replace(/^B:/, "");
+
+  return raw;
+}
+
+function toPolygonSymbol(value = "") {
+  const clean = normalizeSymbol(value);
+  if (!clean) return "";
+
+  // Forex típico: EURUSD -> C:EURUSD
+  // El resto queda limpio para no romper acciones/índices/cripto
+  if (/^[A-Z]{6}$/.test(clean) && !/\d/.test(clean)) {
+    return `C:${clean}`;
+  }
+
+  return clean;
+}
+
 function symbolVariants(value) {
   const raw = String(value || "").trim().toUpperCase();
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
@@ -212,6 +250,7 @@ function symbolVariants(value) {
       compactSymbol(afterColon),
       compactSymbol(afterSlash),
       compactSymbol(afterDash),
+      compactSymbol(normalizeSymbol(raw)),
     ]),
   ].filter(Boolean);
 }
@@ -231,7 +270,7 @@ function normalizeSide(value) {
 }
 
 function normalizePositionSymbol(body = {}) {
-  return String(
+  const raw = String(
     body.symbol ||
       body.tvSymbol ||
       body.selectedSymbol ||
@@ -245,6 +284,8 @@ function normalizePositionSymbol(body = {}) {
   )
     .trim()
     .toUpperCase();
+
+  return normalizeSymbol(raw);
 }
 
 function normalizeQty(body = {}) {
@@ -291,6 +332,7 @@ function normalizePrice(body = {}) {
     body.bid ??
     body.mark ??
     null;
+
   if (raw === null || raw === undefined || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -335,12 +377,14 @@ function extractQuotePrice(item = {}) {
 }
 
 function normalizeQuote(symbol, item = {}) {
+  const cleanSymbol = normalizeSymbol(symbol);
   const label =
     item.label ||
     item.name ||
-    (symbol.split(":").pop() || symbol).replace("_", "/");
+    (cleanSymbol.split(":").pop() || cleanSymbol).replace("_", "/");
+
   return {
-    symbol,
+    symbol: cleanSymbol,
     label,
     market: item.market || "Unknown",
     price: extractQuotePrice(item),
@@ -388,7 +432,14 @@ function buildQuotesArray() {
 
 function buildMarketPayload() {
   const quotes = buildQuotesArray();
-  return { ok: true, count: quotes.length, quotes, data: quotes, items: quotes, latest: quotes[0] || null };
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
 }
 
 function getCurrentPriceForSymbol(symbol) {
@@ -1524,7 +1575,6 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
-    // Reservar margen solamente una vez
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
@@ -1753,6 +1803,31 @@ function storePrice(symbol, price, rawData = null) {
   console.log("📥 PRICE UPDATE:", clean, numeric);
 }
 
+async function fetchPolygonLastPrice(symbol) {
+  const clean = normalizeSymbol(symbol);
+  if (!clean || !process.env.POLYGON_API_KEY) return null;
+
+  const polygonSymbol = toPolygonSymbol(clean);
+  if (!polygonSymbol) return null;
+
+  const url =
+    `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}` +
+    `?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
+
+  const response = await fetch(url);
+  const data = await response.json();
+
+  const price = extractQuotePrice(data);
+  if (!price) return null;
+
+  return {
+    price,
+    raw: data,
+    symbol: clean,
+    polygonSymbol,
+  };
+}
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
@@ -1823,13 +1898,14 @@ io.on("connection", (socket) => {
 
     try {
       const cleanSymbol = normalizeSymbol(symbol);
+      const polygonSymbol = toPolygonSymbol(cleanSymbol);
 
-      if (polygonSocket?.subscribe) {
-        polygonSocket.subscribe(cleanSymbol, kind);
+      if (polygonSocket?.subscribe && polygonSymbol) {
+        polygonSocket.subscribe(polygonSymbol, kind || "trades");
       }
 
       socket.join(cleanSymbol);
-      console.log("subscribe:", socket.id, cleanSymbol, kind || "trades");
+      console.log("subscribe:", socket.id, cleanSymbol, "->", polygonSymbol, kind || "trades");
     } catch (e) {
       console.warn("subscribe error:", e);
     }
@@ -1840,13 +1916,14 @@ io.on("connection", (socket) => {
 
     try {
       const cleanSymbol = normalizeSymbol(symbol);
+      const polygonSymbol = toPolygonSymbol(cleanSymbol);
 
-      if (polygonSocket?.unsubscribe) {
-        polygonSocket.unsubscribe(cleanSymbol, kind);
+      if (polygonSocket?.unsubscribe && polygonSymbol) {
+        polygonSocket.unsubscribe(polygonSymbol, kind || "trades");
       }
 
       socket.leave(cleanSymbol);
-      console.log("unsubscribe:", socket.id, cleanSymbol, kind || "trades");
+      console.log("unsubscribe:", socket.id, cleanSymbol, "->", polygonSymbol, kind || "trades");
     } catch (e) {
       console.warn("unsubscribe error:", e);
     }
@@ -1914,19 +1991,26 @@ try {
           const symbol = extractSymbol(data);
           const price = extractPrice(data);
 
-          if (!symbol || price === null || price === undefined) return;
+          if (!symbol) return;
 
-          const numericPrice = Number(price);
-          if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
+          let finalPrice = price;
 
-          storePrice(symbol, numericPrice, data);
+          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
+            const fallback = await fetchPolygonLastPrice(symbol);
+            finalPrice = fallback?.price || null;
+            if (finalPrice) storePrice(symbol, finalPrice, fallback.raw);
+          }
+
+          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) return;
+
+          storePrice(symbol, Number(finalPrice), data);
 
           if (priceHandler?.handle) {
             priceHandler.handle(data);
           }
 
           if (typeof updatePriceStore === "function") {
-            updatePriceStore(symbol, numericPrice);
+            updatePriceStore(symbol, Number(finalPrice));
           }
 
           scheduleLivePnLSync(symbol);
