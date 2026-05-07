@@ -2117,11 +2117,9 @@ app.get("/api/price", (req, res) => {
       }
     }
 
-    // si el store guarda el número directo
-    const directPrice = extractQuotePrice(priceData);
-    const price = Number.isFinite(directPrice) && directPrice > 0 ? directPrice : null;
+    const price = extractPrice(priceData);
 
-    if (!price) {
+    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
       return res.status(404).json({ ok: false, error: "Precio inválido", symbol });
     }
 
@@ -2132,7 +2130,7 @@ app.get("/api/price", (req, res) => {
       currentPrice: price,
       last: price,
       close: price,
-      updatedAt: new Date().toISOString(),
+      updatedAt: priceData?.updatedAt || new Date().toISOString(),
     });
   } catch (err) {
     console.error("Error /api/price:", err);
