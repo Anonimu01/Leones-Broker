@@ -2927,42 +2927,149 @@ app.get("*", (req, res) => {
    GET REAL PRICE (FIX)
 ========================= */
 
-app.get("/api/price", (req, res) => {
+/* =========================
+   GET REAL PRICE (FIX REAL)
+========================= */
+
+app.get("/api/price", async (req, res) => {
   try {
     const rawSymbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+      req.query.symbol ||
+      req.query.tvSymbol ||
+      req.query.selectedSymbol ||
+      ""
     );
 
     const symbol = normalizeSymbol(rawSymbol);
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
+      return res.status(400).json({
+        ok: false,
+        error: "Símbolo requerido",
+      });
     }
 
     console.log("📊 PRICE REQUEST:", symbol);
 
-    let priceData = null;
+    //////////////////////////////////////////////////////
+    // 1. STORE LOCAL
+    //////////////////////////////////////////////////////
 
-    if (priceHandler?.prices) {
-      const store = priceHandler.prices instanceof Map
-        ? Object.fromEntries(priceHandler.prices.entries())
-        : priceHandler.prices;
+    let found = null;
 
-      priceData = findBestPriceMatch(symbol, store || {});
+    try {
+      if (priceHandler?.prices) {
+        const store =
+          priceHandler.prices instanceof Map
+            ? Object.fromEntries(
+                priceHandler.prices.entries()
+              )
+            : priceHandler.prices;
+
+        found = findBestPriceMatch(
+          symbol,
+          store || {}
+        );
+      }
+
+      if (!found) {
+        found = findBestPriceMatch(
+          symbol,
+          getPriceStore?.() || {}
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "❌ STORE SEARCH ERROR:",
+        err?.message || err
+      );
     }
 
-    if (!priceData) {
-      priceData = findBestPriceMatch(symbol, getPriceStore() || {});
+    //////////////////////////////////////////////////////
+    // 2. EXTRAER PRECIO
+    //////////////////////////////////////////////////////
+
+    let price = null;
+
+    if (found) {
+      price =
+        Number(found?.price) ||
+        Number(found?.currentPrice) ||
+        Number(found?.lastPrice) ||
+        Number(found?.last) ||
+        Number(found?.close) ||
+
+        Number(found?.raw?.price) ||
+        Number(found?.raw?.p) ||
+        Number(found?.raw?.last) ||
+        Number(found?.raw?.close) ||
+        Number(found?.raw?.c) ||
+
+        null;
     }
 
-    const price = extractPrice(priceData);
+    //////////////////////////////////////////////////////
+    // 3. FALLBACK POLYGON
+    //////////////////////////////////////////////////////
 
     if (
-      price === null ||
-      price === undefined ||
+      !price ||
       !Number.isFinite(price) ||
       price <= 0
     ) {
+      try {
+        console.warn(
+          "⚠️ PRICE STORE EMPTY -> FETCH FALLBACK:",
+          symbol
+        );
+
+        const fallback =
+          await fetchPolygonLastPrice(symbol);
+
+        const fallbackPrice =
+          Number(fallback?.price);
+
+        if (
+          Number.isFinite(fallbackPrice) &&
+          fallbackPrice > 0
+        ) {
+          price = fallbackPrice;
+
+          storePrice(
+            symbol,
+            fallbackPrice,
+            fallback?.raw
+          );
+
+          console.log(
+            "✅ FALLBACK PRICE SUCCESS:",
+            symbol,
+            fallbackPrice
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "❌ FALLBACK FETCH ERROR:",
+          err?.message || err
+        );
+      }
+    }
+
+    //////////////////////////////////////////////////////
+    // 4. VALIDACIÓN FINAL
+    //////////////////////////////////////////////////////
+
+    if (
+      !price ||
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      console.warn(
+        "❌ FINAL PRICE INVALID:",
+        symbol,
+        price
+      );
+
       return res.status(404).json({
         ok: false,
         error: "Precio inválido",
@@ -2970,21 +3077,35 @@ app.get("/api/price", (req, res) => {
       });
     }
 
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
+
     return res.json({
       ok: true,
       symbol,
-      price,
-      currentPrice: price,
-      last: price,
-      close: price,
-      updatedAt: priceData?.updatedAt || new Date().toISOString(),
+      price: Number(price),
+      currentPrice: Number(price),
+      last: Number(price),
+      close: Number(price),
+      updatedAt:
+        found?.updatedAt ||
+        new Date().toISOString(),
     });
+
   } catch (err) {
-    console.error("Error /api/price:", err);
-    res.status(500).json({ ok: false, error: "Error interno" });
+    console.error(
+      "Error /api/price:",
+      err
+    );
+
+    res.status(500).json({
+      ok: false,
+      error: "Error interno",
+    });
   }
 });
-
+   
 /* ======================================================
    START / SHUTDOWN
    ====================================================== */
