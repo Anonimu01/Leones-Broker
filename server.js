@@ -3044,29 +3044,50 @@ app.get("/api/price", async (req, res) => {
       );
     }
 
-    //////////////////////////////////////////////////////
-    // 2. EXTRAER PRECIO
-    //////////////////////////////////////////////////////
+   //////////////////////////////////////////////////////
+// 2. EXTRAER PRECIO (FIX DEFINITIVO)
+//////////////////////////////////////////////////////
 
-    let price = null;
+let price = null;
 
-    if (found) {
-      price =
-        Number(found?.price) ||
-        Number(found?.currentPrice) ||
-        Number(found?.lastPrice) ||
-        Number(found?.last) ||
-        Number(found?.close) ||
+if (found) {
+  price =
+    Number(found?.price) ||
+    Number(found?.currentPrice) ||
+    Number(found?.lastPrice) ||
+    Number(found?.last) ||
+    Number(found?.close) ||
+    Number(found?.raw?.price) ||
+    Number(found?.raw?.p) ||
+    Number(found?.raw?.lp) ||
+    Number(found?.raw?.last) ||
+    Number(found?.raw?.close) ||
+    Number(found?.bid) ||
+    Number(found?.ask) ||
+    null;
+}
 
-        Number(found?.raw?.price) ||
-        Number(found?.raw?.p) ||
-        Number(found?.raw?.last) ||
-        Number(found?.raw?.close) ||
-        Number(found?.raw?.c) ||
+//////////////////////////////////////////////////////
+// 3. 🔥 FIX CRÍTICO: si price viene null SIEMPRE fallback
+//////////////////////////////////////////////////////
 
-        null;
+if (!price || !Number.isFinite(price) || price <= 0) {
+  console.warn("⚠️ PRICE NULL → FORZANDO POLYGON REST:", symbol);
+
+  try {
+    const fallback = await fetchPolygonLastPrice(symbol);
+
+    if (fallback?.price && Number.isFinite(fallback.price)) {
+      price = fallback.price;
+
+      storePrice(symbol, price, fallback.raw);
+
+      console.log("✅ PRICE RECOVERED FROM POLYGON:", symbol, price);
     }
-
+  } catch (err) {
+    console.warn("❌ FALLBACK ERROR:", err?.message || err);
+  }
+}
     //////////////////////////////////////////////////////
     // 3. FALLBACK POLYGON
     //////////////////////////////////////////////////////
