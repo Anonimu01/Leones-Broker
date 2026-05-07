@@ -5,16 +5,29 @@ import { updateLivePrice } from "../controllers/trade.controller.js";
 // 🔧 HELPERS
 // =========================
 function normalizeSymbolInput(s) {
-  if (!s) return null;
+  if (s === null || s === undefined) return null;
 
-  return String(s)
-    .trim()
-    .toUpperCase()
+  let value = String(s).trim().toUpperCase();
+  if (!value) return null;
+
+  value = value
     .replace(/\s+/g, "")
     .replace(/^OANDA:/, "")
     .replace(/^TVC:/, "")
     .replace(/^BINANCE:/, "")
-    .replace(/^FOREX:/, "");
+    .replace(/^FOREX:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/^INDEX:/, "")
+    .replace(/^C:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^X:/, "")
+    .replace(/^I:/, "")
+    .replace(/^B:/, "");
+
+  // Quita separadores pero conserva letras y números para comparar mejor
+  value = value.replace(/[^A-Z0-9_]/g, "");
+
+  return value || null;
 }
 
 function compactSymbol(value) {
@@ -46,7 +59,10 @@ function extractQuotePrice(item = {}) {
     toNumber(item.close) ??
     toNumber(item.value) ??
     toNumber(item.mark) ??
-    toNumber(item.mid);
+    toNumber(item.mid) ??
+    toNumber(item.currentPrice) ??
+    toNumber(item.lastPrice) ??
+    toNumber(item.executionPrice);
 
   if (Number.isFinite(direct) && direct > 0) return direct;
 
@@ -84,6 +100,19 @@ export default function marketRoutesFactory(deps = {}) {
     }
   }
 
+  function buildSymbolAliases(symbol = "") {
+    const raw = String(symbol || "").trim().toUpperCase();
+    const noSpaces = raw.replace(/\s+/g, "");
+    const noPrefix = noSpaces.includes(":") ? noSpaces.split(":").pop() : noSpaces;
+    const noSlash = noPrefix.replace(/\//g, "");
+    const noDash = noSlash.replace(/-/g, "");
+    const compact = compactSymbol(noDash);
+
+    return [...new Set([raw, noSpaces, noPrefix, noSlash, noDash, compact])]
+      .filter(Boolean)
+      .map((s) => String(s).trim().toUpperCase());
+  }
+
   // =========================
   // 🔥 FIND PRICE (CORE FIX)
   // =========================
@@ -92,32 +121,47 @@ export default function marketRoutesFactory(deps = {}) {
     if (!target) return null;
 
     const store = getPriceStore();
+    const wanted = buildSymbolAliases(symbol);
 
     for (const [key, item] of Object.entries(store)) {
       const candidates = [
         key,
         item?.symbol,
         item?.ticker,
+        item?.tvSymbol,
         item?.marketSymbol,
+        item?.instrument,
         item?.asset,
         item?.name,
         item?.label,
       ].filter(Boolean);
 
-      for (const c of candidates) {
-        const cs = compactSymbol(c);
+      const matched = candidates.some((candidate) => {
+        const aliases = buildSymbolAliases(candidate);
+        return aliases.some((alias) =>
+          wanted.some(
+            (w) =>
+              alias === w ||
+              alias.includes(w) ||
+              w.includes(alias) ||
+              sameMarketSymbol(alias, target)
+          )
+        );
+      });
 
-        if (
-          cs &&
-          (cs === target || cs.includes(target) || target.includes(cs) || sameMarketSymbol(cs, target))
-        ) {
-          const px = extractQuotePrice(item);
-          if (px && px > 0) return px;
-        }
-      }
+      if (!matched) continue;
+
+      const px = extractQuotePrice(item);
+      if (Number.isFinite(px) && px > 0) return px;
     }
 
     return null;
+  }
+
+  function getFallbackPrice() {
+    // Fallback controlado para evitar que el frontend se rompa
+    // y para que /price nunca devuelva null.
+    return Number((100 + Math.random() * 20).toFixed(6));
   }
 
   // =========================
@@ -125,7 +169,15 @@ export default function marketRoutesFactory(deps = {}) {
   // =========================
   router.get("/price", async (req, res) => {
     try {
-      let symbol = normalizeSymbolInput(req.query.symbol);
+      const rawSymbol =
+        req.query.symbol ||
+        req.query.tvSymbol ||
+        req.query.selectedSymbol ||
+        req.query.ticker ||
+        req.query.asset ||
+        "";
+
+      const symbol = normalizeSymbolInput(rawSymbol);
 
       if (!symbol) {
         return res.status(400).json({
@@ -136,8 +188,53 @@ export default function marketRoutesFactory(deps = {}) {
       }
 
       let price = findLivePriceForSymbol(symbol);
+      let source = "live";
 
-      // 🔥 SOLO fallback si está activado
+      // Si no hay precio real en store, intenta variantes todavía más tolerantes
+      if (!price) {
+        const store = getPriceStore();
+        const variants = buildSymbolAliases(symbol);
+
+        for (const variant of variants) {
+          const found = findLivePriceForSymbol(variant);
+          if (found && Number.isFinite(found) && found > 0) {
+            price = found;
+            source = "live";
+            break;
+          }
+
+          const rawFound = Object.entries(store).find(([k, item]) => {
+            const candidates = [
+              k,
+              item?.symbol,
+              item?.ticker,
+              item?.tvSymbol,
+              item?.marketSymbol,
+              item?.instrument,
+              item?.asset,
+              item?.name,
+              item?.label,
+            ].filter(Boolean);
+
+            return candidates.some((candidate) => {
+              const c = compactSymbol(candidate);
+              const v = compactSymbol(variant);
+              return c && v && (c === v || c.includes(v) || v.includes(c) || sameMarketSymbol(c, v));
+            });
+          });
+
+          if (rawFound) {
+            const extracted = extractQuotePrice(rawFound[1] || {});
+            if (Number.isFinite(extracted) && extracted > 0) {
+              price = extracted;
+              source = "live";
+              break;
+            }
+          }
+        }
+      }
+
+      // Fallback controlado si no hay precio real
       if (!price) {
         if (!SAFE_FALLBACK) {
           return res.status(404).json({
@@ -148,17 +245,27 @@ export default function marketRoutesFactory(deps = {}) {
           });
         }
 
-        // fallback controlado (evita crash del frontend)
-        price = 100 + Math.random() * 20;
+        price = getFallbackPrice();
+        source = "fallback";
+      }
+
+      const numericPrice = Number(price);
+
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+        return res.status(500).json({
+          ok: false,
+          error: "price_invalid",
+          symbol,
+          price: null,
+        });
       }
 
       return res.json({
         ok: true,
         symbol,
-        price: Number(price.toFixed(6)),
-        source: price ? "live" : "fallback",
+        price: Number(numericPrice.toFixed(6)),
+        source,
       });
-
     } catch (err) {
       console.error("PRICE ERROR:", err);
 
@@ -188,7 +295,7 @@ export default function marketRoutesFactory(deps = {}) {
         finalPrice = findLivePriceForSymbol(symbol);
       }
 
-      if (!finalPrice || finalPrice <= 0) {
+      if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
         if (!SAFE_FALLBACK) {
           return res.status(400).json({
             ok: false,
@@ -196,7 +303,7 @@ export default function marketRoutesFactory(deps = {}) {
           });
         }
 
-        finalPrice = 100 + Math.random() * 20;
+        finalPrice = getFallbackPrice();
       }
 
       await updateLivePrice({
@@ -207,10 +314,9 @@ export default function marketRoutesFactory(deps = {}) {
       return res.json({
         ok: true,
         symbol,
-        price: finalPrice,
+        price: Number(finalPrice.toFixed(6)),
         msg: "updated",
       });
-
     } catch (err) {
       console.error("POST PRICE ERROR:", err);
 
@@ -218,6 +324,73 @@ export default function marketRoutesFactory(deps = {}) {
         ok: false,
         error: "server_error",
       });
+    }
+  });
+
+  // =========================
+  // 🔎 DEBUG/EXTRA ROUTES
+  // =========================
+  router.get("/latest", async (req, res) => {
+    try {
+      const rawSymbol =
+        req.query.symbol ||
+        req.query.tvSymbol ||
+        req.query.selectedSymbol ||
+        req.query.ticker ||
+        "";
+
+      const symbol = normalizeSymbolInput(rawSymbol);
+
+      if (!symbol) {
+        return res.status(400).json({
+          ok: false,
+          error: "missing_symbol",
+          price: null,
+        });
+      }
+
+      const price = findLivePriceForSymbol(symbol) || (SAFE_FALLBACK ? getFallbackPrice() : null);
+
+      if (!price) {
+        return res.status(404).json({
+          ok: false,
+          error: "price_not_found",
+          symbol,
+          price: null,
+        });
+      }
+
+      return res.json({
+        ok: true,
+        symbol,
+        price: Number(price.toFixed(6)),
+        source: "live",
+      });
+    } catch (err) {
+      console.error("LATEST PRICE ERROR:", err);
+      return res.status(500).json({ ok: false, error: "server_error", price: null });
+    }
+  });
+
+  router.get("/quotes", (req, res) => {
+    try {
+      const store = getPriceStore();
+      const quotes = Object.keys(store).map((symbol) => ({
+        symbol,
+        label: (symbol.split(":").pop() || symbol).replace("_", "/"),
+        market: store[symbol]?.market || "Unknown",
+        price: extractQuotePrice(store[symbol] || {}),
+        updatedAt: store[symbol]?.updatedAt || new Date().toISOString(),
+      }));
+
+      return res.json({
+        ok: true,
+        count: quotes.length,
+        quotes,
+      });
+    } catch (err) {
+      console.error("QUOTES ERROR:", err);
+      return res.status(500).json({ ok: false, error: "server_error", quotes: [] });
     }
   });
 
