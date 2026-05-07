@@ -1,18 +1,24 @@
 // sockets/polygonSocket.js
 import WebSocket from "ws";
 import EventEmitter from "events";
-import { endpoints, key as defaultKey, prefixes as defaultPrefixes } from "../config/polygon.js";
+import {
+  endpoints,
+  key as defaultKey,
+  prefixes as defaultPrefixes
+} from "../config/polygon.js";
 
 /**
- * PolygonSocket — multi-class socket manager
+ * PolygonSocket — FIXED VERSION (ROBUST PRICE ENGINE)
  */
 export default class PolygonSocket extends EventEmitter {
   constructor(opts = {}) {
     super();
+
     this.apiKey = opts.apiKey || defaultKey || null;
 
     this.ws = {};
     this.pendingSends = {};
+
     this.subscriptions = {
       stocks: new Set(),
       crypto: new Set(),
@@ -23,8 +29,6 @@ export default class PolygonSocket extends EventEmitter {
 
     this.reconnectBase = Number(opts.reconnectBase) || 1000;
     this.reconnectMax = Number(opts.reconnectMax) || 30000;
-    this.reconnectAttempts = {};
-    this.reconnectDelay = {};
 
     this._connecting = {
       stocks: false,
@@ -34,9 +38,6 @@ export default class PolygonSocket extends EventEmitter {
       options: false,
     };
 
-    this.heartbeatIntervalMs = Number(opts.heartbeatIntervalMs) || 30000;
-    this._heartbeatTimers = {};
-
     this.prefixes = opts.prefixes || defaultPrefixes || {
       trades: "T.",
       quotes: "Q.",
@@ -45,11 +46,8 @@ export default class PolygonSocket extends EventEmitter {
 
     Object.keys(this.subscriptions).forEach((k) => {
       this.pendingSends[k] = [];
-      this.reconnectAttempts[k] = 0;
-      this.reconnectDelay[k] = this.reconnectBase;
     });
 
-    // 🔥 IMPORTANTE: referencia al priceHandler global
     this.priceHandler = opts.priceHandler || global.priceHandler;
   }
 
@@ -64,26 +62,26 @@ export default class PolygonSocket extends EventEmitter {
   }
 
   // ======================================================
-  // 🔥 FIX PRINCIPAL: NORMALIZAR SYMBOL
+  // 🔥 CLEAN SYMBOL (IMPROVED)
   // ======================================================
-  _cleanSymbol(symbol) {
-    return String(symbol || "")
+  _cleanSymbol(symbol = "") {
+    return String(symbol)
       .toUpperCase()
-      .replace("OANDA:", "")
-      .replace("TVC:", "")
-      .replace("C:", "")
-      .replace("/", "")
+      .replace(/^OANDA:/, "")
+      .replace(/^TVC:/, "")
+      .replace(/^C:/, "")
+      .replace(/\//g, "")
       .trim();
   }
 
-  _guessClass(symbol) {
-    if (!symbol) return "stocks";
+  _guessClass(symbol = "") {
     const s = String(symbol).toUpperCase();
 
-    if (s.includes("BTC") || s.includes("ETH") || s.includes("USDT") || s.includes("USD")) return "crypto";
-    if (s.includes("/") || s.includes("FX") || s.includes("OANDA")) return "forex";
+    if (s.includes("BTC") || s.includes("ETH") || s.includes("USDT")) return "crypto";
+    if (s.includes("/") || s.includes("OANDA") || s.includes("FX")) return "forex";
     if (s.startsWith("I:") || s.includes("INDEX")) return "indices";
     if (s.startsWith("O:")) return "options";
+
     return "stocks";
   }
 
@@ -91,6 +89,9 @@ export default class PolygonSocket extends EventEmitter {
     return endpoints?.[cls] || null;
   }
 
+  // ======================================================
+  // 🔥 CONNECT
+  // ======================================================
   _connectClass(cls) {
     if (this._connecting[cls]) return;
 
@@ -100,6 +101,7 @@ export default class PolygonSocket extends EventEmitter {
     this._connecting[cls] = true;
 
     let conn;
+
     try {
       conn = new WebSocket(url);
     } catch (err) {
@@ -114,14 +116,17 @@ export default class PolygonSocket extends EventEmitter {
       this._connecting[cls] = false;
 
       if (this.apiKey) {
-        conn.send(JSON.stringify({ action: "auth", params: this.apiKey }));
+        conn.send(JSON.stringify({
+          action: "auth",
+          params: this.apiKey
+        }));
       }
 
       this._flushPendingSends(cls);
     });
 
     // ======================================================
-    // 🔥 FIX REAL: GUARDAR PRECIOS EN MEMORIA
+    // 🔥 FIX PRINCIPAL: MESSAGE PARSER ROBUSTO
     // ======================================================
     conn.on("message", (msg) => {
       let parsed;
@@ -133,38 +138,62 @@ export default class PolygonSocket extends EventEmitter {
       }
 
       const item = Array.isArray(parsed) ? parsed[0] : parsed;
-
       if (!item) return;
 
+      // ======================================================
+      // 🔥 SYMBOL FIX
+      // ======================================================
       const symbol =
         item.sym ||
         item.symbol ||
         item.ticker ||
-        item.pair;
+        item.pair ||
+        item.T ||
+        item.s;
 
-      const price =
-        item.p ||
-        item.price ||
-        item.last ||
-        item.c;
+      if (!symbol) return;
 
-      if (!symbol || price === undefined) return;
+      const cleanSymbol = this._cleanSymbol(symbol);
 
-      const clean = this._cleanSymbol(symbol);
+      // ======================================================
+      // 🔥 PRICE EXTRACTION ROBUSTA
+      // ======================================================
+      const rawPrice =
+        item.p ??
+        item.price ??
+        item.last ??
+        item.c ??
+        item.ap ??
+        item.bp ??
+        item.mid ??
+        item.vw ??
+        null;
 
-      // 🔥 GUARDAR EN MEMORIA GLOBAL
+      const price = Number(rawPrice);
+
+      if (!Number.isFinite(price) || price <= 0) return;
+
+      // ======================================================
+      // 🔥 STORE FIXED (Map OR Object safe)
+      // ======================================================
       if (this.priceHandler?.prices) {
         if (this.priceHandler.prices instanceof Map) {
-          this.priceHandler.prices.set(clean, Number(price));
+          this.priceHandler.prices.set(cleanSymbol, price);
         } else {
-          this.priceHandler.prices[clean] = Number(price);
+          this.priceHandler.prices[cleanSymbol] = price;
         }
       }
 
-      // debug
-      console.log("📥 PRICE UPDATE:", clean, price);
+      // DEBUG
+      console.log("📥 PRICE UPDATE:", cleanSymbol, price);
 
-      this.emit("data", { cls, item });
+      // EVENT
+      this.emit("data", {
+        cls,
+        symbol: cleanSymbol,
+        price,
+        raw: item,
+      });
     });
 
     conn.on("close", () => {
@@ -178,32 +207,34 @@ export default class PolygonSocket extends EventEmitter {
     });
   }
 
+  // ======================================================
   _scheduleReconnect(cls) {
     setTimeout(() => this._connectClass(cls), this.reconnectBase);
   }
 
+  // ======================================================
   _flushPendingSends(cls) {
     const conn = this.ws[cls];
     if (!conn || conn.readyState !== WebSocket.OPEN) return;
 
     const queue = this.pendingSends[cls] || [];
     while (queue.length) {
-      const item = queue.shift();
-      conn.send(JSON.stringify(item));
+      conn.send(JSON.stringify(queue.shift()));
     }
   }
 
+  // ======================================================
   subscribe(symbol) {
     const cls = this._guessClass(symbol);
     const conn = this.ws[cls];
 
     if (!conn || conn.readyState !== WebSocket.OPEN) return;
 
-    const sub = this._cleanSymbol(symbol);
+    const clean = this._cleanSymbol(symbol);
 
     conn.send(JSON.stringify({
       action: "subscribe",
-      params: sub
+      params: clean
     }));
   }
 }
