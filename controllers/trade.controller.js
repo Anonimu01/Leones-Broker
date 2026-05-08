@@ -11,6 +11,7 @@ function normalizePrice(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// 🔥 FIX REAL: mantiene símbolos tipo ASX:XJO, EURUSD, etc.
 function normalizeSymbol(value) {
   return String(value || "")
     .trim()
@@ -20,7 +21,7 @@ function normalizeSymbol(value) {
     .replace(/^FOREX:/, "")
     .replace(/^NASDAQ:/, "")
     .replace(/^INDEX:/, "")
-    .replace(/[^A-Z0-9]/g, "");
+    .replace(/[^A-Z0-9:]/g, ""); // 👈 IMPORTANTE: mantiene ":"
 }
 
 function normalizeSide(value) {
@@ -29,7 +30,7 @@ function normalizeSide(value) {
 }
 
 // =======================
-// 🔥 FIND REAL PRICE (FIX FINAL)
+// 🔥 MARKET PRICE ENGINE (ROBUSTO)
 // =======================
 function getMarketPrice(symbol) {
   const clean = normalizeSymbol(symbol);
@@ -43,13 +44,13 @@ function getMarketPrice(symbol) {
   for (const src of sources) {
     if (!src) continue;
 
-    const p =
+    const price =
       normalizePrice(src[clean]?.price) ||
       normalizePrice(src[clean]) ||
       normalizePrice(src[symbol]?.price) ||
       normalizePrice(src[symbol]);
 
-    if (p) return p;
+    if (price) return price;
   }
 
   return null;
@@ -85,8 +86,8 @@ async function getOrCreateWallet(userId, session) {
       balance: Number(userDoc?.balance || 1000),
       credit: Number(userDoc?.credit || 0),
       marginUsed: 0,
-      equity: 1000,
-      freeMargin: 1000,
+      equity: Number(userDoc?.balance || 1000),
+      freeMargin: Number(userDoc?.balance || 1000),
     });
 
     await wallet.save({ session });
@@ -96,13 +97,16 @@ async function getOrCreateWallet(userId, session) {
 }
 
 // =======================
-// 📊 RECALC
+// 📊 RECALC WALLET
 // =======================
 async function recalc(userId, session) {
   const wallet = await Wallet.findOne({ user: userId }).session(session);
   if (!wallet) return;
 
-  const positions = await Position.find({ user: userId, status: "OPEN" }).session(session);
+  const positions = await Position.find({
+    user: userId,
+    status: "OPEN",
+  }).session(session);
 
   let margin = 0;
   let pnl = 0;
@@ -120,7 +124,7 @@ async function recalc(userId, session) {
 }
 
 // =======================
-// 🚀 OPEN TRADE (FIX FINAL)
+// 🚀 OPEN TRADE (FIX DEFINITIVO)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -137,17 +141,23 @@ export const openTrade = async ({ user, order }) => {
     quantity = Number(quantity);
 
     // =========================
-    // 🔥 PRICE FIX REAL
+    // 🔥 PRICE ENGINE FIX REAL
     // =========================
     let entryPrice = normalizePrice(price);
 
+    // 🔥 SI FRONTEND MANDA 0 → IGNORAR
+    if (!entryPrice) entryPrice = null;
+
+    // 🔥 BUSCAR EN MARKET GLOBAL
     if (!entryPrice) {
       entryPrice = getMarketPrice(symbol);
     }
 
+    // ❌ BLOQUEO FINAL
     if (!entryPrice) {
       await session.abortTransaction();
       session.endSession();
+
       return {
         ok: false,
         error: "price_not_available",
@@ -211,7 +221,10 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     const position = await Position.findById(positionId).session(session);
     if (!position) throw new Error("position_not_found");
 
-    let exit = normalizePrice(closePrice) || getMarketPrice(position.symbol) || position.entryPrice;
+    let exit =
+      normalizePrice(closePrice) ||
+      getMarketPrice(position.symbol) ||
+      position.entryPrice;
 
     const pnl = computePnl({
       side: position.side,
@@ -249,7 +262,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 };
 
 // =======================
-// 📡 LIVE PRICE (EXPORT FIXED)
+// 📡 LIVE PRICE
 // =======================
 export const updateLivePrice = async ({ symbol, price }) => {
   try {
@@ -271,16 +284,16 @@ export const updateLivePrice = async ({ symbol, price }) => {
 
       p.currentPrice = live;
       p.pnl = pnl;
+
       await p.save();
     }
-
   } catch (e) {
     console.error("updateLivePrice error:", e);
   }
 };
 
 // =======================
-// EXPORT FIX (IMPORTANT FOR RENDER ERROR)
+// EXPORT
 // =======================
 export default {
   openTrade,
