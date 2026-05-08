@@ -172,19 +172,20 @@ export const openTrade = async ({ user, order }) => {
 
     let entryPrice = normalizePrice(price);
 
-    // =========================
-    // 🔥 FIX QUE TE FALTABA
-    // =========================
+    // 🔥 BUSQUEDA REAL EN GLOBAL PRICE HANDLER
     if (!entryPrice) {
-      const live =
-        global.priceHandler?.prices?.[symbol]?.price ||
-        global.priceHandler?.prices?.[normalizeSymbol(symbol)]?.price;
+      const store = global.priceHandler?.prices || {};
 
-      entryPrice = normalizePrice(live);
+      entryPrice =
+        normalizePrice(store[symbol]?.price) ||
+        normalizePrice(store[normalizeSymbol(symbol)]?.price);
     }
 
-    // ❌ BLOQUEO REAL (NO INVENTAR PRECIOS SILENCIOSOS)
+    // ❌ BLOQUEO REAL
     if (!entryPrice) {
+      await session.abortTransaction();
+      session.endSession();
+
       return {
         ok: false,
         error: "price_not_available",
@@ -198,6 +199,7 @@ export const openTrade = async ({ user, order }) => {
     const margin = (quantity * entryPrice) / leverage;
 
     wallet.marginUsed = Number(wallet.marginUsed || 0) + margin;
+
     await wallet.save({ session });
 
     const position = await Position.create(
@@ -236,7 +238,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 // =======================
-// 🔴 CLOSE TRADE (FIX REAL)
+// 🔴 CLOSE TRADE
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
@@ -257,8 +259,9 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     let exit = normalizePrice(closePrice);
 
     if (!exit) {
+      const store = global.priceHandler?.prices || {};
       exit =
-        global.priceHandler?.prices?.[normalizeSymbol(position.symbol)]?.price ||
+        normalizePrice(store[normalizeSymbol(position.symbol)]?.price) ||
         normalizePrice(position.entryPrice);
     }
 
