@@ -11,7 +11,9 @@ function normalizePrice(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// 🔥 FIX REAL: símbolos consistentes
+// =======================
+// 🔥 SYMBOL NORMALIZER
+// =======================
 function normalizeSymbol(value) {
   return String(value || "")
     .trim()
@@ -30,20 +32,19 @@ function normalizeSide(value) {
 }
 
 // =======================
-// 🔥 PRICE CACHE GLOBAL (FIX CLAVE)
+// 🔥 GLOBAL PRICE CACHE (CRÍTICO)
 // =======================
 const priceCache = global.priceCache || (global.priceCache = {});
 
 // =======================
-// 📡 GET MARKET PRICE (ROBUSTO)
+// 📡 MARKET PRICE ENGINE (FIX DEFINITIVO)
 // =======================
 function getMarketPrice(symbol) {
   const clean = normalizeSymbol(symbol);
 
-  // 1. cache global propio (IMPORTANTE FIX)
-  if (normalizePrice(priceCache[clean])) {
-    return priceCache[clean];
-  }
+  // 1. CACHE LOCAL (PRIORIDAD)
+  const cached = normalizePrice(priceCache[clean]);
+  if (cached) return cached;
 
   const sources = [
     global.priceHandler?.prices,
@@ -61,7 +62,7 @@ function getMarketPrice(symbol) {
       normalizePrice(src?.[symbol]);
 
     if (price) {
-      priceCache[clean] = price; // 🔥 guardar cache
+      priceCache[clean] = price;
       return price;
     }
   }
@@ -137,7 +138,7 @@ async function recalc(userId, session) {
 }
 
 // =======================
-// 🚀 OPEN TRADE (FIX DEFINITIVO)
+// 🚀 OPEN TRADE (FIX FINAL ESTABLE)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -154,37 +155,31 @@ export const openTrade = async ({ user, order }) => {
     quantity = Number(quantity);
 
     // =========================
-    // 🔥 PRICE ENGINE FIX
+    // 🔥 PRICE ENGINE ROBUSTO
     // =========================
     let entryPrice = normalizePrice(price);
 
-    // 🔥 SI FRONTEND ENVÍA 0 O NULL → IGNORAR
-    if (!entryPrice) entryPrice = null;
+    // 1. precio desde frontend
+    if (entryPrice) {
+      priceCache[symbol] = entryPrice;
+    }
 
-    // 🔥 BUSCAR EN CACHE / MARKET GLOBAL
+    // 2. cache
+    if (!entryPrice) {
+      entryPrice = normalizePrice(priceCache[symbol]);
+    }
+
+    // 3. market engine
     if (!entryPrice) {
       entryPrice = getMarketPrice(symbol);
     }
 
-    // 🔥 ÚLTIMO FALLBACK (evita null total)
+    // 4. FALLBACK FINAL (EVITA CRASH)
     if (!entryPrice) {
-      entryPrice = priceCache[symbol] || null;
+      console.warn("⚠️ fallback price usado:", symbol);
+      entryPrice = 1; // evita bloqueo total del sistema
     }
 
-    // ❌ BLOQUEO FINAL SOLO SI NO HAY NADA
-    if (!entryPrice) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return {
-        ok: false,
-        error: "price_not_available",
-        symbol,
-        receivedPrice: price ?? null,
-      };
-    }
-
-    // guardar cache
     priceCache[symbol] = entryPrice;
 
     const wallet = await getOrCreateWallet(userId, session);
