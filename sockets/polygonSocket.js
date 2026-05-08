@@ -3,7 +3,7 @@ import EventEmitter from "events";
 import { endpoints, key as defaultKey, prefixes as defaultPrefixes } from "../config/polygon.js";
 
 /**
- * PolygonSocket — FIXED VERSION (PRICE STABLE + SYMBOL NORMALIZATION)
+ * PolygonSocket — FINAL FIXED VERSION (STABLE PRICES)
  */
 export default class PolygonSocket extends EventEmitter {
   constructor(opts = {}) {
@@ -12,63 +12,54 @@ export default class PolygonSocket extends EventEmitter {
     this.apiKey = opts.apiKey || defaultKey || null;
 
     this.ws = {};
-    this.pendingSends = {};
-
     this.reconnectBase = Number(opts.reconnectBase) || 1000;
-
-    this._connecting = {
-      stocks: false,
-      crypto: false,
-      forex: false,
-      indices: false,
-      options: false,
-    };
-
-    this.prefixes = opts.prefixes || defaultPrefixes || {
-      trades: "T.",
-      quotes: "Q.",
-      aggs: "A.",
-    };
 
     this.priceHandler =
       opts.priceHandler ||
       global.priceHandler ||
       (global.priceHandler = {
-        prices: new Map(),
+        prices: {},
       });
 
-    this.pendingSends = {};
+    this._connecting = {};
+    this.prefixes = opts.prefixes || defaultPrefixes || {};
   }
 
   // ======================================================
-  // NORMALIZAR SYMBOL (🔥 FIX CLAVE)
+  // NORMALIZAR SYMBOL (CRÍTICO)
   // ======================================================
   _cleanSymbol(symbol) {
-    if (!symbol) return "";
+    if (!symbol) return null;
 
     return String(symbol)
       .toUpperCase()
       .replace("BINANCE:", "")
       .replace("OANDA:", "")
-      .replace("TVC:", "")
       .replace("FOREX:", "")
       .replace("INDEX:", "")
+      .replace("TVC:", "")
       .replace("C:", "")
-      .replace("X:", "")
       .replace("/", "")
+      .replace("_", "")
       .trim();
   }
 
+  // ======================================================
+  // CLASIFICAR MERCADO
+  // ======================================================
   _guessClass(symbol) {
     const s = String(symbol || "").toUpperCase();
 
     if (s.includes("BTC") || s.includes("ETH") || s.includes("USDT")) return "crypto";
     if (s.includes("EUR") || s.includes("USD") || s.includes("JPY")) return "forex";
-    if (s.startsWith("I") || s.includes("SPX")) return "indices";
+    if (s.includes("SPX") || s.includes("INDEX")) return "indices";
     return "stocks";
   }
 
-  _getEndpointFor(cls) {
+  // ======================================================
+  // ENDPOINT
+  // ======================================================
+  _getEndpoint(cls) {
     return endpoints?.[cls] || null;
   }
 
@@ -77,12 +68,12 @@ export default class PolygonSocket extends EventEmitter {
   // ======================================================
   connect() {
     Object.keys(endpoints || {}).forEach((cls) => {
-      if (!this.ws[cls]) this._connect(cls);
+      this._connect(cls);
     });
   }
 
   _connect(cls) {
-    const url = this._getEndpointFor(cls);
+    const url = this._getEndpoint(cls);
     if (!url) return;
 
     let ws;
@@ -103,7 +94,7 @@ export default class PolygonSocket extends EventEmitter {
     });
 
     // ======================================================
-    // 🔥 FIX PRINCIPAL DE PRECIOS
+    // 🔥 DATA HANDLER FINAL
     // ======================================================
     ws.on("message", (msg) => {
       let data;
@@ -124,39 +115,50 @@ export default class PolygonSocket extends EventEmitter {
         item.pair ||
         item.s;
 
-      let price =
-        item.p ||
-        item.price ||
-        item.last ||
-        item.c ||
-        item.close;
+      if (!rawSymbol) return;
 
-      if (!rawSymbol || price == null) return;
+      // =========================
+      // PRICE DETECTION (ROBUSTO)
+      // =========================
+      let price = null;
 
-      const symbol = this._cleanSymbol(rawSymbol);
-      const numericPrice = Number(price);
+      // trade
+      if (item.p != null) price = item.p;
 
-      if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
+      // fallback quote
+      else if (item.price != null) price = item.price;
+      else if (item.last != null) price = item.last;
+      else if (item.c != null) price = item.c;
 
-      // ======================================================
-      // 💾 STORE GLOBAL (ESTO ES LO QUE TE FALTABA)
-      // ======================================================
-      const payload = {
-        symbol,
-        price: numericPrice,
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Map seguro
-      if (this.priceHandler.prices instanceof Map) {
-        this.priceHandler.prices.set(symbol, payload);
-      } else {
-        this.priceHandler.prices[symbol] = payload;
+      // bid/ask fallback
+      else if (item.bp && item.ap) {
+        price = (Number(item.bp) + Number(item.ap)) / 2;
       }
 
-      console.log("📥 PRICE OK:", symbol, numericPrice);
+      if (price == null) return;
 
-      this.emit("price", payload);
+      const numericPrice = Number(price);
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
+
+      const symbol = this._cleanSymbol(rawSymbol);
+      if (!symbol) return;
+
+      // ======================================================
+      // 💾 STORE FINAL (UNIFICADO)
+      // ======================================================
+      this.priceHandler.prices[symbol] = {
+        symbol,
+        price: numericPrice,
+        updatedAt: Date.now(),
+        raw: item,
+      };
+
+      console.log("📥 PRICE:", symbol, numericPrice);
+
+      this.emit("price", {
+        symbol,
+        price: numericPrice,
+      });
     });
 
     ws.on("close", () => {
@@ -169,7 +171,7 @@ export default class PolygonSocket extends EventEmitter {
   }
 
   // ======================================================
-  // SUBSCRIBE FIX
+  // SUBSCRIBE
   // ======================================================
   subscribe(symbol) {
     const cls = this._guessClass(symbol);
