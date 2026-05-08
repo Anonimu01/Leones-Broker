@@ -4943,21 +4943,20 @@ async function loadPositions() {
   }
 
 /* =========================
-   NORMALIZE SYMBOL
+   NORMALIZE SYMBOL (FIX REAL)
 ========================= */
 function normalizeSymbol(symbol = "") {
   return String(symbol)
     .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .trim();
+    .trim()
+    .replace(/[^A-Z0-9:]/g, "");
 }
 
 /* =========================
    VALIDATE SYMBOL (🔥 NUEVO)
 ========================= */
 function isValidSymbol(symbol) {
-  const s = String(symbol || "").toUpperCase().trim();
-  return /^[A-Z0-9]{3,10}$/.test(s);
+  return /^[A-Z0-9:]{3,15}$/.test(symbol);
 }
 
 /* =========================
@@ -4982,11 +4981,13 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (FIXED)
+   🔥 LIVE PRICE SYNC
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
+    const clean = normalizeSymbol(symbol);
+
+    const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
     const data = await res.json();
 
     if (data?.price && Number(data.price) > 0) {
@@ -4997,10 +4998,8 @@ async function syncLivePrice(symbol) {
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json();
 
-    const normalized = normalizeSymbol(symbol);
-
-    const match = quotes.find(q =>
-      normalizeSymbol(q.symbol) === normalized
+    const match = quotes?.quotes?.find(q =>
+      normalizeSymbol(q.symbol) === clean
     );
 
     if (match?.price && Number(match.price) > 0) {
@@ -5010,13 +5009,13 @@ async function syncLivePrice(symbol) {
 
     return null;
   } catch (err) {
-    console.warn("Precio sync error:", err);
+    console.warn("syncLivePrice error:", err);
     return null;
   }
 }
 
 /* =========================
-   🔥 GET LIVE PRICE SAFE
+   GET LIVE PRICE SAFE
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
@@ -5062,36 +5061,39 @@ async function placeOrder(input) {
         document.getElementById("order-type-bottom")?.value ||
         "Market";
 
-      if (String(type).toLowerCase() !== "market") {
-        const priceInput =
-          document.getElementById("order-price") ||
-          document.getElementById("order-price-bottom");
+      const priceInput =
+        document.getElementById("order-price") ||
+        document.getElementById("order-price-bottom");
 
-        price = parseFloat(priceInput?.value);
-      }
+      price = parseFloat(priceInput?.value);
     } else {
       side = input?.side || input?.direction;
       symbol = input?.symbol || getActiveSymbol();
       amount = Number(input?.amount);
       type = input?.type || "Market";
-      price = input?.price;
+      price = Number(input?.price);
     }
 
-    if (!symbol) return alert("Selecciona símbolo");
-    if (!isValidSymbol(symbol)) return alert("Símbolo inválido ❌");
+    symbol = normalizeSymbol(symbol);
+
+    // 🔥 VALIDACIÓN REAL
+    if (!isValidSymbol(symbol)) {
+      return alert("Símbolo inválido");
+    }
+
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!side) return alert("Dirección inválida");
 
-    symbol = normalizeSymbol(symbol);
     side = String(side).toLowerCase();
 
     const payload = {
       symbol,
       direction: side,
       type: String(type).toLowerCase(),
-      qty: amount
+      qty: amount,
     };
 
+    // 🔥 SOLO PASA PRICE SI ES REAL
     if (price && Number(price) > 0) {
       payload.price = Number(price);
     }
@@ -5130,29 +5132,23 @@ document.addEventListener("click", async (e) => {
 });
 
 /* =========================
-   🔥 FINAL BACKEND ORDER (FIXED)
+   🔥 FINAL BACKEND ORDER FIX
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(
-      payload.symbol || window.tvSymbol || window.selectedSymbol
-    );
-
+    const symbol = normalizeSymbol(payload.symbol || window.tvSymbol || window.selectedSymbol);
     const amount = Number(payload.qty ?? payload.amount);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
     const user = getUser() || {};
 
-    if (!user.token) {
-      alert("No autenticado");
-      return;
-    }
+    if (!user.token) return alert("No autenticado");
 
-    if (!symbol) return alert("Símbolo inválido");
-    if (!isValidSymbol(symbol)) return alert("Símbolo inválido ❌");
+    if (!isValidSymbol(symbol)) return alert("Símbolo inválido");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
+    // 🔥 PRECIO OBLIGATORIO REAL
     let price = getLivePriceFallback();
 
     if (!price) {
@@ -5170,7 +5166,7 @@ async function placeBrokerOrder(payload = {}) {
       side: side.toUpperCase(),
       type: "market",
       qty: amount,
-      price: Number(price)
+      price: Number(price),
     };
 
     console.log("🚀 FINAL PAYLOAD:", body);
@@ -5179,9 +5175,9 @@ async function placeBrokerOrder(payload = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer " + user.token
+        Authorization: "Bearer " + user.token,
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     const data = await res.json();
@@ -5190,7 +5186,7 @@ async function placeBrokerOrder(payload = {}) {
 
     if (!res.ok) {
       console.error("❌ BACKEND ERROR:", data);
-      alert(data?.message || "Error al abrir operación");
+      alert(data?.error || "Error al abrir operación");
       return;
     }
 
