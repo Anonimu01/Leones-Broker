@@ -3,7 +3,7 @@ import EventEmitter from "events";
 import { endpoints, key as defaultKey, prefixes as defaultPrefixes } from "../config/polygon.js";
 
 /**
- * PolygonSocket — multi-class socket manager (FIXED SAFE VERSION)
+ * PolygonSocket — FIXED VERSION (PRICE STABLE + SYMBOL NORMALIZATION)
  */
 export default class PolygonSocket extends EventEmitter {
   constructor(opts = {}) {
@@ -13,19 +13,8 @@ export default class PolygonSocket extends EventEmitter {
 
     this.ws = {};
     this.pendingSends = {};
-    this.subscriptions = {
-      stocks: new Set(),
-      crypto: new Set(),
-      forex: new Set(),
-      indices: new Set(),
-      options: new Set(),
-    };
 
     this.reconnectBase = Number(opts.reconnectBase) || 1000;
-    this.reconnectMax = Number(opts.reconnectMax) || 30000;
-
-    this.reconnectAttempts = {};
-    this.reconnectDelay = {};
 
     this._connecting = {
       stocks: false,
@@ -35,58 +24,47 @@ export default class PolygonSocket extends EventEmitter {
       options: false,
     };
 
-    this.heartbeatIntervalMs = Number(opts.heartbeatIntervalMs) || 30000;
-    this._heartbeatTimers = {};
-
     this.prefixes = opts.prefixes || defaultPrefixes || {
       trades: "T.",
       quotes: "Q.",
       aggs: "A.",
     };
 
-    Object.keys(this.subscriptions).forEach((k) => {
-      this.pendingSends[k] = [];
-      this.reconnectAttempts[k] = 0;
-      this.reconnectDelay[k] = this.reconnectBase;
-    });
+    this.priceHandler =
+      opts.priceHandler ||
+      global.priceHandler ||
+      (global.priceHandler = {
+        prices: new Map(),
+      });
 
-    // ⚠️ SAFE fallback (NO rompe si no existe)
-    this.priceHandler = opts.priceHandler || global.priceHandler || {
-      prices: {}
-    };
-  }
-
-  connect() {
-    return this.start();
-  }
-
-  async start() {
-    Object.keys(this.subscriptions).forEach((cls) => {
-      if (!this.ws[cls]) this._connectClass(cls);
-    });
+    this.pendingSends = {};
   }
 
   // ======================================================
-  // NORMALIZAR SYMBOL
+  // NORMALIZAR SYMBOL (🔥 FIX CLAVE)
   // ======================================================
   _cleanSymbol(symbol) {
-    return String(symbol || "")
+    if (!symbol) return "";
+
+    return String(symbol)
       .toUpperCase()
+      .replace("BINANCE:", "")
       .replace("OANDA:", "")
       .replace("TVC:", "")
+      .replace("FOREX:", "")
+      .replace("INDEX:", "")
       .replace("C:", "")
+      .replace("X:", "")
       .replace("/", "")
       .trim();
   }
 
   _guessClass(symbol) {
-    if (!symbol) return "stocks";
-    const s = String(symbol).toUpperCase();
+    const s = String(symbol || "").toUpperCase();
 
-    if (s.includes("BTC") || s.includes("ETH") || s.includes("USDT") || s.includes("USD")) return "crypto";
-    if (s.includes("/") || s.includes("FX") || s.includes("OANDA")) return "forex";
-    if (s.startsWith("I:") || s.includes("INDEX")) return "indices";
-    if (s.startsWith("O:")) return "options";
+    if (s.includes("BTC") || s.includes("ETH") || s.includes("USDT")) return "crypto";
+    if (s.includes("EUR") || s.includes("USD") || s.includes("JPY")) return "forex";
+    if (s.startsWith("I") || s.includes("SPX")) return "indices";
     return "stocks";
   }
 
@@ -95,134 +73,117 @@ export default class PolygonSocket extends EventEmitter {
   }
 
   // ======================================================
-  // CONEXIÓN WS
+  // CONNECT
   // ======================================================
-  _connectClass(cls) {
-    if (this._connecting[cls]) return;
+  connect() {
+    Object.keys(endpoints || {}).forEach((cls) => {
+      if (!this.ws[cls]) this._connect(cls);
+    });
+  }
 
+  _connect(cls) {
     const url = this._getEndpointFor(cls);
     if (!url) return;
 
-    this._connecting[cls] = true;
-
-    let conn;
+    let ws;
 
     try {
-      conn = new WebSocket(url);
+      ws = new WebSocket(url);
     } catch (err) {
-      this._connecting[cls] = false;
-      this._scheduleReconnect(cls);
+      setTimeout(() => this._connect(cls), this.reconnectBase);
       return;
     }
 
-    this.ws[cls] = conn;
+    this.ws[cls] = ws;
 
-    conn.on("open", () => {
-      this._connecting[cls] = false;
-
+    ws.on("open", () => {
       if (this.apiKey) {
-        conn.send(JSON.stringify({ action: "auth", params: this.apiKey }));
+        ws.send(JSON.stringify({ action: "auth", params: this.apiKey }));
       }
-
-      this._flushPendingSends(cls);
     });
 
     // ======================================================
-    // 🔥 FIX SEGURO DE PRECIOS
+    // 🔥 FIX PRINCIPAL DE PRECIOS
     // ======================================================
-    conn.on("message", (msg) => {
-      let parsed;
+    ws.on("message", (msg) => {
+      let data;
 
       try {
-        parsed = JSON.parse(msg.toString());
+        data = JSON.parse(msg.toString());
       } catch {
         return;
       }
 
-      const item = Array.isArray(parsed) ? parsed[0] : parsed;
+      const item = Array.isArray(data) ? data[0] : data;
       if (!item) return;
 
-      const symbol = item.sym || item.symbol || item.ticker || item.pair;
+      const rawSymbol =
+        item.sym ||
+        item.symbol ||
+        item.ticker ||
+        item.pair ||
+        item.s;
 
-      const price =
+      let price =
         item.p ||
         item.price ||
         item.last ||
-        item.c;
+        item.c ||
+        item.close;
 
-      if (!symbol || price == null) return;
+      if (!rawSymbol || price == null) return;
 
-      const clean = this._cleanSymbol(symbol);
+      const symbol = this._cleanSymbol(rawSymbol);
       const numericPrice = Number(price);
 
       if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
 
       // ======================================================
-      // 🔥 SAFE WRITE (NO ROMPE FRONTEND)
+      // 💾 STORE GLOBAL (ESTO ES LO QUE TE FALTABA)
       // ======================================================
-
       const payload = {
+        symbol,
         price: numericPrice,
         updatedAt: new Date().toISOString(),
       };
 
-      // Map safe
-      if (this.priceHandler?.prices instanceof Map) {
-        this.priceHandler.prices.set(clean, payload);
+      // Map seguro
+      if (this.priceHandler.prices instanceof Map) {
+        this.priceHandler.prices.set(symbol, payload);
+      } else {
+        this.priceHandler.prices[symbol] = payload;
       }
 
-      // Object safe
-      else if (typeof this.priceHandler?.prices === "object") {
-        this.priceHandler.prices[clean] = payload;
-      }
+      console.log("📥 PRICE OK:", symbol, numericPrice);
 
-      console.log("📥 PRICE UPDATE:", clean, numericPrice);
-
-      this.emit("data", { cls, item });
+      this.emit("price", payload);
     });
 
-    conn.on("close", () => {
-      this._connecting[cls] = false;
-      this._scheduleReconnect(cls);
+    ws.on("close", () => {
+      setTimeout(() => this._connect(cls), this.reconnectBase);
     });
 
-    conn.on("error", () => {
-      this._connecting[cls] = false;
-      this._scheduleReconnect(cls);
+    ws.on("error", () => {
+      setTimeout(() => this._connect(cls), this.reconnectBase);
     });
   }
 
   // ======================================================
-  _scheduleReconnect(cls) {
-    setTimeout(() => this._connectClass(cls), this.reconnectBase);
-  }
-
-  _flushPendingSends(cls) {
-    const conn = this.ws[cls];
-    if (!conn || conn.readyState !== WebSocket.OPEN) return;
-
-    const queue = this.pendingSends[cls] || [];
-
-    while (queue.length) {
-      const item = queue.shift();
-      conn.send(JSON.stringify(item));
-    }
-  }
-
-  // ======================================================
-  // SUBSCRIBE SAFE
+  // SUBSCRIBE FIX
   // ======================================================
   subscribe(symbol) {
     const cls = this._guessClass(symbol);
-    const conn = this.ws[cls];
+    const ws = this.ws[cls];
 
-    if (!conn || conn.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    const sub = this._cleanSymbol(symbol);
+    const clean = this._cleanSymbol(symbol);
 
-    conn.send(JSON.stringify({
-      action: "subscribe",
-      params: sub
-    }));
+    ws.send(
+      JSON.stringify({
+        action: "subscribe",
+        params: clean,
+      })
+    );
   }
 }
