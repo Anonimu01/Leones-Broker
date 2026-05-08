@@ -1065,6 +1065,35 @@ try {
 
 app.get("/api/quotes", async (req, res) => res.json((await buildMarketPayload()).quotes));
 
+app.get("/api/quotes", (req, res) => {
+  const data = priceHandler.getAllPrices();
+
+  const symbols = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "EURUSD",
+    "AAPL",
+    "SPX",
+    "BCHUSDT",
+    "ADAUSDT",
+    "USDJPY"
+  ];
+
+  const response = symbols.map((sym) => {
+    const clean = sym.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const p = data[clean] || {};
+
+    return {
+      symbol: sym,
+      price: p.price ?? 0,
+      change: p.change ?? 0,
+      updatedAt: p.updatedAt || p.ts || null
+    };
+  });
+
+  res.json(response);
+});
+
 /* ======================================================
    FIX /api/latest
    ====================================================== */
