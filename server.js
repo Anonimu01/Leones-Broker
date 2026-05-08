@@ -1992,6 +1992,41 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+  function normalizeSymbol(symbol = "") {
+  return String(symbol || "")
+    .trim()
+    .toUpperCase()
+
+    //////////////////////////////////////////////////////
+    // REMOVE PREFIXES
+    //////////////////////////////////////////////////////
+
+    .replace(/^OANDA:/, "")
+    .replace(/^TVC:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^FOREX:/, "")
+    .replace(/^C:/, "")
+    .replace(/^X:/, "")
+    .replace(/^I:/, "")
+    .replace(/^INDEX:/, "")
+    .replace(/^BINANCE:/, "")
+    .replace(/^NASDAQ:/, "")
+
+    //////////////////////////////////////////////////////
+    // REMOVE SPECIAL CHARS
+    //////////////////////////////////////////////////////
+
+    .replace(/[\/:_\-]/g, "")
+
+    //////////////////////////////////////////////////////
+    // FINAL CLEAN
+    //////////////////////////////////////////////////////
+
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
