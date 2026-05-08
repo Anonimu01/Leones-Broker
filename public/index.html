@@ -4953,7 +4953,7 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
-   VALIDATE SYMBOL (🔥 NUEVO)
+   VALIDATE SYMBOL
 ========================= */
 function isValidSymbol(symbol) {
   return /^[A-Z0-9:]{3,15}$/.test(symbol);
@@ -5015,7 +5015,7 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   GET LIVE PRICE SAFE
+   GET LIVE PRICE FALLBACK
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
@@ -5043,29 +5043,18 @@ async function placeOrder(input) {
   try {
     sendingOrder = true;
 
-    const api = window.__LEONES_BROKER_EXT2 || {};
     let side, symbol, amount, type, price;
 
     if (typeof input === "string") {
       side = input;
       symbol = getActiveSymbol();
 
-      const sizeInput =
-        document.getElementById("brokerOrderSize") ||
-        document.getElementById("brokerOrderSizeBottom");
-
-      amount = parseFloat(sizeInput?.value);
+      amount = Number(document.getElementById("brokerOrderSize")?.value);
 
       type =
-        document.getElementById("order-type")?.value ||
-        document.getElementById("order-type-bottom")?.value ||
-        "Market";
+        document.getElementById("order-type")?.value || "Market";
 
-      const priceInput =
-        document.getElementById("order-price") ||
-        document.getElementById("order-price-bottom");
-
-      price = parseFloat(priceInput?.value);
+      price = Number(document.getElementById("order-price")?.value);
     } else {
       side = input?.side || input?.direction;
       symbol = input?.symbol || getActiveSymbol();
@@ -5076,11 +5065,7 @@ async function placeOrder(input) {
 
     symbol = normalizeSymbol(symbol);
 
-    // 🔥 VALIDACIÓN REAL
-    if (!isValidSymbol(symbol)) {
-      return alert("Símbolo inválido");
-    }
-
+    if (!isValidSymbol(symbol)) return alert("Símbolo inválido");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!side) return alert("Dirección inválida");
 
@@ -5093,16 +5078,9 @@ async function placeOrder(input) {
       qty: amount,
     };
 
-    // 🔥 SOLO PASA PRICE SI ES REAL
-    if (price && Number(price) > 0) {
-      payload.price = Number(price);
-    }
+    if (price > 0) payload.price = price;
 
     console.log("🚀 ORDER INIT:", payload);
-
-    if (typeof api.placeBrokerOrder === "function") {
-      return await api.placeBrokerOrder(payload);
-    }
 
     return await placeBrokerOrder(payload);
 
@@ -5136,11 +5114,14 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(payload.symbol || window.tvSymbol || window.selectedSymbol);
-    const amount = Number(payload.qty ?? payload.amount);
+    const symbol = normalizeSymbol(
+      payload.symbol || window.tvSymbol || window.selectedSymbol
+    );
+
+    const amount = Number(payload.qty);
     const side = String(payload.direction || payload.side || "buy").toLowerCase();
 
-    const user = getUser() || {};
+    const user = getUser?.() || {};
 
     if (!user.token) return alert("No autenticado");
 
@@ -5149,14 +5130,12 @@ async function placeBrokerOrder(payload = {}) {
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
     // 🔥 PRECIO OBLIGATORIO REAL
-    let price = getLivePriceFallback();
+    let price = await syncLivePrice(symbol);
 
-    if (!price) {
-      price = await syncLivePrice(symbol);
-    }
+    if (!price) price = getLivePriceFallback();
 
     if (!price || price <= 0) {
-      console.error("❌ Precio final inválido:", price);
+      console.error("❌ Sin precio válido");
       alert("No hay precio disponible del mercado");
       return;
     }
@@ -5185,7 +5164,6 @@ async function placeBrokerOrder(payload = {}) {
     console.log("📩 BACKEND RESPONSE:", data);
 
     if (!res.ok) {
-      console.error("❌ BACKEND ERROR:", data);
       alert(data?.error || "Error al abrir operación");
       return;
     }
@@ -5193,12 +5171,52 @@ async function placeBrokerOrder(payload = {}) {
     await loadPositions?.();
     await loadAccount?.();
 
-    console.log("✅ ORDER OK");
     return data;
 
   } catch (err) {
     console.error("❌ ORDER FAILED:", err);
   }
+}
+
+/* =========================
+   FORCE TRADE (FIX FINAL)
+========================= */
+async function forceTrade() {
+  const symbol = normalizeSymbol(getActiveSymbol());
+  const qty = Number(document.getElementById("qty")?.value);
+
+  if (!symbol || !qty) return;
+
+  let price = await syncLivePrice(symbol);
+
+  if (!price) price = getLivePriceFallback();
+
+  if (!price || price <= 0) {
+    console.error("❌ Sin precio de mercado");
+    alert("No hay precio disponible");
+    return;
+  }
+
+  const payload = {
+    symbol,
+    side: "buy",
+    qty,
+    price: Number(price),
+  };
+
+  console.log("🚀 Enviando orden:", payload);
+
+  const res = await fetch("/api/trade/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+
+  console.log("📩 RESPUESTA BACKEND:", data);
+
+  return data;
 }
 /* =========================
    🔥 BOOT SISTEMA
