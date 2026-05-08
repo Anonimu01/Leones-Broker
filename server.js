@@ -1972,7 +1972,12 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
-
+function compactSymbol(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
 
 function normalizeSymbol(symbol = "") {
   return String(symbol || "")
@@ -1994,7 +1999,6 @@ function normalizeSymbol(symbol = "") {
 
 function getMarketHint(symbol = "") {
   const clean = normalizeSymbol(symbol);
-
   if (!clean) return "";
 
   if (clean === "SPX" || clean.includes("SP500") || clean.includes("SNP")) return "index";
@@ -2288,6 +2292,7 @@ const SAMPLE_SYMBOLS = [
 
 function buildQuotesArray() {
   const store = getPriceStore();
+
   const sampleQuotes = SAMPLE_SYMBOLS.map((sample) => {
     const found = findBestPriceMatch(sample.symbol, store);
     return normalizeQuote(sample.symbol, found || sample);
@@ -2360,31 +2365,16 @@ function getCurrentPriceForSymbol(symbol) {
 }
 
 function resolveOrderPrice(body = {}, symbol = "") {
-  const direct = normalizePrice(body);
-  if (direct) return direct;
+  const direct =
+    Number(body.price) ||
+    Number(body.entryPrice) ||
+    Number(body.currentPrice) ||
+    Number(body.lastPrice) ||
+    Number(body.marketPrice) ||
+    Number(body.quotePrice) ||
+    Number(body.executionPrice);
 
-  const candidates = [
-    body.currentPrice,
-    body.current_price,
-    body.lastPrice,
-    body.last_price,
-    body.tvPrice,
-    body.tv_price,
-    body.entry,
-    body.entryPrice,
-    body.entry_price,
-    body.marketPrice,
-    body.market_price,
-    body.quotePrice,
-    body.quote_price,
-    body.executionPrice,
-    body.execution_price,
-  ];
-
-  for (const candidate of candidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
+  if (Number.isFinite(direct) && direct > 0) return direct;
 
   const market = getCurrentPriceForSymbol(symbol);
   if (market && Number.isFinite(market) && market > 0) return market;
@@ -2445,19 +2435,18 @@ async function fetchPolygonLastPrice(symbol) {
     }
 
     const polygonSymbol = toPolygonSymbol(clean);
-
     if (!polygonSymbol) {
       console.warn("❌ INVALID POLYGON SYMBOL:", clean);
       return null;
     }
 
-    const endpoints = [
+    const urls = [
       `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`,
     ];
 
     console.log("🌍 FETCH FALLBACK:", polygonSymbol);
 
-    for (const url of endpoints) {
+    for (const url of urls) {
       try {
         const response = await fetch(url);
         const data = await response.json();
@@ -2523,6 +2512,17 @@ function storePrice(symbol, price, rawData = null) {
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
+}
+
+function safeStorePrice(symbol, price, rawData = null) {
+  const numeric = Number(price);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, price);
+    return false;
+  }
+
+  storePrice(symbol, numeric, rawData);
+  return true;
 }
 
 async function safeAutoSubscribeDefaults() {
@@ -2678,26 +2678,23 @@ try {
           console.log("📊 PRICE RAW:", JSON.stringify(data, null, 2));
 
           const symbol = extractSymbol(data);
-          const price = extractPrice(data);
+          let finalPrice = extractPrice(data);
 
-          console.log("🔥 EXTRACTED PRICE:", price);
+          console.log("🔥 EXTRACTED PRICE:", finalPrice);
 
           if (!symbol) {
             console.warn("❌ SYMBOL INVALID:", data);
             return;
           }
 
-          let finalPrice = price;
-
           if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
             try {
               console.warn("⚠️ SOCKET PRICE INVALID -> FETCH FALLBACK:", symbol);
-
               const fallback = await fetchPolygonLastPrice(symbol);
               finalPrice = fallback?.price || null;
 
               if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
-                storePrice(symbol, finalPrice, fallback.raw);
+                safeStorePrice(symbol, finalPrice, fallback.raw);
                 console.log("✅ STORE UPDATED FALLBACK:", symbol, finalPrice);
               }
             } catch (fallbackErr) {
@@ -2710,8 +2707,7 @@ try {
             return;
           }
 
-          storePrice(symbol, Number(finalPrice), data);
-
+          safeStorePrice(symbol, Number(finalPrice), data);
           console.log("✅ STORE UPDATED:", symbol, finalPrice);
 
           if (priceHandler?.handle) {
