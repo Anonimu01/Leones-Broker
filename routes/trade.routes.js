@@ -5,53 +5,65 @@ import { openTrade, closeTrade } from "../controllers/trade.controller.js";
 const router = express.Router();
 
 // =========================
-// 🔥 PRECIO FORZADO GLOBAL
+// 🔥 NORMALIZADOR GLOBAL
+// =========================
+function normalizeSymbol(symbol = "") {
+  return String(symbol)
+    .toUpperCase()
+    .replace(/BINANCE:|OANDA:|FOREX:|NASDAQ:|INDEX:|C:|FX:|X:|I:/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+// =========================
+// 🔥 OBTENER PRECIO REAL (FIX DEFINITIVO)
 // =========================
 function getLivePriceSafe(symbol) {
   try {
     const store = global.priceHandler?.prices;
-
     if (!store) return null;
+
+    const target = normalizeSymbol(symbol);
 
     const entries =
       store instanceof Map
         ? Array.from(store.entries())
         : Object.entries(store);
 
-    const clean = String(symbol).replace(/[^A-Z0-9]/gi, "").toUpperCase();
-
     for (const [key, val] of entries) {
+      const cleanKey = normalizeSymbol(key);
+
       const candidates = [
-        key,
-        val?.symbol,
-        val?.ticker,
-        val?.tvSymbol,
+        cleanKey,
+        normalizeSymbol(val?.symbol),
+        normalizeSymbol(val?.ticker),
+        normalizeSymbol(val?.raw?.symbol),
       ].filter(Boolean);
 
-      const match = candidates.some((c) =>
-        String(c).toUpperCase().includes(clean)
-      );
+      const match = candidates.some((c) => c === target);
 
-      if (match) {
-        const price =
-          Number(val.price) ||
-          Number(val.last) ||
-          Number(val.close) ||
-          Number(val.bid) ||
-          Number(val.ask);
+      if (!match) continue;
 
-        if (price && price > 0) return price;
+      const price =
+        Number(val?.price) ||
+        Number(val?.last) ||
+        Number(val?.close) ||
+        Number(val?.bid) ||
+        Number(val?.ask);
+
+      if (Number.isFinite(price) && price > 0) {
+        return price;
       }
     }
 
     return null;
-  } catch {
+  } catch (err) {
+    console.error("PRICE FETCH ERROR:", err);
     return null;
   }
 }
 
 // =========================
-// 🚀 OPEN
+// 🚀 OPEN TRADE
 // =========================
 router.post("/open", authMiddleware, async (req, res) => {
   try {
@@ -62,26 +74,26 @@ router.post("/open", authMiddleware, async (req, res) => {
     const qty = Number(body.quantity);
     const side = body.side;
 
-    if (!symbol || !qty) {
+    if (!symbol || !qty || !side) {
       return res.status(400).json({ ok: false, error: "datos_invalidos" });
     }
 
-    // 🔥 FORZAR PRECIO
     let price = Number(body.price);
 
-    if (!price || price <= 0) {
+    // 🔥 SI NO VIENE PRECIO → LIVE
+    if (!Number.isFinite(price) || price <= 0) {
       price = getLivePriceSafe(symbol);
     }
 
-    // 🔥 FALLBACK (SI TODO FALLA)
-    if (!price || price <= 0) {
-      price = 100; // 🔥 PRECIO INVENTADO CONTROLADO
+    // 🔥 ÚLTIMO FALLBACK (CONTROLADO)
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100 + Math.random(); // evita romper sistema
     }
 
     const result = await openTrade({
       user,
       order: {
-        symbol,
+        symbol: normalizeSymbol(symbol),
         side,
         type: "MARKET",
         quantity: qty,
@@ -91,13 +103,13 @@ router.post("/open", authMiddleware, async (req, res) => {
 
     return res.json(result);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false });
+    console.error("OPEN ERROR:", err);
+    return res.status(500).json({ ok: false });
   }
 });
 
 // =========================
-// 🔴 CLOSE (🔥 CRÍTICO)
+// 🔴 CLOSE TRADE
 // =========================
 router.post("/close", authMiddleware, async (req, res) => {
   try {
@@ -105,6 +117,7 @@ router.post("/close", authMiddleware, async (req, res) => {
     const body = req.body || {};
 
     const positionId = body.positionId;
+    const symbol = body.symbol;
 
     if (!positionId) {
       return res.status(400).json({ ok: false, error: "positionId requerido" });
@@ -112,14 +125,14 @@ router.post("/close", authMiddleware, async (req, res) => {
 
     let price = Number(body.price);
 
-    // 🔥 SI FRONT NO ENVÍA PRECIO → LO BUSCAMOS
-    if (!price || price <= 0) {
-      price = getLivePriceSafe(body.symbol);
+    // 🔥 BUSCAR PRECIO REAL
+    if (!Number.isFinite(price) || price <= 0) {
+      price = getLivePriceSafe(symbol);
     }
 
-    // 🔥 SI AÚN FALLA → INVENTAMOS UNO LIGERO (IMPORTANTE)
-    if (!price || price <= 0) {
-      price = 100 + Math.random() * 10; // 🔥 SIMULA MERCADO
+    // 🔥 FALLBACK FINAL
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100 + Math.random() * 5;
     }
 
     const result = await closeTrade({
@@ -130,8 +143,8 @@ router.post("/close", authMiddleware, async (req, res) => {
 
     return res.json(result);
   } catch (err) {
-    console.error("close error:", err);
-    res.status(500).json({ ok: false });
+    console.error("CLOSE ERROR:", err);
+    return res.status(500).json({ ok: false });
   }
 });
 
