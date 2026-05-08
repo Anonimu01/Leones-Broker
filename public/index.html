@@ -4953,7 +4953,7 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
-   🔥 SYMBOL MAP (NUEVO - IMPORTANTE)
+   🔥 SYMBOL MAP
 ========================= */
 function toPriceSymbol(symbol) {
   return normalizeSymbol(symbol)
@@ -4991,12 +4991,11 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (FIX REAL)
+   🔥 LIVE PRICE SYNC (SILENT)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
     const clean = toPriceSymbol(symbol);
-
     if (!clean) return null;
 
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
@@ -5021,33 +5020,27 @@ async function syncLivePrice(symbol) {
 
     return null;
 
-  } catch (err) {
-    console.warn("syncLivePrice error:", err);
+  } catch {
     return null;
   }
 }
 
 /* =========================
-   GET LIVE PRICE FALLBACK (SAFE)
+   GET LIVE PRICE FALLBACK
 ========================= */
 function getLivePriceFallback() {
-  const candidates = [
-    window.tvPrice,
-    window.lastPrice,
-    window.currentPrice,
-    window.marketPrice,
-  ];
+  const v =
+    window.tvPrice ||
+    window.lastPrice ||
+    window.currentPrice ||
+    window.marketPrice;
 
-  for (const v of candidates) {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /* =========================
-   GET USER (SAFE)
+   USER
 ========================= */
 function getUser() {
   try {
@@ -5076,16 +5069,16 @@ async function placeOrder(input) {
     } else {
       side = input?.side || input?.direction;
       symbol = input?.symbol || getActiveSymbol();
-      amount = Number(input?.amount);
+      amount = Number(input?.qty || input?.amount);
       type = input?.type || "Market";
     }
 
     symbol = normalizeSymbol(symbol);
     side = String(side || "").toLowerCase();
 
-    if (!isValidSymbol(symbol)) return alert("Símbolo inválido");
-    if (!amount || amount <= 0) return alert("Cantidad inválida");
-    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+    if (!isValidSymbol(symbol)) return;
+    if (!amount || amount <= 0) return;
+    if (!["buy", "sell"].includes(side)) return;
 
     const payload = {
       symbol,
@@ -5094,14 +5087,11 @@ async function placeOrder(input) {
       qty: amount,
     };
 
-    console.log("🚀 ORDER INIT:", payload);
-
     return await placeBrokerOrder(payload);
 
-  } catch (err) {
-    console.error("❌ ORDER ERROR:", err);
+  } catch {
   } finally {
-    setTimeout(() => (sendingOrder = false), 600);
+    setTimeout(() => (sendingOrder = false), 500);
   }
 }
 
@@ -5124,7 +5114,7 @@ document.addEventListener("click", async (e) => {
 });
 
 /* =========================
-   🔥 BACKEND ORDER (FIX FINAL)
+   BACKEND ORDER (CLEAN)
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
@@ -5133,21 +5123,16 @@ async function placeBrokerOrder(payload = {}) {
     const side = String(payload.direction || "buy").toLowerCase();
 
     const user = getUser();
+    if (!user.token) return;
 
-    if (!user.token) return alert("No autenticado");
-    if (!isValidSymbol(symbol)) return alert("Símbolo inválido");
-    if (!amount || amount <= 0) return alert("Cantidad inválida");
-    if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
+    if (!isValidSymbol(symbol)) return;
+    if (!amount || amount <= 0) return;
+    if (!["buy", "sell"].includes(side)) return;
 
     let price = await syncLivePrice(symbol);
-
     if (!price) price = getLivePriceFallback();
 
-    if (!price || price <= 0) {
-      console.error("❌ SIN PRECIO REAL");
-      alert("No hay precio disponible del mercado en este momento");
-      return;
-    }
+    if (!price || price <= 0) return;
 
     const body = {
       symbol,
@@ -5156,8 +5141,6 @@ async function placeBrokerOrder(payload = {}) {
       qty: amount,
       price: Number(price),
     };
-
-    console.log("🚀 FINAL PAYLOAD:", body);
 
     const res = await fetch("/api/trade/open", {
       method: "POST",
@@ -5168,28 +5151,21 @@ async function placeBrokerOrder(payload = {}) {
       body: JSON.stringify(body),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
-    console.log("📩 BACKEND RESPONSE:", data);
+    if (!res.ok) return;
 
-    if (!res.ok) {
-      console.error("❌ ERROR BACKEND:", data);
-      alert(data?.error || "Error al abrir operación");
-      return;
-    }
-
-    await loadPositions?.();
-    await loadAccount?.();
+    loadPositions?.();
+    loadAccount?.();
 
     return data;
 
-  } catch (err) {
-    console.error("❌ ORDER FAILED:", err);
+  } catch {
   }
 }
 
 /* =========================
-   FORCE TRADE (FIX FINAL)
+   FORCE TRADE (CLEAN)
 ========================= */
 async function forceTrade() {
   const symbol = normalizeSymbol(getActiveSymbol());
@@ -5198,14 +5174,9 @@ async function forceTrade() {
   if (!symbol || !qty) return;
 
   let price = await syncLivePrice(symbol);
-
   if (!price) price = getLivePriceFallback();
 
-  if (!price || price <= 0) {
-    console.error("❌ SIN PRECIO REAL");
-    alert("No hay precio de mercado disponible");
-    return;
-  }
+  if (!price || price <= 0) return;
 
   const payload = {
     symbol,
@@ -5214,19 +5185,13 @@ async function forceTrade() {
     price: Number(price),
   };
 
-  console.log("🚀 FORCE TRADE:", payload);
-
   const res = await fetch("/api/trade/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
-  const data = await res.json();
-
-  console.log("📩 RESPUESTA BACKEND:", data);
-
-  return data;
+  return await res.json().catch(() => ({}));
 }
 /* =========================
    🔥 BOOT SISTEMA
