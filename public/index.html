@@ -4953,6 +4953,16 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
+   🔥 SYMBOL MAP (NUEVO - IMPORTANTE)
+========================= */
+function toPriceSymbol(symbol) {
+  return normalizeSymbol(symbol)
+    .replace("OANDA:", "")
+    .replace("FX:", "")
+    .replace("CURRENCY:", "");
+}
+
+/* =========================
    VALIDATE SYMBOL
 ========================= */
 function isValidSymbol(symbol) {
@@ -4981,15 +4991,14 @@ function getActiveSymbol() {
 }
 
 /* =========================
-   🔥 LIVE PRICE SYNC (ROBUSTO)
+   🔥 LIVE PRICE SYNC (FIX REAL)
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    const clean = normalizeSymbol(symbol);
+    const clean = toPriceSymbol(symbol);
 
     if (!clean) return null;
 
-    // 1. API principal
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(clean)}`);
     const data = await res.json().catch(() => null);
 
@@ -4998,12 +5007,11 @@ async function syncLivePrice(symbol) {
       return Number(data.price);
     }
 
-    // 2. fallback quotes
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json().catch(() => null);
 
     const match = quotes?.quotes?.find(q =>
-      normalizeSymbol(q.symbol) === clean
+      toPriceSymbol(q.symbol) === clean
     );
 
     if (match?.price && Number(match.price) > 0) {
@@ -5058,20 +5066,18 @@ async function placeOrder(input) {
   try {
     sendingOrder = true;
 
-    let side, symbol, amount, type, price;
+    let side, symbol, amount, type;
 
     if (typeof input === "string") {
       side = input;
       symbol = getActiveSymbol();
       amount = Number(document.getElementById("brokerOrderSize")?.value);
       type = document.getElementById("order-type")?.value || "Market";
-      price = Number(document.getElementById("order-price")?.value);
     } else {
       side = input?.side || input?.direction;
       symbol = input?.symbol || getActiveSymbol();
       amount = Number(input?.amount);
       type = input?.type || "Market";
-      price = Number(input?.price);
     }
 
     symbol = normalizeSymbol(symbol);
@@ -5081,7 +5087,6 @@ async function placeOrder(input) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // ❌ NO ENVIAMOS PRICE AQUÍ, SE OBTIENE REAL EN BACKEND FLOW
     const payload = {
       symbol,
       direction: side,
@@ -5134,12 +5139,10 @@ async function placeBrokerOrder(payload = {}) {
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO REAL OBLIGATORIO
     let price = await syncLivePrice(symbol);
 
     if (!price) price = getLivePriceFallback();
 
-    // ❌ BLOQUEO TOTAL SI NO HAY PRECIO REAL
     if (!price || price <= 0) {
       console.error("❌ SIN PRECIO REAL");
       alert("No hay precio disponible del mercado en este momento");
