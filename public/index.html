@@ -4953,6 +4953,14 @@ function normalizeSymbol(symbol = "") {
 }
 
 /* =========================
+   VALIDATE SYMBOL (🔥 NUEVO)
+========================= */
+function isValidSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase().trim();
+  return /^[A-Z0-9]{3,10}$/.test(s);
+}
+
+/* =========================
    FLAGS
 ========================= */
 let sendingOrder = false;
@@ -4978,7 +4986,6 @@ function getActiveSymbol() {
 ========================= */
 async function syncLivePrice(symbol) {
   try {
-    // 🔥 PRIMERO intenta endpoint correcto
     const res = await fetch(`/api/latest?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
@@ -4987,7 +4994,6 @@ async function syncLivePrice(symbol) {
       return Number(data.price);
     }
 
-    // 🔥 FALLBACK quotes
     const res2 = await fetch("/api/quotes");
     const quotes = await res2.json();
 
@@ -5010,7 +5016,7 @@ async function syncLivePrice(symbol) {
 }
 
 /* =========================
-   🔥 GET LIVE PRICE SAFE (MEJORADO)
+   🔥 GET LIVE PRICE SAFE
 ========================= */
 function getLivePriceFallback() {
   const candidates = [
@@ -5072,6 +5078,7 @@ async function placeOrder(input) {
     }
 
     if (!symbol) return alert("Selecciona símbolo");
+    if (!isValidSymbol(symbol)) return alert("Símbolo inválido ❌");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!side) return alert("Dirección inválida");
 
@@ -5142,10 +5149,10 @@ async function placeBrokerOrder(payload = {}) {
     }
 
     if (!symbol) return alert("Símbolo inválido");
+    if (!isValidSymbol(symbol)) return alert("Símbolo inválido ❌");
     if (!amount || amount <= 0) return alert("Cantidad inválida");
     if (!["buy", "sell"].includes(side)) return alert("Dirección inválida");
 
-    // 🔥 PRECIO GARANTIZADO
     let price = getLivePriceFallback();
 
     if (!price) {
