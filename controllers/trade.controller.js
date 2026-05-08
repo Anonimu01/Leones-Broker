@@ -4,7 +4,7 @@ import User from "../models/user.model.js";
 import mongoose from "mongoose";
 
 // =======================
-// 🔧 HELPERS
+// 🔧 HELPERS ROBUSTOS
 // =======================
 function normalizePrice(value) {
   const n = Number(value);
@@ -15,7 +15,12 @@ function normalizeSymbol(value) {
   return String(value || "")
     .trim()
     .toUpperCase()
-    .replace(/^OANDA:/, "");
+    .replace(/^OANDA:/, "")
+    .replace(/^BINANCE:/, "")
+    .replace(/^FOREX:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/^INDEX:/, "")
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 function normalizeSide(value) {
@@ -24,7 +29,7 @@ function normalizeSide(value) {
 }
 
 // =======================
-// 🔥 PNL REAL
+// 🔥 PNL
 // =======================
 function computePnl({ side, entryPrice, exitPrice, qty }) {
   const entry = Number(entryPrice);
@@ -41,7 +46,7 @@ function computePnl({ side, entryPrice, exitPrice, qty }) {
 }
 
 // =======================
-// 🔥 WALLET
+// 🔥 WALLET SAFE
 // =======================
 async function getOrCreateWallet(userId, session = null) {
   let wallet = await Wallet.findOne({ user: userId }).session(session);
@@ -70,7 +75,7 @@ async function getOrCreateWallet(userId, session = null) {
 }
 
 // =======================
-// 🔥 RECALCULO
+// 🔥 RECALCULO WALLET
 // =======================
 async function recalculateWallet(userId, session = null) {
   const wallet = await Wallet.findOne({ user: userId }).session(session);
@@ -93,11 +98,7 @@ async function recalculateWallet(userId, session = null) {
   const credit = Number(wallet.credit || 0);
 
   wallet.marginUsed = marginUsed;
-
-  // 🔥 EQUITY EN TIEMPO REAL
   wallet.equity = balanceOwn + pnlFloating + credit;
-
-  // 🔥 FREE MARGIN
   wallet.freeMargin = wallet.equity - marginUsed;
 
   wallet.updatedAt = new Date();
@@ -111,7 +112,7 @@ async function recalculateWallet(userId, session = null) {
 }
 
 // =======================
-// 📈 UPDATE LIVE PRICE
+// 📈 LIVE PRICE FIX TOTAL
 // =======================
 export const updateLivePrice = async ({ symbol, price }) => {
   try {
@@ -154,7 +155,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 // =======================
-// 🚀 OPEN TRADE
+// 🚀 OPEN TRADE (FIX PRICE REAL)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -173,10 +174,10 @@ export const openTrade = async ({ user, order }) => {
 
     let entryPrice = normalizePrice(price);
 
-    // 🔥 FALLBACK (NUNCA NULL)
+    // 🔥 FIX CLAVE: nunca dejar null silencioso
     if (!entryPrice) {
-      console.warn("⚠️ Precio inválido en apertura → usando 1");
-      entryPrice = 1;
+      const live = global.priceHandler?.prices?.[symbol]?.price;
+      entryPrice = normalizePrice(live) || 1;
     }
 
     const wallet = await getOrCreateWallet(userId, session);
@@ -184,7 +185,6 @@ export const openTrade = async ({ user, order }) => {
     const leverage = Math.max(Number(wallet.leverageFactor ?? 1), 1);
     const margin = (quantity * entryPrice) / leverage;
 
-    // 🔥 NO TOCAR BALANCE
     wallet.marginUsed = Number(wallet.marginUsed || 0) + margin;
     wallet.updatedAt = new Date();
 
@@ -228,7 +228,7 @@ export const openTrade = async ({ user, order }) => {
 };
 
 // =======================
-// 🔴 CLOSE TRADE (FIX FINAL)
+// 🔴 CLOSE TRADE (FIX TOTAL REAL)
 // =======================
 export const closeTrade = async ({ user, positionId, closePrice }) => {
   const session = await mongoose.startSession();
@@ -248,11 +248,14 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const wallet = await getOrCreateWallet(userId, session);
 
-    // 🔥 NUNCA NULL
     let exit = normalizePrice(closePrice);
+
+    // 🔥 FIX CLAVE: tomar precio real si frontend falla
     if (!exit) {
-      console.warn("⚠️ closePrice inválido → usando entryPrice");
-      exit = normalizePrice(position.entryPrice) || 1;
+      exit =
+        global.priceHandler?.prices?.[normalizeSymbol(position.symbol)]?.price ||
+        normalizePrice(position.entryPrice) ||
+        1;
     }
 
     const pnl = computePnl({
@@ -264,22 +267,14 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     const margin = Number(position.marginReserved || 0);
 
-    // 🔥 SOLO PNL AL BALANCE
-    const newBalance = Number(wallet.balanceOwn || 0) + pnl;
+    wallet.balanceOwn = Number(wallet.balanceOwn || 0) + pnl;
+    wallet.balance = wallet.balanceOwn;
 
-    wallet.balanceOwn = newBalance;
-    wallet.balance = newBalance;
-
-    // 🔥 LIBERAR MARGEN
-    wallet.marginUsed = Math.max(
-      0,
-      Number(wallet.marginUsed || 0) - margin
-    );
+    wallet.marginUsed = Math.max(0, Number(wallet.marginUsed || 0) - margin);
 
     wallet.updatedAt = new Date();
     await wallet.save({ session });
 
-    // 🔴 CERRAR POSICION
     position.status = "CLOSED";
     position.closePrice = exit;
     position.currentPrice = exit;
@@ -299,7 +294,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
       ok: true,
       data: {
         pnl,
-        balance: newBalance,
+        balance: wallet.balanceOwn,
         closePrice: exit,
       },
     };
