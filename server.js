@@ -1972,6 +1972,159 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
+function compactSymbol(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeSymbol(symbol = "") {
+  return String(symbol || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^OANDA:/, "")
+    .replace(/^TVC:/, "")
+    .replace(/^FX:/, "")
+    .replace(/^FOREX:/, "")
+    .replace(/^C:/, "")
+    .replace(/^X:/, "")
+    .replace(/^I:/, "")
+    .replace(/^INDEX:/, "")
+    .replace(/^BINANCE:/, "")
+    .replace(/^NASDAQ:/, "")
+    .replace(/[\/:_\-\s]/g, "")
+    .trim();
+}
+
+function getMarketHint(symbol = "") {
+  const clean = normalizeSymbol(symbol);
+
+  if (!clean) return "";
+
+  if (clean === "SPX" || clean.includes("SP500") || clean.includes("SNP")) return "index";
+  if (/^[A-Z]{6}$/.test(clean)) return "forex";
+  if (/^[A-Z]{3,5}USDT$/.test(clean) || /^[A-Z]{3,5}USD$/.test(clean)) return "crypto";
+  if (/^[A-Z]{1,5}$/.test(clean)) return "stock";
+
+  return "";
+}
+
+function buildSymbolAliases(symbol = "") {
+  const raw = String(symbol || "").trim().toUpperCase();
+  const clean = normalizeSymbol(raw);
+  const compact = compactSymbol(raw);
+  const marketHint = getMarketHint(clean);
+
+  const aliases = new Set([
+    raw,
+    clean,
+    compact,
+    raw.replace(/^OANDA:/, ""),
+    raw.replace(/^TVC:/, ""),
+    raw.replace(/^C:/, ""),
+    raw.replace(/^X:/, ""),
+    raw.replace(/^FX:/, ""),
+    raw.replace(/^BINANCE:/, ""),
+    raw.replace(/^NASDAQ:/, ""),
+    raw.replace(/^FOREX:/, ""),
+    raw.replace(/^INDEX:/, ""),
+    raw.replace(/^I:/, ""),
+  ]);
+
+  if (/^[A-Z]{6}$/.test(clean)) {
+    const base = clean.slice(0, 3);
+    const quote = clean.slice(3);
+    aliases.add(`${base}_${quote}`);
+    aliases.add(`${base}/${quote}`);
+    aliases.add(`C:${clean}`);
+    aliases.add(`FOREX:${clean}`);
+    aliases.add(`FX:${clean}`);
+    aliases.add(`TVC:${base}${quote}`);
+  }
+
+  if (/^[A-Z]{3,5}USDT$/.test(clean)) {
+    const base = clean.slice(0, -4);
+    aliases.add(`${base}USD`);
+    aliases.add(`X:${base}USD`);
+    aliases.add(`BINANCE:${base}USDT`);
+    aliases.add(`BINANCE:${base}USD`);
+  }
+
+  if (/^[A-Z]{3,5}USD$/.test(clean) && marketHint === "crypto") {
+    const base = clean.slice(0, -3);
+    aliases.add(`${base}USDT`);
+    aliases.add(`X:${base}USD`);
+    aliases.add(`BINANCE:${base}USDT`);
+  }
+
+  if (clean === "SPX") {
+    aliases.add("I:SPX");
+    aliases.add("INDEX:SPX");
+    aliases.add("^GSPC");
+  }
+
+  if (/^[A-Z]{1,5}$/.test(clean) && clean !== "SPX") {
+    aliases.add(`NASDAQ:${clean}`);
+  }
+
+  return [...aliases]
+    .filter(Boolean)
+    .map((s) => String(s).trim().toUpperCase());
+}
+
+function sameMarketSymbol(a = "", b = "") {
+  const ax = buildSymbolAliases(a);
+  const bx = buildSymbolAliases(b);
+  return ax.some((x) => bx.includes(x));
+}
+
+function findBestPriceMatch(symbol, store = {}) {
+  const wanted = buildSymbolAliases(symbol);
+  const keys = Object.keys(store || {});
+
+  for (const key of keys) {
+    const keyAliases = buildSymbolAliases(key);
+    const keyMatch = keyAliases.some((k) =>
+      wanted.some((w) => k === w || k.includes(w) || w.includes(k))
+    );
+
+    if (keyMatch) {
+      return store[key];
+    }
+  }
+
+  for (const key of keys) {
+    const item = store[key];
+
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.ticker,
+      item?.sym,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+      item?.name,
+      item?.label,
+    ].filter(Boolean);
+
+    const found = candidates.some((candidate) => {
+      const cAliases = buildSymbolAliases(candidate);
+      return cAliases.some((c) =>
+        wanted.some((w) => c === w || c.includes(w) || w.includes(c))
+      );
+    });
+
+    if (found) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
 function extractSymbol(data) {
   return normalizeSymbol(
     data?.symbol ||
@@ -1988,6 +2141,36 @@ function extractSymbol(data) {
   );
 }
 
+function toPolygonSymbol(value = "") {
+  const clean = normalizeSymbol(value);
+  if (!clean) return "";
+
+  if (/^[A-Z]{6}$/.test(clean)) {
+    return `C:${clean}`;
+  }
+
+  if (/^[A-Z]{3,5}USDT$/.test(clean)) {
+    const base = clean.slice(0, -4);
+    return `X:${base}USD`;
+  }
+
+  if (/^[A-Z]{3,5}USD$/.test(clean) && getMarketHint(clean) === "crypto") {
+    const base = clean.slice(0, -3);
+    return `X:${base}USD`;
+  }
+
+  if (clean === "SPX") {
+    return "I:SPX";
+  }
+
+  return clean;
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function extractPrice(data = {}) {
   if (!data) return null;
 
@@ -2000,8 +2183,6 @@ function extractPrice(data = {}) {
     data?.close,
     data?.mid,
     data?.mark,
-    data?.a,
-    data?.b,
     data?.value,
     data?.currentPrice,
     data?.executionPrice,
@@ -2009,10 +2190,21 @@ function extractPrice(data = {}) {
     data?.raw?.p,
     data?.raw?.lp,
     data?.raw?.last,
+    data?.raw?.lastPrice,
     data?.raw?.close,
     data?.raw?.c,
+    data?.raw?.mid,
+    data?.raw?.mark,
     data?.bp,
     data?.ap,
+    data?.q?.p,
+    data?.t?.p,
+    data?.lastTrade?.p,
+    data?.raw?.lastTrade?.p,
+    data?.vw,
+    data?.o,
+    data?.h,
+    data?.l,
   ];
 
   for (const v of candidates) {
@@ -2020,14 +2212,284 @@ function extractPrice(data = {}) {
     if (Number.isFinite(n) && n > 0) return n;
   }
 
-  const ask = Number(data?.ask);
-  const bid = Number(data?.bid);
+  const ask = toNumber(data?.ask ?? data?.a ?? data?.ap ?? data?.raw?.ask ?? data?.raw?.a);
+  const bid = toNumber(data?.bid ?? data?.b ?? data?.bp ?? data?.raw?.bid ?? data?.raw?.b);
 
   if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
     return (ask + bid) / 2;
   }
 
   return null;
+}
+
+function extractQuotePrice(item = {}) {
+  const direct =
+    toNumber(item.price) ??
+    toNumber(item.last) ??
+    toNumber(item.close) ??
+    toNumber(item.value) ??
+    toNumber(item.mark) ??
+    toNumber(item.mid);
+
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const ask = toNumber(item.ask);
+  const bid = toNumber(item.bid);
+
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
+  }
+
+  return null;
+}
+
+function normalizeQuote(symbol, item = {}) {
+  const cleanSymbol = normalizeSymbol(symbol);
+  const label =
+    item.label ||
+    item.name ||
+    (cleanSymbol.split(":").pop() || cleanSymbol).replace("_", "/");
+
+  return {
+    symbol: cleanSymbol,
+    label,
+    market: item.market || "Unknown",
+    price: extractQuotePrice(item),
+    bid: toNumber(item.bid),
+    ask: toNumber(item.ask),
+    open: toNumber(item.open),
+    high: toNumber(item.high),
+    low: toNumber(item.low),
+    volume: toNumber(item.volume),
+    change: toNumber(item.change),
+    changePercent: toNumber(item.changePercent),
+    updatedAt: item.updatedAt || item.timestamp || new Date().toISOString(),
+    raw: item,
+  };
+}
+
+function getPriceStore() {
+  try {
+    const raw = priceHandler?.prices;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return raw;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
+];
+
+function buildQuotesArray() {
+  const store = getPriceStore();
+  const sampleQuotes = SAMPLE_SYMBOLS.map((sample) => {
+    const found = findBestPriceMatch(sample.symbol, store);
+    return normalizeQuote(sample.symbol, found || sample);
+  });
+
+  const extraKeys = Object.keys(store).filter((key) => {
+    return !SAMPLE_SYMBOLS.some((sample) =>
+      buildSymbolAliases(sample.symbol).some((alias) =>
+        buildSymbolAliases(key).includes(alias)
+      )
+    );
+  });
+
+  const extraQuotes = extraKeys.map((key) => normalizeQuote(key, store[key] || {}));
+
+  return [...sampleQuotes, ...extraQuotes];
+}
+
+function buildMarketPayload() {
+  const quotes = buildQuotesArray();
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
+}
+
+function getCurrentPriceForSymbol(symbol) {
+  const targetCompact = compactSymbol(symbol);
+  if (!targetCompact) return null;
+
+  const store = getPriceStore();
+
+  for (const [key, item] of Object.entries(store)) {
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.label,
+      item?.ticker,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+    ].filter(Boolean);
+
+    const matched = candidates.some((candidate) => {
+      const aliases = buildSymbolAliases(candidate).map(compactSymbol);
+      if (!aliases.length) return false;
+
+      return aliases.some((c) => {
+        return (
+          c === targetCompact ||
+          c.includes(targetCompact) ||
+          targetCompact.includes(c) ||
+          sameMarketSymbol(c, targetCompact)
+        );
+      });
+    });
+
+    if (!matched) continue;
+
+    const px = extractQuotePrice(item);
+    if (Number.isFinite(px) && px > 0) return px;
+  }
+
+  return null;
+}
+
+function resolveOrderPrice(body = {}, symbol = "") {
+  const direct = normalizePrice(body);
+  if (direct) return direct;
+
+  const candidates = [
+    body.currentPrice,
+    body.current_price,
+    body.lastPrice,
+    body.last_price,
+    body.tvPrice,
+    body.tv_price,
+    body.entry,
+    body.entryPrice,
+    body.entry_price,
+    body.marketPrice,
+    body.market_price,
+    body.quotePrice,
+    body.quote_price,
+    body.executionPrice,
+    body.execution_price,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const market = getCurrentPriceForSymbol(symbol);
+  if (market && Number.isFinite(market) && market > 0) return market;
+
+  return null;
+}
+
+function isClosedPosition(p = {}) {
+  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
+}
+
+function computePositionPnl(position = {}, currentPrice = null) {
+  const entry = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const px = Number(currentPrice ?? position.currentPrice ?? entry) || entry;
+  const sign = side === "SELL" ? -1 : 1;
+  return (px - entry) * qty * sign;
+}
+
+function annotatePosition(position = {}) {
+  const entryPrice = Number(position.entryPrice ?? position.price ?? position.openPrice ?? 0) || 0;
+
+  let currentPrice = Number(position.currentPrice);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    currentPrice = getCurrentPriceForSymbol(position.symbol);
+  }
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    currentPrice = entryPrice;
+  }
+
+  const qty = Number(position.qty ?? position.quantity ?? position.amount ?? position.positionSize ?? 0) || 0;
+  const side = normalizeSide(position.side || position.direction || position.positionSide);
+  const sign = side === "SELL" ? -1 : 1;
+
+  const pnl = isClosedPosition(position)
+    ? Number(position.realizedPnl ?? position.pnl ?? 0) || 0
+    : (currentPrice - entryPrice) * qty * sign;
+
+  return {
+    ...position,
+    entryPrice,
+    currentPrice,
+    qty,
+    pnl,
+    unrealizedPnl: pnl,
+    isOpen: !isClosedPosition(position),
+  };
+}
+
+async function fetchPolygonLastPrice(symbol) {
+  try {
+    const clean = normalizeSymbol(symbol);
+
+    if (!clean || !process.env.POLYGON_API_KEY) {
+      return null;
+    }
+
+    const polygonSymbol = toPolygonSymbol(clean);
+
+    if (!polygonSymbol) {
+      console.warn("❌ INVALID POLYGON SYMBOL:", clean);
+      return null;
+    }
+
+    const endpoints = [
+      `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`,
+    ];
+
+    console.log("🌍 FETCH FALLBACK:", polygonSymbol);
+
+    for (const url of endpoints) {
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        console.log("🌍 FALLBACK RESPONSE:", JSON.stringify(data, null, 2));
+
+        const price = extractQuotePrice(data);
+
+        if (price && Number.isFinite(price) && price > 0) {
+          return {
+            price,
+            raw: data,
+            symbol: clean,
+            polygonSymbol,
+          };
+        }
+      } catch (e) {
+        console.warn("⚠️ Polygon fallback attempt failed:", e?.message || e);
+      }
+    }
+
+    console.warn("❌ FALLBACK PRICE INVALID:", clean);
+    return null;
+  } catch (err) {
+    console.warn("❌ fetchPolygonLastPrice error:", err?.message || err);
+    return null;
+  }
 }
 
 function storePrice(symbol, price, rawData = null) {
@@ -2066,51 +2528,6 @@ function storePrice(symbol, price, rawData = null) {
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
-}
-
-async function fetchPolygonLastPrice(symbol) {
-  try {
-    const clean = normalizeSymbol(symbol);
-
-    if (!clean || !process.env.POLYGON_API_KEY) {
-      return null;
-    }
-
-    const polygonSymbol = toPolygonSymbol(clean);
-
-    if (!polygonSymbol) {
-      console.warn("❌ INVALID POLYGON SYMBOL:", clean);
-      return null;
-    }
-
-    const url =
-      `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}` +
-      `?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
-
-    console.log("🌍 FETCH FALLBACK:", polygonSymbol);
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    console.log("🌍 FALLBACK RESPONSE:", JSON.stringify(data, null, 2));
-
-    const price = extractQuotePrice(data);
-
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      console.warn("❌ FALLBACK PRICE INVALID:", clean, price);
-      return null;
-    }
-
-    return {
-      price,
-      raw: data,
-      symbol: clean,
-      polygonSymbol,
-    };
-  } catch (err) {
-    console.warn("❌ fetchPolygonLastPrice error:", err?.message || err);
-    return null;
-  }
 }
 
 async function safeAutoSubscribeDefaults() {
@@ -2182,10 +2599,7 @@ io.on("connection", (socket) => {
     try {
       const prices = getPriceStore();
 
-      if (
-        priceHandler &&
-        typeof priceHandler.getSymbols === "function"
-      ) {
+      if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
         socket.emit(
@@ -2217,10 +2631,7 @@ io.on("connection", (socket) => {
       console.log("POLYGON:", polygonSymbol);
       console.log("KIND:", kind || "trades");
 
-      if (
-        polygonSocket?.subscribe &&
-        polygonSymbol
-      ) {
+      if (polygonSocket?.subscribe && polygonSymbol) {
         polygonSocket.subscribe(polygonSymbol, kind || "trades");
         console.log("✅ POLYGON SUBSCRIBED:", polygonSymbol);
       } else {
@@ -2240,10 +2651,7 @@ io.on("connection", (socket) => {
       const cleanSymbol = normalizeSymbol(symbol);
       const polygonSymbol = toPolygonSymbol(cleanSymbol);
 
-      if (
-        polygonSocket?.unsubscribe &&
-        polygonSymbol
-      ) {
+      if (polygonSocket?.unsubscribe && polygonSymbol) {
         polygonSocket.unsubscribe(polygonSymbol, kind || "trades");
         console.log("❌ POLYGON UNSUBSCRIBED:", polygonSymbol);
       }
@@ -2293,13 +2701,8 @@ try {
               const fallback = await fetchPolygonLastPrice(symbol);
               finalPrice = fallback?.price || null;
 
-              if (
-                finalPrice &&
-                Number.isFinite(finalPrice) &&
-                finalPrice > 0
-              ) {
+              if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
                 storePrice(symbol, finalPrice, fallback.raw);
-
                 console.log("✅ STORE UPDATED FALLBACK:", symbol, finalPrice);
               }
             } catch (fallbackErr) {
@@ -2312,11 +2715,7 @@ try {
             return;
           }
 
-          if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
-            storePrice(symbol, Number(finalPrice), data);
-          } else {
-            console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, finalPrice);
-          }
+          storePrice(symbol, Number(finalPrice), data);
 
           console.log("✅ STORE UPDATED:", symbol, finalPrice);
 
@@ -2379,7 +2778,6 @@ try {
   console.error("❌ Error inicializando PolygonSocket:", err?.message || err);
   polygonSocket = null;
 }
-
 /* ======================================================
    STATIC
    ====================================================== */
