@@ -170,9 +170,12 @@ export const openTrade = async ({ user, order }) => {
     type = String(type || "MARKET").toUpperCase();
     quantity = Number(quantity);
 
+    // ======================================================
+    // 🔥 ENTRY PRICE FIX REAL (AQUÍ LO COLOCAMOS)
+    // ======================================================
     let entryPrice = normalizePrice(price);
 
-    // 🔥 BUSQUEDA REAL EN GLOBAL PRICE HANDLER
+    // 🔥 SI NO VIENE PRICE → BUSCAR MERCADO REAL
     if (!entryPrice) {
       const store = global.priceHandler?.prices || {};
 
@@ -279,7 +282,10 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
     wallet.balanceOwn = Number(wallet.balanceOwn || 0) + pnl;
     wallet.balance = wallet.balanceOwn;
 
-    wallet.marginUsed = Math.max(0, Number(wallet.marginUsed || 0) - Number(position.marginReserved || 0));
+    wallet.marginUsed = Math.max(
+      0,
+      Number(wallet.marginUsed || 0) - Number(position.marginReserved || 0)
+    );
 
     await wallet.save({ session });
 
