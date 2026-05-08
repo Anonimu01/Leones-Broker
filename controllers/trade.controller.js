@@ -11,7 +11,7 @@ function normalizePrice(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// 🔥 FIX REAL: mantiene símbolos tipo ASX:XJO, EURUSD, etc.
+// 🔥 FIX REAL: símbolos consistentes
 function normalizeSymbol(value) {
   return String(value || "")
     .trim()
@@ -21,7 +21,7 @@ function normalizeSymbol(value) {
     .replace(/^FOREX:/, "")
     .replace(/^NASDAQ:/, "")
     .replace(/^INDEX:/, "")
-    .replace(/[^A-Z0-9:]/g, ""); // 👈 IMPORTANTE: mantiene ":"
+    .replace(/[^A-Z0-9:]/g, "");
 }
 
 function normalizeSide(value) {
@@ -30,10 +30,20 @@ function normalizeSide(value) {
 }
 
 // =======================
-// 🔥 MARKET PRICE ENGINE (ROBUSTO)
+// 🔥 PRICE CACHE GLOBAL (FIX CLAVE)
+// =======================
+const priceCache = global.priceCache || (global.priceCache = {});
+
+// =======================
+// 📡 GET MARKET PRICE (ROBUSTO)
 // =======================
 function getMarketPrice(symbol) {
   const clean = normalizeSymbol(symbol);
+
+  // 1. cache global propio (IMPORTANTE FIX)
+  if (normalizePrice(priceCache[clean])) {
+    return priceCache[clean];
+  }
 
   const sources = [
     global.priceHandler?.prices,
@@ -45,12 +55,15 @@ function getMarketPrice(symbol) {
     if (!src) continue;
 
     const price =
-      normalizePrice(src[clean]?.price) ||
-      normalizePrice(src[clean]) ||
-      normalizePrice(src[symbol]?.price) ||
-      normalizePrice(src[symbol]);
+      normalizePrice(src?.[clean]?.price) ||
+      normalizePrice(src?.[clean]) ||
+      normalizePrice(src?.[symbol]?.price) ||
+      normalizePrice(src?.[symbol]);
 
-    if (price) return price;
+    if (price) {
+      priceCache[clean] = price; // 🔥 guardar cache
+      return price;
+    }
   }
 
   return null;
@@ -141,19 +154,24 @@ export const openTrade = async ({ user, order }) => {
     quantity = Number(quantity);
 
     // =========================
-    // 🔥 PRICE ENGINE FIX REAL
+    // 🔥 PRICE ENGINE FIX
     // =========================
     let entryPrice = normalizePrice(price);
 
-    // 🔥 SI FRONTEND MANDA 0 → IGNORAR
+    // 🔥 SI FRONTEND ENVÍA 0 O NULL → IGNORAR
     if (!entryPrice) entryPrice = null;
 
-    // 🔥 BUSCAR EN MARKET GLOBAL
+    // 🔥 BUSCAR EN CACHE / MARKET GLOBAL
     if (!entryPrice) {
       entryPrice = getMarketPrice(symbol);
     }
 
-    // ❌ BLOQUEO FINAL
+    // 🔥 ÚLTIMO FALLBACK (evita null total)
+    if (!entryPrice) {
+      entryPrice = priceCache[symbol] || null;
+    }
+
+    // ❌ BLOQUEO FINAL SOLO SI NO HAY NADA
     if (!entryPrice) {
       await session.abortTransaction();
       session.endSession();
@@ -165,6 +183,9 @@ export const openTrade = async ({ user, order }) => {
         receivedPrice: price ?? null,
       };
     }
+
+    // guardar cache
+    priceCache[symbol] = entryPrice;
 
     const wallet = await getOrCreateWallet(userId, session);
 
@@ -262,13 +283,15 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 };
 
 // =======================
-// 📡 LIVE PRICE
+// 📡 LIVE PRICE UPDATE
 // =======================
 export const updateLivePrice = async ({ symbol, price }) => {
   try {
     const clean = normalizeSymbol(symbol);
     const live = normalizePrice(price);
     if (!live) return;
+
+    priceCache[clean] = live;
 
     const positions = await Position.find({ status: "OPEN" });
 
