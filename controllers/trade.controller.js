@@ -153,7 +153,7 @@ export const updateLivePrice = async ({ symbol, price }) => {
 };
 
 // =======================
-// 🚀 OPEN TRADE (FIX DEFINITIVO)
+// 🚀 OPEN TRADE (FIX FINAL REAL)
 // =======================
 export const openTrade = async ({ user, order }) => {
   const session = await mongoose.startSession();
@@ -171,7 +171,7 @@ export const openTrade = async ({ user, order }) => {
     quantity = Number(quantity);
 
     // ======================================================
-    // 🔥 ENTRY PRICE FIX REAL (AQUÍ LO COLOCAMOS)
+    // 🔥 ENTRY PRICE FIX REAL (AQUÍ ESTÁ LO IMPORTANTE)
     // ======================================================
     let entryPrice = normalizePrice(price);
 
@@ -182,6 +182,13 @@ export const openTrade = async ({ user, order }) => {
       entryPrice =
         normalizePrice(store[symbol]?.price) ||
         normalizePrice(store[normalizeSymbol(symbol)]?.price);
+    }
+
+    // 🔥 SEGUNDO FALLBACK (extra seguridad)
+    if (!entryPrice && global.marketData?.prices) {
+      entryPrice =
+        normalizePrice(global.marketData.prices[symbol]) ||
+        normalizePrice(global.marketData.prices[normalizeSymbol(symbol)]);
     }
 
     // ❌ BLOQUEO REAL
@@ -263,6 +270,7 @@ export const closeTrade = async ({ user, positionId, closePrice }) => {
 
     if (!exit) {
       const store = global.priceHandler?.prices || {};
+
       exit =
         normalizePrice(store[normalizeSymbol(position.symbol)]?.price) ||
         normalizePrice(position.entryPrice);
