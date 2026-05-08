@@ -1972,12 +1972,7 @@ app.use("/api/api", (req, res) => {
 
 let polygonSocket = null;
 
-function compactSymbol(value = "") {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
+
 
 function normalizeSymbol(symbol = "") {
   return String(symbol || "")
