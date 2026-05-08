@@ -296,6 +296,7 @@ function findBestPriceMatch(symbol, store = {}) {
 
     const found = candidates.some((candidate) => {
       const cAliases = buildSymbolAliases(candidate);
+
       return cAliases.some((c) =>
         wanted.some((w) => c === w || c.includes(w) || w.includes(c))
       );
@@ -1990,58 +1991,42 @@ function extractSymbol(data) {
 function extractPrice(data = {}) {
   if (!data) return null;
 
-  console.log(
-    "🔥 extractPrice INPUT:",
-    JSON.stringify(data, null, 2)
-  );
-
-  const directCandidates = [
-    data.price,
-    data.p,
-    data.lp,
-    data.last,
-    data.lastPrice,
-    data.close,
-    data.c,
-    data.mark,
-    data.mid,
-    data.value,
-    data.currentPrice,
-    data.executionPrice,
-    data.raw?.price,
-    data.raw?.p,
-    data.raw?.lp,
-    data.raw?.last,
-    data.raw?.close,
-    data.raw?.c,
-    data.bp,
-    data.ap,
+  const candidates = [
+    data?.price,
+    data?.p,
+    data?.last,
+    data?.lastPrice,
+    data?.c,
+    data?.close,
+    data?.mid,
+    data?.mark,
+    data?.a,
+    data?.b,
+    data?.value,
+    data?.currentPrice,
+    data?.executionPrice,
+    data?.raw?.price,
+    data?.raw?.p,
+    data?.raw?.lp,
+    data?.raw?.last,
+    data?.raw?.close,
+    data?.raw?.c,
+    data?.bp,
+    data?.ap,
   ];
 
-  for (const value of directCandidates) {
-    const n = Number(value);
-
-    if (Number.isFinite(n) && n > 0) {
-      console.log("✅ PRICE FOUND:", n);
-      return n;
-    }
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
-  const bid = Number(data.bid) || Number(data.b);
-  const ask = Number(data.ask) || Number(data.a);
+  const ask = Number(data?.ask);
+  const bid = Number(data?.bid);
 
-  if (
-    Number.isFinite(bid) &&
-    Number.isFinite(ask) &&
-    bid > 0 &&
-    ask > 0
-  ) {
-    const mid = (bid + ask) / 2;
-    console.log("✅ MID PRICE:", mid);
-    return mid;
+  if (Number.isFinite(ask) && Number.isFinite(bid) && ask > 0 && bid > 0) {
+    return (ask + bid) / 2;
   }
 
-  console.warn("❌ extractPrice FAILED");
   return null;
 }
 
@@ -2327,7 +2312,11 @@ try {
             return;
           }
 
-          storePrice(symbol, Number(finalPrice), data);
+          if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
+            storePrice(symbol, Number(finalPrice), data);
+          } else {
+            console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, finalPrice);
+          }
 
           console.log("✅ STORE UPDATED:", symbol, finalPrice);
 
