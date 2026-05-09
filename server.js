@@ -1583,29 +1583,34 @@ global.priceCache = global.priceCache || {};
 global.priceMeta = global.priceMeta || {};
 
 /* ======================================================
-   NORMALIZE SYMBOL
+   SAFE NORMALIZE SYMBOL
 ====================================================== */
 
-function normalizeSymbol(symbol = "") {
-  let s = String(symbol || "")
-    .toUpperCase()
-    .trim();
+// ⚠️ SOLO CREAR SI NO EXISTE
+if (typeof global.normalizeSymbol !== "function") {
+  global.normalizeSymbol = function(symbol = "") {
+    let s = String(symbol || "")
+      .toUpperCase()
+      .trim();
 
-  s = s.replace("BINANCE:", "");
-  s = s.replace("FOREX:", "");
-  s = s.replace("OANDA:", "");
-  s = s.replace("FX:", "");
-  s = s.replace("C:", "");
-  s = s.replace("X:", "");
-  s = s.replace("/", "");
-  s = s.replace("-", "");
+    s = s.replace("BINANCE:", "");
+    s = s.replace("FOREX:", "");
+    s = s.replace("OANDA:", "");
+    s = s.replace("FX:", "");
+    s = s.replace("C:", "");
+    s = s.replace("X:", "");
+    s = s.replace("/", "");
+    s = s.replace("-", "");
 
-  if (s === "BTCUSD") s = "BTCUSDT";
-  if (s === "ETHUSD") s = "ETHUSDT";
-  if (s === "SOLUSD") s = "SOLUSDT";
+    if (s === "BTCUSD") s = "BTCUSDT";
+    if (s === "ETHUSD") s = "ETHUSDT";
+    if (s === "SOLUSD") s = "SOLUSDT";
 
-  return s;
+    return s;
+  };
 }
+
+const normalizeSymbol = global.normalizeSymbol;
 
 /* ======================================================
    MARKET SEEDS
@@ -1666,7 +1671,6 @@ const MARKET_SEEDS = {
 function detectMarket(symbol = "") {
   const s = normalizeSymbol(symbol);
 
-  // CRYPTO
   if (
     s.endsWith("USDT") ||
     s.startsWith("BTC") ||
@@ -1680,7 +1684,6 @@ function detectMarket(symbol = "") {
     return "crypto";
   }
 
-  // FOREX
   const forexPairs = [
     "EURUSD",
     "USDJPY",
@@ -1697,7 +1700,6 @@ function detectMarket(symbol = "") {
     return "forex";
   }
 
-  // INDICES
   if (
     s.includes("SPX") ||
     s.includes("NAS100") ||
@@ -1708,7 +1710,6 @@ function detectMarket(symbol = "") {
     return "indices";
   }
 
-  // COMMODITIES
   if (
     s.includes("GOLD") ||
     s.includes("SILVER") ||
@@ -1838,10 +1839,10 @@ global.getFakePrice = function(symbol) {
 };
 
 /* ======================================================
-   GET MARKET PRICE
+   SAFE GET MARKET PRICE
 ====================================================== */
 
-function getMarketPrice(symbol) {
+global.getMarketPrice = function(symbol) {
   const clean = normalizeSymbol(symbol);
 
   const cached = Number(global.priceCache[clean]);
@@ -1851,9 +1852,7 @@ function getMarketPrice(symbol) {
   }
 
   return global.getFakePrice(clean);
-}
-
-global.getMarketPrice = getMarketPrice;
+};
 
 /* ======================================================
    INITIAL SEED
@@ -1904,6 +1903,7 @@ setInterval(() => {
     console.error("Fake market error:", err);
   }
 }, 1000);
+
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
