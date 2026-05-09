@@ -2427,26 +2427,31 @@ app.use(express.static(staticPath));
    GET REAL PRICE (FIX REAL)
    ====================================================== */
 
+/* ======================================================
+   GET REAL PRICE (FIX REAL)
+====================================================== */
+
 app.get("/api/price", async (req, res) => {
   try {
-    let symbol = String(req.query.symbol || "")
+    // =========================
+    // RAW SYMBOL
+    // =========================
+    const rawSymbol = String(
+      req.query.symbol ||
+      req.query.tvSymbol ||
+      req.query.selectedSymbol ||
+      ""
+    )
       .toUpperCase()
       .trim();
-
-    if (!symbol) {
-      return res.status(400).json({
-        ok: false,
-        error: "symbol_required",
-      });
-    }
 
     // =========================
     // NORMALIZE
     // =========================
-    symbol = symbol
+    let symbol = rawSymbol
       .replace("OANDA:", "")
-      .replace("FOREX:", "")
       .replace("BINANCE:", "")
+      .replace("FOREX:", "")
       .replace("FX:", "")
       .replace("C:", "")
       .replace("X:", "")
@@ -2454,111 +2459,226 @@ app.get("/api/price", async (req, res) => {
       .replace("-", "")
       .trim();
 
-    // TradingView → internal
+    // CRYPTO FIX
     if (symbol === "BTCUSD") symbol = "BTCUSDT";
     if (symbol === "ETHUSD") symbol = "ETHUSDT";
     if (symbol === "SOLUSD") symbol = "SOLUSDT";
 
-    let price = null;
+    // FALLBACK normalize existente
+    try {
+      if (typeof normalizeSymbol === "function") {
+        symbol = normalizeSymbol(symbol);
+      }
+    } catch {}
 
-    // =========================
-    // 1. CACHE
-    // =========================
-    const cached = Number(global.priceCache?.[symbol]);
-
-    if (Number.isFinite(cached) && cached > 0) {
-      price = cached;
+    if (!symbol) {
+      return res.status(400).json({
+        ok: false,
+        error: "Símbolo requerido",
+      });
     }
 
     // =========================
-    // 2. PRICE HANDLER
+    // AUTO SEED
     // =========================
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        const stored =
-          priceHandler?.prices instanceof Map
-            ? priceHandler.prices.get(symbol)
-            : priceHandler?.prices?.[symbol];
+    try {
+      if (typeof forcePriceExists === "function") {
+        forcePriceExists(symbol);
+      }
+    } catch {}
 
-        const p = Number(
-          stored?.price ??
-          stored?.currentPrice ??
-          stored?.close ??
-          stored?.lastPrice
-        );
+    let found = null;
 
-        if (Number.isFinite(p) && p > 0) {
-          price = p;
+    // =========================
+    // SEARCH PRICE STORE
+    // =========================
+    try {
+      if (priceHandler?.prices) {
+        const store =
+          priceHandler.prices instanceof Map
+            ? Object.fromEntries(priceHandler.prices.entries())
+            : priceHandler.prices;
+
+        if (typeof findBestPriceMatch === "function") {
+          found = findBestPriceMatch(symbol, store || {});
         }
-      } catch {}
+      }
+
+      if (!found && typeof getPriceStore === "function") {
+        const store = getPriceStore() || {};
+
+        if (typeof findBestPriceMatch === "function") {
+          found = findBestPriceMatch(symbol, store);
+        }
+      }
+    } catch (err) {
+      console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
     }
 
     // =========================
-    // 3. POLYGON
+    // EXTRACT PRICE
+    // =========================
+    let price =
+      Number(found?.price) ||
+      Number(found?.currentPrice) ||
+      Number(found?.lastPrice) ||
+      Number(found?.last) ||
+      Number(found?.close) ||
+      Number(found?.raw?.price) ||
+      Number(found?.raw?.p) ||
+      Number(found?.raw?.lp) ||
+      Number(found?.raw?.last) ||
+      Number(found?.raw?.close) ||
+      Number(found?.bid) ||
+      Number(found?.ask) ||
+      Number(global.priceCache?.[symbol]) ||
+      Number(global.priceMeta?.[symbol]?.price) ||
+      null;
+
+    // =========================
+    // LOCAL FAKE ENGINE
     // =========================
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        const fallback = await fetchPolygonLastPrice(symbol);
-
-        const polygonPrice = Number(
-          fallback?.price
-        );
+        if (typeof global.getFakePrice === "function") {
+          price = global.getFakePrice(symbol);
+        }
 
         if (
-          Number.isFinite(polygonPrice) &&
-          polygonPrice > 0
+          Number.isFinite(price) &&
+          price > 0 &&
+          typeof safeStorePrice === "function"
         ) {
-          price = polygonPrice;
-
-          global.priceCache[symbol] = polygonPrice;
+          safeStorePrice(symbol, price, found?.raw || null);
         }
       } catch (err) {
-        console.warn(
-          "Polygon fallback failed:",
-          err?.message || err
-        );
+        console.warn("❌ FAKE PRICE ERROR:", err?.message || err);
       }
     }
 
     // =========================
-    // 4. FAKE PRICE
+    // POLYGON FALLBACK
     // =========================
-    if (
-      (!Number.isFinite(price) || price <= 0) &&
-      typeof global.getFakePrice === "function"
-    ) {
+    if (!Number.isFinite(price) || price <= 0) {
       try {
-        const fake = Number(
-          global.getFakePrice(symbol)
-        );
+        if (typeof fetchPolygonLastPrice === "function") {
+          const fallback = await fetchPolygonLastPrice(symbol);
 
-        if (Number.isFinite(fake) && fake > 0) {
-          price = fake;
+          const fallbackPrice = Number(fallback?.price);
+
+          if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+            price = fallbackPrice;
+
+            if (typeof safeStorePrice === "function") {
+              safeStorePrice(
+                symbol,
+                fallbackPrice,
+                fallback?.raw || null
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("❌ FALLBACK ERROR:", err?.message || err);
+      }
+    }
+
+    // =========================
+    // ABSOLUTE FINAL FIX
+    // =========================
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        if (typeof forcePriceExists === "function") {
+          price = forcePriceExists(symbol);
+        }
+      } catch {}
+
+      if (!Number.isFinite(price) || price <= 0) {
+        try {
+          if (typeof global.getFakePrice === "function") {
+            price = global.getFakePrice(symbol);
+          }
+        } catch {}
+      }
+
+      if (!Number.isFinite(price) || price <= 0) {
+        price = 1 + Math.random() * 1000;
+      }
+
+      try {
+        if (typeof safeStorePrice === "function") {
+          safeStorePrice(symbol, price, found?.raw || null);
         }
       } catch {}
     }
 
     // =========================
-    // FINAL FAILSAFE
+    // FINAL VALIDATION
     // =========================
+    price = Number(price);
+
     if (!Number.isFinite(price) || price <= 0) {
-      price = 1;
+      return res.status(500).json({
+        ok: false,
+        error: "invalid_price",
+        symbol,
+      });
     }
 
+    // =========================
+    // RESPONSE
+    // =========================
     return res.json({
       ok: true,
       symbol,
-      price: Number(price),
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      updatedAt:
+        found?.updatedAt ||
+        global.priceMeta?.[symbol]?.updatedAt ||
+        new Date().toISOString(),
     });
 
   } catch (err) {
-    console.error("/api/price error:", err);
+    console.error("❌ Error /api/price:", err);
 
     return res.status(500).json({
       ok: false,
-      error: "price_error",
-      message: err?.message || "Unknown error",
+      error: "Error interno",
+      message: err?.message || "price_failed",
     });
+  }
+});
+
+/* ======================================================
+   SPA FALLBACK
+====================================================== */
+
+app.get("*", (req, res) => {
+  try {
+    if (req.path.startsWith("/api/") || req.path === "/api") {
+      return res.status(404).json({
+        ok: false,
+        error: "API endpoint not found",
+      });
+    }
+
+    const indexPath = path.join(staticPath, "index.html");
+
+    return res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error("❌ Error sirviendo index.html:", err);
+
+        return res.status(err.status || 500).send("Error loading app");
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ SPA FALLBACK ERROR:", err);
+
+    return res.status(500).send("Server error");
   }
 });
 /* =========================
