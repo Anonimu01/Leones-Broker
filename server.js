@@ -1606,15 +1606,20 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     // RISK CALCULATION
     // =========================
-    const notional = qty * price;
+    const notional = Math.abs(qty * price);
 
-    const requiredMargin =
-      notional / leverage;
+    let requiredMargin = notional / leverage;
+
+    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
+      requiredMargin = 1;
+    }
+
+    requiredMargin = Math.min(requiredMargin, 100);
 
     const freeMargin =
-      balanceOwn + credit - marginUsed;
+      Number(balanceOwn + credit - marginUsed) || 0;
 
-    if (freeMargin < requiredMargin) {
+    if (freeMargin <= 0) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_margin",
