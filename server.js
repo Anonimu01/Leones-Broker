@@ -1066,21 +1066,7 @@ async function resolveUniversalPrice(rawSymbol) {
   }
 }
 
-async function getLatestPriceResponse(rawSymbol) {
-  const symbol = normalizeUniversalSymbol(rawSymbol);
-  if (!symbol) return null;
 
-  const price = await resolveUniversalPrice(symbol);
-  return {
-    ok: true,
-    symbol,
-    price,
-    currentPrice: price,
-    last: price,
-    close: price,
-    updatedAt: new Date().toISOString(),
-  };
-}
 
 async function resolvePriceWithFallback(symbol, body = {}) {
   const direct = normalizePrice(body);
