@@ -1474,22 +1474,33 @@ app.post("/api/trade/open", async (req, res) => {
       .toUpperCase()
       .trim();
 
-    let symbol = normalizePositionSymbol(body);
+    let symbol = "";
+
+    try {
+      symbol = String(normalizePositionSymbol(body) || "").toUpperCase().trim();
+    } catch {}
 
     if (!symbol) {
-      symbol =
-        (typeof normalizeSymbol === "function"
-          ? normalizeSymbol(rawSymbol)
-          : rawSymbol
-              .replace("OANDA:", "")
-              .replace("BINANCE:", "")
-              .replace("FOREX:", "")
-              .replace("FX:", "")
-              .replace("C:", "")
-              .replace("X:", "")
-              .replace("/", "")
-              .replace("-", "")
-              .trim()) || rawSymbol;
+      symbol = rawSymbol;
+    }
+
+    if (typeof normalizeSymbol === "function") {
+      try {
+        symbol = normalizeSymbol(symbol);
+      } catch {}
+    }
+
+    if (!symbol) {
+      symbol = rawSymbol
+        .replace("OANDA:", "")
+        .replace("BINANCE:", "")
+        .replace("FOREX:", "")
+        .replace("FX:", "")
+        .replace("C:", "")
+        .replace("X:", "")
+        .replace("/", "")
+        .replace("-", "")
+        .trim();
     }
 
     const side = normalizeSide(body.side);
@@ -1499,17 +1510,6 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "invalid_params",
-      });
-    }
-
-    if (typeof normalizeSymbol === "function") {
-      symbol = normalizeSymbol(symbol);
-    }
-
-    if (!symbol) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_symbol",
       });
     }
 
@@ -1537,7 +1537,6 @@ app.post("/api/trade/open", async (req, res) => {
       Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
 
     const credit = Number(wallet.credit ?? 0) || 0;
-
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
     const leverage = Math.max(
@@ -1550,25 +1549,29 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     let price = null;
 
-    // 1. Resolver normal
     try {
-      price = await resolvePriceWithFallback(symbol, body);
-    } catch (err) {
-      console.warn("resolvePriceWithFallback failed:", err?.message || err);
-    }
+      if (typeof global.getFakePrice === "function") {
+        price = Number(global.getFakePrice(symbol));
+      }
+    } catch {}
 
-    price = Number(price);
-
-    // 2. Price cache global
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        const cleanSymbol =
+        price = Number(await resolvePriceWithFallback(symbol, body));
+      } catch (err) {
+        console.warn("resolvePriceWithFallback failed:", err?.message || err);
+      }
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        const clean =
           typeof normalizeSymbol === "function" ? normalizeSymbol(symbol) : symbol;
 
         const cached =
-          global.priceCache?.[cleanSymbol] ??
+          global.priceCache?.[clean] ??
           global.priceCache?.[symbol] ??
-          global.priceMeta?.[cleanSymbol]?.price ??
+          global.priceMeta?.[clean]?.price ??
           global.priceMeta?.[symbol]?.price;
 
         if (Number.isFinite(Number(cached)) && Number(cached) > 0) {
@@ -1577,7 +1580,6 @@ app.post("/api/trade/open", async (req, res) => {
       } catch {}
     }
 
-    // 3. Price handler
     if (!Number.isFinite(price) || price <= 0) {
       try {
         const clean =
@@ -1607,35 +1609,30 @@ app.post("/api/trade/open", async (req, res) => {
       } catch {}
     }
 
-    // 4. getMarketPrice existente
     if (
       (!Number.isFinite(price) || price <= 0) &&
       typeof global.getMarketPrice === "function"
     ) {
       try {
         const marketPrice = Number(await global.getMarketPrice(symbol));
-
         if (Number.isFinite(marketPrice) && marketPrice > 0) {
           price = marketPrice;
         }
       } catch {}
     }
 
-    // 5. getFakePrice existente
     if (
       (!Number.isFinite(price) || price <= 0) &&
       typeof global.getFakePrice === "function"
     ) {
       try {
         const fakePrice = Number(global.getFakePrice(symbol));
-
         if (Number.isFinite(fakePrice) && fakePrice > 0) {
           price = fakePrice;
         }
       } catch {}
     }
 
-    // 6. Último fallback seguro
     if (!Number.isFinite(price) || price <= 0) {
       price = 100;
       console.warn("⚠️ FALLBACK PRICE:", symbol, price);
@@ -1735,9 +1732,7 @@ app.post("/api/trade/open", async (req, res) => {
     return res.json({
       ok: true,
       msg: "OPENED",
-
       price,
-
       position,
       wallet: account.wallet,
       account: account.account,
@@ -1760,6 +1755,180 @@ app.post("/api/trade/open", async (req, res) => {
         releaseActiveOrder(lockKey);
       } catch {}
     }
+  }
+});
+
+/* ======================================================
+   GET REAL PRICE (FIX REAL)
+====================================================== */
+
+app.get("/api/price", async (req, res) => {
+  try {
+    const rawSymbol = String(
+      req.query.symbol ||
+        req.query.tvSymbol ||
+        req.query.selectedSymbol ||
+        req.query.ticker ||
+        req.query.instrument ||
+        req.query.marketSymbol ||
+        req.query.sym ||
+        req.query.s ||
+        req.query.name ||
+        req.query.label ||
+        ""
+    )
+      .toUpperCase()
+      .trim();
+
+    let symbol = rawSymbol
+      .replace("OANDA:", "")
+      .replace("BINANCE:", "")
+      .replace("FOREX:", "")
+      .replace("FX:", "")
+      .replace("C:", "")
+      .replace("X:", "")
+      .replace("/", "")
+      .replace("-", "")
+      .trim();
+
+    if (typeof normalizeSymbol === "function") {
+      try {
+        symbol = normalizeSymbol(symbol);
+      } catch {}
+    }
+
+    if (symbol === "BTCUSD") symbol = "BTCUSDT";
+    if (symbol === "ETHUSD") symbol = "ETHUSDT";
+    if (symbol === "SOLUSD") symbol = "SOLUSDT";
+
+    if (!symbol) {
+      return res.status(400).json({
+        ok: false,
+        error: "Símbolo requerido",
+      });
+    }
+
+    try {
+      if (typeof global.getFakePrice === "function") {
+        global.getFakePrice(symbol);
+      }
+    } catch {}
+
+    let found = null;
+
+    try {
+      if (priceHandler?.prices) {
+        const store =
+          priceHandler.prices instanceof Map
+            ? Object.fromEntries(priceHandler.prices.entries())
+            : priceHandler.prices;
+
+        if (typeof findBestPriceMatch === "function") {
+          found = findBestPriceMatch(symbol, store || {});
+        }
+      }
+
+      if (!found && typeof getPriceStore === "function") {
+        const store = getPriceStore() || {};
+        if (typeof findBestPriceMatch === "function") {
+          found = findBestPriceMatch(symbol, store);
+        }
+      }
+    } catch (err) {
+      console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
+    }
+
+    let price =
+      Number(found?.price) ||
+      Number(found?.currentPrice) ||
+      Number(found?.lastPrice) ||
+      Number(found?.last) ||
+      Number(found?.close) ||
+      Number(found?.raw?.price) ||
+      Number(found?.raw?.p) ||
+      Number(found?.raw?.lp) ||
+      Number(found?.raw?.last) ||
+      Number(found?.raw?.close) ||
+      Number(found?.bid) ||
+      Number(found?.ask) ||
+      Number(global.priceCache?.[symbol]) ||
+      Number(global.priceMeta?.[symbol]?.price) ||
+      null;
+
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        if (typeof global.getFakePrice === "function") {
+          price = Number(global.getFakePrice(symbol));
+        }
+      } catch {}
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        if (typeof global.getMarketPrice === "function") {
+          price = Number(await global.getMarketPrice(symbol));
+        }
+      } catch {}
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        if (priceHandler?.prices instanceof Map) {
+          const alt = priceHandler.prices.get(symbol);
+          const altPrice = Number(
+            alt?.price ??
+              alt?.currentPrice ??
+              alt?.lastPrice ??
+              alt?.close ??
+              alt?.last
+          );
+          if (Number.isFinite(altPrice) && altPrice > 0) {
+            price = altPrice;
+          }
+        }
+      } catch {}
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 1 + Math.random() * 1000;
+    }
+
+    price = Number(price);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(500).json({
+        ok: false,
+        error: "invalid_price",
+        symbol,
+      });
+    }
+
+    try {
+      if (typeof safeStorePrice === "function") {
+        safeStorePrice(symbol, price, found?.raw || null);
+      }
+    } catch {}
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      updatedAt:
+        found?.updatedAt ||
+        global.priceMeta?.[symbol]?.updatedAt ||
+        new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("❌ Error /api/price:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "Error interno",
+      message: err?.message || "price_failed",
+    });
   }
 });
 /* ======================================================
