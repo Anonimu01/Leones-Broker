@@ -2429,116 +2429,137 @@ app.use(express.static(staticPath));
 
 app.get("/api/price", async (req, res) => {
   try {
-    const rawSymbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
-    );
-    const symbol = normalizeSymbol(rawSymbol);
+    let symbol = String(req.query.symbol || "")
+      .toUpperCase()
+      .trim();
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
+      return res.status(400).json({
+        ok: false,
+        error: "symbol_required",
+      });
     }
 
-    // 🔥 AUTO-SEED TOTAL
-    forcePriceExists(symbol);
+    // =========================
+    // NORMALIZE
+    // =========================
+    symbol = symbol
+      .replace("OANDA:", "")
+      .replace("FOREX:", "")
+      .replace("BINANCE:", "")
+      .replace("FX:", "")
+      .replace("C:", "")
+      .replace("X:", "")
+      .replace("/", "")
+      .replace("-", "")
+      .trim();
 
-    let found = null;
-
-    try {
-      if (priceHandler?.prices) {
-        const store =
-          priceHandler.prices instanceof Map
-            ? Object.fromEntries(priceHandler.prices.entries())
-            : priceHandler.prices;
-
-        found = findBestPriceMatch(symbol, store || {});
-      }
-
-      if (!found) {
-        found = findBestPriceMatch(symbol, getPriceStore?.() || {});
-      }
-    } catch (err) {
-      console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
-    }
+    // TradingView → internal
+    if (symbol === "BTCUSD") symbol = "BTCUSDT";
+    if (symbol === "ETHUSD") symbol = "ETHUSDT";
+    if (symbol === "SOLUSD") symbol = "SOLUSDT";
 
     let price = null;
 
-    if (found) {
-      price =
-        Number(found?.price) ||
-        Number(found?.currentPrice) ||
-        Number(found?.lastPrice) ||
-        Number(found?.last) ||
-        Number(found?.close) ||
-        Number(found?.raw?.price) ||
-        Number(found?.raw?.p) ||
-        Number(found?.raw?.lp) ||
-        Number(found?.raw?.last) ||
-        Number(found?.raw?.close) ||
-        Number(found?.bid) ||
-        Number(found?.ask) ||
-        null;
+    // =========================
+    // 1. CACHE
+    // =========================
+    const cached = Number(global.priceCache?.[symbol]);
+
+    if (Number.isFinite(cached) && cached > 0) {
+      price = cached;
     }
 
-    // 🔥 FIX 1: usar motor fake local si no hay precio
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      price = global.getFakePrice?.(symbol);
-      if (price && Number.isFinite(price) && price > 0) {
-        safeStorePrice(symbol, price, found?.raw || null);
-      }
+    // =========================
+    // 2. PRICE HANDLER
+    // =========================
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        const stored =
+          priceHandler?.prices instanceof Map
+            ? priceHandler.prices.get(symbol)
+            : priceHandler?.prices?.[symbol];
+
+        const p = Number(
+          stored?.price ??
+          stored?.currentPrice ??
+          stored?.close ??
+          stored?.lastPrice
+        );
+
+        if (Number.isFinite(p) && p > 0) {
+          price = p;
+        }
+      } catch {}
     }
 
-    // 🔥 FIX 2: mantener respaldo externo si existe
-    if (!price || !Number.isFinite(price) || price <= 0) {
+    // =========================
+    // 3. POLYGON
+    // =========================
+    if (!Number.isFinite(price) || price <= 0) {
       try {
         const fallback = await fetchPolygonLastPrice(symbol);
-        const fallbackPrice = Number(fallback?.price);
 
-        if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
-          price = fallbackPrice;
-          safeStorePrice(symbol, fallbackPrice, fallback?.raw || null);
+        const polygonPrice = Number(
+          fallback?.price
+        );
+
+        if (
+          Number.isFinite(polygonPrice) &&
+          polygonPrice > 0
+        ) {
+          price = polygonPrice;
+
+          global.priceCache[symbol] = polygonPrice;
         }
       } catch (err) {
-        console.warn("❌ FALLBACK ERROR:", err?.message || err);
+        console.warn(
+          "Polygon fallback failed:",
+          err?.message || err
+        );
       }
     }
 
-    // 🔥 FIX 3: garantía final absoluta
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      price = forcePriceExists(symbol) || global.getFakePrice?.(symbol);
+    // =========================
+    // 4. FAKE PRICE
+    // =========================
+    if (
+      (!Number.isFinite(price) || price <= 0) &&
+      typeof global.getFakePrice === "function"
+    ) {
+      try {
+        const fake = Number(
+          global.getFakePrice(symbol)
+        );
 
-      if (!price || !Number.isFinite(price) || price <= 0) {
-        price = 50 + Math.random() * 1000;
-      }
+        if (Number.isFinite(fake) && fake > 0) {
+          price = fake;
+        }
+      } catch {}
+    }
 
-      safeStorePrice(symbol, price, found?.raw || null);
+    // =========================
+    // FINAL FAILSAFE
+    // =========================
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 1;
     }
 
     return res.json({
       ok: true,
       symbol,
       price: Number(price),
-      currentPrice: Number(price),
-      last: Number(price),
-      close: Number(price),
-      updatedAt: found?.updatedAt || new Date().toISOString(),
     });
-  } catch (err) {
-    console.error("Error /api/price:", err);
-    return res.status(500).json({ ok: false, error: "Error interno" });
-  }
-});
 
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") {
-    return res.status(404).json({ error: "API endpoint not found" });
+  } catch (err) {
+    console.error("/api/price error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "price_error",
+      message: err?.message || "Unknown error",
+    });
   }
-  const indexPath = path.join(staticPath, "index.html");
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
-    }
-  });
 });
 /* =========================
    START / SHUTDOWN
