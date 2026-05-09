@@ -1448,43 +1448,149 @@ app.post("/api/trade/open", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized",
+      });
+    }
 
     const body = req.body || {};
+
     const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side);
     const qty = normalizeQty(body);
 
     if (!symbol || !side || !qty) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_params",
+      });
     }
 
     lockKey = makeOpenLockKey(user._id, symbol, side, qty);
 
-    if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
-      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
+    if (
+      !withOpenLock(lockKey, 2500) ||
+      !withActiveOrder(lockKey, 2500)
+    ) {
+      return res.status(429).json({
+        ok: false,
+        error: "duplicate_order_blocked",
+      });
     }
 
+    // =========================
+    // WALLET
+    // =========================
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-    const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+    const balanceOwn =
+      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+
+    const credit =
+      Number(wallet.credit ?? 0) || 0;
+
+    const marginUsed =
+      Number(wallet.marginUsed ?? 0) || 0;
+
+    const leverage = Math.max(
+      Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1,
+      1
+    );
 
     // =========================
-    // 🔥 PRICE RESOLUTION (ROBUSTO)
+    // PRICE RESOLUTION
     // =========================
-    let price = await resolvePriceWithFallback(symbol, body);
+    let price = null;
 
-    // AUTO FIX: nunca dejar que se caiga la orden
+    // 1. Resolver normal
+    try {
+      price = await resolvePriceWithFallback(symbol, body);
+    } catch (err) {
+      console.warn("resolvePriceWithFallback failed:", err?.message || err);
+    }
+
+    // 2. Price cache global
     if (!Number.isFinite(price) || price <= 0) {
-      price =
-        global.getFakePrice?.(symbol) ||
-        forcePriceExists?.(symbol) ||
-        (50 + Math.random() * 1000);
+      try {
+        const cached =
+          global.priceCache?.[symbol] ??
+          global.priceCache?.[
+            typeof normalizeSymbol === "function"
+              ? normalizeSymbol(symbol)
+              : symbol
+          ];
 
-      console.warn("⚠️ PRICE AUTO-FIX TRADE:", symbol, price);
+        if (Number.isFinite(Number(cached)) && Number(cached) > 0) {
+          price = Number(cached);
+        }
+      } catch {}
+    }
+
+    // 3. Price handler
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
+        const clean =
+          typeof normalizeSymbol === "function"
+            ? normalizeSymbol(symbol)
+            : symbol;
+
+        const stored =
+          priceHandler?.prices instanceof Map
+            ? priceHandler.prices.get(clean)
+            : priceHandler?.prices?.[clean];
+
+        const storedPrice = Number(
+          stored?.price ??
+          stored?.currentPrice ??
+          stored?.close ??
+          stored?.lastPrice
+        );
+
+        if (Number.isFinite(storedPrice) && storedPrice > 0) {
+          price = storedPrice;
+        }
+      } catch {}
+    }
+
+    // 4. getMarketPrice existente
+    if (
+      (!Number.isFinite(price) || price <= 0) &&
+      typeof global.getMarketPrice === "function"
+    ) {
+      try {
+        const marketPrice = Number(
+          await global.getMarketPrice(symbol)
+        );
+
+        if (Number.isFinite(marketPrice) && marketPrice > 0) {
+          price = marketPrice;
+        }
+      } catch {}
+    }
+
+    // 5. getFakePrice existente
+    if (
+      (!Number.isFinite(price) || price <= 0) &&
+      typeof global.getFakePrice === "function"
+    ) {
+      try {
+        const fakePrice = Number(
+          global.getFakePrice(symbol)
+        );
+
+        if (Number.isFinite(fakePrice) && fakePrice > 0) {
+          price = fakePrice;
+        }
+      } catch {}
+    }
+
+    // 6. Último fallback seguro
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100;
+      console.warn("⚠️ FALLBACK PRICE:", symbol, price);
     }
 
     price = Number(price);
@@ -1493,7 +1599,7 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(500).json({
         ok: false,
         error: "price_unrecoverable",
-        symbol
+        symbol,
       });
     }
 
@@ -1501,22 +1607,49 @@ app.post("/api/trade/open", async (req, res) => {
     // RISK CALCULATION
     // =========================
     const notional = qty * price;
-    const requiredMargin = notional / leverage;
-    const freeMargin = balanceOwn + credit - marginUsed;
+
+    const requiredMargin =
+      notional / leverage;
+
+    const freeMargin =
+      balanceOwn + credit - marginUsed;
 
     if (freeMargin < requiredMargin) {
-      return res.status(400).json({ ok: false, error: "insufficient_margin" });
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_margin",
+      });
     }
 
     // =========================
     // WALLET UPDATE
     // =========================
-    wallet.balanceOwn = balanceOwn - requiredMargin;
-    wallet.balance = wallet.balanceOwn;
-    wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.balanceOwn =
+      balanceOwn - requiredMargin;
+
+    wallet.balance =
+      wallet.balanceOwn;
+
+    wallet.marginUsed =
+      marginUsed + requiredMargin;
+
+    wallet.equity =
+      wallet.balanceOwn +
+      wallet.marginUsed +
+      credit;
+
+    wallet.freeMargin = Math.max(
+      wallet.balanceOwn +
+        credit -
+        wallet.marginUsed,
+      0
+    );
+
+    wallet.marginLevel =
+      wallet.marginUsed > 0
+        ? (wallet.equity / wallet.marginUsed) * 100
+        : 0;
+
     wallet.updatedAt = new Date();
 
     await wallet.save();
@@ -1529,27 +1662,52 @@ app.post("/api/trade/open", async (req, res) => {
       symbol,
       side,
       qty,
+
       entryPrice: price,
       currentPrice: price,
+
       marginReserved: requiredMargin,
       leverage,
+
       status: "OPEN",
+
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    const account = await safeBuildAccountForUser(user);
+    // =========================
+    // ACCOUNT BUILD
+    // =========================
+    const account =
+      await safeBuildAccountForUser(user);
 
-    const annotatedPosition = annotatePosition(
-      position.toObject ? position.toObject() : position
+    const annotatedPosition =
+      annotatePosition(
+        position.toObject
+          ? position.toObject()
+          : position
+      );
+
+    // =========================
+    // EMIT LIVE
+    // =========================
+    emitStateUpdates(
+      user._id,
+      account,
+      [annotatedPosition],
+      null
     );
 
-    emitStateUpdates(user._id, account, [annotatedPosition], null);
-    scheduleLivePnLSync(symbol);
+    try {
+      scheduleLivePnLSync(symbol);
+    } catch {}
 
     return res.json({
       ok: true,
       msg: "OPENED",
+
+      price,
+
       position,
       wallet: account.wallet,
       account: account.account,
@@ -1557,16 +1715,22 @@ app.post("/api/trade/open", async (req, res) => {
 
   } catch (err) {
     console.error("/api/trade/open error:", err);
+
     return res.status(500).json({
       ok: false,
       error: "server_error",
-      message: err?.message || "Error interno"
+      message: err?.message || "Error interno",
     });
 
   } finally {
     if (lockKey) {
-      releaseOpenLock(lockKey);
-      releaseActiveOrder(lockKey);
+      try {
+        releaseOpenLock(lockKey);
+      } catch {}
+
+      try {
+        releaseActiveOrder(lockKey);
+      } catch {}
     }
   }
 });
