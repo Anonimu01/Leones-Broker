@@ -1549,12 +1549,29 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     let price = null;
 
+    // SIEMPRE USAR EL SIMULADOR PRIMERO
     try {
       if (typeof global.getFakePrice === "function") {
         price = Number(global.getFakePrice(symbol));
-      }
-    } catch {}
 
+        if (Number.isFinite(price) && price > 0) {
+          global.priceCache = global.priceCache || {};
+          global.priceCache[symbol] = price;
+
+          try {
+            safeStorePrice(symbol, price, {
+              source: "fake-market-engine",
+            });
+          } catch {}
+
+          console.log("🔥 SIMULATED PRICE:", symbol, price);
+        }
+      }
+    } catch (err) {
+      console.warn("Fake price failed:", err?.message || err);
+    }
+
+    // FALLBACKS SOLO SI EL SIMULADOR FALLA
     if (!Number.isFinite(price) || price <= 0) {
       try {
         price = Number(await resolvePriceWithFallback(symbol, body));
@@ -1759,179 +1776,6 @@ app.post("/api/trade/open", async (req, res) => {
 });
 
 /* ======================================================
-   GET REAL PRICE (FIX REAL)
-====================================================== */
-
-app.get("/api/price", async (req, res) => {
-  try {
-    const rawSymbol = String(
-      req.query.symbol ||
-        req.query.tvSymbol ||
-        req.query.selectedSymbol ||
-        req.query.ticker ||
-        req.query.instrument ||
-        req.query.marketSymbol ||
-        req.query.sym ||
-        req.query.s ||
-        req.query.name ||
-        req.query.label ||
-        ""
-    )
-      .toUpperCase()
-      .trim();
-
-    let symbol = rawSymbol
-      .replace("OANDA:", "")
-      .replace("BINANCE:", "")
-      .replace("FOREX:", "")
-      .replace("FX:", "")
-      .replace("C:", "")
-      .replace("X:", "")
-      .replace("/", "")
-      .replace("-", "")
-      .trim();
-
-    if (typeof normalizeSymbol === "function") {
-      try {
-        symbol = normalizeSymbol(symbol);
-      } catch {}
-    }
-
-    if (symbol === "BTCUSD") symbol = "BTCUSDT";
-    if (symbol === "ETHUSD") symbol = "ETHUSDT";
-    if (symbol === "SOLUSD") symbol = "SOLUSDT";
-
-    if (!symbol) {
-      return res.status(400).json({
-        ok: false,
-        error: "Símbolo requerido",
-      });
-    }
-
-    try {
-      if (typeof global.getFakePrice === "function") {
-        global.getFakePrice(symbol);
-      }
-    } catch {}
-
-    let found = null;
-
-    try {
-      if (priceHandler?.prices) {
-        const store =
-          priceHandler.prices instanceof Map
-            ? Object.fromEntries(priceHandler.prices.entries())
-            : priceHandler.prices;
-
-        if (typeof findBestPriceMatch === "function") {
-          found = findBestPriceMatch(symbol, store || {});
-        }
-      }
-
-      if (!found && typeof getPriceStore === "function") {
-        const store = getPriceStore() || {};
-        if (typeof findBestPriceMatch === "function") {
-          found = findBestPriceMatch(symbol, store);
-        }
-      }
-    } catch (err) {
-      console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
-    }
-
-    let price =
-      Number(found?.price) ||
-      Number(found?.currentPrice) ||
-      Number(found?.lastPrice) ||
-      Number(found?.last) ||
-      Number(found?.close) ||
-      Number(found?.raw?.price) ||
-      Number(found?.raw?.p) ||
-      Number(found?.raw?.lp) ||
-      Number(found?.raw?.last) ||
-      Number(found?.raw?.close) ||
-      Number(found?.bid) ||
-      Number(found?.ask) ||
-      Number(global.priceCache?.[symbol]) ||
-      Number(global.priceMeta?.[symbol]?.price) ||
-      null;
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        if (typeof global.getFakePrice === "function") {
-          price = Number(global.getFakePrice(symbol));
-        }
-      } catch {}
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        if (typeof global.getMarketPrice === "function") {
-          price = Number(await global.getMarketPrice(symbol));
-        }
-      } catch {}
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        if (priceHandler?.prices instanceof Map) {
-          const alt = priceHandler.prices.get(symbol);
-          const altPrice = Number(
-            alt?.price ??
-              alt?.currentPrice ??
-              alt?.lastPrice ??
-              alt?.close ??
-              alt?.last
-          );
-          if (Number.isFinite(altPrice) && altPrice > 0) {
-            price = altPrice;
-          }
-        }
-      } catch {}
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      price = 1 + Math.random() * 1000;
-    }
-
-    price = Number(price);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.status(500).json({
-        ok: false,
-        error: "invalid_price",
-        symbol,
-      });
-    }
-
-    try {
-      if (typeof safeStorePrice === "function") {
-        safeStorePrice(symbol, price, found?.raw || null);
-      }
-    } catch {}
-
-    return res.json({
-      ok: true,
-      symbol,
-      price,
-      currentPrice: price,
-      last: price,
-      close: price,
-      updatedAt:
-        found?.updatedAt ||
-        global.priceMeta?.[symbol]?.updatedAt ||
-        new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("❌ Error /api/price:", err);
-
-    return res.status(500).json({
-      ok: false,
-      error: "Error interno",
-      message: err?.message || "price_failed",
-    });
-  }
-});
-/* ======================================================
    ROUTES MODULARES
    ====================================================== */
 // ======================================================
@@ -2034,7 +1878,6 @@ function detectMarket(symbol = "") {
 
   if (!s) return "stocks";
 
-  // CRYPTO
   if (
     s.includes("BTC") ||
     s.includes("ETH") ||
@@ -2054,10 +1897,8 @@ function detectMarket(symbol = "") {
     return "crypto";
   }
 
-  // FOREX
   if (/^[A-Z]{6}$/.test(s)) return "forex";
 
-  // INDICES
   if (
     s.includes("SPX") ||
     s.includes("NAS100") ||
@@ -2071,7 +1912,6 @@ function detectMarket(symbol = "") {
     return "indices";
   }
 
-  // COMMODITIES
   if (
     s.includes("GOLD") ||
     s.includes("SILVER") ||
@@ -2104,7 +1944,6 @@ function generateBasePrice(symbol = "") {
 
   const market = detectMarket(s);
 
-  // Buscar seed exacto
   for (const group of Object.values(MARKET_SEEDS)) {
     if (Number.isFinite(group[s])) {
       return Number(group[s]);
@@ -2309,7 +2148,19 @@ app.use("/api/api", (req, res) => {
 let polygonSocket = null;
 
 function extractSymbol(data) {
-  return normalizeSymbol(data?.symbol || data?.ticker || data?.sym || data?.T || data?.s || data?.instrument || data?.marketSymbol || data?.asset || data?.name || data?.label || "");
+  return normalizeSymbol(
+    data?.symbol ||
+      data?.ticker ||
+      data?.sym ||
+      data?.T ||
+      data?.s ||
+      data?.instrument ||
+      data?.marketSymbol ||
+      data?.asset ||
+      data?.name ||
+      data?.label ||
+      ""
+  );
 }
 
 function extractPrice(data = {}) {
@@ -2319,6 +2170,7 @@ function extractPrice(data = {}) {
 function safeStorePrice(symbol, price, rawData = null) {
   const clean = normalizeSymbol(symbol);
   const numeric = Number(price);
+
   if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
     console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, price);
     return false;
@@ -2338,7 +2190,11 @@ function safeStorePrice(symbol, price, rawData = null) {
   }
 
   if (typeof updatePriceStore === "function") {
-    try { updatePriceStore(clean, numeric); } catch (err) { console.warn("updatePriceStore error:", err?.message || err); }
+    try {
+      updatePriceStore(clean, numeric);
+    } catch (err) {
+      console.warn("updatePriceStore error:", err?.message || err);
+    }
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
@@ -2355,7 +2211,9 @@ async function fetchPolygonLastPrice(symbol) {
       return null;
     }
 
-    const url = `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
+    const url = `https://api.polygon.io/v2/last/trade/${encodeURIComponent(
+      polygonSymbol
+    )}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
     console.log("🌍 FETCH FALLBACK:", polygonSymbol);
 
     try {
@@ -2394,14 +2252,24 @@ async function safeAutoSubscribeDefaults() {
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
-  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch {
+    socket.emit("prices_snapshot", {});
+  }
 
   socket.on("join_user_room", async ({ token, userId } = {}) => {
     try {
       let uid = String(userId || "").trim();
       if (!uid && token && process.env.JWT_SECRET) {
         const payload = jwt.verify(String(token), process.env.JWT_SECRET);
-        uid = String(payload?.id || payload?.sub || payload?.userId || payload?._id || "").trim();
+        uid = String(
+          payload?.id ||
+            payload?.sub ||
+            payload?.userId ||
+            payload?._id ||
+            ""
+        ).trim();
       }
       if (!uid) return;
       socket.join(`user:${uid}`);
@@ -2413,7 +2281,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("request_prices_snapshot", () => {
-    try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch {
+      socket.emit("prices_snapshot", {});
+    }
   });
 
   socket.on("request_symbols", () => {
@@ -2422,7 +2294,14 @@ io.on("connection", (socket) => {
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
-        socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k]?.market || "Unknown",
+          }))
+        );
       } else {
         socket.emit("symbols_update", SAMPLE_SYMBOLS);
       }
@@ -2503,7 +2382,10 @@ try {
                 console.log("✅ STORE UPDATED FALLBACK:", symbol, finalPrice);
               }
             } catch (fallbackErr) {
-              console.warn("❌ FALLBACK FETCH ERROR:", fallbackErr?.message || fallbackErr);
+              console.warn(
+                "❌ FALLBACK FETCH ERROR:",
+                fallbackErr?.message || fallbackErr
+              );
             }
           }
           if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
@@ -2513,10 +2395,21 @@ try {
           safeStorePrice(symbol, Number(finalPrice), data);
           console.log("✅ STORE UPDATED:", symbol, finalPrice);
           if (priceHandler?.handle) {
-            try { priceHandler.handle({ ...data, symbol, price: Number(finalPrice) }); } catch (handlerErr) { console.warn("priceHandler.handle error:", handlerErr?.message || handlerErr); }
+            try {
+              priceHandler.handle({ ...data, symbol, price: Number(finalPrice) });
+            } catch (handlerErr) {
+              console.warn(
+                "priceHandler.handle error:",
+                handlerErr?.message || handlerErr
+              );
+            }
           }
           if (typeof updatePriceStore === "function") {
-            try { updatePriceStore(symbol, Number(finalPrice)); } catch (storeErr) { console.warn("updatePriceStore error:", storeErr?.message || storeErr); }
+            try {
+              updatePriceStore(symbol, Number(finalPrice));
+            } catch (storeErr) {
+              console.warn("updatePriceStore error:", storeErr?.message || storeErr);
+            }
           }
           scheduleLivePnLSync(symbol);
         } catch (err) {
@@ -2525,10 +2418,18 @@ try {
       },
       onOpen: async () => {
         console.log("✅ PolygonSocket abierto");
-        try { await safeAutoSubscribeDefaults(); } catch (err) { console.warn("❌ AUTO SUBSCRIBE FAILED:", err?.message || err); }
+        try {
+          await safeAutoSubscribeDefaults();
+        } catch (err) {
+          console.warn("❌ AUTO SUBSCRIBE FAILED:", err?.message || err);
+        }
       },
-      onClose: () => { console.log("❌ PolygonSocket cerrado"); },
-      onError: (err) => { console.error("❌ PolygonSocket error:", err?.message || err); },
+      onClose: () => {
+        console.log("❌ PolygonSocket cerrado");
+      },
+      onError: (err) => {
+        console.error("❌ PolygonSocket error:", err?.message || err);
+      },
     });
 
     const maybe = polygonSocket.connect();
@@ -2554,12 +2455,19 @@ let staticDirName = null;
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
   try {
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) { staticDirName = cand; break; }
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
   } catch {}
 }
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(
+      ", "
+    )}. Usando fallback '${staticDirName}'.`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -2574,7 +2482,9 @@ function stripScriptWrappers(source) {
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/.test(trimmed);
   if (startsWithScript && endsWithScript) {
-    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/, "");
   }
   return text;
 }
@@ -2584,18 +2494,26 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/js/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  if (normalized.startsWith("/public/"))
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
   const uniqueCandidates = [...new Set(candidates)];
-  return uniqueCandidates.find((p) => { try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; } });
+  return uniqueCandidates.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 app.use(async (req, res, next) => {
@@ -2609,10 +2527,16 @@ app.use(async (req, res, next) => {
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
@@ -2692,7 +2616,6 @@ app.get("/api/price", async (req, res) => {
 
       if (!found && typeof getPriceStore === "function") {
         const store = getPriceStore() || {};
-
         if (typeof findBestPriceMatch === "function") {
           found = findBestPriceMatch(symbol, store);
         }
@@ -2720,6 +2643,14 @@ app.get("/api/price", async (req, res) => {
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
+        if (typeof global.getFakePrice === "function") {
+          price = Number(global.getFakePrice(symbol));
+        }
+      } catch {}
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      try {
         if (typeof global.getMarketPrice === "function") {
           price = Number(await global.getMarketPrice(symbol));
         }
@@ -2728,25 +2659,7 @@ app.get("/api/price", async (req, res) => {
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        if (typeof global.getFakePrice === "function") {
-          price = Number(global.getFakePrice(symbol));
-        }
-
-        if (
-          Number.isFinite(price) &&
-          price > 0 &&
-          typeof safeStorePrice === "function"
-        ) {
-          safeStorePrice(symbol, price, found?.raw || null);
-        }
-      } catch (err) {
-        console.warn("❌ FAKE PRICE ERROR:", err?.message || err);
-      }
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        if (priceHandler?.prices?.get && priceHandler.prices instanceof Map) {
+        if (priceHandler?.prices instanceof Map) {
           const alt = priceHandler.prices.get(symbol);
           const altPrice = Number(
             alt?.price ??
@@ -2827,13 +2740,13 @@ app.get("*", (req, res) => {
         return res.status(err.status || 500).send("Error loading app");
       }
     });
-
   } catch (err) {
     console.error("❌ SPA FALLBACK ERROR:", err);
 
     return res.status(500).send("Server error");
   }
 });
+
 /* =========================
    START / SHUTDOWN
    ========================= */
@@ -2848,8 +2761,10 @@ const server = httpServer.listen(PORT, "0.0.0.0", () => {
   console.log("MONGO:", !!process.env.MONGO_URI);
   console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
   console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
+  if (!process.env.POLYGON_API_KEY)
+    console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
+  if (!process.env.RESEND_API_KEY)
+    console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
 });
 
 let shuttingDown = false;
@@ -2895,7 +2810,11 @@ const gracefulShutdown = async (signal) => {
     await safeClosePolygonSocket();
 
     if (typeof global?.stopRiskWatcher === "function") {
-      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
+      try {
+        global.stopRiskWatcher();
+      } catch (e) {
+        console.warn("stopRiskWatcher threw:", e);
+      }
     }
 
     await mongoose.disconnect();
@@ -2910,7 +2829,13 @@ const gracefulShutdown = async (signal) => {
 
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("unhandledRejection", (r) => { console.error("UnhandledRejection:", r); gracefulShutdown("unhandledRejection").catch(() => {}); });
-process.on("uncaughtException", (e) => { console.error("UncaughtException:", e); gracefulShutdown("uncaughtException").catch(() => {}); });
+process.on("unhandledRejection", (r) => {
+  console.error("UnhandledRejection:", r);
+  gracefulShutdown("unhandledRejection").catch(() => {});
+});
+process.on("uncaughtException", (e) => {
+  console.error("UncaughtException:", e);
+  gracefulShutdown("uncaughtException").catch(() => {});
+});
 
 export default app;
