@@ -4946,7 +4946,7 @@ async function loadPositions() {
    NORMALIZE SYMBOL
 ========================= */
 function normalizeSymbol(symbol = "") {
-  return String(symbol)
+  return String(symbol || "")
     .toUpperCase()
     .trim()
     .replace(/[^A-Z0-9:]/g, "");
@@ -4955,18 +4955,23 @@ function normalizeSymbol(symbol = "") {
 /* =========================
    SYMBOL CLEAN
 ========================= */
-function toPriceSymbol(symbol) {
+function toPriceSymbol(symbol = "") {
   return normalizeSymbol(symbol)
     .replace("OANDA:", "")
     .replace("FX:", "")
-    .replace("CURRENCY:", "");
+    .replace("CURRENCY:", "")
+    .replace("FOREX:", "")
+    .replace("BINANCE:", "")
+    .replace("/", "")
+    .replace("-", "")
+    .trim();
 }
 
 /* =========================
    VALIDATE SYMBOL
 ========================= */
-function isValidSymbol(symbol) {
-  return /^[A-Z0-9:]{1,20}$/.test(symbol);
+function isValidSymbol(symbol = "") {
+  return /^[A-Z0-9:]{1,30}$/.test(symbol);
 }
 
 /* =========================
@@ -4986,68 +4991,128 @@ function getActiveSymbol() {
     api.activeSymbol ||
     document.getElementById("tradingSymbol")?.textContent?.trim() ||
     document.getElementById("op-symbol")?.textContent?.trim() ||
-    ""
+    "BTCUSDT"
   );
 }
 
 /* =========================
-   🔥 UNIVERSAL PRICE ENGINE (100% FAILSAFE)
+   🔥 UNIVERSAL PRICE ENGINE
 ========================= */
-function generatePrice(symbol) {
+function generatePrice(symbol = "") {
   symbol = normalizeSymbol(symbol);
 
-  const s = symbol;
+  if (!symbol) {
+    return 100;
+  }
 
-  if (s.includes("BTC")) return 60000 + Math.random() * 1000;
-  if (s.includes("ETH")) return 3000 + Math.random() * 150;
-  if (s.includes("EUR")) return 1.08 + Math.random() * 0.01;
-  if (s.includes("USDJPY")) return 150 + Math.random() * 2;
-  if (s.includes("GOLD")) return 2400 + Math.random() * 20;
-  if (s.includes("OIL")) return 78 + Math.random() * 4;
-  if (s.includes("AAPL")) return 190 + Math.random() * 6;
-  if (s.includes("TSLA")) return 250 + Math.random() * 10;
-  if (s.includes("NAS")) return 18500 + Math.random() * 200;
-  if (s.includes("SPX")) return 5200 + Math.random() * 80;
+  if (symbol.includes("BTC")) return 60000 + Math.random() * 3000;
+  if (symbol.includes("ETH")) return 3000 + Math.random() * 200;
+  if (symbol.includes("SOL")) return 140 + Math.random() * 20;
+  if (symbol.includes("BNB")) return 550 + Math.random() * 40;
+
+  if (symbol.includes("EURUSD")) return 1.08 + Math.random() * 0.01;
+  if (symbol.includes("GBPUSD")) return 1.27 + Math.random() * 0.02;
+  if (symbol.includes("USDJPY")) return 150 + Math.random() * 2;
+
+  if (symbol.includes("GOLD")) return 2400 + Math.random() * 50;
+  if (symbol.includes("SILVER")) return 29 + Math.random() * 3;
+  if (symbol.includes("OIL")) return 78 + Math.random() * 6;
+
+  if (symbol.includes("AAPL")) return 190 + Math.random() * 10;
+  if (symbol.includes("TSLA")) return 250 + Math.random() * 20;
+  if (symbol.includes("NVDA")) return 900 + Math.random() * 30;
+
+  if (symbol.includes("NAS")) return 18500 + Math.random() * 300;
+  if (symbol.includes("SPX")) return 5200 + Math.random() * 100;
 
   return 50 + Math.random() * 2000;
 }
 
 /* =========================
-   🔥 GET PRICE (GUARANTEED NO FAIL)
+   🔥 GET PRICE
 ========================= */
 async function getPrice(symbol) {
   try {
-    symbol = normalizeSymbol(symbol);
+    symbol = toPriceSymbol(symbol);
 
-    // 1. backend
-    const res = await fetch(`/api/price?symbol=${symbol}`);
-    const data = await res.json().catch(() => null);
-
-    let price = Number(data?.price);
-
-    if (price > 0) {
-      window.tvPrice = price;
-      return price;
+    if (!symbol) {
+      return generatePrice("BTCUSDT");
     }
 
-    // 2. cache frontend
-    price =
-      Number(window.tvPrice ||
-      window.lastPrice ||
-      window.currentPrice ||
-      window.marketPrice);
+    ///////////////////////////////////////////////////////
+    // 1. BACKEND PRICE
+    ///////////////////////////////////////////////////////
 
-    if (price > 0) return price;
+    try {
+      const response = await fetch(
+        `/api/price?symbol=${encodeURIComponent(symbol)}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-    // 3. fallback final (SIEMPRE FUNCIONA)
-    price = generatePrice(symbol);
-    window.tvPrice = price;
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
 
-    return price;
+        const backendPrice =
+          Number(data?.price) ||
+          Number(data?.currentPrice) ||
+          Number(data?.last) ||
+          Number(data?.close);
 
-  } catch {
+        if (Number.isFinite(backendPrice) && backendPrice > 0) {
+          window.tvPrice = backendPrice;
+          window.lastPrice = backendPrice;
+          window.currentPrice = backendPrice;
+          window.marketPrice = backendPrice;
+
+          return backendPrice;
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ BACKEND PRICE ERROR:", err);
+    }
+
+    ///////////////////////////////////////////////////////
+    // 2. FRONTEND CACHE
+    ///////////////////////////////////////////////////////
+
+    const cached =
+      Number(window.tvPrice) ||
+      Number(window.lastPrice) ||
+      Number(window.currentPrice) ||
+      Number(window.marketPrice);
+
+    if (Number.isFinite(cached) && cached > 0) {
+      return cached;
+    }
+
+    ///////////////////////////////////////////////////////
+    // 3. FINAL FALLBACK
+    ///////////////////////////////////////////////////////
+
+    const fakePrice = generatePrice(symbol);
+
+    window.tvPrice = fakePrice;
+    window.lastPrice = fakePrice;
+    window.currentPrice = fakePrice;
+    window.marketPrice = fakePrice;
+
+    return fakePrice;
+
+  } catch (err) {
+    console.warn("⚠️ getPrice fallback:", err);
+
     const fallback = generatePrice(symbol);
+
     window.tvPrice = fallback;
+    window.lastPrice = fallback;
+    window.currentPrice = fallback;
+    window.marketPrice = fallback;
+
     return fallback;
   }
 }
@@ -5056,14 +5121,19 @@ async function getPrice(symbol) {
    FALLBACK LIVE
 ========================= */
 function getLivePriceFallback() {
-  const v =
+  const value =
     window.tvPrice ||
     window.lastPrice ||
     window.currentPrice ||
     window.marketPrice;
 
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  const n = Number(value);
+
+  if (Number.isFinite(n) && n > 0) {
+    return n;
+  }
+
+  return null;
 }
 
 /* =========================
@@ -5086,41 +5156,70 @@ async function placeOrder(input) {
   try {
     sendingOrder = true;
 
-    let side, symbol, amount, type;
+    let side;
+    let symbol;
+    let amount;
+    let type;
 
     if (typeof input === "string") {
       side = input;
       symbol = getActiveSymbol();
-      amount = Number(document.getElementById("brokerOrderSize")?.value);
-      type = "Market";
+      amount = Number(
+        document.getElementById("brokerOrderSize")?.value || 0
+      );
+      type = "market";
     } else {
       side = input?.side || input?.direction;
       symbol = input?.symbol || getActiveSymbol();
-      amount = Number(input?.qty || input?.amount);
-      type = input?.type || "Market";
+      amount = Number(input?.qty || input?.amount || 0);
+      type = input?.type || "market";
     }
 
-    symbol = normalizeSymbol(symbol);
-    side = String(side).toLowerCase();
+    symbol = toPriceSymbol(symbol);
+    side = String(side || "").toLowerCase();
 
-    if (!isValidSymbol(symbol)) return;
-    if (!amount || amount <= 0) return;
-    if (!["buy", "sell"].includes(side)) return;
+    ///////////////////////////////////////////////////////
+    // VALIDACIONES
+    ///////////////////////////////////////////////////////
+
+    if (!isValidSymbol(symbol)) {
+      console.warn("❌ INVALID SYMBOL:", symbol);
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      console.warn("❌ INVALID AMOUNT:", amount);
+      return;
+    }
+
+    if (!["buy", "sell"].includes(side)) {
+      console.warn("❌ INVALID SIDE:", side);
+      return;
+    }
+
+    ///////////////////////////////////////////////////////
+    // PRICE
+    ///////////////////////////////////////////////////////
 
     const price = await getPrice(symbol);
 
     const payload = {
       symbol,
       direction: side,
-      type: "market",
+      type,
       qty: amount,
       price,
     };
 
     return await placeBrokerOrder(payload);
 
+  } catch (err) {
+    console.error("❌ placeOrder error:", err);
+    return null;
   } finally {
-    setTimeout(() => (sendingOrder = false), 300);
+    setTimeout(() => {
+      sendingOrder = false;
+    }, 300);
   }
 }
 
@@ -5129,15 +5228,21 @@ async function placeOrder(input) {
 ========================= */
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");
+
   if (!btn) return;
 
-  const action = btn.dataset.action;
-  if (!["buy", "sell"].includes(action)) return;
+  const action = String(btn.dataset.action || "").toLowerCase();
+
+  if (!["buy", "sell"].includes(action)) {
+    return;
+  }
 
   e.preventDefault();
   e.stopPropagation();
 
-  if (sendingOrder) return;
+  if (sendingOrder) {
+    return;
+  }
 
   await placeOrder(action);
 });
@@ -5147,24 +5252,62 @@ document.addEventListener("click", async (e) => {
 ========================= */
 async function placeBrokerOrder(payload = {}) {
   try {
-    const symbol = normalizeSymbol(payload.symbol);
-    const amount = Number(payload.qty);
-    const side = payload.direction;
+    const symbol = toPriceSymbol(payload.symbol);
+    const amount = Number(payload.qty || 0);
+    const side = String(
+      payload.direction || payload.side || ""
+    ).toUpperCase();
+
+    ///////////////////////////////////////////////////////
+    // USER
+    ///////////////////////////////////////////////////////
 
     const user = getUser();
-    if (!user.token) return;
 
-    const price = Number(payload.price || await getPrice(symbol));
+    if (!user?.token) {
+      console.warn("❌ TOKEN NOT FOUND");
+      return null;
+    }
+
+    ///////////////////////////////////////////////////////
+    // PRICE
+    ///////////////////////////////////////////////////////
+
+    let price = Number(payload.price);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = await getPrice(symbol);
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = generatePrice(symbol);
+    }
+
+    ///////////////////////////////////////////////////////
+    // BODY
+    ///////////////////////////////////////////////////////
 
     const body = {
       symbol,
-      side: side.toUpperCase(),
+      side,
       type: "market",
       qty: amount,
-      price: price || generatePrice(symbol),
+
+      price,
+      entryPrice: price,
+      currentPrice: price,
+      marketPrice: price,
+      lastPrice: price,
+      close: price,
     };
 
-    const res = await fetch("/api/trade/open", {
+    console.log("🚀 ORDER BODY:", body);
+
+    ///////////////////////////////////////////////////////
+    // REQUEST
+    ///////////////////////////////////////////////////////
+
+    const response = await fetch("/api/trade/open", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5173,10 +5316,43 @@ async function placeBrokerOrder(payload = {}) {
       body: JSON.stringify(body),
     });
 
-    return await res.json().catch(() => ({}));
+    const data = await response.json().catch(() => ({}));
 
-  } catch {
-    return null;
+    console.log("📥 ORDER RESPONSE:", data);
+
+    ///////////////////////////////////////////////////////
+    // FAILSAFE
+    ///////////////////////////////////////////////////////
+
+    if (!data?.ok) {
+      console.warn("⚠️ ORDER FAILED:", data);
+
+      return {
+        ok: false,
+        error: data?.error || "order_failed",
+        data,
+      };
+    }
+
+    ///////////////////////////////////////////////////////
+    // SAVE PRICE
+    ///////////////////////////////////////////////////////
+
+    window.tvPrice = price;
+    window.lastPrice = price;
+    window.currentPrice = price;
+    window.marketPrice = price;
+
+    return data;
+
+  } catch (err) {
+    console.error("❌ placeBrokerOrder error:", err);
+
+    return {
+      ok: false,
+      error: "network_error",
+      message: err?.message || "Request failed",
+    };
   }
 }
 /* =========================
