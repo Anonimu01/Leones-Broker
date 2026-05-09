@@ -1448,315 +1448,155 @@ app.post("/api/trade/open", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-
     if (!user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Unauthorized",
-      });
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
     const body = req.body || {};
-
-    const rawSymbol = String(
-      body.symbol ??
-        body.selectedSymbol ??
-        body.tvSymbol ??
-        body.ticker ??
-        body.instrument ??
-        body.marketSymbol ??
-        body.sym ??
-        body.s ??
-        body.name ??
-        body.label ??
-        ""
-    )
-      .toUpperCase()
-      .trim();
-
-    let symbol = "";
-
-    try {
-      symbol = String(normalizePositionSymbol(body) || "").toUpperCase().trim();
-    } catch {}
-
-    if (!symbol) {
-      symbol = rawSymbol;
-    }
-
-    if (typeof normalizeSymbol === "function") {
-      try {
-        symbol = normalizeSymbol(symbol);
-      } catch {}
-    }
-
-    if (!symbol) {
-      symbol = rawSymbol
-        .replace("OANDA:", "")
-        .replace("BINANCE:", "")
-        .replace("FOREX:", "")
-        .replace("FX:", "")
-        .replace("C:", "")
-        .replace("X:", "")
-        .replace("/", "")
-        .replace("-", "")
-        .trim();
-    }
-
+    const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side);
     const qty = normalizeQty(body);
 
     if (!symbol || !side || !qty) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_params",
-      });
-    }
-
-    if (typeof global.getFakePrice === "function") {
-      try {
-        global.getFakePrice(symbol);
-      } catch {}
+      return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
     lockKey = makeOpenLockKey(user._id, symbol, side, qty);
 
     if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
-      return res.status(429).json({
-        ok: false,
-        error: "duplicate_order_blocked",
-      });
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
 
-    // =========================
-    // WALLET
-    // =========================
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn =
-      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-
+    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const credit = Number(wallet.credit ?? 0) || 0;
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
-    const leverage = Math.max(
-      Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1,
-      1
-    );
+    /////////////////////////////////////////////////////////
+    // FIX REAL DEL PRECIO
+    /////////////////////////////////////////////////////////
 
-    // =========================
-    // PRICE RESOLUTION
-    // =========================
     let price = null;
 
-    // SIEMPRE USAR EL SIMULADOR PRIMERO
-    try {
-      if (typeof global.getFakePrice === "function") {
-        price = Number(global.getFakePrice(symbol));
+    // 1. PRECIO DIRECTO DEL BODY
+    const directCandidates = [
+      body.price,
+      body.entryPrice,
+      body.currentPrice,
+      body.marketPrice,
+      body.lastPrice,
+      body.close,
+      body.ask,
+      body.bid,
+    ];
 
-        if (Number.isFinite(price) && price > 0) {
-          global.priceCache = global.priceCache || {};
-          global.priceCache[symbol] = price;
-
-          try {
-            safeStorePrice(symbol, price, {
-              source: "fake-market-engine",
-            });
-          } catch {}
-
-          console.log("🔥 SIMULATED PRICE:", symbol, price);
-        }
-      }
-    } catch (err) {
-      console.warn("Fake price failed:", err?.message || err);
-    }
-
-    // FALLBACKS SOLO SI EL SIMULADOR FALLA
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        price = Number(await resolvePriceWithFallback(symbol, body));
-      } catch (err) {
-        console.warn("resolvePriceWithFallback failed:", err?.message || err);
+    for (const value of directCandidates) {
+      const n = Number(value);
+      if (Number.isFinite(n) && n > 0) {
+        price = n;
+        break;
       }
     }
 
+    // 2. GET CURRENT PRICE
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        const clean =
-          typeof normalizeSymbol === "function" ? normalizeSymbol(symbol) : symbol;
-
-        const cached =
-          global.priceCache?.[clean] ??
-          global.priceCache?.[symbol] ??
-          global.priceMeta?.[clean]?.price ??
-          global.priceMeta?.[symbol]?.price;
-
-        if (Number.isFinite(Number(cached)) && Number(cached) > 0) {
-          price = Number(cached);
-        }
-      } catch {}
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        const clean =
-          typeof normalizeSymbol === "function" ? normalizeSymbol(symbol) : symbol;
-
-        const stored =
-          priceHandler?.prices instanceof Map
-            ? priceHandler.prices.get(clean)
-            : priceHandler?.prices?.[clean];
-
-        const storedPrice = Number(
-          stored?.price ??
-            stored?.currentPrice ??
-            stored?.close ??
-            stored?.lastPrice ??
-            stored?.last ??
-            stored?.raw?.price ??
-            stored?.raw?.p ??
-            stored?.raw?.lp ??
-            stored?.raw?.last ??
-            stored?.raw?.close
-        );
-
-        if (Number.isFinite(storedPrice) && storedPrice > 0) {
-          price = storedPrice;
-        }
-      } catch {}
-    }
-
-    if (
-      (!Number.isFinite(price) || price <= 0) &&
-      typeof global.getMarketPrice === "function"
-    ) {
-      try {
-        const marketPrice = Number(await global.getMarketPrice(symbol));
+        const marketPrice = getCurrentPriceForSymbol(symbol);
         if (Number.isFinite(marketPrice) && marketPrice > 0) {
           price = marketPrice;
+          console.log("✅ Precio obtenido desde getCurrentPriceForSymbol:", price);
         }
       } catch {}
     }
 
-    if (
-      (!Number.isFinite(price) || price <= 0) &&
-      typeof global.getFakePrice === "function"
-    ) {
+    // 3. PRICE STORE
+    if (!Number.isFinite(price) || price <= 0) {
       try {
-        const fakePrice = Number(global.getFakePrice(symbol));
-        if (Number.isFinite(fakePrice) && fakePrice > 0) {
-          price = fakePrice;
+        const store = getPriceStore?.() || {};
+        const found = findBestPriceMatch(symbol, store);
+
+        if (found) {
+          const extracted = extractQuotePrice(found);
+          if (Number.isFinite(extracted) && extracted > 0) {
+            price = extracted;
+            console.log("✅ Precio encontrado desde store:", price);
+          }
         }
       } catch {}
     }
 
+    // 4. FALLBACK CONTROLADO
     if (!Number.isFinite(price) || price <= 0) {
-      price = 100;
-      console.warn("⚠️ FALLBACK PRICE:", symbol, price);
+      const fallback =
+        Number(body.entryPrice) ||
+        Number(body.price) ||
+        Number(body.currentPrice);
+
+      if (Number.isFinite(fallback) && fallback > 0) {
+        price = fallback;
+        console.warn("⚠️ Precio no disponible, usando entry temporal:", price);
+      }
     }
 
-    price = Number(price);
-
+    // VALIDACIÓN FINAL
     if (!Number.isFinite(price) || price <= 0) {
-      return res.status(500).json({
-        ok: false,
-        error: "price_unrecoverable",
-        symbol,
-      });
-    }
-
-    // =========================
-    // RISK CALCULATION
-    // =========================
-    const notional = Math.abs(qty * price);
-
-    let requiredMargin = notional / leverage;
-
-    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
-      requiredMargin = 1;
-    }
-
-    const freeMargin = Number(balanceOwn + credit - marginUsed) || 0;
-
-    if (!Number.isFinite(freeMargin) || freeMargin <= 0) {
+      console.warn("❌ Precio final inválido:", price, { symbol, body });
       return res.status(400).json({
         ok: false,
-        error: "insufficient_margin",
+        error: "price_invalid",
+        symbol,
+        receivedPrice: price,
       });
     }
 
-    requiredMargin = Math.min(requiredMargin, freeMargin, 100);
+    const notional = qty * price;
+    const requiredMargin = notional / leverage;
+    const freeMargin = balanceOwn + credit - marginUsed;
 
-    // =========================
-    // WALLET UPDATE
-    // =========================
-    wallet.balanceOwn = Math.max(balanceOwn - requiredMargin, 0);
+    if (freeMargin < requiredMargin) {
+      return res.status(400).json({ ok: false, error: "insufficient_margin" });
+    }
+
+    wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
-
-    wallet.freeMargin = Math.max(
-      wallet.balanceOwn + credit - wallet.marginUsed,
-      0
-    );
-
-    wallet.marginLevel =
-      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-
+    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
+    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
-
     await wallet.save();
 
-    // =========================
-    // POSITION CREATE
-    // =========================
     const position = await Position.create({
       user: user._id,
       symbol,
       side,
       qty,
-
       entryPrice: price,
       currentPrice: price,
-
       marginReserved: requiredMargin,
       leverage,
-
       status: "OPEN",
-
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    // =========================
-    // ACCOUNT BUILD
-    // =========================
     const account = await safeBuildAccountForUser(user);
+    const annotatedPosition = annotatePosition(position.toObject ? position.toObject() : position);
 
-    const annotatedPosition = annotatePosition(
-      position.toObject ? position.toObject() : position
-    );
-
-    // =========================
-    // EMIT LIVE
-    // =========================
     emitStateUpdates(user._id, account, [annotatedPosition], null);
-
-    try {
-      scheduleLivePnLSync(symbol);
-    } catch {}
+    scheduleLivePnLSync(symbol);
 
     return res.json({
       ok: true,
       msg: "OPENED",
-      price,
       position,
       wallet: account.wallet,
       account: account.account,
     });
   } catch (err) {
     console.error("/api/trade/open error:", err);
-
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -1764,17 +1604,100 @@ app.post("/api/trade/open", async (req, res) => {
     });
   } finally {
     if (lockKey) {
-      try {
-        releaseOpenLock(lockKey);
-      } catch {}
-
-      try {
-        releaseActiveOrder(lockKey);
-      } catch {}
+      releaseOpenLock(lockKey);
+      releaseActiveOrder(lockKey);
     }
   }
 });
 
+app.post("/api/trade/close", async (req, res) => {
+  let lockKey = null;
+
+  try {
+    const user = await getUserDocFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const { positionId } = req.body || {};
+    if (!positionId) {
+      return res.status(400).json({ ok: false, error: "positionId_required" });
+    }
+
+    lockKey = makeCloseLockKey(user._id, positionId);
+    if (!withOpenLock(lockKey, 2500)) {
+      return res.status(429).json({ ok: false, error: "duplicate_close_blocked" });
+    }
+
+    const position = await Position.findOne({
+      _id: positionId,
+      user: user._id,
+      status: { $in: ["OPEN", "open", "Open"] },
+    });
+
+    if (!position) {
+      return res.status(404).json({ ok: false, error: "not_found" });
+    }
+
+    const body = req.body || {};
+    const price =
+      resolveOrderPrice(body, position.symbol) ||
+      getCurrentPriceForSymbol(position.symbol);
+
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ ok: false, error: "price_invalid" });
+    }
+
+    const result = await applyCloseToPosition({
+      user,
+      positionDoc: position,
+      currentPrice: price,
+      source: "api/trade/close",
+    });
+
+    scheduleLivePnLSync(position.symbol);
+
+    return res.json({
+      ok: true,
+      msg: "CLOSED",
+      ...result,
+    });
+  } catch (err) {
+    console.error("/api/trade/close error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  } finally {
+    if (lockKey) releaseOpenLock(lockKey);
+  }
+});
+
+app.get("/api/trade/positions", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+
+    const positions = await safeLoadOpenPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (err) {
+    console.error("/api/trade/positions error", err);
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno",
+    });
+  }
+});
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
