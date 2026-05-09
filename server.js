@@ -1451,27 +1451,11 @@ app.post("/api/trade/open", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-
-    // =========================
-    // 🔥 SYMBOL FIX (TRADINGVIEW SAFE)
-    // =========================
-    let symbol = normalizePositionSymbol(body);
-
-    if (!symbol) {
-      symbol =
-        String(body.symbol || body.ticker || body.tvSymbol || "")
-          .toUpperCase()
-          .trim();
-    }
-
-    if (!symbol) {
-      return res.status(400).json({ ok: false, error: "invalid_symbol" });
-    }
-
+    const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side);
     const qty = normalizeQty(body);
 
-    if (!side || !qty) {
+    if (!symbol || !side || !qty) {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
@@ -1489,25 +1473,28 @@ app.post("/api/trade/open", async (req, res) => {
     const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
     // =========================
-    // 🔥 PRICE RESOLUTION (100% SAFE)
+    // 🔥 PRICE RESOLUTION (ROBUSTO)
     // =========================
     let price = await resolvePriceWithFallback(symbol, body);
 
-    // 🔥 AUTO FIX TOTAL (NUNCA FALLA)
+    // AUTO FIX: nunca dejar que se caiga la orden
     if (!Number.isFinite(price) || price <= 0) {
-      console.warn("⚠️ PRICE FALLBACK ACTIVE:", symbol);
-
       price =
         global.getFakePrice?.(symbol) ||
         forcePriceExists?.(symbol) ||
         (50 + Math.random() * 1000);
+
+      console.warn("⚠️ PRICE AUTO-FIX TRADE:", symbol, price);
     }
 
     price = Number(price);
 
-    // 🔥 ULTIMATE SAFETY NET
     if (!Number.isFinite(price) || price <= 0) {
-      price = 100;
+      return res.status(500).json({
+        ok: false,
+        error: "price_unrecoverable",
+        symbol
+      });
     }
 
     // =========================
@@ -1566,8 +1553,6 @@ app.post("/api/trade/open", async (req, res) => {
       position,
       wallet: account.wallet,
       account: account.account,
-      symbol,
-      entryPrice: price
     });
 
   } catch (err) {
