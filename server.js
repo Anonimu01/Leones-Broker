@@ -2259,22 +2259,6 @@ app.post("/api/_send_test_email", async (req, res) => {
   }
 });
 
-/* ======================================================
-   MODULAR ROUTES
-   ====================================================== */
-
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes);
-app.use("/api/positions", positionsRoutes);
-app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes);
-
-app.use("/api/api", (req, res) => {
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
 
 /* ======================================================
    START / SHUTDOWN
