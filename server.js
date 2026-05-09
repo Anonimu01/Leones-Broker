@@ -1582,39 +1582,56 @@ app.post("/api/trade/open", async (req, res) => {
 global.priceCache = global.priceCache || {};
 global.priceMeta = global.priceMeta || {};
 
-// ------------------------------
-// SEEDS BASE POR MERCADO
-// ------------------------------
+/* ======================================================
+   NORMALIZE SYMBOL
+====================================================== */
+
+function normalizeSymbol(symbol = "") {
+  let s = String(symbol || "")
+    .toUpperCase()
+    .trim();
+
+  s = s.replace("BINANCE:", "");
+  s = s.replace("FOREX:", "");
+  s = s.replace("OANDA:", "");
+  s = s.replace("FX:", "");
+  s = s.replace("C:", "");
+  s = s.replace("X:", "");
+  s = s.replace("/", "");
+  s = s.replace("-", "");
+
+  if (s === "BTCUSD") s = "BTCUSDT";
+  if (s === "ETHUSD") s = "ETHUSDT";
+  if (s === "SOLUSD") s = "SOLUSDT";
+
+  return s;
+}
+
+/* ======================================================
+   MARKET SEEDS
+====================================================== */
+
 const MARKET_SEEDS = {
   forex: {
     EURUSD: 1.0840,
-    USDJPY: 150.2500,
+    USDJPY: 150.25,
     GBPUSD: 1.2740,
     AUDUSD: 0.6650,
     USDCAD: 1.3650,
     USDCHF: 0.9010,
     NZDUSD: 0.6120,
-    EURJPY: 163.1000,
-    EURGBP: 0.8540,
-    EURAUD: 1.6400,
-    GBPJPY: 191.5000,
-    EURCAD: 1.4800,
   },
+
   crypto: {
     BTCUSDT: 67200,
     ETHUSDT: 3500,
     SOLUSDT: 145,
     BNBUSDT: 585,
-    ADAUSDT: 0.45,
     XRPUSDT: 0.53,
+    ADAUSDT: 0.45,
     DOGEUSDT: 0.16,
-    BCHUSDT: 380,
-    LTCUSDT: 80,
-    DOTUSDT: 6.8,
-    AVAXUSDT: 35,
-    LINKUSDT: 18,
-    MATICUSDT: 0.75,
   },
+
   stocks: {
     AAPL: 190,
     TSLA: 250,
@@ -1623,202 +1640,156 @@ const MARKET_SEEDS = {
     AMZN: 180,
     META: 485,
     GOOGL: 170,
-    NFLX: 625,
-    AMD: 165,
-    SPY: 520,
-    QQQ: 460,
-    DIA: 390,
-    IBM: 185,
-    ORCL: 140,
   },
+
   indices: {
     SPX: 5200,
     NAS100: 18500,
     DJ30: 39000,
     DAX40: 18400,
     FTSE100: 8200,
-    NIKKEI225: 38500,
-    RUSSELL2000: 2100,
-    VIX: 14.5,
   },
+
   commodities: {
     GOLD: 2400,
     SILVER: 29,
     OIL: 78,
-    WTI: 78,
     BRENT: 82,
     NATGAS: 2.8,
-    COPPER: 4.2,
-    CORN: 430,
-    WHEAT: 590,
-    SOYBEAN: 1180,
-    PLATINUM: 980,
-    PALLADIUM: 930,
   },
 };
 
-// ------------------------------
-// CLASSIFICAR MERCADO
-// ------------------------------
+/* ======================================================
+   DETECT MARKET
+====================================================== */
+
 function detectMarket(symbol = "") {
-  const s = String(symbol || "").toUpperCase();
+  const s = normalizeSymbol(symbol);
 
-  if (!s) return "stocks";
-
-  // Crypto
+  // CRYPTO
   if (
-    s.includes("BTC") ||
-    s.includes("ETH") ||
-    s.includes("SOL") ||
-    s.includes("BNB") ||
-    s.includes("ADA") ||
-    s.includes("XRP") ||
-    s.includes("DOGE") ||
-    s.includes("LTC") ||
-    s.includes("LINK") ||
-    s.includes("AVAX") ||
-    s.includes("MATIC") ||
-    s.includes("USDT") ||
-    s.includes("USDC") ||
-    s.includes("BUSD")
+    s.endsWith("USDT") ||
+    s.startsWith("BTC") ||
+    s.startsWith("ETH") ||
+    s.startsWith("SOL") ||
+    s.startsWith("BNB") ||
+    s.startsWith("XRP") ||
+    s.startsWith("ADA") ||
+    s.startsWith("DOGE")
   ) {
     return "crypto";
   }
 
-  // Forex
-  if (/^[A-Z]{6}$/.test(s)) return "forex";
-  if (
-    s.includes("EUR") ||
-    s.includes("USDJPY") ||
-    s.includes("GBPJPY") ||
-    s.includes("AUDUSD") ||
-    s.includes("USDCAD") ||
-    s.includes("USDCHF") ||
-    s.includes("NZDUSD")
-  ) {
+  // FOREX
+  const forexPairs = [
+    "EURUSD",
+    "USDJPY",
+    "GBPUSD",
+    "AUDUSD",
+    "USDCAD",
+    "USDCHF",
+    "NZDUSD",
+    "EURJPY",
+    "GBPJPY",
+  ];
+
+  if (forexPairs.includes(s)) {
     return "forex";
   }
 
-  // Índices
+  // INDICES
   if (
     s.includes("SPX") ||
     s.includes("NAS100") ||
     s.includes("DJ30") ||
-    s.includes("DAX40") ||
-    s.includes("FTSE100") ||
-    s.includes("NIKKEI") ||
-    s.includes("RUSSELL") ||
-    s.includes("VIX")
+    s.includes("DAX") ||
+    s.includes("FTSE")
   ) {
     return "indices";
   }
 
-  // Commodities
+  // COMMODITIES
   if (
     s.includes("GOLD") ||
     s.includes("SILVER") ||
     s.includes("OIL") ||
-    s.includes("WTI") ||
     s.includes("BRENT") ||
-    s.includes("NATGAS") ||
-    s.includes("COPPER") ||
-    s.includes("CORN") ||
-    s.includes("WHEAT") ||
-    s.includes("SOYBEAN") ||
-    s.includes("PLATINUM") ||
-    s.includes("PALLADIUM") ||
-    s.includes("GAS")
+    s.includes("NATGAS")
   ) {
     return "commodities";
   }
 
-  // Default: stocks
   return "stocks";
 }
 
-// ------------------------------
-// PRECIO BASE SEGÚN MERCADO
-// ------------------------------
+/* ======================================================
+   GENERATE BASE PRICE
+====================================================== */
+
 function generateBasePrice(symbol = "") {
-  const s = String(symbol || "").toUpperCase();
+  const s = normalizeSymbol(symbol);
   const market = detectMarket(s);
 
-  // Prioridad: seeds exactos
   for (const group of Object.values(MARKET_SEEDS)) {
-    if (Number.isFinite(group[s])) return Number(group[s]);
-  }
-
-  // Generación por mercado
-  switch (market) {
-    case "crypto": {
-      if (s.includes("BTC")) return 60000 + Math.random() * 8000;
-      if (s.includes("ETH")) return 2500 + Math.random() * 1000;
-      if (s.includes("SOL")) return 100 + Math.random() * 100;
-      if (s.includes("BNB")) return 450 + Math.random() * 250;
-      return 0.01 + Math.random() * 5000;
-    }
-
-    case "forex": {
-      if (s.includes("JPY")) return 120 + Math.random() * 40;
-      if (s.includes("EUR") || s.includes("GBP") || s.includes("AUD") || s.includes("NZD")) {
-        return 0.5 + Math.random() * 1.8;
-      }
-      return 0.5 + Math.random() * 2.5;
-    }
-
-    case "indices": {
-      if (s.includes("VIX")) return 10 + Math.random() * 20;
-      if (s.includes("SPX")) return 4800 + Math.random() * 600;
-      if (s.includes("NAS")) return 17000 + Math.random() * 2500;
-      if (s.includes("DJ")) return 35000 + Math.random() * 5000;
-      return 1000 + Math.random() * 50000;
-    }
-
-    case "commodities": {
-      if (s.includes("GOLD")) return 2000 + Math.random() * 500;
-      if (s.includes("SILVER")) return 20 + Math.random() * 15;
-      if (s.includes("OIL") || s.includes("WTI") || s.includes("BRENT")) return 60 + Math.random() * 40;
-      if (s.includes("NATGAS")) return 1 + Math.random() * 5;
-      return 1 + Math.random() * 5000;
-    }
-
-    case "stocks":
-    default: {
-      return 5 + Math.random() * 1500;
+    if (Number.isFinite(group[s])) {
+      return Number(group[s]);
     }
   }
-}
-
-// ------------------------------
-// VOLATILIDAD POR MERCADO
-// ------------------------------
-function getVolatility(symbol = "") {
-  const s = String(symbol || "").toUpperCase();
-  const market = detectMarket(s);
 
   switch (market) {
     case "crypto":
-      return s.includes("BTC") ? 0.008 : s.includes("ETH") ? 0.010 : 0.012;
+      return 1 + Math.random() * 70000;
+
     case "forex":
-      return s.includes("JPY") ? 0.0018 : 0.0012;
+      return 0.5 + Math.random() * 2;
+
     case "indices":
-      return s.includes("VIX") ? 0.02 : 0.004;
+      return 1000 + Math.random() * 50000;
+
     case "commodities":
-      return s.includes("OIL") || s.includes("WTI") || s.includes("BRENT") ? 0.008 : 0.005;
-    case "stocks":
+      return 10 + Math.random() * 3000;
+
+    default:
+      return 5 + Math.random() * 1000;
+  }
+}
+
+/* ======================================================
+   VOLATILITY
+====================================================== */
+
+function getVolatility(symbol = "") {
+  const market = detectMarket(symbol);
+
+  switch (market) {
+    case "crypto":
+      return 0.01;
+
+    case "forex":
+      return 0.0015;
+
+    case "indices":
+      return 0.004;
+
+    case "commodities":
+      return 0.005;
+
     default:
       return 0.006;
   }
 }
 
-// ------------------------------
-// ESCRIBIR PRECIO EN CACHE + PRICE HANDLER
-// ------------------------------
+/* ======================================================
+   WRITE PRICE
+====================================================== */
+
 function writePrice(symbol, price, raw = null) {
   const clean = normalizeSymbol(symbol);
   const numeric = Number(price);
 
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return false;
+  if (!clean) return false;
+  if (!Number.isFinite(numeric)) return false;
+  if (numeric <= 0) return false;
 
   const payload = {
     symbol: clean,
@@ -1834,7 +1805,7 @@ function writePrice(symbol, price, raw = null) {
   try {
     if (priceHandler?.prices instanceof Map) {
       priceHandler.prices.set(clean, payload);
-    } else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
+    } else if (priceHandler?.prices) {
       priceHandler.prices[clean] = payload;
     }
   } catch {}
@@ -1842,110 +1813,97 @@ function writePrice(symbol, price, raw = null) {
   return true;
 }
 
-// ------------------------------
-// CREAR O LEVANTAR PRECIO
-// ------------------------------
-global.getFakePrice = (symbol) => {
+/* ======================================================
+   GET FAKE PRICE
+====================================================== */
+
+global.getFakePrice = function(symbol) {
   const clean = normalizeSymbol(symbol);
+
   if (!clean) return null;
 
   const existing = Number(global.priceCache[clean]);
-  if (Number.isFinite(existing) && existing > 0) return existing;
+
+  if (Number.isFinite(existing) && existing > 0) {
+    return existing;
+  }
 
   const base = generateBasePrice(clean);
-  writePrice(clean, base, { source: "seed" });
+
+  writePrice(clean, base, {
+    source: "seed",
+  });
+
   return base;
 };
 
-// ------------------------------
-// ALIMENTAR TODOS LOS SÍMBOLOS QUE YA EXISTEN Y LOS NUEVOS
-// ------------------------------
+/* ======================================================
+   GET MARKET PRICE
+====================================================== */
+
+function getMarketPrice(symbol) {
+  const clean = normalizeSymbol(symbol);
+
+  const cached = Number(global.priceCache[clean]);
+
+  if (Number.isFinite(cached) && cached > 0) {
+    return cached;
+  }
+
+  return global.getFakePrice(clean);
+}
+
+global.getMarketPrice = getMarketPrice;
+
+/* ======================================================
+   INITIAL SEED
+====================================================== */
+
 function seedInitialSymbols() {
   for (const group of Object.values(MARKET_SEEDS)) {
-    for (const [sym, px] of Object.entries(group)) {
-      writePrice(sym, px, { source: "seed" });
+    for (const [symbol, price] of Object.entries(group)) {
+      writePrice(symbol, price, {
+        source: "seed",
+      });
     }
   }
 }
 
-// ------------------------------
-// MOVIMIENTO CONTINUO TIPO MERCADO
-// ------------------------------
+seedInitialSymbols();
+
+/* ======================================================
+   LIVE MARKET SIMULATION
+====================================================== */
+
 setInterval(() => {
   try {
     const keys = Object.keys(global.priceCache);
 
     for (const symbol of keys) {
       const current = Number(global.priceCache[symbol]);
-      if (!Number.isFinite(current) || current <= 0) continue;
+
+      if (!Number.isFinite(current) || current <= 0) {
+        continue;
+      }
 
       const vol = getVolatility(symbol);
-      const drift = (Math.random() - 0.5) * vol;
-      let next = current * (1 + drift);
 
-      // límites mínimos para no romper ratios
-      if (detectMarket(symbol) === "forex") {
-        next = Math.max(next, 0.0001);
-      } else if (detectMarket(symbol) === "crypto") {
-        next = Math.max(next, 0.0000001);
-      } else {
-        next = Math.max(next, 0.0001);
-      }
+      const move = (Math.random() - 0.5) * vol;
 
-      writePrice(symbol, Number(next.toFixed(6)), global.priceMeta[symbol]?.raw || null);
-    }
+      let next = current * (1 + move);
 
-    // Si algún símbolo se pidió y aún no existe, lo creamos
-    const requestedSeeds = [
-      "EURUSD",
-      "USDJPY",
-      "GBPUSD",
-      "BTCUSDT",
-      "ETHUSDT",
-      "SOLUSDT",
-      "AAPL",
-      "TSLA",
-      "NVDA",
-      "SPX",
-      "NAS100",
-      "DJ30",
-      "GOLD",
-      "OIL",
-    ];
+      next = Math.max(next, 0.0000001);
 
-    for (const sym of requestedSeeds) {
-      if (!Number.isFinite(global.priceCache[sym]) || global.priceCache[sym] <= 0) {
-        global.getFakePrice(sym);
-      }
+      writePrice(
+        symbol,
+        Number(next.toFixed(6)),
+        global.priceMeta[symbol]?.raw || null
+      );
     }
   } catch (err) {
     console.error("Fake market error:", err);
   }
 }, 1000);
-global.getMarketPrice = function(symbol) {
-  const clean = normalizeSymbol(symbol);
-  const price = global.getFakePrice(clean);
-
-  if (!priceHandler?.prices) return price;
-
-  // sincroniza lectura
-  const stored =
-    priceHandler.prices instanceof Map
-      ? priceHandler.prices.get(clean)
-      : priceHandler.prices?.[clean];
-
-  return stored?.price || price;
-};
-// ------------------------------
-// REEMPLAZA TU getMarketPrice POR ESTE
-// ------------------------------
-function getMarketPrice(symbol) {
-  return global.getFakePrice(symbol);
-}
-
-// Opcional: exponerlo por si otra parte del servidor lo usa
-global.getMarketPrice = getMarketPrice;
-
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
