@@ -5713,7 +5713,7 @@ function forceTrade(direction) {
   }
 
   // 🔥 PRECIO ACTUAL (FIX REAL)
- const price =
+const price =
   api?.prices?.[symbol] ??
   api?.lastPrice ??
   null;
@@ -5741,7 +5741,7 @@ const payload = {
   close: finalPrice,
   price: finalPrice
 };
-
+  
   console.log("🚀 Enviando orden:", payload);
 
   api.placeOrder?.(payload);
