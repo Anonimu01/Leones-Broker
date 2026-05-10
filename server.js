@@ -2542,7 +2542,7 @@ function writePrice(symbol, price, raw = null) {
 global.priceCache = global.priceCache || {};
 global.priceMeta = global.priceMeta || {};
 
-global.getFakePrice = (symbol) => {
+global.getFakePrice = global.getFakePrice || ((symbol) => {
   const clean =
     typeof normalizeSymbol === "function"
       ? normalizeSymbol(symbol)
@@ -2595,7 +2595,7 @@ global.getFakePrice = (symbol) => {
   }
 
   return safeBase;
-};
+});
 
 // ------------------------------
 // FORCE PRICE EXISTS
@@ -2662,10 +2662,6 @@ global.getPriceStore =
 
     return store;
   };
-
-function getPriceStore() {
-  return global.getPriceStore();
-}
 
 // ------------------------------
 // UPDATE PRICE STORE
@@ -2836,7 +2832,10 @@ app.use("/api/api", (req, res) => {
 
 app.get("/api/market/latest", async (req, res) => {
   try {
-    const safeStore = getPriceStore();
+    const safeStore =
+      typeof global.getPriceStore === "function"
+        ? global.getPriceStore()
+        : {};
 
     return res.json({
       ok: true,
@@ -2862,7 +2861,10 @@ app.get("/api/market/latest", async (req, res) => {
 
 app.get("/api/market/polygon/quotes", async (req, res) => {
   try {
-    const safeStore = getPriceStore();
+    const safeStore =
+      typeof global.getPriceStore === "function"
+        ? global.getPriceStore()
+        : {};
 
     const quotes = Object.entries(safeStore || {}).map(([symbol, value]) => {
       const price = Number(
@@ -2901,7 +2903,10 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
 
 app.get("/api/quotes", async (req, res) => {
   try {
-    const safeStore = getPriceStore();
+    const safeStore =
+      typeof global.getPriceStore === "function"
+        ? global.getPriceStore()
+        : {};
 
     const quotes = {};
 
@@ -2940,7 +2945,18 @@ app.get("/api/quotes", async (req, res) => {
 let polygonSocket = null;
 
 function extractSymbol(data) {
-  const raw = data?.symbol || data?.ticker || data?.sym || data?.T || data?.s || data?.instrument || data?.marketSymbol || data?.asset || data?.name || data?.label || "";
+  const raw =
+    data?.symbol ||
+    data?.ticker ||
+    data?.sym ||
+    data?.T ||
+    data?.s ||
+    data?.instrument ||
+    data?.marketSymbol ||
+    data?.asset ||
+    data?.name ||
+    data?.label ||
+    "";
 
   return typeof normalizeSymbol === "function"
     ? normalizeSymbol(raw)
@@ -2965,6 +2981,7 @@ function extractPrice(data = {}) {
   }
 
   const symbol = extractSymbol(data);
+
   if (symbol && global.priceCache?.[symbol]) {
     const cached = Number(global.priceCache[symbol]);
     if (Number.isFinite(cached) && cached > 0) return cached;
@@ -3087,7 +3104,10 @@ io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
   try {
-    socket.emit("prices_snapshot", getPriceStore() || {});
+    socket.emit(
+      "prices_snapshot",
+      typeof global.getPriceStore === "function" ? global.getPriceStore() : {}
+    );
   } catch {
     socket.emit("prices_snapshot", {});
   }
@@ -3095,14 +3115,11 @@ io.on("connection", (socket) => {
   socket.on("join_user_room", async ({ token, userId } = {}) => {
     try {
       let uid = String(userId || "").trim();
-
       if (!uid && token && process.env.JWT_SECRET) {
         const payload = jwt.verify(String(token), process.env.JWT_SECRET);
         uid = String(payload?.id || payload?.sub || payload?.userId || payload?._id || "").trim();
       }
-
       if (!uid) return;
-
       socket.join(`user:${uid}`);
       socket.data.userId = uid;
       socket.emit("room_joined", { ok: true, userId: uid });
@@ -3113,7 +3130,10 @@ io.on("connection", (socket) => {
 
   socket.on("request_prices_snapshot", () => {
     try {
-      socket.emit("prices_snapshot", getPriceStore() || {});
+      socket.emit(
+        "prices_snapshot",
+        typeof global.getPriceStore === "function" ? global.getPriceStore() : {}
+      );
     } catch {
       socket.emit("prices_snapshot", {});
     }
@@ -3121,7 +3141,8 @@ io.on("connection", (socket) => {
 
   socket.on("request_symbols", () => {
     try {
-      const prices = getPriceStore();
+      const prices =
+        typeof global.getPriceStore === "function" ? global.getPriceStore() : {};
 
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
@@ -3445,7 +3466,10 @@ app.get("/api/price", async (req, res) => {
     let found = null;
 
     try {
-      const store = global.getPriceStore();
+      const store =
+        typeof global.getPriceStore === "function"
+          ? global.getPriceStore()
+          : {};
 
       if (typeof findBestPriceMatch === "function") {
         found = findBestPriceMatch(symbol, store || {});
