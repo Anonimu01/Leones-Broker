@@ -2649,158 +2649,138 @@ app.use("/api/api", (req, res) => {
 });
 
 
-      /* ======================================================
-   FAKE MARKET API (NO 500 ERRORS)
+    /* ======================================================
+   MARKET / QUOTES SAFE FIX
 ====================================================== */
 
 app.get("/api/market/latest", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(
-      req.query.symbol ||
-      req.query.s ||
-      req.query.ticker ||
-      "BTCUSDT"
-    );
+    const store =
+      typeof getPriceStore === "function"
+        ? getPriceStore()
+        : {};
 
-    let price = null;
-
-    try {
-      if (typeof global.getFakePrice === "function") {
-        price = Number(global.getFakePrice(symbol));
-      }
-    } catch {}
-
-    if (!Number.isFinite(price) || price <= 0) {
-      price = 100 + Math.random() * 1000;
-    }
+    const safeStore =
+      store && typeof store === "object"
+        ? store
+        : {};
 
     return res.json({
       ok: true,
-      symbol,
-      price,
-      last: price,
-      close: price,
-      currentPrice: price,
-      updatedAt: new Date().toISOString(),
+      prices: safeStore,
+      data: safeStore,
+      latest: safeStore,
     });
 
   } catch (err) {
-    console.error("/api/market/latest error:", err);
+    console.error("/api/market/latest", err);
 
     return res.json({
       ok: true,
-      symbol: "BTCUSDT",
-      price: 50000,
-      last: 50000,
-      close: 50000,
-      currentPrice: 50000,
-      fallback: true,
+      prices: {},
+      data: {},
+      latest: {},
     });
   }
 });
 
 /* ======================================================
-   FAKE POLYGON QUOTES
+   POLYGON QUOTES SAFE
 ====================================================== */
 
 app.get("/api/market/polygon/quotes", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(
-      req.query.symbol ||
-      req.query.s ||
-      req.query.ticker ||
-      "BTCUSDT"
-    );
+    const store =
+      typeof getPriceStore === "function"
+        ? getPriceStore()
+        : {};
 
-    let price = null;
+    const safeStore =
+      store && typeof store === "object"
+        ? store
+        : {};
 
-    try {
-      if (typeof global.getFakePrice === "function") {
-        price = Number(global.getFakePrice(symbol));
-      }
-    } catch {}
+    const quotes = Object.entries(safeStore).map(([symbol, value]) => {
+      const price =
+        Number(
+          value?.price ||
+          value?.last ||
+          value?.close ||
+          value?.c ||
+          value
+        ) || 0;
 
-    if (!Number.isFinite(price) || price <= 0) {
-      price = 100 + Math.random() * 1000;
-    }
+      return {
+        symbol,
+        price,
+      };
+    });
 
     return res.json({
       ok: true,
-      status: "success",
-      symbol,
-      results: [
-        {
-          symbol,
-          price,
-          bid: price,
-          ask: price,
-          last: price,
-          close: price,
-          currentPrice: price,
-          updatedAt: Date.now(),
-        },
-      ],
+      quotes,
+      data: quotes,
     });
 
   } catch (err) {
-    console.error("/api/market/polygon/quotes error:", err);
+    console.error("/api/market/polygon/quotes", err);
 
     return res.json({
       ok: true,
-      results: [],
-      fallback: true,
+      quotes: [],
+      data: [],
     });
   }
 });
 
 /* ======================================================
-   FAKE QUOTES API
+   QUOTES SAFE
 ====================================================== */
 
 app.get("/api/quotes", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(
-      req.query.symbol ||
-      req.query.s ||
-      req.query.ticker ||
-      "BTCUSDT"
-    );
+    const store =
+      typeof getPriceStore === "function"
+        ? getPriceStore()
+        : {};
 
-    let price = null;
+    const safeStore =
+      store && typeof store === "object"
+        ? store
+        : {};
 
-    try {
-      if (typeof global.getFakePrice === "function") {
-        price = Number(global.getFakePrice(symbol));
-      }
-    } catch {}
+    const quotes = {};
 
-    if (!Number.isFinite(price) || price <= 0) {
-      price = 100 + Math.random() * 1000;
+    for (const [symbol, value] of Object.entries(safeStore)) {
+      const price =
+        Number(
+          value?.price ||
+          value?.last ||
+          value?.close ||
+          value?.c ||
+          value
+        ) || 0;
+
+      quotes[symbol] = price;
     }
 
     return res.json({
       ok: true,
-      symbol,
-      price,
-      quote: {
-        symbol,
-        price,
-        bid: price,
-        ask: price,
-        last: price,
-      },
+      quotes,
+      data: quotes,
     });
 
   } catch (err) {
-    console.error("/api/quotes error:", err);
+    console.error("/api/quotes", err);
 
     return res.json({
       ok: true,
-      fallback: true,
-      price: 50000,
+      quotes: {},
+      data: {},
     });
   }
 });
+
 
 /* ======================================================
    SOCKET.IO
