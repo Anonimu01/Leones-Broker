@@ -5694,7 +5694,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 ORDEN REAL SIN ERROR
   ========================= */
-function forceTrade(direction) {
+async function forceTrade(direction) {
   const api = ext();
 
   const amountInput = document.getElementById("brokerOrderSize");
@@ -5705,7 +5705,10 @@ function forceTrade(direction) {
     return;
   }
 
-  const symbol = window.selectedSymbol || api.activeSymbol || window.TR?.activeSymbol;
+  const symbol =
+    window.selectedSymbol ||
+    api.activeSymbol ||
+    window.TR?.activeSymbol;
 
   if (!symbol) {
     alert("Selecciona un símbolo");
@@ -5713,38 +5716,39 @@ function forceTrade(direction) {
   }
 
   // 🔥 PRECIO ACTUAL (FIX REAL)
-const price =
-  api?.prices?.[symbol] ??
-  api?.lastPrice ??
-  null;
+  const price =
+    api?.prices?.[symbol] ??
+    api?.lastPrice ??
+    null;
 
-let finalPrice = Number(price);
-
-if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
-  console.warn("⚠️ Precio fallback automático");
-
-  finalPrice = await getPrice(symbol);
+  let finalPrice = Number(price);
 
   if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
-    finalPrice = generatePrice(symbol);
-  }
-}
+    console.warn("⚠️ Precio fallback automático");
 
-const payload = {
-  symbol: symbol,
-  side: direction,
-  qty: amount,
-  entryPrice: finalPrice,
-  currentPrice: finalPrice,
-  marketPrice: finalPrice,
-  lastPrice: finalPrice,
-  close: finalPrice,
-  price: finalPrice
-};
-  
+    finalPrice = await getPrice(symbol);
+
+    if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
+      finalPrice = generatePrice(symbol);
+    }
+  }
+
+  const payload = {
+    symbol: symbol,
+    side: direction,
+    qty: amount,
+    entryPrice: finalPrice,
+    currentPrice: finalPrice,
+    marketPrice: finalPrice,
+    lastPrice: finalPrice,
+    close: finalPrice,
+    price: finalPrice
+  };
+
   console.log("🚀 Enviando orden:", payload);
 
   api.placeOrder?.(payload);
+}
 
   /* =========================
      🔥 FETCH CORRECTO (AQUÍ DENTRO)
