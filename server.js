@@ -2648,6 +2648,160 @@ app.use("/api/api", (req, res) => {
   return res.redirect(307, newUrl);
 });
 
+
+      /* ======================================================
+   FAKE MARKET API (NO 500 ERRORS)
+====================================================== */
+
+app.get("/api/market/latest", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(
+      req.query.symbol ||
+      req.query.s ||
+      req.query.ticker ||
+      "BTCUSDT"
+    );
+
+    let price = null;
+
+    try {
+      if (typeof global.getFakePrice === "function") {
+        price = Number(global.getFakePrice(symbol));
+      }
+    } catch {}
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100 + Math.random() * 1000;
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      last: price,
+      close: price,
+      currentPrice: price,
+      updatedAt: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.error("/api/market/latest error:", err);
+
+    return res.json({
+      ok: true,
+      symbol: "BTCUSDT",
+      price: 50000,
+      last: 50000,
+      close: 50000,
+      currentPrice: 50000,
+      fallback: true,
+    });
+  }
+});
+
+/* ======================================================
+   FAKE POLYGON QUOTES
+====================================================== */
+
+app.get("/api/market/polygon/quotes", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(
+      req.query.symbol ||
+      req.query.s ||
+      req.query.ticker ||
+      "BTCUSDT"
+    );
+
+    let price = null;
+
+    try {
+      if (typeof global.getFakePrice === "function") {
+        price = Number(global.getFakePrice(symbol));
+      }
+    } catch {}
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100 + Math.random() * 1000;
+    }
+
+    return res.json({
+      ok: true,
+      status: "success",
+      symbol,
+      results: [
+        {
+          symbol,
+          price,
+          bid: price,
+          ask: price,
+          last: price,
+          close: price,
+          currentPrice: price,
+          updatedAt: Date.now(),
+        },
+      ],
+    });
+
+  } catch (err) {
+    console.error("/api/market/polygon/quotes error:", err);
+
+    return res.json({
+      ok: true,
+      results: [],
+      fallback: true,
+    });
+  }
+});
+
+/* ======================================================
+   FAKE QUOTES API
+====================================================== */
+
+app.get("/api/quotes", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(
+      req.query.symbol ||
+      req.query.s ||
+      req.query.ticker ||
+      "BTCUSDT"
+    );
+
+    let price = null;
+
+    try {
+      if (typeof global.getFakePrice === "function") {
+        price = Number(global.getFakePrice(symbol));
+      }
+    } catch {}
+
+    if (!Number.isFinite(price) || price <= 0) {
+      price = 100 + Math.random() * 1000;
+    }
+
+    return res.json({
+      ok: true,
+      symbol,
+      price,
+      quote: {
+        symbol,
+        price,
+        bid: price,
+        ask: price,
+        last: price,
+      },
+    });
+
+  } catch (err) {
+    console.error("/api/quotes error:", err);
+
+    return res.json({
+      ok: true,
+      fallback: true,
+      price: 50000,
+    });
+  }
+});
+
 /* ======================================================
    SOCKET.IO
    ====================================================== */
