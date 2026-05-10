@@ -2836,8 +2836,78 @@ app.use("/api/api", (req, res) => {
 // SAFE GLOBAL STORE
 global.marketQuotes = global.marketQuotes || {};
 
+// SAFE PRICE STORE
 if (typeof global.getPriceStore !== "function") {
   global.getPriceStore = () => global.marketQuotes || {};
+}
+
+// SAFE WRITE PRICE
+if (typeof global.writePrice !== "function") {
+  global.writePrice = (symbol, price, extra = {}) => {
+    try {
+      if (!symbol) return;
+
+      const numericPrice = Number(price);
+
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+        return;
+      }
+
+      global.marketQuotes[symbol] = {
+        ...(global.marketQuotes[symbol] || {}),
+        symbol,
+        price: numericPrice,
+        bid: Number(extra.bid ?? numericPrice),
+        ask: Number(extra.ask ?? numericPrice),
+        updatedAt: Date.now(),
+        ...extra,
+      };
+    } catch (err) {
+      console.error("❌ writePrice error:", err);
+    }
+  };
+}
+
+/* ======================================================
+   SAFE HELPERS
+====================================================== */
+
+function safeExtractPrice(value) {
+  try {
+    const price = Number(
+      value?.price ??
+      value?.lastPrice ??
+      value?.last ??
+      value?.close ??
+      value?.c ??
+      value
+    );
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return null;
+    }
+
+    return price;
+  } catch {
+    return null;
+  }
+}
+
+function safeNormalizeQuote(symbol, value) {
+  const price = safeExtractPrice(value);
+
+  if (!price) return null;
+
+  return {
+    symbol,
+    price,
+    bid: Number(value?.bid ?? price),
+    ask: Number(value?.ask ?? price),
+    updatedAt:
+      value?.updatedAt ||
+      value?.timestamp ||
+      Date.now(),
+  };
 }
 
 /* ======================================================
@@ -2854,38 +2924,24 @@ app.get("/api/market/latest", async (req, res) => {
     const latest = {};
 
     for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const price = Number(
-        value?.price ??
-        value?.lastPrice ??
-        value?.last ??
-        value?.close ??
-        value?.c ??
-        value
-      );
+      const normalized = safeNormalizeQuote(symbol, value);
 
-      if (!Number.isFinite(price) || price <= 0) continue;
+      if (!normalized) continue;
 
-      latest[symbol] = {
-        symbol,
-        price,
-        bid: Number(value?.bid ?? price),
-        ask: Number(value?.ask ?? price),
-        updatedAt:
-          value?.updatedAt ||
-          value?.timestamp ||
-          Date.now(),
-      };
+      latest[symbol] = normalized;
     }
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       prices: latest,
       data: latest,
       latest,
       count: Object.keys(latest).length,
+      serverTime: Date.now(),
     });
+
   } catch (err) {
-    console.error("❌ /api/market/latest", err);
+    console.error("❌ /api/market/latest:", err);
 
     return res.status(200).json({
       ok: true,
@@ -2894,6 +2950,7 @@ app.get("/api/market/latest", async (req, res) => {
       latest: {},
       count: 0,
       fallback: true,
+      serverTime: Date.now(),
     });
   }
 });
@@ -2912,37 +2969,23 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
     const quotes = [];
 
     for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const price = Number(
-        value?.price ??
-        value?.lastPrice ??
-        value?.last ??
-        value?.close ??
-        value?.c ??
-        value
-      );
+      const normalized = safeNormalizeQuote(symbol, value);
 
-      if (!Number.isFinite(price) || price <= 0) continue;
+      if (!normalized) continue;
 
-      quotes.push({
-        symbol,
-        price,
-        bid: Number(value?.bid ?? price),
-        ask: Number(value?.ask ?? price),
-        updatedAt:
-          value?.updatedAt ||
-          value?.timestamp ||
-          Date.now(),
-      });
+      quotes.push(normalized);
     }
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       quotes,
       data: quotes,
       count: quotes.length,
+      serverTime: Date.now(),
     });
+
   } catch (err) {
-    console.error("❌ /api/market/polygon/quotes", err);
+    console.error("❌ /api/market/polygon/quotes:", err);
 
     return res.status(200).json({
       ok: true,
@@ -2950,6 +2993,7 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
       data: [],
       count: 0,
       fallback: true,
+      serverTime: Date.now(),
     });
   }
 });
@@ -2968,37 +3012,23 @@ app.get("/api/quotes", async (req, res) => {
     const quotes = {};
 
     for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const price = Number(
-        value?.price ??
-        value?.lastPrice ??
-        value?.last ??
-        value?.close ??
-        value?.c ??
-        value
-      );
+      const normalized = safeNormalizeQuote(symbol, value);
 
-      if (!Number.isFinite(price) || price <= 0) continue;
+      if (!normalized) continue;
 
-      quotes[symbol] = {
-        symbol,
-        price,
-        bid: Number(value?.bid ?? price),
-        ask: Number(value?.ask ?? price),
-        updatedAt:
-          value?.updatedAt ||
-          value?.timestamp ||
-          Date.now(),
-      };
+      quotes[symbol] = normalized;
     }
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       quotes,
       data: quotes,
       count: Object.keys(quotes).length,
+      serverTime: Date.now(),
     });
+
   } catch (err) {
-    console.error("❌ /api/quotes", err);
+    console.error("❌ /api/quotes:", err);
 
     return res.status(200).json({
       ok: true,
@@ -3006,6 +3036,7 @@ app.get("/api/quotes", async (req, res) => {
       data: {},
       count: 0,
       fallback: true,
+      serverTime: Date.now(),
     });
   }
 });
