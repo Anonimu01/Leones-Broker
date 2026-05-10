@@ -5713,21 +5713,34 @@ function forceTrade(direction) {
   }
 
   // 🔥 PRECIO ACTUAL (FIX REAL)
-  const price =
-    api?.prices?.[symbol] ??
-    api?.lastPrice ??
-    null;
+ const price =
+  api?.prices?.[symbol] ??
+  api?.lastPrice ??
+  null;
 
-  if (!price) {
-    console.warn("⚠️ Precio no disponible, usando entry temporal");
+let finalPrice = Number(price);
+
+if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
+  console.warn("⚠️ Precio fallback automático");
+
+  finalPrice = await getPrice(symbol);
+
+  if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
+    finalPrice = generatePrice(symbol);
   }
+}
 
-  const payload = {
-    symbol: symbol,
-    side: direction,
-    qty: amount,
-    entryPrice: price || 0 // 🔥 evita que falle el backend y el pnl
-  };
+const payload = {
+  symbol: symbol,
+  side: direction,
+  qty: amount,
+  entryPrice: finalPrice,
+  currentPrice: finalPrice,
+  marketPrice: finalPrice,
+  lastPrice: finalPrice,
+  close: finalPrice,
+  price: finalPrice
+};
 
   console.log("🚀 Enviando orden:", payload);
 
