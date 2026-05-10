@@ -193,8 +193,6 @@ function compactSymbol(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-
-
 function toPolygonSymbol(value = "") {
   const clean = normalizeSymbol(value);
   if (!clean) return "";
@@ -1221,10 +1219,6 @@ app.get("/api/latest", (req, res) => {
         .toUpperCase()
     );
 
-    //////////////////////////////////////////////////////
-    // SI NO HAY SYMBOL
-    //////////////////////////////////////////////////////
-
     if (!symbol) {
       return res.json({
         ok: true,
@@ -1238,24 +1232,13 @@ app.get("/api/latest", (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // BUSCAR PRECIO
-    //////////////////////////////////////////////////////
-
     let price = null;
 
     try {
       price = getCurrentPriceForSymbol(symbol);
     } catch {}
 
-    //////////////////////////////////////////////////////
-    // FALLBACK STORE
-    //////////////////////////////////////////////////////
-
-    if (
-      !Number.isFinite(price) ||
-      price <= 0
-    ) {
+    if (!Number.isFinite(price) || price <= 0) {
       try {
         const store = getPriceStore?.() || {};
         const found = findBestPriceMatch(symbol, store);
@@ -1266,14 +1249,7 @@ app.get("/api/latest", (req, res) => {
       } catch {}
     }
 
-    //////////////////////////////////////////////////////
-    // VALIDAR
-    //////////////////////////////////////////////////////
-
-    if (
-      !Number.isFinite(price) ||
-      price <= 0
-    ) {
+    if (!Number.isFinite(price) || price <= 0) {
       return res.json({
         ok: false,
         error: "price_not_found",
@@ -1286,10 +1262,6 @@ app.get("/api/latest", (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // OK
-    //////////////////////////////////////////////////////
-
     return res.json({
       ok: true,
       symbol,
@@ -1299,7 +1271,6 @@ app.get("/api/latest", (req, res) => {
       last: price,
       updatedAt: new Date().toISOString(),
     });
-
   } catch (e) {
     console.error("/api/latest error:", e);
 
@@ -1314,10 +1285,6 @@ app.get("/api/market/quotes", (req, res) =>
   res.json(buildMarketPayload())
 );
 
-/* ======================================================
-   FIX /api/market/latest
-   ====================================================== */
-
 app.get("/api/market/latest", (req, res) => {
   try {
     const rawSymbol =
@@ -1326,16 +1293,11 @@ app.get("/api/market/latest", (req, res) => {
       req.query.selectedSymbol ||
       "";
 
-    // 🔥 NORMALIZAR
     const symbol = normalizeSymbol(
       String(rawSymbol || "")
         .trim()
         .toUpperCase()
     );
-
-    //////////////////////////////////////////////////////
-    // SI NO HAY SYMBOL -> NO ROMPER FRONTEND
-    //////////////////////////////////////////////////////
 
     if (!symbol) {
       return res.json({
@@ -1350,22 +1312,13 @@ app.get("/api/market/latest", (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // BUSCAR PRECIO REAL
-    //////////////////////////////////////////////////////
-
     let price = null;
 
-    // 1. PRICE STORE
     try {
       price = getCurrentPriceForSymbol(symbol);
     } catch {}
 
-    // 2. FALLBACK PRICE STORE
-    if (
-      !Number.isFinite(price) ||
-      price <= 0
-    ) {
+    if (!Number.isFinite(price) || price <= 0) {
       try {
         const store = getPriceStore?.() || {};
         const found = findBestPriceMatch(symbol, store);
@@ -1376,14 +1329,7 @@ app.get("/api/market/latest", (req, res) => {
       } catch {}
     }
 
-    //////////////////////////////////////////////////////
-    // VALIDAR
-    //////////////////////////////////////////////////////
-
-    if (
-      !Number.isFinite(price) ||
-      price <= 0
-    ) {
+    if (!Number.isFinite(price) || price <= 0) {
       return res.json({
         ok: false,
         error: "price_not_found",
@@ -1396,10 +1342,6 @@ app.get("/api/market/latest", (req, res) => {
       });
     }
 
-    //////////////////////////////////////////////////////
-    // OK
-    //////////////////////////////////////////////////////
-
     return res.json({
       ok: true,
       symbol,
@@ -1409,7 +1351,6 @@ app.get("/api/market/latest", (req, res) => {
       last: price,
       updatedAt: new Date().toISOString(),
     });
-
   } catch (e) {
     console.error("/api/market/latest error:", e);
 
@@ -1443,13 +1384,13 @@ app.get("/api/symbols", (req, res) => {
     }
 
     return res.json(SAMPLE_SYMBOLS);
-
   } catch (err) {
     console.error("api/symbols error:", err);
 
     return res.json(SAMPLE_SYMBOLS);
   }
 });
+
 /* ======================================================
    ACCOUNT / WALLET / POSITIONS
    ====================================================== */
@@ -1589,7 +1530,6 @@ app.get("/api/trade/positions", async (req, res) => {
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
-
 /* ======================================================
    ADMIN
    ====================================================== */
