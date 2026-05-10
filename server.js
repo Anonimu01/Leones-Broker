@@ -1475,13 +1475,17 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     // 🔥 PRICE RESOLUTION (ROBUSTO)
     // =========================
-    let price = await resolvePriceWithFallback(symbol, body);
+    let price =
+      Number(body.price) ||
+      Number(body.entryPrice) ||
+      getSimulatedPrice(symbol);
 
     // AUTO FIX: nunca dejar que se caiga la orden
     if (!Number.isFinite(price) || price <= 0) {
       price =
         global.getFakePrice?.(symbol) ||
         forcePriceExists?.(symbol) ||
+        getSimulatedPrice(symbol) ||
         (50 + Math.random() * 1000);
 
       console.warn("⚠️ PRICE AUTO-FIX TRADE:", symbol, price);
@@ -1501,12 +1505,13 @@ app.post("/api/trade/open", async (req, res) => {
     // RISK CALCULATION
     // =========================
     const notional = qty * price;
-    const requiredMargin = notional / leverage;
+    const requiredMargin = 0;
     const freeMargin = balanceOwn + credit - marginUsed;
 
-   if (wallet.balance < marginRequired) {
-  console.warn("⚠️ Margen insuficiente ignorado en modo simulación");
-}
+    if (wallet.balance < requiredMargin) {
+      console.warn("⚠️ Margen insuficiente ignorado en modo simulación");
+    }
+
     // =========================
     // WALLET UPDATE
     // =========================
@@ -1556,6 +1561,7 @@ app.post("/api/trade/open", async (req, res) => {
 
   } catch (err) {
     console.error("/api/trade/open error:", err);
+
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -1569,6 +1575,7 @@ app.post("/api/trade/open", async (req, res) => {
     }
   }
 });
+
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
@@ -1648,7 +1655,6 @@ app.get("/api/price", async (req, res) => {
     });
   }
 });
-
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
