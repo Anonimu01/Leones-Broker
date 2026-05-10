@@ -58,7 +58,9 @@ mongoose.connection.on("connected", () => {
     const closeThreshold = Number(process.env.RISK_CLOSE_THRESHOLD) || 15;
     const stopFn = startRiskWatcher({ intervalMs, alertThreshold, closeThreshold });
     if (typeof stopFn === "function") global.stopRiskWatcher = stopFn;
-    console.log(`🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`);
+    console.log(
+      `🛡️ Risk watcher iniciado (interval=${intervalMs}ms alert=${alertThreshold}% close=${closeThreshold}%)`
+    );
   } catch (e) {
     console.error("Error iniciando risk watcher:", e);
   }
@@ -124,7 +126,9 @@ app.use("/api", limiter);
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
   cors: {
-    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : process.env.CLIENT_URL || "*",
+    origin: Array.from(allowedOrigins).length
+      ? Array.from(allowedOrigins)
+      : process.env.CLIENT_URL || "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -135,58 +139,21 @@ app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
 /* ======================================================
-   HELPERS
+   GLOBALS / HELPERS
    ====================================================== */
 
-const openTradeLocks = new Map();
-const liveSyncTimers = new Map();
-const activeOrders = new Set();
+global.priceCache = global.priceCache || {};
+global.priceMeta = global.priceMeta || {};
+global.marketQuotes = global.marketQuotes || {};
 
-function makeOpenLockKey(userId, symbol, side, qty) {
-  return `${String(userId || "")}:${String(symbol || "")}:${String(side || "")}:${String(qty || "")}`;
+function normalizeSymbol(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
 }
 
-function makeCloseLockKey(userId, positionId) {
-  return `close:${String(userId || "")}:${String(positionId || "")}`;
-}
-
-function withOpenLock(key, ttlMs = 1500) {
-  const now = Date.now();
-  const until = openTradeLocks.get(key) || 0;
-  if (until > now) return false;
-
-  openTradeLocks.set(key, now + ttlMs);
-
-  const t = setTimeout(() => {
-    const current = openTradeLocks.get(key) || 0;
-    if (current <= Date.now()) openTradeLocks.delete(key);
-  }, ttlMs + 100);
-
-  if (t && typeof t.unref === "function") t.unref();
-  return true;
-}
-
-function releaseOpenLock(key) {
-  openTradeLocks.delete(key);
-}
-
-function withActiveOrder(key, ttlMs = 2500) {
-  if (activeOrders.has(key)) return false;
-  activeOrders.add(key);
-
-  const t = setTimeout(() => {
-    activeOrders.delete(key);
-  }, ttlMs);
-
-  if (t && typeof t.unref === "function") t.unref();
-  return true;
-}
-
-function releaseActiveOrder(key) {
-  activeOrders.delete(key);
-}
-
-function compactSymbol(value) {
+function compactSymbol(value = "") {
   return String(value || "")
     .trim()
     .toUpperCase()
@@ -196,17 +163,11 @@ function compactSymbol(value) {
 function toPolygonSymbol(value = "") {
   const clean = normalizeSymbol(value);
   if (!clean) return "";
-
-  // Forex típico: EURUSD -> C:EURUSD
-  // El resto queda limpio para no romper acciones/índices/cripto
-  if (/^[A-Z]{6}$/.test(clean) && !/\d/.test(clean)) {
-    return `C:${clean}`;
-  }
-
+  if (/^[A-Z]{6}$/.test(clean) && !/\d/.test(clean)) return `C:${clean}`;
   return clean;
 }
 
-function symbolVariants(value) {
+function symbolVariants(value = "") {
   const raw = String(value || "").trim().toUpperCase();
   const afterColon = raw.includes(":") ? raw.split(":").pop() : raw;
   const afterSlash = afterColon.includes("/") ? afterColon.split("/").join("") : afterColon;
@@ -311,16 +272,150 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function getPriceStore() {
+function safeExtractPrice(value = {}) {
   try {
-    const raw = priceHandler?.prices;
-    if (!raw) return {};
-    if (raw instanceof Map) return Object.fromEntries(raw.entries());
-    if (typeof raw === "object") return raw;
-    return {};
+    const price = Number(
+      value?.price ??
+        value?.lastPrice ??
+        value?.last ??
+        value?.close ??
+        value?.c ??
+        value
+    );
+    if (!Number.isFinite(price) || price <= 0) return null;
+    return price;
   } catch {
-    return {};
+    return null;
   }
+}
+
+function safeNormalizeQuote(symbol, value = {}) {
+  const price = safeExtractPrice(value);
+  if (!price) return null;
+  return {
+    symbol,
+    price,
+    bid: Number(value?.bid ?? price),
+    ask: Number(value?.ask ?? price),
+    updatedAt: value?.updatedAt || value?.timestamp || Date.now(),
+  };
+}
+
+function syncMarketQuotesFromPriceStore() {
+  global.marketQuotes = global.marketQuotes || {};
+  for (const [symbol, value] of Object.entries(global.priceCache || {})) {
+    const price = Number(value);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    global.marketQuotes[symbol] = {
+      symbol,
+      price,
+      bid: Number(global.priceMeta?.[symbol]?.bid ?? price),
+      ask: Number(global.priceMeta?.[symbol]?.ask ?? price),
+      updatedAt: global.priceMeta?.[symbol]?.updatedAt || Date.now(),
+      raw: global.priceMeta?.[symbol]?.raw || null,
+    };
+  }
+}
+
+function writePrice(symbol, price, raw = null) {
+  const clean = normalizeSymbol(symbol);
+  const numeric = Number(price);
+  if (!clean || !Number.isFinite(numeric) || numeric <= 0) return false;
+
+  const payload = {
+    symbol: clean,
+    price: numeric,
+    market: detectMarket(clean),
+    updatedAt: new Date().toISOString(),
+    raw,
+  };
+
+  global.priceCache[clean] = numeric;
+  global.priceMeta[clean] = payload;
+  global.marketQuotes[clean] = {
+    symbol: clean,
+    price: numeric,
+    bid: Number(payload.bid ?? numeric),
+    ask: Number(payload.ask ?? numeric),
+    updatedAt: payload.updatedAt,
+    raw,
+  };
+
+  try {
+    if (priceHandler?.prices instanceof Map) {
+      priceHandler.prices.set(clean, payload);
+    } else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
+      priceHandler.prices[clean] = payload;
+    }
+  } catch {}
+
+  return true;
+}
+
+if (typeof global.getPriceStore !== "function") {
+  global.getPriceStore = () => {
+    syncMarketQuotesFromPriceStore();
+    const store = {};
+    for (const [symbol, value] of Object.entries(global.priceCache || {})) {
+      const price = Number(value);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      store[symbol] = {
+        symbol,
+        price,
+        updatedAt: global.priceMeta?.[symbol]?.updatedAt || new Date().toISOString(),
+        bid: Number(global.priceMeta?.[symbol]?.bid ?? price),
+        ask: Number(global.priceMeta?.[symbol]?.ask ?? price),
+        raw: global.priceMeta?.[symbol]?.raw || null,
+      };
+    }
+    return store;
+  };
+}
+
+if (typeof global.writePrice !== "function") {
+  global.writePrice = writePrice;
+}
+
+function findBestPriceMatch(symbol, store = {}) {
+  try {
+    const target = compactSymbol(symbol);
+    if (!target) return null;
+
+    for (const [key, item] of Object.entries(store || {})) {
+      const candidates = [
+        key,
+        item?.symbol,
+        item?.label,
+        item?.ticker,
+        item?.tvSymbol,
+        item?.instrument,
+        item?.marketSymbol,
+        item?.asset,
+      ].filter(Boolean);
+
+      const matched = candidates.some((candidate) => {
+        const c = compactSymbol(candidate);
+        if (!c) return false;
+        return (
+          c === target ||
+          c.includes(target) ||
+          target.includes(c) ||
+          sameMarketSymbol(c, target)
+        );
+      });
+
+      if (matched) return item;
+    }
+
+    return null;
+  } catch (err) {
+    console.error("findBestPriceMatch error:", err);
+    return null;
+  }
+}
+
+function getPriceStore() {
+  return typeof global.getPriceStore === "function" ? global.getPriceStore() : {};
 }
 
 function extractQuotePrice(item = {}) {
@@ -369,120 +464,294 @@ function normalizeQuote(symbol, item = {}) {
   };
 }
 
-const SAMPLE_SYMBOLS = [
-  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
-  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
-  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
-  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
-  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
-  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
-];
+/* ======================================================
+   FAKE MARKET ENGINE
+====================================================== */
 
-function buildQuotesArray() {
-  const store = getPriceStore();
-  const keys = Object.keys(store);
+const MARKET_SEEDS = {
+  forex: {
+    EURUSD: 1.084,
+    USDJPY: 150.25,
+    GBPUSD: 1.274,
+    AUDUSD: 0.665,
+    USDCAD: 1.365,
+    USDCHF: 0.901,
+    NZDUSD: 0.612,
+    EURJPY: 163.1,
+    EURGBP: 0.854,
+    EURAUD: 1.64,
+    GBPJPY: 191.5,
+    EURCAD: 1.48,
+  },
+  crypto: {
+    BTCUSDT: 67200,
+    ETHUSDT: 3500,
+    SOLUSDT: 145,
+    BNBUSDT: 585,
+    ADAUSDT: 0.45,
+    XRPUSDT: 0.53,
+    DOGEUSDT: 0.16,
+    BCHUSDT: 380,
+    LTCUSDT: 80,
+    DOTUSDT: 6.8,
+    AVAXUSDT: 35,
+    LINKUSDT: 18,
+    MATICUSDT: 0.75,
+  },
+  stocks: {
+    AAPL: 190,
+    TSLA: 250,
+    NVDA: 900,
+    MSFT: 420,
+    AMZN: 180,
+    META: 485,
+    GOOGL: 170,
+    NFLX: 625,
+    AMD: 165,
+    SPY: 520,
+    QQQ: 460,
+    DIA: 390,
+    IBM: 185,
+    ORCL: 140,
+  },
+  indices: {
+    SPX: 5200,
+    NAS100: 18500,
+    DJ30: 39000,
+    DAX40: 18400,
+    FTSE100: 8200,
+    NIKKEI225: 38500,
+    RUSSELL2000: 2100,
+    VIX: 14.5,
+  },
+  commodities: {
+    GOLD: 2400,
+    SILVER: 29,
+    OIL: 78,
+    WTI: 78,
+    BRENT: 82,
+    NATGAS: 2.8,
+    COPPER: 4.2,
+    CORN: 430,
+    WHEAT: 590,
+    SOYBEAN: 1180,
+    PLATINUM: 980,
+    PALLADIUM: 930,
+  },
+};
 
-  if (keys.length) {
-    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
+function detectMarket(symbol = "") {
+  const s = String(symbol || "")
+    .toUpperCase()
+    .replace("/", "")
+    .replace("-", "")
+    .trim();
+
+  if (!s) return "stocks";
+
+  if (
+    s.includes("BTC") ||
+    s.includes("ETH") ||
+    s.includes("SOL") ||
+    s.includes("BNB") ||
+    s.includes("ADA") ||
+    s.includes("XRP") ||
+    s.includes("DOGE") ||
+    s.includes("LTC") ||
+    s.includes("LINK") ||
+    s.includes("AVAX") ||
+    s.includes("MATIC") ||
+    s.includes("USDT") ||
+    s.includes("USDC") ||
+    s.includes("BUSD")
+  ) {
+    return "crypto";
   }
 
-  return SAMPLE_SYMBOLS.map((s) =>
-    normalizeQuote(s.symbol, {
-      label: s.label,
-      market: s.market,
-      price: null,
-      updatedAt: new Date().toISOString(),
-    })
-  );
+  if (/^[A-Z]{6}$/.test(s)) return "forex";
+
+  if (
+    s.includes("SPX") ||
+    s.includes("NAS100") ||
+    s.includes("DJ30") ||
+    s.includes("DAX40") ||
+    s.includes("FTSE100") ||
+    s.includes("NIKKEI") ||
+    s.includes("RUSSELL") ||
+    s.includes("VIX")
+  ) {
+    return "indices";
+  }
+
+  if (
+    s.includes("GOLD") ||
+    s.includes("SILVER") ||
+    s.includes("OIL") ||
+    s.includes("WTI") ||
+    s.includes("BRENT") ||
+    s.includes("NATGAS") ||
+    s.includes("COPPER") ||
+    s.includes("CORN") ||
+    s.includes("WHEAT") ||
+    s.includes("SOYBEAN") ||
+    s.includes("PLATINUM") ||
+    s.includes("PALLADIUM")
+  ) {
+    return "commodities";
+  }
+
+  return "stocks";
 }
 
-function buildMarketPayload() {
-  const quotes = buildQuotesArray();
-  return {
-    ok: true,
-    count: quotes.length,
-    quotes,
-    data: quotes,
-    items: quotes,
-    latest: quotes[0] || null,
+function generateBasePrice(symbol = "") {
+  const s = String(symbol || "")
+    .toUpperCase()
+    .replace("/", "")
+    .replace("-", "")
+    .trim();
+
+  const market = detectMarket(s);
+
+  for (const group of Object.values(MARKET_SEEDS)) {
+    if (Number.isFinite(group[s])) return Number(group[s]);
+  }
+
+  switch (market) {
+    case "crypto":
+      return 1 + Math.random() * 70000;
+    case "forex":
+      return 0.5 + Math.random() * 2;
+    case "indices":
+      return 1000 + Math.random() * 50000;
+    case "commodities":
+      return 10 + Math.random() * 3000;
+    default:
+      return 5 + Math.random() * 1000;
+  }
+}
+
+function getVolatility(symbol = "") {
+  const market = detectMarket(symbol);
+  switch (market) {
+    case "crypto":
+      return 0.01;
+    case "forex":
+      return 0.0015;
+    case "indices":
+      return 0.004;
+    case "commodities":
+      return 0.005;
+    default:
+      return 0.006;
+  }
+}
+
+global.getFakePrice =
+  global.getFakePrice ||
+  function getFakePrice(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
+
+    const existing =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+
+    if (Number.isFinite(existing) && existing > 0) return existing;
+
+    const base =
+      typeof generateBasePrice === "function"
+        ? Number(generateBasePrice(clean))
+        : Number(100 + Math.random() * 1000);
+
+    const safeBase =
+      Number.isFinite(base) && base > 0
+        ? base
+        : Number((50 + Math.random() * 1000).toFixed(6));
+
+    writePrice(clean, safeBase, { source: "seed" });
+    return safeBase;
   };
-}
 
-function getCurrentPriceForSymbol(symbol) {
-  const targetCompact = compactSymbol(symbol);
-  if (!targetCompact) return null;
+global.forcePriceExists =
+  global.forcePriceExists ||
+  function forcePriceExists(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
 
-  const store = getPriceStore();
+    const current =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
 
-  for (const [key, item] of Object.entries(store)) {
-    const candidates = [
-      key,
-      item?.symbol,
-      item?.label,
-      item?.ticker,
-      item?.tvSymbol,
-      item?.instrument,
-      item?.marketSymbol,
-      item?.asset,
-    ].filter(Boolean);
+    if (Number.isFinite(current) && current > 0) return current;
 
-    const matched = candidates.some((candidate) => {
-      const c = compactSymbol(candidate);
-      if (!c) return false;
-      return (
-        c === targetCompact ||
-        c.includes(targetCompact) ||
-        targetCompact.includes(c) ||
-        sameMarketSymbol(c, targetCompact)
-      );
-    });
+    const forced = global.getFakePrice(clean);
+    if (Number.isFinite(forced) && forced > 0) return forced;
 
-    if (!matched) continue;
+    const fallback = Number((50 + Math.random() * 1000).toFixed(6));
+    writePrice(clean, fallback, { source: "force-fallback" });
+    return fallback;
+  };
 
-    const px = extractQuotePrice(item);
-    if (Number.isFinite(px) && px > 0) return px;
+global.updatePriceStore =
+  global.updatePriceStore ||
+  function updatePriceStore(symbol, price) {
+    return writePrice(symbol, price, global.priceMeta?.[normalizeSymbol(symbol)]?.raw || null);
+  };
+
+global.getMarketPrice =
+  global.getMarketPrice ||
+  function getMarketPrice(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
+    const cached =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+    if (Number.isFinite(cached) && cached > 0) return cached;
+    return global.getFakePrice(clean);
+  };
+
+function seedInitialSymbols() {
+  for (const group of Object.values(MARKET_SEEDS || {})) {
+    for (const [sym, px] of Object.entries(group || {})) {
+      const price = Number(px);
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      if (!Number.isFinite(global.priceCache?.[sym]) || Number(global.priceCache?.[sym]) <= 0) {
+        writePrice(sym, price, { source: "seed" });
+      }
+    }
   }
-
-  return null;
 }
 
-function resolveOrderPrice(body = {}, symbol = "") {
-  const direct = normalizePrice(body);
-  if (direct) return direct;
+seedInitialSymbols();
 
-  const candidates = [
-    body.currentPrice,
-    body.current_price,
-    body.lastPrice,
-    body.last_price,
-    body.tvPrice,
-    body.tv_price,
-    body.entry,
-    body.entryPrice,
-    body.entry_price,
-    body.marketPrice,
-    body.market_price,
-    body.quotePrice,
-    body.quote_price,
-    body.executionPrice,
-    body.execution_price,
-  ];
+setInterval(() => {
+  try {
+    const keys = Object.keys(global.priceCache || {});
+    for (const symbol of keys) {
+      const current = Number(global.priceCache[symbol]);
+      if (!Number.isFinite(current) || current <= 0) continue;
 
-  for (const candidate of candidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n) && n > 0) return n;
+      const vol = typeof getVolatility === "function" ? Number(getVolatility(symbol)) : 0.001;
+      const drift = (Math.random() - 0.5) * vol;
+      let next = current * (1 + drift);
+      next = Math.max(next, 0.0000001);
+      const finalPrice = Number(next.toFixed(6));
+      writePrice(symbol, finalPrice, global.priceMeta?.[symbol]?.raw || null);
+    }
+  } catch (err) {
+    console.error("Fake market error:", err);
   }
+}, 1000);
 
-  const market = getCurrentPriceForSymbol(symbol);
-  if (market && Number.isFinite(market) && market > 0) return market;
-
-  return null;
-}
+/* ======================================================
+   ACCOUNT / WALLET HELPERS
+   ====================================================== */
 
 function isClosedPosition(p = {}) {
-  const status = String(p.status || p.state || p.positionStatus || "").toLowerCase().trim();
+  const status = String(p.status || p.state || p.positionStatus || "")
+    .toLowerCase()
+    .trim();
   return status.includes("close") || status === "closed" || !!p.closedAt || !!p.closed_at;
 }
 
@@ -731,54 +1000,6 @@ async function buildAccountForUser(userDoc) {
   };
 }
 
-function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
-  try {
-    const account = accountPayload?.account || accountPayload || null;
-    const payload = { userId, account };
-
-    io.emit("wallet_update", payload);
-    io.emit("account_update", payload);
-
-    if (Array.isArray(positions)) io.emit("positions_update", { userId, positions });
-    if (transaction) io.emit("transactions_update", { userId, transaction });
-
-    if (userId) {
-      const room = `user:${String(userId)}`;
-      io.to(room).emit("wallet_update", payload);
-      io.to(room).emit("account_update", payload);
-      if (Array.isArray(positions)) io.to(room).emit("positions_update", { userId, positions });
-      if (transaction) io.to(room).emit("transactions_update", { userId, transaction });
-    }
-  } catch (e) {
-    console.warn("emitStateUpdates error:", e?.message || e);
-  }
-}
-
-async function requireAdmin(req, res, next) {
-  try {
-    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
-    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
-
-    const auth = req.headers.authorization || req.headers.Authorization || "";
-    const token = String(auth).toLowerCase().startsWith("bearer ") ? String(auth).split(" ")[1] : "";
-    if (!token || !process.env.JWT_SECRET) {
-      return res.status(401).json({ ok: false, error: "Admin unauthorized" });
-    }
-
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const role = String(payload?.role || payload?.type || "").toLowerCase();
-
-    if (role === "admin" || payload?.isAdmin === true || payload?.admin === true) {
-      req.user = payload;
-      return next();
-    }
-
-    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
-  } catch {
-    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
-  }
-}
-
 function buildEmptyAccountPayload(userDoc) {
   const walletSnapshot = normalizeWalletSnapshot(
     {
@@ -837,7 +1058,6 @@ async function safeLoadOpenPositionsForUser(userId) {
       .lean()
       .exec()
       .catch(() => []);
-
     return (rows || []).map((p) => {
       try {
         return annotatePosition(p);
@@ -858,7 +1078,6 @@ async function safeLoadAllPositionsForUser(userId) {
       .lean()
       .exec()
       .catch(() => []);
-
     return (rows || []).map((p) => {
       try {
         return annotatePosition(p);
@@ -890,15 +1109,64 @@ async function safeGetUserFromBearer(req) {
   }
 }
 
+function emitStateUpdates(userId, accountPayload = null, positions = null, transaction = null) {
+  try {
+    const account = accountPayload?.account || accountPayload || null;
+    const payload = { userId, account };
+
+    io.emit("wallet_update", payload);
+    io.emit("account_update", payload);
+
+    if (Array.isArray(positions)) io.emit("positions_update", { userId, positions });
+    if (transaction) io.emit("transactions_update", { userId, transaction });
+
+    if (userId) {
+      const room = `user:${String(userId)}`;
+      io.to(room).emit("wallet_update", payload);
+      io.to(room).emit("account_update", payload);
+      if (Array.isArray(positions)) io.to(room).emit("positions_update", { userId, positions });
+      if (transaction) io.to(room).emit("transactions_update", { userId, transaction });
+    }
+  } catch (e) {
+    console.warn("emitStateUpdates error:", e?.message || e);
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const key = String(req.headers["x-admin-api-key"] || req.headers["x-admin-key"] || "");
+    if (process.env.ADMIN_API_KEY && key && key === process.env.ADMIN_API_KEY) return next();
+
+    const auth = req.headers.authorization || req.headers.Authorization || "";
+    const token = String(auth).toLowerCase().startsWith("bearer ") ? String(auth).split(" ")[1] : "";
+    if (!token || !process.env.JWT_SECRET) {
+      return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+    }
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const role = String(payload?.role || payload?.type || "").toLowerCase();
+
+    if (role === "admin" || payload?.isAdmin === true || payload?.admin === true) {
+      req.user = payload;
+      return next();
+    }
+
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  } catch {
+    return res.status(401).json({ ok: false, error: "Admin unauthorized" });
+  }
+}
+
 function scheduleLivePnLSync(symbol) {
   const key = compactSymbol(symbol);
   if (!key) return;
 
-  const prev = liveSyncTimers.get(key);
+  if (!global.liveSyncTimers) global.liveSyncTimers = new Map();
+  const prev = global.liveSyncTimers.get(key);
   if (prev) clearTimeout(prev);
 
   const timer = setTimeout(async () => {
-    liveSyncTimers.delete(key);
+    global.liveSyncTimers.delete(key);
     try {
       await syncLivePnLForSymbol(symbol);
     } catch (e) {
@@ -907,7 +1175,7 @@ function scheduleLivePnLSync(symbol) {
   }, 120);
 
   if (timer?.unref) timer.unref();
-  liveSyncTimers.set(key, timer);
+  global.liveSyncTimers.set(key, timer);
 }
 
 async function syncLivePnLForSymbol(symbol) {
@@ -1060,6 +1328,77 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   };
 }
 
+function getCurrentPriceForSymbol(symbol) {
+  const targetCompact = compactSymbol(symbol);
+  if (!targetCompact) return null;
+
+  const store = getPriceStore();
+
+  for (const [key, item] of Object.entries(store)) {
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.label,
+      item?.ticker,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+    ].filter(Boolean);
+
+    const matched = candidates.some((candidate) => {
+      const c = compactSymbol(candidate);
+      if (!c) return false;
+      return (
+        c === targetCompact ||
+        c.includes(targetCompact) ||
+        targetCompact.includes(c) ||
+        sameMarketSymbol(c, targetCompact)
+      );
+    });
+
+    if (!matched) continue;
+
+    const px = extractQuotePrice(item);
+    if (Number.isFinite(px) && px > 0) return px;
+  }
+
+  return null;
+}
+
+function resolveOrderPrice(body = {}, symbol = "") {
+  const direct = normalizePrice(body);
+  if (direct) return direct;
+
+  const candidates = [
+    body.currentPrice,
+    body.current_price,
+    body.lastPrice,
+    body.last_price,
+    body.tvPrice,
+    body.tv_price,
+    body.entry,
+    body.entryPrice,
+    body.entry_price,
+    body.marketPrice,
+    body.market_price,
+    body.quotePrice,
+    body.quote_price,
+    body.executionPrice,
+    body.execution_price,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const market = getCurrentPriceForSymbol(symbol);
+  if (market && Number.isFinite(market) && market > 0) return market;
+
+  return null;
+}
+
 /* ======================================================
    HEALTH / MAIL
    ====================================================== */
@@ -1135,89 +1474,82 @@ app.post("/api/_send_test_email", async (req, res) => {
 });
 
 /* ======================================================
-   MARKET ROUTES
+   MARKET ROUTES (SAFE - ONLY ONCE)
    ====================================================== */
 
-app.get("/api/markets", (req, res) =>
-  res.json({
-    markets: [
-      "Crypto",
-      "Stocks",
-      "Forex",
-      "Indices",
-      "Futures",
-      "Bonds",
-    ],
-  })
-);
+const SAMPLE_SYMBOLS = [
+  { symbol: "BINANCE:BTCUSDT", label: "BTC/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH/USDT", market: "Crypto" },
+  { symbol: "OANDA:EUR_USD", label: "EUR/USD", market: "Forex" },
+  { symbol: "NASDAQ:AAPL", label: "AAPL", market: "Stocks" },
+  { symbol: "INDEX:SPX", label: "S&P 500", market: "Indices" },
+  { symbol: "BINANCE:BCHUSDT", label: "BCH/USDT", market: "Crypto" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA/USDT", market: "Crypto" },
+  { symbol: "FOREX:USDJPY", label: "USD/JPY", market: "Forex" },
+];
 
-app.get("/api/market/list", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
+function buildQuotesArray() {
+  const store = getPriceStore();
+  const keys = Object.keys(store);
 
-app.get("/api/market/symbols", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
-
-app.get("/api/markets/symbols", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
-
-app.get("/api/api/symbols", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
-
-app.get("/api/api/markets", (req, res) =>
-  res.json({
-    markets: [
-      "Crypto",
-      "Stocks",
-      "Forex",
-      "Indices",
-    ],
-  })
-);
-
-try {
-  if (typeof marketRoutesFactory === "function") {
-    app.use(
-      "/api/market",
-      marketRoutesFactory({
-        polygonSocket: null,
-        priceHandler,
-      })
-    );
-  } else {
-    app.use("/api/market", marketRoutesFactory);
+  if (keys.length) {
+    return keys.map((symbol) => normalizeQuote(symbol, store[symbol] || {}));
   }
-} catch (e) {
-  console.warn(
-    "No se pudo montar /api/market:",
-    e && e.message ? e.message : e
+
+  return SAMPLE_SYMBOLS.map((s) =>
+    normalizeQuote(s.symbol, {
+      label: s.label,
+      market: s.market,
+      price: null,
+      updatedAt: new Date().toISOString(),
+    })
   );
 }
 
-app.get("/api/quotes", (req, res) =>
-  res.json(buildMarketPayload().quotes)
+function buildMarketPayload() {
+  const quotes = buildQuotesArray();
+  return {
+    ok: true,
+    count: quotes.length,
+    quotes,
+    data: quotes,
+    items: quotes,
+    latest: quotes[0] || null,
+  };
+}
+
+app.get("/api/markets", (req, res) =>
+  res.json({
+    markets: ["Crypto", "Stocks", "Forex", "Indices", "Futures", "Bonds"],
+  })
 );
 
-/* ======================================================
-   FIX /api/latest
-   ====================================================== */
+app.get("/api/market/list", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/markets", (req, res) =>
+  res.json({ markets: ["Crypto", "Stocks", "Forex", "Indices"] })
+);
+
+app.get("/api/quotes", (req, res) =>
+  res.status(200).json({
+    ok: true,
+    quotes: getPriceStore(),
+    data: getPriceStore(),
+    count: Object.keys(getPriceStore()).length,
+    serverTime: Date.now(),
+  })
+);
+
+app.get("/api/market/quotes", (req, res) =>
+  res.status(200).json(buildMarketPayload())
+);
 
 app.get("/api/latest", (req, res) => {
   try {
-    const rawSymbol =
-      req.query.symbol ||
-      req.query.tvSymbol ||
-      req.query.selectedSymbol ||
-      "";
-
-    const symbol = normalizeSymbol(
-      String(rawSymbol || "")
-        .trim()
-        .toUpperCase()
-    );
+    const rawSymbol = req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "";
+    const symbol = normalizeSymbol(String(rawSymbol || "").trim().toUpperCase());
 
     if (!symbol) {
       return res.json({
@@ -1240,12 +1572,9 @@ app.get("/api/latest", (req, res) => {
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        const store = getPriceStore?.() || {};
+        const store = getPriceStore() || {};
         const found = findBestPriceMatch(symbol, store);
-
-        if (found) {
-          price = extractQuotePrice(found);
-        }
+        if (found) price = extractQuotePrice(found);
       } catch {}
     }
 
@@ -1273,106 +1602,64 @@ app.get("/api/latest", (req, res) => {
     });
   } catch (e) {
     console.error("/api/latest error:", e);
-
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
-    });
+    return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
-
-app.get("/api/market/quotes", (req, res) =>
-  res.json(buildMarketPayload())
-);
 
 app.get("/api/market/latest", (req, res) => {
   try {
-    const rawSymbol =
-      req.query.symbol ||
-      req.query.tvSymbol ||
-      req.query.selectedSymbol ||
-      "";
-
-    const symbol = normalizeSymbol(
-      String(rawSymbol || "")
-        .trim()
-        .toUpperCase()
-    );
-
-    if (!symbol) {
-      return res.json({
-        ok: true,
-        symbol: null,
-        price: null,
-        currentPrice: null,
-        close: null,
-        last: null,
-        updatedAt: new Date().toISOString(),
-        message: "symbol_missing",
-      });
-    }
-
-    let price = null;
-
-    try {
-      price = getCurrentPriceForSymbol(symbol);
-    } catch {}
-
-    if (!Number.isFinite(price) || price <= 0) {
-      try {
-        const store = getPriceStore?.() || {};
-        const found = findBestPriceMatch(symbol, store);
-
-        if (found) {
-          price = extractQuotePrice(found);
-        }
-      } catch {}
-    }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.json({
-        ok: false,
-        error: "price_not_found",
-        symbol,
-        price: null,
-        currentPrice: null,
-        close: null,
-        last: null,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    return res.json({
+    const quotes = getPriceStore();
+    return res.status(200).json({
       ok: true,
-      symbol,
-      price,
-      currentPrice: price,
-      close: price,
-      last: price,
-      updatedAt: new Date().toISOString(),
+      prices: quotes,
+      data: quotes,
+      latest: quotes,
+      count: Object.keys(quotes).length,
+      serverTime: Date.now(),
     });
-  } catch (e) {
-    console.error("/api/market/latest error:", e);
-
-    return res.status(500).json({
-      ok: false,
-      error: "server_error",
+  } catch (err) {
+    console.error("❌ /api/market/latest:", err);
+    return res.status(200).json({
+      ok: true,
+      prices: {},
+      data: {},
+      latest: {},
+      count: 0,
+      fallback: true,
+      serverTime: Date.now(),
     });
   }
 });
 
-app.get("/api/market/polygon/quotes", (req, res) =>
-  res.json(buildMarketPayload())
-);
+app.get("/api/market/polygon/quotes", (req, res) => {
+  try {
+    const quotesMap = getPriceStore();
+    const quotes = Object.values(quotesMap);
+    return res.status(200).json({
+      ok: true,
+      quotes,
+      data: quotes,
+      count: quotes.length,
+      serverTime: Date.now(),
+    });
+  } catch (err) {
+    console.error("❌ /api/market/polygon/quotes:", err);
+    return res.status(200).json({
+      ok: true,
+      quotes: [],
+      data: [],
+      count: 0,
+      fallback: true,
+      serverTime: Date.now(),
+    });
+  }
+});
 
-app.get("/api/market/polygon/symbols", (req, res) =>
-  res.json(SAMPLE_SYMBOLS)
-);
+app.get("/api/market/polygon/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
 
 app.get("/api/symbols", (req, res) => {
   try {
     const prices = getPriceStore();
-
     if (prices && Object.keys(prices).length) {
       return res.json(
         Object.keys(prices).map((k) => ({
@@ -1382,154 +1669,46 @@ app.get("/api/symbols", (req, res) => {
         }))
       );
     }
-
     return res.json(SAMPLE_SYMBOLS);
   } catch (err) {
     console.error("api/symbols error:", err);
-
     return res.json(SAMPLE_SYMBOLS);
   }
 });
 
+try {
+  if (typeof marketRoutesFactory === "function") {
+    app.use(
+      "/api/market",
+      marketRoutesFactory({
+        polygonSocket: null,
+        priceHandler,
+      })
+    );
+  } else {
+    app.use("/api/market", marketRoutesFactory);
+  }
+} catch (e) {
+  console.warn("No se pudo montar /api/market:", e && e.message ? e.message : e);
+}
+
 /* ======================================================
-   ACCOUNT / WALLET / POSITIONS
+   ROUTES MODULARES
    ====================================================== */
 
-app.get("/api/account", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    return res.json(await safeBuildAccountForUser(user));
-  } catch (e) {
-    console.error("account error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/wallet", walletRoutes);
+app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
+app.use("/api/account", accountRoutes);
+
+app.use("/api/api", (req, res) => {
+  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
+  return res.redirect(307, newUrl);
 });
 
-app.get("/api/me", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    return res.status(200).json(await safeBuildAccountForUser(user));
-  } catch (e) {
-    console.error("/api/me error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/profile", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    return res.json(await safeBuildAccountForUser(user));
-  } catch (e) {
-    console.error("profile error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
-
-app.get("/api/transactions", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
-    const transactions = await safeLoadTransactionsForUser(user._id, limit);
-    return res.json({ ok: true, count: transactions.length, transactions, data: transactions, items: transactions });
-  } catch (e) {
-    console.error("/api/transactions error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/wallet", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const payload = await safeBuildAccountForUser(user);
-    return res.json({
-      ok: true,
-      wallet: payload.wallet,
-      account: payload.account,
-      balance: payload.account.balance,
-      balanceOwn: payload.account.balanceOwn,
-      availableBalance: payload.account.availableBalance,
-      equity: payload.account.equity,
-      marginUsed: payload.account.marginUsed,
-      freeMargin: payload.account.freeMargin,
-      marginLevel: payload.account.marginLevel,
-      leverageFactor: payload.account.leverageFactor,
-      currency: payload.account.currency,
-      transactions: payload.transactions,
-    });
-  } catch (e) {
-    console.error("/api/wallet error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/billetera", (req, res) => res.redirect(307, "/api/wallet"));
-
-app.get("/api/positions", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (e) {
-    console.error("/api/positions error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/posiciones", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (e) {
-    console.error("/api/posiciones error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/positions/all", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadAllPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (e) {
-    console.error("/api/positions/all error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/posiciones/all", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadAllPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (e) {
-    console.error("/api/posiciones/all error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
-
-app.get("/api/trade/positions", async (req, res) => {
-  try {
-    const user = await safeGetUserFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
-    const positions = await safeLoadOpenPositionsForUser(user._id);
-    return res.json({ ok: true, positions, data: positions, items: positions, count: positions.length });
-  } catch (e) {
-    console.error("/api/trade/positions error", e);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
-});
 /* ======================================================
    ADMIN
    ====================================================== */
@@ -1745,10 +1924,7 @@ app.post("/api/trade/open", async (req, res) => {
     const user = await getUserDocFromBearer(req);
 
     if (!user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Unauthorized",
-      });
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
     const body = req.body || {};
@@ -1757,19 +1933,13 @@ app.post("/api/trade/open", async (req, res) => {
     const qty = normalizeQty(body);
 
     if (!symbol || !side || !qty) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_params",
-      });
+      return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    lockKey = makeOpenLockKey(user._id, symbol, side, qty);
+    lockKey = `${String(user._id)}:${symbol}:${side}:${qty}`;
 
     if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
-      return res.status(429).json({
-        ok: false,
-        error: "duplicate_order_blocked",
-      });
+      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1806,26 +1976,21 @@ app.post("/api/trade/open", async (req, res) => {
           Number(global.priceCache?.[symbol]) ||
           Number(global.priceMeta?.[symbol]?.price);
 
-        if (Number.isFinite(cached) && cached > 0) {
-          price = cached;
-        }
+        if (Number.isFinite(cached) && cached > 0) price = cached;
       } catch {}
     }
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
         const marketPrice = Number(getCurrentPriceForSymbol(symbol));
-        if (Number.isFinite(marketPrice) && marketPrice > 0) {
-          price = marketPrice;
-        }
+        if (Number.isFinite(marketPrice) && marketPrice > 0) price = marketPrice;
       } catch {}
     }
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
-        const store = typeof global.getPriceStore === "function" ? global.getPriceStore() : {};
-        const found = typeof findBestPriceMatch === "function" ? findBestPriceMatch(symbol, store) : (store?.[symbol] || null);
-
+        const store = getPriceStore();
+        const found = findBestPriceMatch(symbol, store);
         if (found) {
           const extracted =
             Number(found?.price) ||
@@ -1833,10 +1998,7 @@ app.post("/api/trade/open", async (req, res) => {
             Number(found?.lastPrice) ||
             Number(found?.close) ||
             Number(found?.last);
-
-          if (Number.isFinite(extracted) && extracted > 0) {
-            price = extracted;
-          }
+          if (Number.isFinite(extracted) && extracted > 0) price = extracted;
         }
       } catch {}
     }
@@ -1845,9 +2007,7 @@ app.post("/api/trade/open", async (req, res) => {
       try {
         if (typeof global.getFakePrice === "function") {
           const fakePrice = Number(global.getFakePrice(symbol));
-          if (Number.isFinite(fakePrice) && fakePrice > 0) {
-            price = fakePrice;
-          }
+          if (Number.isFinite(fakePrice) && fakePrice > 0) price = fakePrice;
         }
       } catch {}
     }
@@ -1855,23 +2015,16 @@ app.post("/api/trade/open", async (req, res) => {
     if (!Number.isFinite(price) || price <= 0) {
       try {
         const generated =
-          typeof generateBasePrice === "function"
-            ? Number(generateBasePrice(symbol))
-            : 100;
+          typeof generateBasePrice === "function" ? Number(generateBasePrice(symbol)) : 100;
 
         if (Number.isFinite(generated) && generated > 0) {
           price = generated;
-
-          if (typeof writePrice === "function") {
-            writePrice(symbol, price, { source: "generated" });
-          }
+          if (typeof writePrice === "function") writePrice(symbol, price, { source: "generated" });
         }
       } catch {}
     }
 
-    if (!Number.isFinite(price) || price <= 0) {
-      price = 100;
-    }
+    if (!Number.isFinite(price) || price <= 0) price = 100;
 
     price = Number(price);
 
@@ -1886,18 +2039,11 @@ app.post("/api/trade/open", async (req, res) => {
 
     const notional = Math.abs(qty * price);
     let requiredMargin = notional / leverage;
-
-    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
-      requiredMargin = 1;
-    }
+    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) requiredMargin = 1;
 
     const freeMargin = Number(balanceOwn + credit - marginUsed) || 0;
-
     if (freeMargin < requiredMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_margin",
-      });
+      return res.status(400).json({ ok: false, error: "insufficient_margin" });
     }
 
     wallet.balanceOwn = Math.max(balanceOwn - requiredMargin, 0);
@@ -1907,7 +2053,6 @@ app.post("/api/trade/open", async (req, res) => {
     wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
-
     await wallet.save();
 
     const position = await Position.create({
@@ -1954,7 +2099,6 @@ app.post("/api/trade/open", async (req, res) => {
       try {
         releaseOpenLock(lockKey);
       } catch {}
-
       try {
         releaseActiveOrder(lockKey);
       } catch {}
@@ -1969,28 +2113,19 @@ app.post("/api/trade/close", async (req, res) => {
     const user = await getUserDocFromBearer(req);
 
     if (!user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Unauthorized",
-      });
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
 
     const { positionId } = req.body || {};
 
     if (!positionId) {
-      return res.status(400).json({
-        ok: false,
-        error: "positionId_required",
-      });
+      return res.status(400).json({ ok: false, error: "positionId_required" });
     }
 
-    lockKey = makeCloseLockKey(user._id, positionId);
+    lockKey = `${String(user._id)}:${String(positionId)}:close`;
 
     if (!withOpenLock(lockKey, 2500)) {
-      return res.status(429).json({
-        ok: false,
-        error: "duplicate_close_blocked",
-      });
+      return res.status(429).json({ ok: false, error: "duplicate_close_blocked" });
     }
 
     const position = await Position.findOne({
@@ -2000,10 +2135,7 @@ app.post("/api/trade/close", async (req, res) => {
     });
 
     if (!position) {
-      return res.status(404).json({
-        ok: false,
-        error: "not_found",
-      });
+      return res.status(404).json({ ok: false, error: "not_found" });
     }
 
     const body = req.body || {};
@@ -2030,19 +2162,14 @@ app.post("/api/trade/close", async (req, res) => {
         const cached =
           Number(global.priceCache?.[position.symbol]) ||
           Number(global.priceMeta?.[position.symbol]?.price);
-
-        if (Number.isFinite(cached) && cached > 0) {
-          price = cached;
-        }
+        if (Number.isFinite(cached) && cached > 0) price = cached;
       } catch {}
     }
 
     if (!Number.isFinite(price) || price <= 0) {
       try {
         const marketPrice = Number(getCurrentPriceForSymbol(position.symbol));
-        if (Number.isFinite(marketPrice) && marketPrice > 0) {
-          price = marketPrice;
-        }
+        if (Number.isFinite(marketPrice) && marketPrice > 0) price = marketPrice;
       } catch {}
     }
 
@@ -2050,9 +2177,7 @@ app.post("/api/trade/close", async (req, res) => {
       try {
         if (typeof global.getFakePrice === "function") {
           const fakePrice = Number(global.getFakePrice(position.symbol));
-          if (Number.isFinite(fakePrice) && fakePrice > 0) {
-            price = fakePrice;
-          }
+          if (Number.isFinite(fakePrice) && fakePrice > 0) price = fakePrice;
         }
       } catch {}
     }
@@ -2062,10 +2187,7 @@ app.post("/api/trade/close", async (req, res) => {
     }
 
     if (!Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "price_invalid",
-      });
+      return res.status(400).json({ ok: false, error: "price_invalid" });
     }
 
     const result = await applyCloseToPosition({
@@ -2079,11 +2201,7 @@ app.post("/api/trade/close", async (req, res) => {
       scheduleLivePnLSync(position.symbol);
     } catch {}
 
-    return res.json({
-      ok: true,
-      msg: "CLOSED",
-      ...result,
-    });
+    return res.json({ ok: true, msg: "CLOSED", ...result });
   } catch (err) {
     console.error("/api/trade/close error:", err);
 
@@ -2104,16 +2222,9 @@ app.post("/api/trade/close", async (req, res) => {
 app.get("/api/trade/positions", async (req, res) => {
   try {
     const user = await safeGetUserFromBearer(req);
-
-    if (!user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Unauthorized",
-      });
-    }
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const positions = await safeLoadOpenPositionsForUser(user._id);
-
     return res.json({
       ok: true,
       positions,
@@ -2123,7 +2234,6 @@ app.get("/api/trade/positions", async (req, res) => {
     });
   } catch (err) {
     console.error("/api/trade/positions error", err);
-
     return res.status(500).json({
       ok: false,
       error: "server_error",
@@ -2132,912 +2242,161 @@ app.get("/api/trade/positions", async (req, res) => {
   }
 });
 
-
-
-
-
-
-// ======================================================
-// SAFE GLOBAL PRICE STORE
-// ======================================================
-
-global.marketQuotes = global.marketQuotes || {};
-
-global.getPriceStore =
-  global.getPriceStore ||
-  function () {
-    return global.marketQuotes || {};
-  };
-
-// ======================================================
-// MARKET / QUOTES SAFE ROUTES
-// ======================================================
-
-function buildSafeQuotes() {
-  try {
-    const store =
-      typeof global.getPriceStore === "function"
-        ? global.getPriceStore()
-        : global.marketQuotes || {};
-
-    const normalized = {};
-
-    for (const [symbol, raw] of Object.entries(store || {})) {
-      try {
-        const price = Number(
-          raw?.price ??
-          raw?.lastPrice ??
-          raw?.last ??
-          raw?.close ??
-          raw?.c ??
-          raw
-        );
-
-        if (!Number.isFinite(price) || price <= 0) {
-          continue;
-        }
-
-        normalized[symbol] = {
-          symbol,
-          price,
-          bid: Number(raw?.bid ?? price),
-          ask: Number(raw?.ask ?? price),
-          updatedAt:
-            raw?.updatedAt ||
-            raw?.timestamp ||
-            Date.now(),
-        };
-      } catch (e) {
-        console.error("normalize quote error", symbol, e);
-      }
-    }
-
-    return normalized;
-  } catch (err) {
-    console.error("buildSafeQuotes error", err);
-    return {};
-  }
-}
-
-// ======================================================
-// /api/market/latest
-// ======================================================
-
-app.get("/api/market/latest", (req, res) => {
-  try {
-    const quotes = buildSafeQuotes();
-
-    return res.status(200).json({
-      ok: true,
-      latest: quotes,
-      prices: quotes,
-      data: quotes,
-      count: Object.keys(quotes).length,
-    });
-  } catch (err) {
-    console.error("market/latest fatal", err);
-
-    return res.status(200).json({
-      ok: true,
-      latest: {},
-      prices: {},
-      data: {},
-      count: 0,
-    });
-  }
-});
-
-// ======================================================
-// /api/market/polygon/quotes
-// ======================================================
-
-app.get("/api/market/polygon/quotes", (req, res) => {
-  try {
-    const quotesMap = buildSafeQuotes();
-
-    const quotes = Object.values(quotesMap);
-
-    return res.status(200).json({
-      ok: true,
-      quotes,
-      data: quotes,
-      count: quotes.length,
-    });
-  } catch (err) {
-    console.error("polygon quotes fatal", err);
-
-    return res.status(200).json({
-      ok: true,
-      quotes: [],
-      data: [],
-      count: 0,
-    });
-  }
-});
-
-// ======================================================
-// /api/quotes
-// ======================================================
-
-app.get("/api/quotes", (req, res) => {
-  try {
-    const quotes = buildSafeQuotes();
-
-    return res.status(200).json({
-      ok: true,
-      quotes,
-      data: quotes,
-      count: Object.keys(quotes).length,
-    });
-  } catch (err) {
-    console.error("quotes fatal", err);
-
-    return res.status(200).json({
-      ok: true,
-      quotes: {},
-      data: {},
-      count: 0,
-    });
-  }
-});
-
-
-
-
-    
 /* ======================================================
-   ROUTES MODULARES
+   ACCOUNT / WALLET / POSITIONS
    ====================================================== */
-// ======================================================
-// 🔥 UNIVERSAL FAKE MARKET ENGINE (5 MERCADOS + ANY SYMBOL)
-// Pegar en server.js después de:
-// app.locals.priceHandler = priceHandler;
-// ======================================================
 
-global.priceCache = global.priceCache || {};
-global.priceMeta = global.priceMeta || {};
-
-// ------------------------------
-// SEEDS BASE POR MERCADO
-// ------------------------------
-const MARKET_SEEDS = {
-  forex: {
-    EURUSD: 1.0840,
-    USDJPY: 150.2500,
-    GBPUSD: 1.2740,
-    AUDUSD: 0.6650,
-    USDCAD: 1.3650,
-    USDCHF: 0.9010,
-    NZDUSD: 0.6120,
-    EURJPY: 163.1000,
-    EURGBP: 0.8540,
-    EURAUD: 1.6400,
-    GBPJPY: 191.5000,
-    EURCAD: 1.4800,
-  },
-
-  crypto: {
-    BTCUSDT: 67200,
-    ETHUSDT: 3500,
-    SOLUSDT: 145,
-    BNBUSDT: 585,
-    ADAUSDT: 0.45,
-    XRPUSDT: 0.53,
-    DOGEUSDT: 0.16,
-    BCHUSDT: 380,
-    LTCUSDT: 80,
-    DOTUSDT: 6.8,
-    AVAXUSDT: 35,
-    LINKUSDT: 18,
-    MATICUSDT: 0.75,
-  },
-
-  stocks: {
-    AAPL: 190,
-    TSLA: 250,
-    NVDA: 900,
-    MSFT: 420,
-    AMZN: 180,
-    META: 485,
-    GOOGL: 170,
-    NFLX: 625,
-    AMD: 165,
-    SPY: 520,
-    QQQ: 460,
-    DIA: 390,
-    IBM: 185,
-    ORCL: 140,
-  },
-
-  indices: {
-    SPX: 5200,
-    NAS100: 18500,
-    DJ30: 39000,
-    DAX40: 18400,
-    FTSE100: 8200,
-    NIKKEI225: 38500,
-    RUSSELL2000: 2100,
-    VIX: 14.5,
-  },
-
-  commodities: {
-    GOLD: 2400,
-    SILVER: 29,
-    OIL: 78,
-    WTI: 78,
-    BRENT: 82,
-    NATGAS: 2.8,
-    COPPER: 4.2,
-    CORN: 430,
-    WHEAT: 590,
-    SOYBEAN: 1180,
-    PLATINUM: 980,
-    PALLADIUM: 930,
-  },
-};
-
-// ------------------------------
-// CLASSIFICAR MERCADO
-// ------------------------------
-function detectMarket(symbol = "") {
-  const s = String(symbol || "")
-    .toUpperCase()
-    .replace("/", "")
-    .replace("-", "")
-    .trim();
-
-  if (!s) return "stocks";
-
-  if (
-    s.includes("BTC") ||
-    s.includes("ETH") ||
-    s.includes("SOL") ||
-    s.includes("BNB") ||
-    s.includes("ADA") ||
-    s.includes("XRP") ||
-    s.includes("DOGE") ||
-    s.includes("LTC") ||
-    s.includes("LINK") ||
-    s.includes("AVAX") ||
-    s.includes("MATIC") ||
-    s.includes("USDT") ||
-    s.includes("USDC") ||
-    s.includes("BUSD")
-  ) {
-    return "crypto";
-  }
-
-  if (/^[A-Z]{6}$/.test(s)) return "forex";
-
-  if (
-    s.includes("SPX") ||
-    s.includes("NAS100") ||
-    s.includes("DJ30") ||
-    s.includes("DAX40") ||
-    s.includes("FTSE100") ||
-    s.includes("NIKKEI") ||
-    s.includes("RUSSELL") ||
-    s.includes("VIX")
-  ) {
-    return "indices";
-  }
-
-  if (
-    s.includes("GOLD") ||
-    s.includes("SILVER") ||
-    s.includes("OIL") ||
-    s.includes("WTI") ||
-    s.includes("BRENT") ||
-    s.includes("NATGAS") ||
-    s.includes("COPPER") ||
-    s.includes("CORN") ||
-    s.includes("WHEAT") ||
-    s.includes("SOYBEAN") ||
-    s.includes("PLATINUM") ||
-    s.includes("PALLADIUM")
-  ) {
-    return "commodities";
-  }
-
-  return "stocks";
-}
-
-// ------------------------------
-// GENERAR PRECIO BASE
-// ------------------------------
-function generateBasePrice(symbol = "") {
-  const s = String(symbol || "")
-    .toUpperCase()
-    .replace("/", "")
-    .replace("-", "")
-    .trim();
-
-  const market = detectMarket(s);
-
-  for (const group of Object.values(MARKET_SEEDS)) {
-    if (Number.isFinite(group[s])) {
-      return Number(group[s]);
-    }
-  }
-
-  switch (market) {
-    case "crypto":
-      return 1 + Math.random() * 70000;
-
-    case "forex":
-      return 0.5 + Math.random() * 2;
-
-    case "indices":
-      return 1000 + Math.random() * 50000;
-
-    case "commodities":
-      return 10 + Math.random() * 3000;
-
-    default:
-      return 5 + Math.random() * 1000;
-  }
-}
-
-// ------------------------------
-// VOLATILIDAD
-// ------------------------------
-function getVolatility(symbol = "") {
-  const market = detectMarket(symbol);
-
-  switch (market) {
-    case "crypto":
-      return 0.01;
-
-    case "forex":
-      return 0.0015;
-
-    case "indices":
-      return 0.004;
-
-    case "commodities":
-      return 0.005;
-
-    default:
-      return 0.006;
-  }
-}
-
-// ------------------------------
-// WRITE PRICE
-// ------------------------------
-function writePrice(symbol, price, raw = null) {
-  const clean =
-    typeof normalizeSymbol === "function"
-      ? normalizeSymbol(symbol)
-      : String(symbol || "").toUpperCase();
-
-  const numeric = Number(price);
-
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
-    return false;
-  }
-
-  const payload = {
-    symbol: clean,
-    price: numeric,
-    market: detectMarket(clean),
-    updatedAt: new Date().toISOString(),
-    raw,
-  };
-
-  global.priceCache[clean] = numeric;
-  global.priceMeta[clean] = payload;
-
+app.get("/api/account", async (req, res) => {
   try {
-    if (priceHandler?.prices instanceof Map) {
-      priceHandler.prices.set(clean, payload);
-    } else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
-      priceHandler.prices[clean] = payload;
-    }
-  } catch {}
-
-  return true;
-}
-
-// ------------------------------
-// GET / CREATE PRICE
-// ------------------------------
-global.priceCache = global.priceCache || {};
-global.priceMeta = global.priceMeta || {};
-
-global.getFakePrice = global.getFakePrice || ((symbol) => {
-  const clean =
-    typeof normalizeSymbol === "function"
-      ? normalizeSymbol(symbol)
-      : String(symbol || "").toUpperCase().trim();
-
-  if (!clean) return null;
-
-  const existing =
-    Number(global.priceCache?.[clean]) ||
-    Number(global.priceMeta?.[clean]?.price);
-
-  if (Number.isFinite(existing) && existing > 0) {
-    return existing;
-  }
-
-  const base =
-    typeof generateBasePrice === "function"
-      ? Number(generateBasePrice(clean))
-      : Number(100 + Math.random() * 1000);
-
-  const safeBase =
-    Number.isFinite(base) && base > 0
-      ? base
-      : Number((50 + Math.random() * 1000).toFixed(6));
-
-  try {
-    if (typeof writePrice === "function") {
-      writePrice(clean, safeBase, {
-        source: "seed",
-      });
-    } else {
-      global.priceCache[clean] = safeBase;
-      global.priceMeta[clean] = {
-        symbol: clean,
-        price: safeBase,
-        updatedAt: new Date().toISOString(),
-        raw: { source: "seed" },
-      };
-    }
-  } catch (err) {
-    console.warn("writePrice fallback error:", err?.message || err);
-
-    global.priceCache[clean] = safeBase;
-    global.priceMeta[clean] = {
-      symbol: clean,
-      price: safeBase,
-      updatedAt: new Date().toISOString(),
-      raw: { source: "seed" },
-    };
-  }
-
-  return safeBase;
-});
-
-// ------------------------------
-// FORCE PRICE EXISTS
-// ------------------------------
-global.forcePriceExists =
-  global.forcePriceExists ||
-  function forcePriceExists(symbol) {
-    const clean =
-      typeof normalizeSymbol === "function"
-        ? normalizeSymbol(symbol)
-        : String(symbol || "").toUpperCase().trim();
-
-    if (!clean) return null;
-
-    const current =
-      Number(global.priceCache?.[clean]) ||
-      Number(global.priceMeta?.[clean]?.price);
-
-    if (Number.isFinite(current) && current > 0) {
-      return current;
-    }
-
-    const forced = global.getFakePrice(clean);
-
-    if (Number.isFinite(forced) && forced > 0) {
-      return forced;
-    }
-
-    const fallback = Number((50 + Math.random() * 1000).toFixed(6));
-
-    global.priceCache[clean] = fallback;
-    global.priceMeta[clean] = {
-      symbol: clean,
-      price: fallback,
-      updatedAt: new Date().toISOString(),
-      raw: { source: "force-fallback" },
-    };
-
-    return fallback;
-  };
-
-// ------------------------------
-// SIMPLE PRICE STORE
-// ------------------------------
-global.getPriceStore =
-  global.getPriceStore ||
-  function () {
-    const store = {};
-
-    for (const [symbol, value] of Object.entries(global.priceCache || {})) {
-      const price = Number(value);
-
-      if (Number.isFinite(price) && price > 0) {
-        store[symbol] = {
-          symbol,
-          price,
-          updatedAt:
-            global.priceMeta?.[symbol]?.updatedAt ||
-            new Date().toISOString(),
-          raw: global.priceMeta?.[symbol]?.raw || null,
-        };
-      }
-    }
-
-    return store;
-  };
-
-// ------------------------------
-// UPDATE PRICE STORE
-// ------------------------------
-global.updatePriceStore =
-  global.updatePriceStore ||
-  function (symbol, price) {
-    const clean =
-      typeof normalizeSymbol === "function"
-        ? normalizeSymbol(symbol)
-        : String(symbol || "").toUpperCase().trim();
-
-    const numeric = Number(price);
-
-    if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
-      return false;
-    }
-
-    global.priceCache[clean] = numeric;
-    global.priceMeta[clean] = {
-      symbol: clean,
-      price: numeric,
-      updatedAt: new Date().toISOString(),
-      raw: global.priceMeta?.[clean]?.raw || null,
-    };
-
-    return true;
-  };
-
-// ------------------------------
-// SEED INICIAL
-// ------------------------------
-function seedInitialSymbols() {
-  for (const group of Object.values(MARKET_SEEDS || {})) {
-    for (const [sym, px] of Object.entries(group || {})) {
-      const price = Number(px);
-
-      if (!Number.isFinite(price) || price <= 0) continue;
-
-      if (
-        !Number.isFinite(global.priceCache?.[sym]) ||
-        Number(global.priceCache?.[sym]) <= 0
-      ) {
-        try {
-          if (typeof writePrice === "function") {
-            writePrice(sym, price, {
-              source: "seed",
-            });
-          } else {
-            global.priceCache[sym] = price;
-            global.priceMeta[sym] = {
-              symbol: sym,
-              price,
-              updatedAt: new Date().toISOString(),
-              raw: { source: "seed" },
-            };
-          }
-        } catch (err) {
-          console.warn("seedInitialSymbols error:", err?.message || err);
-        }
-      }
-    }
-  }
-}
-
-seedInitialSymbols();
-
-// ------------------------------
-// LIVE MARKET
-// ------------------------------
-setInterval(() => {
-  try {
-    const keys = Object.keys(global.priceCache || {});
-
-    for (const symbol of keys) {
-      const current = Number(global.priceCache[symbol]);
-
-      if (!Number.isFinite(current) || current <= 0) {
-        continue;
-      }
-
-      const vol =
-        typeof getVolatility === "function"
-          ? Number(getVolatility(symbol))
-          : 0.001;
-
-      const drift = (Math.random() - 0.5) * vol;
-
-      let next = current * (1 + drift);
-
-      next = Math.max(next, 0.0000001);
-
-      const finalPrice = Number(next.toFixed(6));
-
-      try {
-        if (typeof writePrice === "function") {
-          writePrice(
-            symbol,
-            finalPrice,
-            global.priceMeta?.[symbol]?.raw || null
-          );
-        } else {
-          global.priceCache[symbol] = finalPrice;
-          global.priceMeta[symbol] = {
-            symbol,
-            price: finalPrice,
-            updatedAt: new Date().toISOString(),
-            raw: global.priceMeta?.[symbol]?.raw || null,
-          };
-        }
-      } catch (err) {
-        console.warn("live market writePrice error:", err?.message || err);
-
-        global.priceCache[symbol] = finalPrice;
-        global.priceMeta[symbol] = {
-          symbol,
-          price: finalPrice,
-          updatedAt: new Date().toISOString(),
-          raw: global.priceMeta?.[symbol]?.raw || null,
-        };
-      }
-    }
-  } catch (err) {
-    console.error("Fake market error:", err);
-  }
-}, 1000);
-
-// ------------------------------
-// GET MARKET PRICE
-// ------------------------------
-global.getMarketPrice =
-  global.getMarketPrice ||
-  function (symbol) {
-    const clean =
-      typeof normalizeSymbol === "function"
-        ? normalizeSymbol(symbol)
-        : String(symbol || "").toUpperCase().trim();
-
-    if (!clean) return null;
-
-    const cached =
-      Number(global.priceCache?.[clean]) ||
-      Number(global.priceMeta?.[clean]?.price);
-
-    if (Number.isFinite(cached) && cached > 0) {
-      return cached;
-    }
-
-    return global.getFakePrice(clean);
-  };
-
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes);
-app.use("/api/positions", positionsRoutes);
-app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes);
-
-app.use("/api/api", (req, res) => {
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
-
-/* ======================================================
-   MARKET / QUOTES SAFE FIX
-====================================================== */
-
-// SAFE GLOBAL STORE
-global.marketQuotes = global.marketQuotes || {};
-
-// SAFE PRICE STORE
-if (typeof global.getPriceStore !== "function") {
-  global.getPriceStore = () => global.marketQuotes || {};
-}
-
-// SAFE WRITE PRICE
-if (typeof global.writePrice !== "function") {
-  global.writePrice = (symbol, price, extra = {}) => {
-    try {
-      if (!symbol) return;
-
-      const numericPrice = Number(price);
-
-      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
-        return;
-      }
-
-      global.marketQuotes[symbol] = {
-        ...(global.marketQuotes[symbol] || {}),
-        symbol,
-        price: numericPrice,
-        bid: Number(extra.bid ?? numericPrice),
-        ask: Number(extra.ask ?? numericPrice),
-        updatedAt: Date.now(),
-        ...extra,
-      };
-    } catch (err) {
-      console.error("❌ writePrice error:", err);
-    }
-  };
-}
-
-/* ======================================================
-   SAFE HELPERS
-====================================================== */
-
-function safeExtractPrice(value) {
-  try {
-    const price = Number(
-      value?.price ??
-      value?.lastPrice ??
-      value?.last ??
-      value?.close ??
-      value?.c ??
-      value
-    );
-
-    if (!Number.isFinite(price) || price <= 0) {
-      return null;
-    }
-
-    return price;
-  } catch {
-    return null;
-  }
-}
-
-function safeNormalizeQuote(symbol, value) {
-  const price = safeExtractPrice(value);
-
-  if (!price) return null;
-
-  return {
-    symbol,
-    price,
-    bid: Number(value?.bid ?? price),
-    ask: Number(value?.ask ?? price),
-    updatedAt:
-      value?.updatedAt ||
-      value?.timestamp ||
-      Date.now(),
-  };
-}
-
-/* ======================================================
-   MARKET LATEST
-====================================================== */
-
-app.get("/api/market/latest", async (req, res) => {
-  try {
-    const safeStore =
-      typeof global.getPriceStore === "function"
-        ? global.getPriceStore()
-        : global.marketQuotes || {};
-
-    const latest = {};
-
-    for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const normalized = safeNormalizeQuote(symbol, value);
-
-      if (!normalized) continue;
-
-      latest[symbol] = normalized;
-    }
-
-    return res.status(200).json({
-      ok: true,
-      prices: latest,
-      data: latest,
-      latest,
-      count: Object.keys(latest).length,
-      serverTime: Date.now(),
-    });
-
-  } catch (err) {
-    console.error("❌ /api/market/latest:", err);
-
-    return res.status(200).json({
-      ok: true,
-      prices: {},
-      data: {},
-      latest: {},
-      count: 0,
-      fallback: true,
-      serverTime: Date.now(),
-    });
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    return res.json(await safeBuildAccountForUser(user));
+  } catch (e) {
+    console.error("account error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
-/* ======================================================
-   POLYGON QUOTES SAFE
-====================================================== */
-
-app.get("/api/market/polygon/quotes", async (req, res) => {
+app.get("/api/me", async (req, res) => {
   try {
-    const safeStore =
-      typeof global.getPriceStore === "function"
-        ? global.getPriceStore()
-        : global.marketQuotes || {};
-
-    const quotes = [];
-
-    for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const normalized = safeNormalizeQuote(symbol, value);
-
-      if (!normalized) continue;
-
-      quotes.push(normalized);
-    }
-
-    return res.status(200).json({
-      ok: true,
-      quotes,
-      data: quotes,
-      count: quotes.length,
-      serverTime: Date.now(),
-    });
-
-  } catch (err) {
-    console.error("❌ /api/market/polygon/quotes:", err);
-
-    return res.status(200).json({
-      ok: true,
-      quotes: [],
-      data: [],
-      count: 0,
-      fallback: true,
-      serverTime: Date.now(),
-    });
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    return res.status(200).json(await safeBuildAccountForUser(user));
+  } catch (e) {
+    console.error("/api/me error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
-/* ======================================================
-   QUOTES SAFE
-====================================================== */
-
-app.get("/api/quotes", async (req, res) => {
+app.get("/api/profile", async (req, res) => {
   try {
-    const safeStore =
-      typeof global.getPriceStore === "function"
-        ? global.getPriceStore()
-        : global.marketQuotes || {};
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    return res.json(await safeBuildAccountForUser(user));
+  } catch (e) {
+    console.error("profile error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
 
-    const quotes = {};
+app.get("/api/cuenta", (req, res) => res.redirect(307, "/api/account"));
 
-    for (const [symbol, value] of Object.entries(safeStore || {})) {
-      const normalized = safeNormalizeQuote(symbol, value);
-
-      if (!normalized) continue;
-
-      quotes[symbol] = normalized;
-    }
-
-    return res.status(200).json({
+app.get("/api/transactions", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const limit = Math.min(Number(req.query.limit || 50) || 50, 200);
+    const transactions = await safeLoadTransactionsForUser(user._id, limit);
+    return res.json({
       ok: true,
-      quotes,
-      data: quotes,
-      count: Object.keys(quotes).length,
-      serverTime: Date.now(),
+      count: transactions.length,
+      transactions,
+      data: transactions,
+      items: transactions,
     });
+  } catch (e) {
+    console.error("/api/transactions error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
 
-  } catch (err) {
-    console.error("❌ /api/quotes:", err);
-
-    return res.status(200).json({
+app.get("/api/wallet", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const payload = await safeBuildAccountForUser(user);
+    return res.json({
       ok: true,
-      quotes: {},
-      data: {},
-      count: 0,
-      fallback: true,
-      serverTime: Date.now(),
+      wallet: payload.wallet,
+      account: payload.account,
+      balance: payload.account.balance,
+      balanceOwn: payload.account.balanceOwn,
+      availableBalance: payload.account.availableBalance,
+      equity: payload.account.equity,
+      marginUsed: payload.account.marginUsed,
+      freeMargin: payload.account.freeMargin,
+      marginLevel: payload.account.marginLevel,
+      leverageFactor: payload.account.leverageFactor,
+      currency: payload.account.currency,
+      transactions: payload.transactions,
     });
+  } catch (e) {
+    console.error("/api/wallet error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/billetera", (req, res) => res.redirect(307, "/api/wallet"));
+
+app.get("/api/positions", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadOpenPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/positions error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/posiciones", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadOpenPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/posiciones error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/positions/all", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadAllPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/positions/all error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/api/posiciones/all", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    const positions = await safeLoadAllPositionsForUser(user._id);
+    return res.json({
+      ok: true,
+      positions,
+      data: positions,
+      items: positions,
+      count: positions.length,
+    });
+  } catch (e) {
+    console.error("/api/posiciones/all error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -3060,24 +2419,11 @@ function extractSymbol(data) {
     data?.name ||
     data?.label ||
     "";
-
-  return typeof normalizeSymbol === "function"
-    ? normalizeSymbol(raw)
-    : String(raw || "").toUpperCase().trim();
+  return normalizeSymbol(raw);
 }
 
 function extractPrice(data = {}) {
-  const candidates = [
-    data?.price,
-    data?.last,
-    data?.close,
-    data?.currentPrice,
-    data?.bid,
-    data?.ask,
-    data?.p,
-    data?.lp,
-  ];
-
+  const candidates = [data?.price, data?.last, data?.close, data?.currentPrice, data?.bid, data?.ask, data?.p, data?.lp];
   for (const v of candidates) {
     const n = Number(v);
     if (Number.isFinite(n) && n > 0) return n;
@@ -3099,90 +2445,29 @@ function extractPrice(data = {}) {
 }
 
 function safeStorePrice(symbol, price, rawData = null) {
-  const clean =
-    typeof normalizeSymbol === "function"
-      ? normalizeSymbol(symbol)
-      : String(symbol || "").toUpperCase().trim();
-
-  const numeric = Number(price);
-
-  if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
-    console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, price);
-    return false;
-  }
-
-  global.priceCache = global.priceCache || {};
-  global.priceMeta = global.priceMeta || {};
-
-  const payload = {
-    symbol: clean,
-    price: numeric,
-    updatedAt: new Date().toISOString(),
-    raw: rawData || null,
-  };
-
-  global.priceCache[clean] = numeric;
-  global.priceMeta[clean] = payload;
-
-  if (priceHandler?.prices instanceof Map) {
-    priceHandler.prices.set(clean, payload);
-  } else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
-    priceHandler.prices[clean] = payload;
-  }
-
-  if (typeof updatePriceStore === "function") {
-    try {
-      updatePriceStore(clean, numeric);
-    } catch (err) {
-      console.warn("updatePriceStore error:", err?.message || err);
-    }
-  }
-
-  console.log("📥 PRICE UPDATE:", clean, numeric);
-  return true;
+  return writePrice(symbol, price, rawData);
 }
 
 async function fetchPolygonLastPrice(symbol) {
   try {
-    const clean =
-      typeof normalizeSymbol === "function"
-        ? normalizeSymbol(symbol)
-        : String(symbol || "").toUpperCase().trim();
-
+    const clean = normalizeSymbol(symbol);
     if (!clean || !process.env.POLYGON_API_KEY) return null;
 
-    const polygonSymbol =
-      typeof toPolygonSymbol === "function"
-        ? toPolygonSymbol(clean)
-        : clean;
-
-    if (!polygonSymbol) {
-      console.warn("❌ INVALID POLYGON SYMBOL:", clean);
-      return null;
-    }
+    const polygonSymbol = toPolygonSymbol(clean);
+    if (!polygonSymbol) return null;
 
     const url = `https://api.polygon.io/v2/last/trade/${encodeURIComponent(
       polygonSymbol
     )}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
 
-    console.log("🌍 FETCH FALLBACK:", polygonSymbol);
+    const response = await fetch(url);
+    const data = await response.json();
+    const price = extractPrice(data);
 
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-
-      console.log("🌍 FALLBACK RESPONSE:", JSON.stringify(data, null, 2));
-
-      const price = extractPrice(data);
-
-      if (price && Number.isFinite(price) && price > 0) {
-        return { price, raw: data, symbol: clean, polygonSymbol };
-      }
-    } catch (e) {
-      console.warn("⚠️ Polygon fallback attempt failed:", e?.message || e);
+    if (price && Number.isFinite(price) && price > 0) {
+      return { price, raw: data, symbol: clean, polygonSymbol };
     }
 
-    console.warn("❌ FALLBACK PRICE INVALID:", clean);
     return null;
   } catch (err) {
     console.warn("❌ fetchPolygonLastPrice error:", err?.message || err);
@@ -3196,7 +2481,6 @@ async function safeAutoSubscribeDefaults() {
   for (const sym of symbols) {
     try {
       polygonSocket.subscribe(sym, "trades");
-      console.log("🔥 AUTO SUBSCRIBED:", sym);
     } catch (subErr) {
       console.warn("❌ AUTO SUBSCRIBE ERROR:", sym, subErr?.message || subErr);
     }
@@ -3207,10 +2491,7 @@ io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
   try {
-    socket.emit(
-      "prices_snapshot",
-      typeof global.getPriceStore === "function" ? global.getPriceStore() : {}
-    );
+    socket.emit("prices_snapshot", getPriceStore());
   } catch {
     socket.emit("prices_snapshot", {});
   }
@@ -3233,10 +2514,7 @@ io.on("connection", (socket) => {
 
   socket.on("request_prices_snapshot", () => {
     try {
-      socket.emit(
-        "prices_snapshot",
-        typeof global.getPriceStore === "function" ? global.getPriceStore() : {}
-      );
+      socket.emit("prices_snapshot", getPriceStore());
     } catch {
       socket.emit("prices_snapshot", {});
     }
@@ -3244,9 +2522,7 @@ io.on("connection", (socket) => {
 
   socket.on("request_symbols", () => {
     try {
-      const prices =
-        typeof global.getPriceStore === "function" ? global.getPriceStore() : {};
-
+      const prices = getPriceStore();
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
@@ -3269,27 +2545,11 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      const cleanSymbol =
-        typeof normalizeSymbol === "function"
-          ? normalizeSymbol(symbol)
-          : String(symbol || "").toUpperCase().trim();
-
-      const polygonSymbol =
-        typeof toPolygonSymbol === "function"
-          ? toPolygonSymbol(cleanSymbol)
-          : cleanSymbol;
-
-      console.log("📡 SUBSCRIBE REQUEST:");
-      console.log("RAW:", symbol);
-      console.log("CLEAN:", cleanSymbol);
-      console.log("POLYGON:", polygonSymbol);
-      console.log("KIND:", kind || "trades");
+      const cleanSymbol = normalizeSymbol(symbol);
+      const polygonSymbol = toPolygonSymbol(cleanSymbol);
 
       if (polygonSocket?.subscribe && polygonSymbol) {
         polygonSocket.subscribe(polygonSymbol, kind || "trades");
-        console.log("✅ POLYGON SUBSCRIBED:", polygonSymbol);
-      } else {
-        console.warn("❌ polygonSocket.subscribe unavailable");
       }
 
       socket.join(cleanSymbol);
@@ -3301,19 +2561,11 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      const cleanSymbol =
-        typeof normalizeSymbol === "function"
-          ? normalizeSymbol(symbol)
-          : String(symbol || "").toUpperCase().trim();
-
-      const polygonSymbol =
-        typeof toPolygonSymbol === "function"
-          ? toPolygonSymbol(cleanSymbol)
-          : cleanSymbol;
+      const cleanSymbol = normalizeSymbol(symbol);
+      const polygonSymbol = toPolygonSymbol(cleanSymbol);
 
       if (polygonSocket?.unsubscribe && polygonSymbol) {
         polygonSocket.unsubscribe(polygonSymbol, kind || "trades");
-        console.log("❌ POLYGON UNSUBSCRIBED:", polygonSymbol);
       }
 
       socket.leave(cleanSymbol);
@@ -3327,10 +2579,6 @@ io.on("connection", (socket) => {
   });
 });
 
-/* ======================================================
-   POLYGON SOCKET
-   ====================================================== */
-
 try {
   if (!process.env.POLYGON_API_KEY) {
     console.warn("⚠️ POLYGON_API_KEY no definido — realtime limitado");
@@ -3339,53 +2587,32 @@ try {
       apiKey: process.env.POLYGON_API_KEY,
       onPrice: async (data) => {
         try {
-          console.log("📊 PRICE RAW:", JSON.stringify(data, null, 2));
-
           const symbol = extractSymbol(data);
           let finalPrice = extractPrice(data);
 
-          console.log("🔥 EXTRACTED PRICE:", finalPrice);
-
-          if (!symbol) {
-            console.warn("❌ SYMBOL INVALID:", data);
-            return;
-          }
+          if (!symbol) return;
 
           if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
             try {
-              console.warn("⚠️ SOCKET PRICE INVALID -> FETCH FALLBACK:", symbol);
               const fallback = await fetchPolygonLastPrice(symbol);
               finalPrice = fallback?.price || null;
-
               if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
                 safeStorePrice(symbol, finalPrice, fallback.raw);
-                console.log("✅ STORE UPDATED FALLBACK:", symbol, finalPrice);
               }
             } catch (fallbackErr) {
-              console.warn(
-                "❌ FALLBACK FETCH ERROR:",
-                fallbackErr?.message || fallbackErr
-              );
+              console.warn("❌ FALLBACK FETCH ERROR:", fallbackErr?.message || fallbackErr);
             }
           }
 
-          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
-            console.warn("❌ FINAL PRICE INVALID:", symbol, finalPrice);
-            return;
-          }
+          if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) return;
 
           safeStorePrice(symbol, Number(finalPrice), data);
-
-          console.log("✅ STORE UPDATED:", symbol, finalPrice);
 
           if (priceHandler?.handle) {
             try {
               priceHandler.handle({ ...data, symbol, price: Number(finalPrice) });
             } catch (handlerErr) {
-              console.warn(
-                "priceHandler.handle error:",
-                handlerErr?.message || handlerErr
-              );
+              console.warn("priceHandler.handle error:", handlerErr?.message || handlerErr);
             }
           }
 
@@ -3393,10 +2620,7 @@ try {
             try {
               updatePriceStore(symbol, Number(finalPrice));
             } catch (storeErr) {
-              console.warn(
-                "updatePriceStore error:",
-                storeErr?.message || storeErr
-              );
+              console.warn("updatePriceStore error:", storeErr?.message || storeErr);
             }
           }
 
@@ -3406,7 +2630,6 @@ try {
         }
       },
       onOpen: async () => {
-        console.log("✅ PolygonSocket abierto");
         try {
           await safeAutoSubscribeDefaults();
         } catch (err) {
@@ -3472,9 +2695,7 @@ function stripScriptWrappers(source) {
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/.test(trimmed);
   if (startsWithScript && endsWithScript) {
-    text = trimmed
-      .replace(/^<script\b[^>]*>/i, "")
-      .replace(/<\/script>\s*$/, "");
+    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
   }
   return text;
 }
@@ -3551,14 +2772,8 @@ app.use(express.static(staticPath));
 
 app.get("/api/price", async (req, res) => {
   try {
-    const rawSymbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
-    );
-
-    const symbol =
-      typeof normalizeSymbol === "function"
-        ? normalizeSymbol(rawSymbol)
-        : String(rawSymbol || "").toUpperCase().trim();
+    const rawSymbol = String(req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || "");
+    const symbol = normalizeSymbol(rawSymbol);
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
@@ -3569,16 +2784,8 @@ app.get("/api/price", async (req, res) => {
     let found = null;
 
     try {
-      const store =
-        typeof global.getPriceStore === "function"
-          ? global.getPriceStore()
-          : {};
-
-      if (typeof findBestPriceMatch === "function") {
-        found = findBestPriceMatch(symbol, store || {});
-      } else if (store && store[symbol]) {
-        found = store[symbol];
-      }
+      const store = getPriceStore();
+      found = findBestPriceMatch(symbol, store || {}) || store[symbol] || null;
     } catch (err) {
       console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
     }
@@ -3624,11 +2831,7 @@ app.get("/api/price", async (req, res) => {
     }
 
     if (!price || !Number.isFinite(price) || price <= 0) {
-      price =
-        global.forcePriceExists(symbol) ||
-        global.getFakePrice?.(symbol) ||
-        50 + Math.random() * 1000;
-
+      price = global.forcePriceExists(symbol) || global.getFakePrice?.(symbol) || 50 + Math.random() * 1000;
       safeStorePrice(symbol, price, found?.raw || null);
     }
 
@@ -3646,6 +2849,225 @@ app.get("/api/price", async (req, res) => {
     return res.status(500).json({ ok: false, error: "Error interno" });
   }
 });
+
+/* ======================================================
+   SAFE CHECKPOINT FOR /api/market AND /api/quotes
+   ====================================================== */
+
+app.get("/api/market/quotes", (req, res) => res.json(buildMarketPayload()));
+app.get("/api/market/latest", (req, res) => {
+  try {
+    const quotes = getPriceStore();
+    return res.status(200).json({
+      ok: true,
+      prices: quotes,
+      data: quotes,
+      latest: quotes,
+      count: Object.keys(quotes).length,
+      serverTime: Date.now(),
+    });
+  } catch (err) {
+    console.error("❌ /api/market/latest:", err);
+    return res.status(200).json({
+      ok: true,
+      prices: {},
+      data: {},
+      latest: {},
+      count: 0,
+      fallback: true,
+      serverTime: Date.now(),
+    });
+  }
+});
+app.get("/api/market/polygon/quotes", (req, res) => {
+  try {
+    const quotesMap = getPriceStore();
+    const quotes = Object.values(quotesMap);
+    return res.status(200).json({
+      ok: true,
+      quotes,
+      data: quotes,
+      count: quotes.length,
+      serverTime: Date.now(),
+    });
+  } catch (err) {
+    console.error("❌ /api/market/polygon/quotes:", err);
+    return res.status(200).json({
+      ok: true,
+      quotes: [],
+      data: [],
+      count: 0,
+      fallback: true,
+      serverTime: Date.now(),
+    });
+  }
+});
+app.get("/api/quotes", (req, res) => {
+  try {
+    const quotes = getPriceStore();
+    return res.status(200).json({
+      ok: true,
+      quotes,
+      data: quotes,
+      count: Object.keys(quotes).length,
+      serverTime: Date.now(),
+    });
+  } catch (err) {
+    console.error("❌ /api/quotes:", err);
+    return res.status(200).json({
+      ok: true,
+      quotes: {},
+      data: {},
+      count: 0,
+      fallback: true,
+      serverTime: Date.now(),
+    });
+  }
+});
+
+/* ======================================================
+   GET REAL PRICE (SAFE SYMBOL SEARCH)
+   ====================================================== */
+
+function getCurrentPriceForSymbol(symbol) {
+  const targetCompact = compactSymbol(symbol);
+  if (!targetCompact) return null;
+
+  const store = getPriceStore();
+
+  for (const [key, item] of Object.entries(store)) {
+    const candidates = [
+      key,
+      item?.symbol,
+      item?.label,
+      item?.ticker,
+      item?.tvSymbol,
+      item?.instrument,
+      item?.marketSymbol,
+      item?.asset,
+    ].filter(Boolean);
+
+    const matched = candidates.some((candidate) => {
+      const c = compactSymbol(candidate);
+      if (!c) return false;
+      return (
+        c === targetCompact ||
+        c.includes(targetCompact) ||
+        targetCompact.includes(c) ||
+        sameMarketSymbol(c, targetCompact)
+      );
+    });
+
+    if (!matched) continue;
+
+    const px = extractQuotePrice(item);
+    if (Number.isFinite(px) && px > 0) return px;
+  }
+
+  return null;
+}
+
+/* ======================================================
+   GET MARKET PRICE
+   ====================================================== */
+
+global.getMarketPrice =
+  global.getMarketPrice ||
+  function getMarketPrice(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
+    const cached =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+    if (Number.isFinite(cached) && cached > 0) return cached;
+    return global.getFakePrice(clean);
+  };
+
+/* ======================================================
+   GET / CREATE PRICE HELPERS
+   ====================================================== */
+
+global.getFakePrice =
+  global.getFakePrice ||
+  function getFakePrice(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
+
+    const existing =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+
+    if (Number.isFinite(existing) && existing > 0) return existing;
+
+    const base = Number(generateBasePrice(clean));
+    const safeBase = Number.isFinite(base) && base > 0 ? base : Number((50 + Math.random() * 1000).toFixed(6));
+
+    writePrice(clean, safeBase, { source: "seed" });
+    return safeBase;
+  };
+
+global.forcePriceExists =
+  global.forcePriceExists ||
+  function forcePriceExists(symbol) {
+    const clean = normalizeSymbol(symbol);
+    if (!clean) return null;
+
+    const current =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+
+    if (Number.isFinite(current) && current > 0) return current;
+
+    const forced = global.getFakePrice(clean);
+    if (Number.isFinite(forced) && forced > 0) return forced;
+
+    const fallback = Number((50 + Math.random() * 1000).toFixed(6));
+    writePrice(clean, fallback, { source: "force-fallback" });
+    return fallback;
+  };
+
+global.updatePriceStore =
+  global.updatePriceStore ||
+  function updatePriceStore(symbol, price) {
+    return writePrice(symbol, price, global.priceMeta?.[normalizeSymbol(symbol)]?.raw || null);
+  };
+
+/* ======================================================
+   PRICE STORE / SYNC
+   ====================================================== */
+
+function seedPriceCaches() {
+  global.priceCache = global.priceCache || {};
+  global.priceMeta = global.priceMeta || {};
+  global.marketQuotes = global.marketQuotes || {};
+  for (const [symbol, value] of Object.entries(global.priceCache || {})) {
+    const price = Number(value);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (!global.marketQuotes[symbol]) {
+      global.marketQuotes[symbol] = {
+        symbol,
+        price,
+        bid: Number(global.priceMeta?.[symbol]?.bid ?? price),
+        ask: Number(global.priceMeta?.[symbol]?.ask ?? price),
+        updatedAt: global.priceMeta?.[symbol]?.updatedAt || Date.now(),
+        raw: global.priceMeta?.[symbol]?.raw || null,
+      };
+    }
+  }
+}
+seedPriceCaches();
+
+/* ======================================================
+   ENDPOINTS MATCHERS (SAFE)
+   ====================================================== */
+
+app.get("/api/market/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/markets/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+app.get("/api/api/symbols", (req, res) => res.json(SAMPLE_SYMBOLS));
+
+/* ======================================================
+   FINAL CATCH-ALL
+   ====================================================== */
 
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
@@ -3707,8 +3129,10 @@ const gracefulShutdown = async (signal) => {
   timeout.unref();
 
   try {
-    for (const t of liveSyncTimers.values()) clearTimeout(t);
-    liveSyncTimers.clear();
+    if (global.liveSyncTimers instanceof Map) {
+      for (const t of global.liveSyncTimers.values()) clearTimeout(t);
+      global.liveSyncTimers.clear();
+    }
     openTradeLocks.clear();
     activeOrders.clear();
 
