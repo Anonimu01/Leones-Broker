@@ -5268,10 +5268,11 @@ async function placeBrokerOrder(payload = {}) {
 
     const user = getUser();
 
-    if (!user?.token) {
-      console.warn("❌ USER TOKEN NOT FOUND");
-      return null;
-    }
+    const token =
+      user?.token ||
+      localStorage.getItem("token") ||
+      sessionStorage.getItem("token") ||
+      "";
 
     ///////////////////////////////////////////////////////
     // PRICE
@@ -5315,7 +5316,7 @@ async function placeBrokerOrder(payload = {}) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer " + user.token,
+        Authorization: token ? "Bearer " + token : "",
       },
       body: JSON.stringify(body),
     });
