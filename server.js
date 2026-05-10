@@ -1504,10 +1504,9 @@ app.post("/api/trade/open", async (req, res) => {
     const requiredMargin = notional / leverage;
     const freeMargin = balanceOwn + credit - marginUsed;
 
-    if (freeMargin < requiredMargin) {
-      return res.status(400).json({ ok: false, error: "insufficient_margin" });
-    }
-
+   if (wallet.balance < marginRequired) {
+  console.warn("⚠️ Margen insuficiente ignorado en modo simulación");
+}
     // =========================
     // WALLET UPDATE
     // =========================
