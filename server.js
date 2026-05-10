@@ -1889,14 +1889,14 @@ if (!staticDirName) {
     `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
   );
 } else {
-  console.log(`📁 Static folder detected: '${staticDirName}'`);
+  console.log(`Static folder detected: '${staticDirName}'`);
 }
 
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
 /* ======================================================
-   JS HELPERS
+   JS CLEANER
    ====================================================== */
 
 function stripScriptWrappers(source) {
@@ -1978,7 +1978,7 @@ function resolveJsCandidate(requestPath) {
 }
 
 /* ======================================================
-   CLEAN JS DELIVERY
+   JS SERVE FIX
    ====================================================== */
 
 app.use(async (req, res, next) => {
@@ -1991,23 +1991,23 @@ app.use(async (req, res, next) => {
   try {
     const candidate = resolveJsCandidate(pathname);
 
-    if (!candidate) {
+    if (candidate) {
+      const raw = await fs.promises.readFile(candidate, "utf8");
+
+      const cleaned = stripScriptWrappers(raw);
+
       return res
-        .status(404)
+        .status(200)
         .type("application/javascript; charset=utf-8")
-        .send(`console.error("JS missing: ${pathname}");`);
+        .send(cleaned);
     }
 
-    const raw = await fs.promises.readFile(candidate, "utf8");
-
-    const cleaned = stripScriptWrappers(raw);
-
     return res
-      .status(200)
+      .status(404)
       .type("application/javascript; charset=utf-8")
-      .send(cleaned);
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
-    console.error("❌ Error sirviendo JS:", err);
+    console.error("Error sirviendo JS:", err);
 
     return res
       .status(500)
@@ -2017,7 +2017,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ======================================================
-   STATIC ROUTES
+   STATIC SERVE
    ====================================================== */
 
 app.use("/public", express.static(staticPath));
@@ -2046,7 +2046,7 @@ app.get("/api/price", async (req, res) => {
       });
     }
 
-    // 🔥 Garantizar existencia del precio
+    // 🔥 AUTO SEED
     forcePriceExists(symbol);
 
     let found = null;
@@ -2093,25 +2093,28 @@ app.get("/api/price", async (req, res) => {
         null;
     }
 
-    /* ======================================================
-       FIX 1 - Fake local engine
-       ====================================================== */
-
+    // 🔥 FIX 1
     if (!price || !Number.isFinite(price) || price <= 0) {
       price = global.getFakePrice?.(symbol);
 
-      if (price && Number.isFinite(price) && price > 0) {
-        safeStorePrice(symbol, price, found?.raw || null);
+      if (
+        price &&
+        Number.isFinite(price) &&
+        price > 0
+      ) {
+        safeStorePrice(
+          symbol,
+          price,
+          found?.raw || null
+        );
       }
     }
 
-    /* ======================================================
-       FIX 2 - Polygon fallback
-       ====================================================== */
-
+    // 🔥 FIX 2
     if (!price || !Number.isFinite(price) || price <= 0) {
       try {
-        const fallback = await fetchPolygonLastPrice(symbol);
+        const fallback =
+          await fetchPolygonLastPrice(symbol);
 
         const fallbackPrice = Number(fallback?.price);
 
@@ -2135,20 +2138,25 @@ app.get("/api/price", async (req, res) => {
       }
     }
 
-    /* ======================================================
-       FIX 3 - Final absolute guarantee
-       ====================================================== */
-
+    // 🔥 FIX 3
     if (!price || !Number.isFinite(price) || price <= 0) {
       price =
         forcePriceExists(symbol) ||
         global.getFakePrice?.(symbol);
 
-      if (!price || !Number.isFinite(price) || price <= 0) {
+      if (
+        !price ||
+        !Number.isFinite(price) ||
+        price <= 0
+      ) {
         price = 50 + Math.random() * 1000;
       }
 
-      safeStorePrice(symbol, price, found?.raw || null);
+      safeStorePrice(
+        symbol,
+        price,
+        found?.raw || null
+      );
     }
 
     return res.json({
@@ -2163,7 +2171,7 @@ app.get("/api/price", async (req, res) => {
         new Date().toISOString(),
     });
   } catch (err) {
-    console.error("❌ Error /api/price:", err);
+    console.error("Error /api/price:", err);
 
     return res.status(500).json({
       ok: false,
@@ -2173,12 +2181,11 @@ app.get("/api/price", async (req, res) => {
 });
 
 /* ======================================================
-   API NOT FOUND
+   API 404
    ====================================================== */
 
 app.use("/api", (req, res) => {
   return res.status(404).json({
-    ok: false,
     error: "API endpoint not found",
   });
 });
@@ -2193,7 +2200,6 @@ app.get("*", (req, res) => {
     req.path === "/api"
   ) {
     return res.status(404).json({
-      ok: false,
       error: "API endpoint not found",
     });
   }
@@ -2206,11 +2212,11 @@ app.get("*", (req, res) => {
   res.sendFile(indexPath, (err) => {
     if (err) {
       console.error(
-        "❌ Error sirviendo index.html:",
+        "Error sirviendo index.html:",
         err
       );
 
-      return res
+      res
         .status(err.status || 500)
         .send("Error loading app");
     }
@@ -2234,18 +2240,22 @@ const server = httpServer.listen(
       "RESEND:",
       !!process.env.RESEND_API_KEY
     );
+
     console.log(
       "SENDER:",
       !!process.env.SENDER_EMAIL
     );
+
     console.log(
       "MONGO:",
       !!process.env.MONGO_URI
     );
+
     console.log(
       "ADMIN_API_KEY:",
       !!process.env.ADMIN_API_KEY
     );
+
     console.log(
       "POLYGON:",
       !!process.env.POLYGON_API_KEY
@@ -2273,7 +2283,10 @@ const safeClosePolygonSocket = async () => {
   try {
     const maybe = polygonSocket.close();
 
-    if (maybe && typeof maybe.then === "function") {
+    if (
+      maybe &&
+      typeof maybe.then === "function"
+    ) {
       await maybe.catch((err) => {
         console.warn(
           "polygonSocket.close() rejected:",
@@ -2297,7 +2310,7 @@ const gracefulShutdown = async (signal) => {
   console.log(`📴 ${signal} recibido. Cerrando...`);
 
   const timeout = setTimeout(() => {
-    console.warn("⚠️ Forzando cierre...");
+    console.warn("Forzando cierre...");
     process.exit(1);
   }, 30000);
 
@@ -2315,6 +2328,7 @@ const gracefulShutdown = async (signal) => {
     await new Promise((resolve, reject) => {
       server.close((err) => {
         if (err) return reject(err);
+
         resolve();
       });
     });
@@ -2322,7 +2336,8 @@ const gracefulShutdown = async (signal) => {
     await safeClosePolygonSocket();
 
     if (
-      typeof global?.stopRiskWatcher === "function"
+      typeof global?.stopRiskWatcher ===
+      "function"
     ) {
       try {
         global.stopRiskWatcher();
@@ -2340,7 +2355,7 @@ const gracefulShutdown = async (signal) => {
 
     process.exit(0);
   } catch (err) {
-    console.error("❌ Shutdown error:", err);
+    console.error("Shutdown error:", err);
 
     clearTimeout(timeout);
 
