@@ -2830,27 +2830,67 @@ app.use("/api/api", (req, res) => {
    MARKET / QUOTES SAFE FIX
 ====================================================== */
 
+// SAFE GLOBAL STORE
+global.marketQuotes = global.marketQuotes || {};
+
+if (typeof global.getPriceStore !== "function") {
+  global.getPriceStore = () => global.marketQuotes || {};
+}
+
+/* ======================================================
+   MARKET LATEST
+====================================================== */
+
 app.get("/api/market/latest", async (req, res) => {
   try {
     const safeStore =
       typeof global.getPriceStore === "function"
         ? global.getPriceStore()
-        : {};
+        : global.marketQuotes || {};
+
+    const latest = {};
+
+    for (const [symbol, value] of Object.entries(safeStore || {})) {
+      const price = Number(
+        value?.price ??
+        value?.lastPrice ??
+        value?.last ??
+        value?.close ??
+        value?.c ??
+        value
+      );
+
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      latest[symbol] = {
+        symbol,
+        price,
+        bid: Number(value?.bid ?? price),
+        ask: Number(value?.ask ?? price),
+        updatedAt:
+          value?.updatedAt ||
+          value?.timestamp ||
+          Date.now(),
+      };
+    }
 
     return res.json({
       ok: true,
-      prices: safeStore,
-      data: safeStore,
-      latest: safeStore,
+      prices: latest,
+      data: latest,
+      latest,
+      count: Object.keys(latest).length,
     });
   } catch (err) {
-    console.error("/api/market/latest", err);
+    console.error("❌ /api/market/latest", err);
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       prices: {},
       data: {},
       latest: {},
+      count: 0,
+      fallback: true,
     });
   }
 });
@@ -2864,35 +2904,49 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
     const safeStore =
       typeof global.getPriceStore === "function"
         ? global.getPriceStore()
-        : {};
+        : global.marketQuotes || {};
 
-    const quotes = Object.entries(safeStore || {}).map(([symbol, value]) => {
+    const quotes = [];
+
+    for (const [symbol, value] of Object.entries(safeStore || {})) {
       const price = Number(
-        value?.price ||
-          value?.last ||
-          value?.close ||
-          value?.c ||
-          value
-      ) || 0;
+        value?.price ??
+        value?.lastPrice ??
+        value?.last ??
+        value?.close ??
+        value?.c ??
+        value
+      );
 
-      return {
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      quotes.push({
         symbol,
         price,
-      };
-    });
+        bid: Number(value?.bid ?? price),
+        ask: Number(value?.ask ?? price),
+        updatedAt:
+          value?.updatedAt ||
+          value?.timestamp ||
+          Date.now(),
+      });
+    }
 
     return res.json({
       ok: true,
       quotes,
       data: quotes,
+      count: quotes.length,
     });
   } catch (err) {
-    console.error("/api/market/polygon/quotes", err);
+    console.error("❌ /api/market/polygon/quotes", err);
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       quotes: [],
       data: [],
+      count: 0,
+      fallback: true,
     });
   }
 });
@@ -2906,34 +2960,49 @@ app.get("/api/quotes", async (req, res) => {
     const safeStore =
       typeof global.getPriceStore === "function"
         ? global.getPriceStore()
-        : {};
+        : global.marketQuotes || {};
 
     const quotes = {};
 
     for (const [symbol, value] of Object.entries(safeStore || {})) {
       const price = Number(
-        value?.price ||
-          value?.last ||
-          value?.close ||
-          value?.c ||
-          value
-      ) || 0;
+        value?.price ??
+        value?.lastPrice ??
+        value?.last ??
+        value?.close ??
+        value?.c ??
+        value
+      );
 
-      quotes[symbol] = price;
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      quotes[symbol] = {
+        symbol,
+        price,
+        bid: Number(value?.bid ?? price),
+        ask: Number(value?.ask ?? price),
+        updatedAt:
+          value?.updatedAt ||
+          value?.timestamp ||
+          Date.now(),
+      };
     }
 
     return res.json({
       ok: true,
       quotes,
       data: quotes,
+      count: Object.keys(quotes).length,
     });
   } catch (err) {
-    console.error("/api/quotes", err);
+    console.error("❌ /api/quotes", err);
 
-    return res.json({
+    return res.status(200).json({
       ok: true,
       quotes: {},
       data: {},
+      count: 0,
+      fallback: true,
     });
   }
 });
