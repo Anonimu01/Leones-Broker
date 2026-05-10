@@ -2282,6 +2282,160 @@ app.get("/api/trade/positions", async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+// ======================================================
+// SAFE GLOBAL PRICE STORE
+// ======================================================
+
+global.marketQuotes = global.marketQuotes || {};
+
+global.getPriceStore =
+  global.getPriceStore ||
+  function () {
+    return global.marketQuotes || {};
+  };
+
+// ======================================================
+// MARKET / QUOTES SAFE ROUTES
+// ======================================================
+
+function buildSafeQuotes() {
+  try {
+    const store =
+      typeof global.getPriceStore === "function"
+        ? global.getPriceStore()
+        : global.marketQuotes || {};
+
+    const normalized = {};
+
+    for (const [symbol, raw] of Object.entries(store || {})) {
+      try {
+        const price = Number(
+          raw?.price ??
+          raw?.lastPrice ??
+          raw?.last ??
+          raw?.close ??
+          raw?.c ??
+          raw
+        );
+
+        if (!Number.isFinite(price) || price <= 0) {
+          continue;
+        }
+
+        normalized[symbol] = {
+          symbol,
+          price,
+          bid: Number(raw?.bid ?? price),
+          ask: Number(raw?.ask ?? price),
+          updatedAt:
+            raw?.updatedAt ||
+            raw?.timestamp ||
+            Date.now(),
+        };
+      } catch (e) {
+        console.error("normalize quote error", symbol, e);
+      }
+    }
+
+    return normalized;
+  } catch (err) {
+    console.error("buildSafeQuotes error", err);
+    return {};
+  }
+}
+
+// ======================================================
+// /api/market/latest
+// ======================================================
+
+app.get("/api/market/latest", (req, res) => {
+  try {
+    const quotes = buildSafeQuotes();
+
+    return res.status(200).json({
+      ok: true,
+      latest: quotes,
+      prices: quotes,
+      data: quotes,
+      count: Object.keys(quotes).length,
+    });
+  } catch (err) {
+    console.error("market/latest fatal", err);
+
+    return res.status(200).json({
+      ok: true,
+      latest: {},
+      prices: {},
+      data: {},
+      count: 0,
+    });
+  }
+});
+
+// ======================================================
+// /api/market/polygon/quotes
+// ======================================================
+
+app.get("/api/market/polygon/quotes", (req, res) => {
+  try {
+    const quotesMap = buildSafeQuotes();
+
+    const quotes = Object.values(quotesMap);
+
+    return res.status(200).json({
+      ok: true,
+      quotes,
+      data: quotes,
+      count: quotes.length,
+    });
+  } catch (err) {
+    console.error("polygon quotes fatal", err);
+
+    return res.status(200).json({
+      ok: true,
+      quotes: [],
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+// ======================================================
+// /api/quotes
+// ======================================================
+
+app.get("/api/quotes", (req, res) => {
+  try {
+    const quotes = buildSafeQuotes();
+
+    return res.status(200).json({
+      ok: true,
+      quotes,
+      data: quotes,
+      count: Object.keys(quotes).length,
+    });
+  } catch (err) {
+    console.error("quotes fatal", err);
+
+    return res.status(200).json({
+      ok: true,
+      quotes: {},
+      data: {},
+      count: 0,
+    });
+  }
+});
+
+
+
+
+    
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
