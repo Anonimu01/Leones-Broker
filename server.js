@@ -1424,6 +1424,48 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 });
 
 /* ======================================================
+   PRICE RESOLVER HELPERS
+   ====================================================== */
+
+function normalizePrice(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function resolveOrderPrice(body = {}, symbol = "") {
+  try {
+    let price =
+      normalizePrice(body.price) ||
+      normalizePrice(body.entryPrice) ||
+      normalizePrice(body.currentPrice) ||
+      normalizePrice(body.marketPrice) ||
+      normalizePrice(body.lastPrice);
+
+    // Buscar precio del store realtime
+    if (!price && symbol) {
+      try {
+        const live =
+          getCurrentPriceForSymbol(symbol) ||
+          global.getFakePrice?.(symbol);
+
+        price = normalizePrice(live);
+      } catch {}
+    }
+
+    // Precio final fallback
+    if (!price) {
+      price = 1;
+    }
+
+    return Number(price);
+  } catch (err) {
+    console.warn("resolveOrderPrice error:", err);
+    return 1;
+  }
+}
+  
+
+/* ======================================================
    TRADING CORE (FIXED REAL LOGIC)
    ====================================================== */
 
@@ -1826,9 +1868,12 @@ try {
    ====================================================== */
 
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
+
 let staticDirName = null;
+
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
+
   try {
     if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
       staticDirName = cand;
@@ -1839,46 +1884,90 @@ for (const cand of staticCandidates) {
 
 if (!staticDirName) {
   staticDirName = "public";
+
   console.warn(
     `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
   );
 } else {
-  console.log(`Static folder detected: '${staticDirName}'`);
+  console.log(`📁 Static folder detected: '${staticDirName}'`);
 }
 
 const staticPath = path.join(__dirname, staticDirName);
 const jsDirPath = path.join(staticPath, "js");
 
+/* ======================================================
+   JS HELPERS
+   ====================================================== */
+
 function stripScriptWrappers(source) {
   let text = String(source ?? "");
+
   text = text.replace(/^\uFEFF/, "");
+
   const trimmed = text.trim();
+
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
-  const endsWithScript = /<\/script>\s*$/.test(trimmed);
+  const endsWithScript = /<\/script>\s*$/i.test(trimmed);
+
   if (startsWithScript && endsWithScript) {
-    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/i, "");
   }
+
   return text;
 }
 
 function resolveJsCandidate(requestPath) {
   const clean = String(requestPath || "").split("?")[0];
+
   const normalized = clean.replace(/\\/g, "/");
+
   const base = path.basename(normalized);
+
   const candidates = [];
-  if (normalized.startsWith("/public/js/"))
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
-  if (normalized.startsWith("/js/")) {
-    candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
-    candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
+
+  if (normalized.startsWith("/public/js/")) {
+    candidates.push(
+      path.join(
+        staticPath,
+        normalized.replace(/^\/public\//, "")
+      )
+    );
   }
-  if (normalized.startsWith("/public/"))
-    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+
+  if (normalized.startsWith("/js/")) {
+    candidates.push(
+      path.join(
+        jsDirPath,
+        normalized.slice("/js/".length)
+      )
+    );
+
+    candidates.push(
+      path.join(
+        staticPath,
+        normalized.replace(/^\/+/, "")
+      )
+    );
+  }
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(
+      path.join(
+        staticPath,
+        normalized.replace(/^\/public\//, "")
+      )
+    );
+  }
+
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
+
   const uniqueCandidates = [...new Set(candidates)];
+
   return uniqueCandidates.find((p) => {
     try {
       return fs.existsSync(p) && fs.statSync(p).isFile();
@@ -1888,46 +1977,52 @@ function resolveJsCandidate(requestPath) {
   });
 }
 
+/* ======================================================
+   CLEAN JS DELIVERY
+   ====================================================== */
+
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
-  if (!pathname.endsWith(".js")) return next();
+
+  if (!pathname.endsWith(".js")) {
+    return next();
+  }
+
   try {
     const candidate = resolveJsCandidate(pathname);
-    if (candidate) {
-      const raw = await fs.promises.readFile(candidate, "utf8");
-      const cleaned = stripScriptWrappers(raw);
-      res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
-      return;
+
+    if (!candidate) {
+      return res
+        .status(404)
+        .type("application/javascript; charset=utf-8")
+        .send(`console.error("JS missing: ${pathname}");`);
     }
-    res
-      .status(404)
+
+    const raw = await fs.promises.readFile(candidate, "utf8");
+
+    const cleaned = stripScriptWrappers(raw);
+
+    return res
+      .status(200)
       .type("application/javascript; charset=utf-8")
-      .send(`console.error("JS missing: ${pathname}");`);
+      .send(cleaned);
   } catch (err) {
-    console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    console.error("❌ Error sirviendo JS:", err);
+
+    return res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
+
+/* ======================================================
+   STATIC ROUTES
+   ====================================================== */
 
 app.use("/public", express.static(staticPath));
 app.use("/js", express.static(jsDirPath));
 app.use(express.static(staticPath));
-
-app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") {
-    return res.status(404).json({ error: "API endpoint not found" });
-  }
-  const indexPath = path.join(staticPath, "index.html");
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
-    }
-  });
-});
-
-app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not found" }));
-
 
 /* ======================================================
    GET REAL PRICE (FIX REAL)
@@ -1936,15 +2031,22 @@ app.use("/api", (req, res) => res.status(404).json({ error: "API endpoint not fo
 app.get("/api/price", async (req, res) => {
   try {
     const rawSymbol = String(
-      req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
+      req.query.symbol ||
+      req.query.tvSymbol ||
+      req.query.selectedSymbol ||
+      ""
     );
+
     const symbol = normalizeSymbol(rawSymbol);
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
+      return res.status(400).json({
+        ok: false,
+        error: "Símbolo requerido",
+      });
     }
 
-    // 🔥 AUTO-SEED TOTAL
+    // 🔥 Garantizar existencia del precio
     forcePriceExists(symbol);
 
     let found = null;
@@ -1960,10 +2062,16 @@ app.get("/api/price", async (req, res) => {
       }
 
       if (!found) {
-        found = findBestPriceMatch(symbol, getPriceStore?.() || {});
+        found = findBestPriceMatch(
+          symbol,
+          getPriceStore?.() || {}
+        );
       }
     } catch (err) {
-      console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
+      console.warn(
+        "❌ STORE SEARCH ERROR:",
+        err?.message || err
+      );
     }
 
     let price = null;
@@ -1985,32 +2093,56 @@ app.get("/api/price", async (req, res) => {
         null;
     }
 
-    // 🔥 FIX 1: usar motor fake local si no hay precio
+    /* ======================================================
+       FIX 1 - Fake local engine
+       ====================================================== */
+
     if (!price || !Number.isFinite(price) || price <= 0) {
       price = global.getFakePrice?.(symbol);
+
       if (price && Number.isFinite(price) && price > 0) {
         safeStorePrice(symbol, price, found?.raw || null);
       }
     }
 
-    // 🔥 FIX 2: mantener respaldo externo si existe
+    /* ======================================================
+       FIX 2 - Polygon fallback
+       ====================================================== */
+
     if (!price || !Number.isFinite(price) || price <= 0) {
       try {
         const fallback = await fetchPolygonLastPrice(symbol);
+
         const fallbackPrice = Number(fallback?.price);
 
-        if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+        if (
+          Number.isFinite(fallbackPrice) &&
+          fallbackPrice > 0
+        ) {
           price = fallbackPrice;
-          safeStorePrice(symbol, fallbackPrice, fallback?.raw || null);
+
+          safeStorePrice(
+            symbol,
+            fallbackPrice,
+            fallback?.raw || null
+          );
         }
       } catch (err) {
-        console.warn("❌ FALLBACK ERROR:", err?.message || err);
+        console.warn(
+          "❌ FALLBACK ERROR:",
+          err?.message || err
+        );
       }
     }
 
-    // 🔥 FIX 3: garantía final absoluta
+    /* ======================================================
+       FIX 3 - Final absolute guarantee
+       ====================================================== */
+
     if (!price || !Number.isFinite(price) || price <= 0) {
-      price = forcePriceExists(symbol) || global.getFakePrice?.(symbol);
+      price =
+        forcePriceExists(symbol) ||
+        global.getFakePrice?.(symbol);
 
       if (!price || !Number.isFinite(price) || price <= 0) {
         price = 50 + Math.random() * 1000;
@@ -2026,23 +2158,61 @@ app.get("/api/price", async (req, res) => {
       currentPrice: Number(price),
       last: Number(price),
       close: Number(price),
-      updatedAt: found?.updatedAt || new Date().toISOString(),
+      updatedAt:
+        found?.updatedAt ||
+        new Date().toISOString(),
     });
   } catch (err) {
-    console.error("Error /api/price:", err);
-    return res.status(500).json({ ok: false, error: "Error interno" });
+    console.error("❌ Error /api/price:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "Error interno",
+    });
   }
 });
 
+/* ======================================================
+   API NOT FOUND
+   ====================================================== */
+
+app.use("/api", (req, res) => {
+  return res.status(404).json({
+    ok: false,
+    error: "API endpoint not found",
+  });
+});
+
+/* ======================================================
+   FRONTEND FALLBACK
+   ====================================================== */
+
 app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") {
-    return res.status(404).json({ error: "API endpoint not found" });
+  if (
+    req.path.startsWith("/api/") ||
+    req.path === "/api"
+  ) {
+    return res.status(404).json({
+      ok: false,
+      error: "API endpoint not found",
+    });
   }
-  const indexPath = path.join(staticPath, "index.html");
+
+  const indexPath = path.join(
+    staticPath,
+    "index.html"
+  );
+
   res.sendFile(indexPath, (err) => {
     if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
+      console.error(
+        "❌ Error sirviendo index.html:",
+        err
+      );
+
+      return res
+        .status(err.status || 500)
+        .send("Error loading app");
     }
   });
 });
@@ -2053,47 +2223,91 @@ app.get("*", (req, res) => {
 
 const PORT = Number(process.env.PORT) || 3000;
 
-const server = httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on ${PORT}`);
-  console.log("ENV STATUS:");
-  console.log("RESEND:", !!process.env.RESEND_API_KEY);
-  console.log("SENDER:", !!process.env.SENDER_EMAIL);
-  console.log("MONGO:", !!process.env.MONGO_URI);
-  console.log("ADMIN_API_KEY:", !!process.env.ADMIN_API_KEY);
-  console.log("POLYGON:", !!process.env.POLYGON_API_KEY);
-  if (!process.env.POLYGON_API_KEY) console.warn("⚠️ POLYGON_API_KEY no configurado — realtime limitado");
-  if (!process.env.RESEND_API_KEY) console.warn("⚠️ Resend no configurado — emails pueden usar SMTP o simulación");
-});
+const server = httpServer.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(`🚀 Server running on ${PORT}`);
+
+    console.log("ENV STATUS:");
+    console.log(
+      "RESEND:",
+      !!process.env.RESEND_API_KEY
+    );
+    console.log(
+      "SENDER:",
+      !!process.env.SENDER_EMAIL
+    );
+    console.log(
+      "MONGO:",
+      !!process.env.MONGO_URI
+    );
+    console.log(
+      "ADMIN_API_KEY:",
+      !!process.env.ADMIN_API_KEY
+    );
+    console.log(
+      "POLYGON:",
+      !!process.env.POLYGON_API_KEY
+    );
+
+    if (!process.env.POLYGON_API_KEY) {
+      console.warn(
+        "⚠️ POLYGON_API_KEY no configurado — realtime limitado"
+      );
+    }
+
+    if (!process.env.RESEND_API_KEY) {
+      console.warn(
+        "⚠️ Resend no configurado — emails pueden usar SMTP o simulación"
+      );
+    }
+  }
+);
 
 let shuttingDown = false;
 
 const safeClosePolygonSocket = async () => {
   if (!polygonSocket) return;
+
   try {
     const maybe = polygonSocket.close();
+
     if (maybe && typeof maybe.then === "function") {
       await maybe.catch((err) => {
-        console.warn("polygonSocket.close() rejected:", err);
+        console.warn(
+          "polygonSocket.close() rejected:",
+          err
+        );
       });
     }
   } catch (e) {
-    console.warn("polygonSocket.close() threw:", e);
+    console.warn(
+      "polygonSocket.close() threw:",
+      e
+    );
   }
 };
 
 const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
+
   shuttingDown = true;
+
   console.log(`📴 ${signal} recibido. Cerrando...`);
 
   const timeout = setTimeout(() => {
-    console.warn("Forzando cierre...");
+    console.warn("⚠️ Forzando cierre...");
     process.exit(1);
   }, 30000);
+
   timeout.unref();
 
   try {
-    for (const t of liveSyncTimers.values()) clearTimeout(t);
+    for (const t of liveSyncTimers.values()) {
+      clearTimeout(t);
+    }
+
     liveSyncTimers.clear();
     openTradeLocks.clear();
     activeOrders.clear();
@@ -2107,33 +2321,55 @@ const gracefulShutdown = async (signal) => {
 
     await safeClosePolygonSocket();
 
-    if (typeof global?.stopRiskWatcher === "function") {
+    if (
+      typeof global?.stopRiskWatcher === "function"
+    ) {
       try {
         global.stopRiskWatcher();
       } catch (e) {
-        console.warn("stopRiskWatcher threw:", e);
+        console.warn(
+          "stopRiskWatcher threw:",
+          e
+        );
       }
     }
 
     await mongoose.disconnect();
+
     clearTimeout(timeout);
+
     process.exit(0);
   } catch (err) {
-    console.error("Shutdown error:", err);
+    console.error("❌ Shutdown error:", err);
+
     clearTimeout(timeout);
+
     process.exit(1);
   }
 };
 
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () =>
+  gracefulShutdown("SIGINT")
+);
+
+process.on("SIGTERM", () =>
+  gracefulShutdown("SIGTERM")
+);
+
 process.on("unhandledRejection", (r) => {
   console.error("UnhandledRejection:", r);
-  gracefulShutdown("unhandledRejection").catch(() => {});
+
+  gracefulShutdown(
+    "unhandledRejection"
+  ).catch(() => {});
 });
+
 process.on("uncaughtException", (e) => {
   console.error("UncaughtException:", e);
-  gracefulShutdown("uncaughtException").catch(() => {});
+
+  gracefulShutdown(
+    "uncaughtException"
+  ).catch(() => {});
 });
 
 export default app;
