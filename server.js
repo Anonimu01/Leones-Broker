@@ -2539,42 +2539,193 @@ function writePrice(symbol, price, raw = null) {
 // ------------------------------
 // GET / CREATE PRICE
 // ------------------------------
+global.priceCache = global.priceCache || {};
+global.priceMeta = global.priceMeta || {};
+
 global.getFakePrice = (symbol) => {
   const clean =
     typeof normalizeSymbol === "function"
       ? normalizeSymbol(symbol)
-      : String(symbol || "").toUpperCase();
+      : String(symbol || "").toUpperCase().trim();
 
   if (!clean) return null;
 
-  const existing = Number(global.priceCache[clean]);
+  const existing =
+    Number(global.priceCache?.[clean]) ||
+    Number(global.priceMeta?.[clean]?.price);
 
   if (Number.isFinite(existing) && existing > 0) {
     return existing;
   }
 
-  const base = generateBasePrice(clean);
+  const base =
+    typeof generateBasePrice === "function"
+      ? Number(generateBasePrice(clean))
+      : Number(100 + Math.random() * 1000);
 
-  writePrice(clean, base, {
-    source: "seed",
-  });
+  const safeBase =
+    Number.isFinite(base) && base > 0
+      ? base
+      : Number((50 + Math.random() * 1000).toFixed(6));
 
-  return base;
+  try {
+    if (typeof writePrice === "function") {
+      writePrice(clean, safeBase, {
+        source: "seed",
+      });
+    } else {
+      global.priceCache[clean] = safeBase;
+      global.priceMeta[clean] = {
+        symbol: clean,
+        price: safeBase,
+        updatedAt: new Date().toISOString(),
+        raw: { source: "seed" },
+      };
+    }
+  } catch (err) {
+    console.warn("writePrice fallback error:", err?.message || err);
+
+    global.priceCache[clean] = safeBase;
+    global.priceMeta[clean] = {
+      symbol: clean,
+      price: safeBase,
+      updatedAt: new Date().toISOString(),
+      raw: { source: "seed" },
+    };
+  }
+
+  return safeBase;
 };
+
+// ------------------------------
+// FORCE PRICE EXISTS
+// ------------------------------
+global.forcePriceExists =
+  global.forcePriceExists ||
+  function forcePriceExists(symbol) {
+    const clean =
+      typeof normalizeSymbol === "function"
+        ? normalizeSymbol(symbol)
+        : String(symbol || "").toUpperCase().trim();
+
+    if (!clean) return null;
+
+    const current =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
+
+    if (Number.isFinite(current) && current > 0) {
+      return current;
+    }
+
+    const forced = global.getFakePrice(clean);
+
+    if (Number.isFinite(forced) && forced > 0) {
+      return forced;
+    }
+
+    const fallback = Number((50 + Math.random() * 1000).toFixed(6));
+
+    global.priceCache[clean] = fallback;
+    global.priceMeta[clean] = {
+      symbol: clean,
+      price: fallback,
+      updatedAt: new Date().toISOString(),
+      raw: { source: "force-fallback" },
+    };
+
+    return fallback;
+  };
+
+// ------------------------------
+// SIMPLE PRICE STORE
+// ------------------------------
+global.getPriceStore =
+  global.getPriceStore ||
+  function () {
+    const store = {};
+
+    for (const [symbol, value] of Object.entries(global.priceCache || {})) {
+      const price = Number(value);
+
+      if (Number.isFinite(price) && price > 0) {
+        store[symbol] = {
+          symbol,
+          price,
+          updatedAt:
+            global.priceMeta?.[symbol]?.updatedAt ||
+            new Date().toISOString(),
+          raw: global.priceMeta?.[symbol]?.raw || null,
+        };
+      }
+    }
+
+    return store;
+  };
+
+function getPriceStore() {
+  return global.getPriceStore();
+}
+
+// ------------------------------
+// UPDATE PRICE STORE
+// ------------------------------
+global.updatePriceStore =
+  global.updatePriceStore ||
+  function (symbol, price) {
+    const clean =
+      typeof normalizeSymbol === "function"
+        ? normalizeSymbol(symbol)
+        : String(symbol || "").toUpperCase().trim();
+
+    const numeric = Number(price);
+
+    if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
+      return false;
+    }
+
+    global.priceCache[clean] = numeric;
+    global.priceMeta[clean] = {
+      symbol: clean,
+      price: numeric,
+      updatedAt: new Date().toISOString(),
+      raw: global.priceMeta?.[clean]?.raw || null,
+    };
+
+    return true;
+  };
 
 // ------------------------------
 // SEED INICIAL
 // ------------------------------
 function seedInitialSymbols() {
-  for (const group of Object.values(MARKET_SEEDS)) {
-    for (const [sym, px] of Object.entries(group)) {
+  for (const group of Object.values(MARKET_SEEDS || {})) {
+    for (const [sym, px] of Object.entries(group || {})) {
+      const price = Number(px);
+
+      if (!Number.isFinite(price) || price <= 0) continue;
+
       if (
-        !Number.isFinite(global.priceCache[sym]) ||
-        global.priceCache[sym] <= 0
+        !Number.isFinite(global.priceCache?.[sym]) ||
+        Number(global.priceCache?.[sym]) <= 0
       ) {
-        writePrice(sym, px, {
-          source: "seed",
-        });
+        try {
+          if (typeof writePrice === "function") {
+            writePrice(sym, price, {
+              source: "seed",
+            });
+          } else {
+            global.priceCache[sym] = price;
+            global.priceMeta[sym] = {
+              symbol: sym,
+              price,
+              updatedAt: new Date().toISOString(),
+              raw: { source: "seed" },
+            };
+          }
+        } catch (err) {
+          console.warn("seedInitialSymbols error:", err?.message || err);
+        }
       }
     }
   }
@@ -2587,7 +2738,7 @@ seedInitialSymbols();
 // ------------------------------
 setInterval(() => {
   try {
-    const keys = Object.keys(global.priceCache);
+    const keys = Object.keys(global.priceCache || {});
 
     for (const symbol of keys) {
       const current = Number(global.priceCache[symbol]);
@@ -2596,7 +2747,10 @@ setInterval(() => {
         continue;
       }
 
-      const vol = getVolatility(symbol);
+      const vol =
+        typeof getVolatility === "function"
+          ? Number(getVolatility(symbol))
+          : 0.001;
 
       const drift = (Math.random() - 0.5) * vol;
 
@@ -2604,11 +2758,35 @@ setInterval(() => {
 
       next = Math.max(next, 0.0000001);
 
-      writePrice(
-        symbol,
-        Number(next.toFixed(6)),
-        global.priceMeta[symbol]?.raw || null
-      );
+      const finalPrice = Number(next.toFixed(6));
+
+      try {
+        if (typeof writePrice === "function") {
+          writePrice(
+            symbol,
+            finalPrice,
+            global.priceMeta?.[symbol]?.raw || null
+          );
+        } else {
+          global.priceCache[symbol] = finalPrice;
+          global.priceMeta[symbol] = {
+            symbol,
+            price: finalPrice,
+            updatedAt: new Date().toISOString(),
+            raw: global.priceMeta?.[symbol]?.raw || null,
+          };
+        }
+      } catch (err) {
+        console.warn("live market writePrice error:", err?.message || err);
+
+        global.priceCache[symbol] = finalPrice;
+        global.priceMeta[symbol] = {
+          symbol,
+          price: finalPrice,
+          updatedAt: new Date().toISOString(),
+          raw: global.priceMeta?.[symbol]?.raw || null,
+        };
+      }
     }
   } catch (err) {
     console.error("Fake market error:", err);
@@ -2624,9 +2802,13 @@ global.getMarketPrice =
     const clean =
       typeof normalizeSymbol === "function"
         ? normalizeSymbol(symbol)
-        : String(symbol || "").toUpperCase();
+        : String(symbol || "").toUpperCase().trim();
 
-    const cached = Number(global.priceCache[clean]);
+    if (!clean) return null;
+
+    const cached =
+      Number(global.priceCache?.[clean]) ||
+      Number(global.priceMeta?.[clean]?.price);
 
     if (Number.isFinite(cached) && cached > 0) {
       return cached;
@@ -2648,22 +2830,13 @@ app.use("/api/api", (req, res) => {
   return res.redirect(307, newUrl);
 });
 
-
-    /* ======================================================
+/* ======================================================
    MARKET / QUOTES SAFE FIX
 ====================================================== */
 
 app.get("/api/market/latest", async (req, res) => {
   try {
-    const store =
-      typeof getPriceStore === "function"
-        ? getPriceStore()
-        : {};
-
-    const safeStore =
-      store && typeof store === "object"
-        ? store
-        : {};
+    const safeStore = getPriceStore();
 
     return res.json({
       ok: true,
@@ -2671,7 +2844,6 @@ app.get("/api/market/latest", async (req, res) => {
       data: safeStore,
       latest: safeStore,
     });
-
   } catch (err) {
     console.error("/api/market/latest", err);
 
@@ -2690,25 +2862,16 @@ app.get("/api/market/latest", async (req, res) => {
 
 app.get("/api/market/polygon/quotes", async (req, res) => {
   try {
-    const store =
-      typeof getPriceStore === "function"
-        ? getPriceStore()
-        : {};
+    const safeStore = getPriceStore();
 
-    const safeStore =
-      store && typeof store === "object"
-        ? store
-        : {};
-
-    const quotes = Object.entries(safeStore).map(([symbol, value]) => {
-      const price =
-        Number(
-          value?.price ||
+    const quotes = Object.entries(safeStore || {}).map(([symbol, value]) => {
+      const price = Number(
+        value?.price ||
           value?.last ||
           value?.close ||
           value?.c ||
           value
-        ) || 0;
+      ) || 0;
 
       return {
         symbol,
@@ -2721,7 +2884,6 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
       quotes,
       data: quotes,
     });
-
   } catch (err) {
     console.error("/api/market/polygon/quotes", err);
 
@@ -2739,27 +2901,18 @@ app.get("/api/market/polygon/quotes", async (req, res) => {
 
 app.get("/api/quotes", async (req, res) => {
   try {
-    const store =
-      typeof getPriceStore === "function"
-        ? getPriceStore()
-        : {};
-
-    const safeStore =
-      store && typeof store === "object"
-        ? store
-        : {};
+    const safeStore = getPriceStore();
 
     const quotes = {};
 
-    for (const [symbol, value] of Object.entries(safeStore)) {
-      const price =
-        Number(
-          value?.price ||
+    for (const [symbol, value] of Object.entries(safeStore || {})) {
+      const price = Number(
+        value?.price ||
           value?.last ||
           value?.close ||
           value?.c ||
           value
-        ) || 0;
+      ) || 0;
 
       quotes[symbol] = price;
     }
@@ -2769,7 +2922,6 @@ app.get("/api/quotes", async (req, res) => {
       quotes,
       data: quotes,
     });
-
   } catch (err) {
     console.error("/api/quotes", err);
 
@@ -2781,7 +2933,6 @@ app.get("/api/quotes", async (req, res) => {
   }
 });
 
-
 /* ======================================================
    SOCKET.IO
    ====================================================== */
@@ -2789,20 +2940,59 @@ app.get("/api/quotes", async (req, res) => {
 let polygonSocket = null;
 
 function extractSymbol(data) {
-  return normalizeSymbol(data?.symbol || data?.ticker || data?.sym || data?.T || data?.s || data?.instrument || data?.marketSymbol || data?.asset || data?.name || data?.label || "");
+  const raw = data?.symbol || data?.ticker || data?.sym || data?.T || data?.s || data?.instrument || data?.marketSymbol || data?.asset || data?.name || data?.label || "";
+
+  return typeof normalizeSymbol === "function"
+    ? normalizeSymbol(raw)
+    : String(raw || "").toUpperCase().trim();
 }
 
 function extractPrice(data = {}) {
-  return extractQuotePrice(data);
+  const candidates = [
+    data?.price,
+    data?.last,
+    data?.close,
+    data?.currentPrice,
+    data?.bid,
+    data?.ask,
+    data?.p,
+    data?.lp,
+  ];
+
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const symbol = extractSymbol(data);
+  if (symbol && global.priceCache?.[symbol]) {
+    const cached = Number(global.priceCache[symbol]);
+    if (Number.isFinite(cached) && cached > 0) return cached;
+  }
+
+  if (symbol && typeof global.getFakePrice === "function") {
+    const fake = Number(global.getFakePrice(symbol));
+    if (Number.isFinite(fake) && fake > 0) return fake;
+  }
+
+  return null;
 }
 
 function safeStorePrice(symbol, price, rawData = null) {
-  const clean = normalizeSymbol(symbol);
+  const clean =
+    typeof normalizeSymbol === "function"
+      ? normalizeSymbol(symbol)
+      : String(symbol || "").toUpperCase().trim();
+
   const numeric = Number(price);
+
   if (!clean || !Number.isFinite(numeric) || numeric <= 0) {
     console.warn("❌ NO SE GUARDA PRECIO INVÁLIDO:", symbol, price);
     return false;
   }
+
+  global.priceCache = global.priceCache || {};
+  global.priceMeta = global.priceMeta || {};
 
   const payload = {
     symbol: clean,
@@ -2811,14 +3001,21 @@ function safeStorePrice(symbol, price, rawData = null) {
     raw: rawData || null,
   };
 
+  global.priceCache[clean] = numeric;
+  global.priceMeta[clean] = payload;
+
   if (priceHandler?.prices instanceof Map) {
     priceHandler.prices.set(clean, payload);
-  } else if (typeof priceHandler?.prices === "object") {
+  } else if (priceHandler?.prices && typeof priceHandler.prices === "object") {
     priceHandler.prices[clean] = payload;
   }
 
   if (typeof updatePriceStore === "function") {
-    try { updatePriceStore(clean, numeric); } catch (err) { console.warn("updatePriceStore error:", err?.message || err); }
+    try {
+      updatePriceStore(clean, numeric);
+    } catch (err) {
+      console.warn("updatePriceStore error:", err?.message || err);
+    }
   }
 
   console.log("📥 PRICE UPDATE:", clean, numeric);
@@ -2827,22 +3024,37 @@ function safeStorePrice(symbol, price, rawData = null) {
 
 async function fetchPolygonLastPrice(symbol) {
   try {
-    const clean = normalizeSymbol(symbol);
+    const clean =
+      typeof normalizeSymbol === "function"
+        ? normalizeSymbol(symbol)
+        : String(symbol || "").toUpperCase().trim();
+
     if (!clean || !process.env.POLYGON_API_KEY) return null;
-    const polygonSymbol = toPolygonSymbol(clean);
+
+    const polygonSymbol =
+      typeof toPolygonSymbol === "function"
+        ? toPolygonSymbol(clean)
+        : clean;
+
     if (!polygonSymbol) {
       console.warn("❌ INVALID POLYGON SYMBOL:", clean);
       return null;
     }
 
-    const url = `https://api.polygon.io/v2/last/trade/${encodeURIComponent(polygonSymbol)}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
+    const url = `https://api.polygon.io/v2/last/trade/${encodeURIComponent(
+      polygonSymbol
+    )}?apiKey=${encodeURIComponent(process.env.POLYGON_API_KEY)}`;
+
     console.log("🌍 FETCH FALLBACK:", polygonSymbol);
 
     try {
       const response = await fetch(url);
       const data = await response.json();
+
       console.log("🌍 FALLBACK RESPONSE:", JSON.stringify(data, null, 2));
-      const price = extractQuotePrice(data);
+
+      const price = extractPrice(data);
+
       if (price && Number.isFinite(price) && price > 0) {
         return { price, raw: data, symbol: clean, polygonSymbol };
       }
@@ -2874,16 +3086,23 @@ async function safeAutoSubscribeDefaults() {
 io.on("connection", (socket) => {
   console.log("📡 Cliente conectado:", socket.id);
 
-  try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+  try {
+    socket.emit("prices_snapshot", getPriceStore() || {});
+  } catch {
+    socket.emit("prices_snapshot", {});
+  }
 
   socket.on("join_user_room", async ({ token, userId } = {}) => {
     try {
       let uid = String(userId || "").trim();
+
       if (!uid && token && process.env.JWT_SECRET) {
         const payload = jwt.verify(String(token), process.env.JWT_SECRET);
         uid = String(payload?.id || payload?.sub || payload?.userId || payload?._id || "").trim();
       }
+
       if (!uid) return;
+
       socket.join(`user:${uid}`);
       socket.data.userId = uid;
       socket.emit("room_joined", { ok: true, userId: uid });
@@ -2893,16 +3112,28 @@ io.on("connection", (socket) => {
   });
 
   socket.on("request_prices_snapshot", () => {
-    try { socket.emit("prices_snapshot", getPriceStore() || {}); } catch { socket.emit("prices_snapshot", {}); }
+    try {
+      socket.emit("prices_snapshot", getPriceStore() || {});
+    } catch {
+      socket.emit("prices_snapshot", {});
+    }
   });
 
   socket.on("request_symbols", () => {
     try {
       const prices = getPriceStore();
+
       if (priceHandler && typeof priceHandler.getSymbols === "function") {
         socket.emit("symbols_update", priceHandler.getSymbols() || []);
       } else if (prices && Object.keys(prices).length) {
-        socket.emit("symbols_update", Object.keys(prices).map((k) => ({ symbol: k, label: (k.split(":").pop() || k).replace("_", "/"), market: prices[k]?.market || "Unknown" })));
+        socket.emit(
+          "symbols_update",
+          Object.keys(prices).map((k) => ({
+            symbol: k,
+            label: (k.split(":").pop() || k).replace("_", "/"),
+            market: prices[k]?.market || "Unknown",
+          }))
+        );
       } else {
         socket.emit("symbols_update", SAMPLE_SYMBOLS);
       }
@@ -2914,19 +3145,29 @@ io.on("connection", (socket) => {
   socket.on("subscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      const cleanSymbol = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(cleanSymbol);
+      const cleanSymbol =
+        typeof normalizeSymbol === "function"
+          ? normalizeSymbol(symbol)
+          : String(symbol || "").toUpperCase().trim();
+
+      const polygonSymbol =
+        typeof toPolygonSymbol === "function"
+          ? toPolygonSymbol(cleanSymbol)
+          : cleanSymbol;
+
       console.log("📡 SUBSCRIBE REQUEST:");
       console.log("RAW:", symbol);
       console.log("CLEAN:", cleanSymbol);
       console.log("POLYGON:", polygonSymbol);
       console.log("KIND:", kind || "trades");
+
       if (polygonSocket?.subscribe && polygonSymbol) {
         polygonSocket.subscribe(polygonSymbol, kind || "trades");
         console.log("✅ POLYGON SUBSCRIBED:", polygonSymbol);
       } else {
         console.warn("❌ polygonSocket.subscribe unavailable");
       }
+
       socket.join(cleanSymbol);
     } catch (e) {
       console.warn("subscribe error:", e);
@@ -2936,12 +3177,21 @@ io.on("connection", (socket) => {
   socket.on("unsubscribe", ({ symbol, kind } = {}) => {
     if (!symbol) return;
     try {
-      const cleanSymbol = normalizeSymbol(symbol);
-      const polygonSymbol = toPolygonSymbol(cleanSymbol);
+      const cleanSymbol =
+        typeof normalizeSymbol === "function"
+          ? normalizeSymbol(symbol)
+          : String(symbol || "").toUpperCase().trim();
+
+      const polygonSymbol =
+        typeof toPolygonSymbol === "function"
+          ? toPolygonSymbol(cleanSymbol)
+          : cleanSymbol;
+
       if (polygonSocket?.unsubscribe && polygonSymbol) {
         polygonSocket.unsubscribe(polygonSymbol, kind || "trades");
         console.log("❌ POLYGON UNSUBSCRIBED:", polygonSymbol);
       }
+
       socket.leave(cleanSymbol);
     } catch (e) {
       console.warn("unsubscribe error:", e);
@@ -2966,38 +3216,66 @@ try {
       onPrice: async (data) => {
         try {
           console.log("📊 PRICE RAW:", JSON.stringify(data, null, 2));
+
           const symbol = extractSymbol(data);
           let finalPrice = extractPrice(data);
+
           console.log("🔥 EXTRACTED PRICE:", finalPrice);
+
           if (!symbol) {
             console.warn("❌ SYMBOL INVALID:", data);
             return;
           }
+
           if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
             try {
               console.warn("⚠️ SOCKET PRICE INVALID -> FETCH FALLBACK:", symbol);
               const fallback = await fetchPolygonLastPrice(symbol);
               finalPrice = fallback?.price || null;
+
               if (finalPrice && Number.isFinite(finalPrice) && finalPrice > 0) {
                 safeStorePrice(symbol, finalPrice, fallback.raw);
                 console.log("✅ STORE UPDATED FALLBACK:", symbol, finalPrice);
               }
             } catch (fallbackErr) {
-              console.warn("❌ FALLBACK FETCH ERROR:", fallbackErr?.message || fallbackErr);
+              console.warn(
+                "❌ FALLBACK FETCH ERROR:",
+                fallbackErr?.message || fallbackErr
+              );
             }
           }
+
           if (!finalPrice || !Number.isFinite(finalPrice) || finalPrice <= 0) {
             console.warn("❌ FINAL PRICE INVALID:", symbol, finalPrice);
             return;
           }
+
           safeStorePrice(symbol, Number(finalPrice), data);
+
           console.log("✅ STORE UPDATED:", symbol, finalPrice);
+
           if (priceHandler?.handle) {
-            try { priceHandler.handle({ ...data, symbol, price: Number(finalPrice) }); } catch (handlerErr) { console.warn("priceHandler.handle error:", handlerErr?.message || handlerErr); }
+            try {
+              priceHandler.handle({ ...data, symbol, price: Number(finalPrice) });
+            } catch (handlerErr) {
+              console.warn(
+                "priceHandler.handle error:",
+                handlerErr?.message || handlerErr
+              );
+            }
           }
+
           if (typeof updatePriceStore === "function") {
-            try { updatePriceStore(symbol, Number(finalPrice)); } catch (storeErr) { console.warn("updatePriceStore error:", storeErr?.message || storeErr); }
+            try {
+              updatePriceStore(symbol, Number(finalPrice));
+            } catch (storeErr) {
+              console.warn(
+                "updatePriceStore error:",
+                storeErr?.message || storeErr
+              );
+            }
           }
+
           scheduleLivePnLSync(symbol);
         } catch (err) {
           console.warn("onPrice handler error:", err?.message || err);
@@ -3005,10 +3283,18 @@ try {
       },
       onOpen: async () => {
         console.log("✅ PolygonSocket abierto");
-        try { await safeAutoSubscribeDefaults(); } catch (err) { console.warn("❌ AUTO SUBSCRIBE FAILED:", err?.message || err); }
+        try {
+          await safeAutoSubscribeDefaults();
+        } catch (err) {
+          console.warn("❌ AUTO SUBSCRIBE FAILED:", err?.message || err);
+        }
       },
-      onClose: () => { console.log("❌ PolygonSocket cerrado"); },
-      onError: (err) => { console.error("❌ PolygonSocket error:", err?.message || err); },
+      onClose: () => {
+        console.log("❌ PolygonSocket cerrado");
+      },
+      onError: (err) => {
+        console.error("❌ PolygonSocket error:", err?.message || err);
+      },
     });
 
     const maybe = polygonSocket.connect();
@@ -3018,6 +3304,7 @@ try {
         polygonSocket = null;
       });
     }
+
     console.log("🔌 Intentando conectar PolygonSocket...");
   }
 } catch (err) {
@@ -3031,15 +3318,22 @@ try {
 
 const staticCandidates = ["public", "publico", "público", "Public", "Publico"];
 let staticDirName = null;
+
 for (const cand of staticCandidates) {
   const p = path.join(__dirname, cand);
   try {
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) { staticDirName = cand; break; }
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      staticDirName = cand;
+      break;
+    }
   } catch {}
 }
+
 if (!staticDirName) {
   staticDirName = "public";
-  console.warn(`WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`);
+  console.warn(
+    `WARN: No se encontró carpeta estática entre ${staticCandidates.join(", ")}. Usando fallback '${staticDirName}'.`
+  );
 } else {
   console.log(`Static folder detected: '${staticDirName}'`);
 }
@@ -3054,7 +3348,9 @@ function stripScriptWrappers(source) {
   const startsWithScript = /^<script\b[^>]*>/i.test(trimmed);
   const endsWithScript = /<\/script>\s*$/.test(trimmed);
   if (startsWithScript && endsWithScript) {
-    text = trimmed.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>\s*$/, "");
+    text = trimmed
+      .replace(/^<script\b[^>]*>/i, "")
+      .replace(/<\/script>\s*$/, "");
   }
   return text;
 }
@@ -3064,35 +3360,60 @@ function resolveJsCandidate(requestPath) {
   const normalized = clean.replace(/\\/g, "/");
   const base = path.basename(normalized);
   const candidates = [];
-  if (normalized.startsWith("/public/js/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+
+  if (normalized.startsWith("/public/js/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
   if (normalized.startsWith("/js/")) {
     candidates.push(path.join(jsDirPath, normalized.slice("/js/".length)));
     candidates.push(path.join(staticPath, normalized.replace(/^\/+/, "")));
   }
-  if (normalized.startsWith("/public/")) candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(path.join(staticPath, normalized.replace(/^\/public\//, "")));
+  }
+
   if (base) {
     candidates.push(path.join(staticPath, base));
     candidates.push(path.join(jsDirPath, base));
   }
+
   const uniqueCandidates = [...new Set(candidates)];
-  return uniqueCandidates.find((p) => { try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; } });
+
+  return uniqueCandidates.find((p) => {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 app.use(async (req, res, next) => {
   const pathname = req.path || "";
   if (!pathname.endsWith(".js")) return next();
+
   try {
     const candidate = resolveJsCandidate(pathname);
+
     if (candidate) {
       const raw = await fs.promises.readFile(candidate, "utf8");
       const cleaned = stripScriptWrappers(raw);
       res.status(200).type("application/javascript; charset=utf-8").send(cleaned);
       return;
     }
-    res.status(404).type("application/javascript; charset=utf-8").send(`console.error("JS missing: ${pathname}");`);
+
+    res
+      .status(404)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS missing: ${pathname}");`);
   } catch (err) {
     console.error("Error sirviendo JS:", err);
-    res.status(500).type("application/javascript; charset=utf-8").send(`console.error("JS server error");`);
+    res
+      .status(500)
+      .type("application/javascript; charset=utf-8")
+      .send(`console.error("JS server error");`);
   }
 });
 
@@ -3109,29 +3430,27 @@ app.get("/api/price", async (req, res) => {
     const rawSymbol = String(
       req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
     );
-    const symbol = normalizeSymbol(rawSymbol);
+
+    const symbol =
+      typeof normalizeSymbol === "function"
+        ? normalizeSymbol(rawSymbol)
+        : String(rawSymbol || "").toUpperCase().trim();
 
     if (!symbol) {
       return res.status(400).json({ ok: false, error: "Símbolo requerido" });
     }
 
-    // 🔥 AUTO-SEED TOTAL
-    forcePriceExists(symbol);
+    global.forcePriceExists(symbol);
 
     let found = null;
 
     try {
-      if (priceHandler?.prices) {
-        const store =
-          priceHandler.prices instanceof Map
-            ? Object.fromEntries(priceHandler.prices.entries())
-            : priceHandler.prices;
+      const store = global.getPriceStore();
 
+      if (typeof findBestPriceMatch === "function") {
         found = findBestPriceMatch(symbol, store || {});
-      }
-
-      if (!found) {
-        found = findBestPriceMatch(symbol, getPriceStore?.() || {});
+      } else if (store && store[symbol]) {
+        found = store[symbol];
       }
     } catch (err) {
       console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
@@ -3156,7 +3475,6 @@ app.get("/api/price", async (req, res) => {
         null;
     }
 
-    // 🔥 FIX 1: usar motor fake local si no hay precio
     if (!price || !Number.isFinite(price) || price <= 0) {
       price = global.getFakePrice?.(symbol);
       if (price && Number.isFinite(price) && price > 0) {
@@ -3164,7 +3482,6 @@ app.get("/api/price", async (req, res) => {
       }
     }
 
-    // 🔥 FIX 2: mantener respaldo externo si existe
     if (!price || !Number.isFinite(price) || price <= 0) {
       try {
         const fallback = await fetchPolygonLastPrice(symbol);
@@ -3179,13 +3496,11 @@ app.get("/api/price", async (req, res) => {
       }
     }
 
-    // 🔥 FIX 3: garantía final absoluta
     if (!price || !Number.isFinite(price) || price <= 0) {
-      price = forcePriceExists(symbol) || global.getFakePrice?.(symbol);
-
-      if (!price || !Number.isFinite(price) || price <= 0) {
-        price = 50 + Math.random() * 1000;
-      }
+      price =
+        global.forcePriceExists(symbol) ||
+        global.getFakePrice?.(symbol) ||
+        50 + Math.random() * 1000;
 
       safeStorePrice(symbol, price, found?.raw || null);
     }
@@ -3209,6 +3524,7 @@ app.get("*", (req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/api") {
     return res.status(404).json({ error: "API endpoint not found" });
   }
+
   const indexPath = path.join(staticPath, "index.html");
   res.sendFile(indexPath, (err) => {
     if (err) {
@@ -3217,6 +3533,7 @@ app.get("*", (req, res) => {
     }
   });
 });
+
 /* =========================
    START / SHUTDOWN
    ========================= */
@@ -3278,7 +3595,11 @@ const gracefulShutdown = async (signal) => {
     await safeClosePolygonSocket();
 
     if (typeof global?.stopRiskWatcher === "function") {
-      try { global.stopRiskWatcher(); } catch (e) { console.warn("stopRiskWatcher threw:", e); }
+      try {
+        global.stopRiskWatcher();
+      } catch (e) {
+        console.warn("stopRiskWatcher threw:", e);
+      }
     }
 
     await mongoose.disconnect();
@@ -3293,7 +3614,13 @@ const gracefulShutdown = async (signal) => {
 
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("unhandledRejection", (r) => { console.error("UnhandledRejection:", r); gracefulShutdown("unhandledRejection").catch(() => {}); });
-process.on("uncaughtException", (e) => { console.error("UncaughtException:", e); gracefulShutdown("uncaughtException").catch(() => {}); });
+process.on("unhandledRejection", (r) => {
+  console.error("UnhandledRejection:", r);
+  gracefulShutdown("unhandledRejection").catch(() => {});
+});
+process.on("uncaughtException", (e) => {
+  console.error("UncaughtException:", e);
+  gracefulShutdown("uncaughtException").catch(() => {});
+});
 
 export default app;
