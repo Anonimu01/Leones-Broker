@@ -5203,6 +5203,10 @@ async function placeOrder(input) {
 
     const price = await getPrice(symbol);
 
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Precio inválido");
+    }
+
     const payload = {
       symbol,
       direction: side,
@@ -5265,7 +5269,7 @@ async function placeBrokerOrder(payload = {}) {
     const user = getUser();
 
     if (!user?.token) {
-      console.warn("❌ TOKEN NOT FOUND");
+      console.warn("❌ USER TOKEN NOT FOUND");
       return null;
     }
 
