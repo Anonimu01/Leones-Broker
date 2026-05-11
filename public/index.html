@@ -3373,7 +3373,47 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   });
 
   // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
-  connectTradingView(widget);
+ connectTradingView(widget);
+
+// 🔥 SYNC DEL SÍMBOLO REAL DEL GRÁFICO
+widget.onChartReady(() => {
+
+  const chart = widget.activeChart();
+
+  function syncSymbolFromChart() {
+    try {
+
+      const fullSymbol = chart.symbol();
+
+      const cleanSymbol = String(fullSymbol || "")
+        .split(":")
+        .pop()
+        .trim()
+        .toUpperCase();
+
+      // 🔥 GLOBAL REAL
+      window.currentSymbol = cleanSymbol;
+
+      // 🔥 FALLBACKS
+      window.selectedSymbol = cleanSymbol;
+      state.lastChartSymbol = cleanSymbol;
+
+      console.log("✅ Symbol synced:", cleanSymbol);
+
+    } catch (err) {
+      console.error("❌ syncSymbolFromChart error", err);
+    }
+  }
+
+  // primera vez
+  syncSymbolFromChart();
+
+  // cuando cambie desde el buscador
+  chart.onSymbolChanged().subscribe(null, () => {
+    syncSymbolFromChart();
+  });
+
+});
 
   state.lastChartSymbol = symbol;
 
@@ -3444,81 +3484,111 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     syncOrderFields();
   }
 
-  function submitOrder(direction) {
-    const side = String(direction || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
-    const symbolMeta = getActiveSymbolMeta();
-    const amount = Number(
-      document.getElementById('brokerOrderSize')?.value ||
-      document.getElementById('brokerOrderSizeBottom')?.value ||
-      0
-    );
-    const type = getOrderType();
-    const price = getOrderPrice();
+ function submitOrder(direction) {
+  const side = String(direction || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
+  const symbolMeta = getActiveSymbolMeta();
 
-    if (!amount || amount <= 0) {
-      alert('Coloca un monto válido');
-      return Promise.resolve(null);
-    }
+  const realSymbol = String(
+    window.currentSymbol ||
+    window.selectedSymbol ||
+    state.lastChartSymbol ||
+    symbolMeta?.symbol ||
+    ''
+  ).toUpperCase();
 
-    if (!symbolMeta?.symbol) {
-      alert('Selecciona un símbolo');
-      return Promise.resolve(null);
-    }
+  const amount = Number(
+    document.getElementById('brokerOrderSize')?.value ||
+    document.getElementById('brokerOrderSizeBottom')?.value ||
+    0
+  );
 
-    LAST_AMOUNT = String(amount);
+  const type = getOrderType();
+  const price = getOrderPrice();
 
-    const amountInputs = [document.getElementById('brokerOrderSize'), document.getElementById('brokerOrderSizeBottom')].filter(Boolean);
-    amountInputs.forEach(input => (input.value = amount));
-
-    const typeInputs = [document.getElementById('order-type'), document.getElementById('order-type-bottom')].filter(Boolean);
-    typeInputs.forEach(input => (input.value = type));
-
-    if (Number.isFinite(price)) {
-      const priceInputs = [document.getElementById('order-price'), document.getElementById('order-price-bottom')].filter(Boolean);
-      priceInputs.forEach(input => (input.value = price));
-    }
-
-    syncOrderTypeBoxes(type);
-
-    return (async () => {
-      try {
-        if (typeof window.__LEONES_BROKER_EXT2?.placeOrder === 'function') {
-          const result = await window.__LEONES_BROKER_EXT2.placeOrder(side);
-          return result;
-        }
-
-        if (typeof window.placeBrokerOrder === 'function') {
-          const result = await window.placeBrokerOrder({
-            symbol: symbolMeta.symbol,
-            tvSymbol: symbolMeta.tvSymbol,
-            amount,
-            direction: side,
-            type,
-            price: Number.isFinite(price) ? price : null
-          });
-          return result;
-        }
-
-        if (typeof window.openTrade === 'function') {
-          const result = await window.openTrade(
-            symbolMeta.symbol,
-            amount,
-            side,
-            Number.isFinite(price) ? price : null
-          );
-          return result;
-        }
-
-        alert('La orden no está disponible en este momento.');
-        return null;
-      } catch (err) {
-        console.warn('[BROKER-UI-FIX] submitOrder', err);
-        alert(err?.message || 'No se pudo enviar la orden');
-        return null;
-      }
-    })();
+  if (!amount || amount <= 0) {
+    alert('Coloca un monto válido');
+    return Promise.resolve(null);
   }
 
+  if (!realSymbol) {
+    alert('Selecciona un símbolo');
+    return Promise.resolve(null);
+  }
+
+  LAST_AMOUNT = String(amount);
+
+  const amountInputs = [
+    document.getElementById('brokerOrderSize'),
+    document.getElementById('brokerOrderSizeBottom')
+  ].filter(Boolean);
+
+  amountInputs.forEach(input => (input.value = amount));
+
+  const typeInputs = [
+    document.getElementById('order-type'),
+    document.getElementById('order-type-bottom')
+  ].filter(Boolean);
+
+  typeInputs.forEach(input => (input.value = type));
+
+  if (Number.isFinite(price)) {
+    const priceInputs = [
+      document.getElementById('order-price'),
+      document.getElementById('order-price-bottom')
+    ].filter(Boolean);
+
+    priceInputs.forEach(input => (input.value = price));
+  }
+
+  syncOrderTypeBoxes(type);
+
+  return (async () => {
+    try {
+
+      if (typeof window.__LEONES_BROKER_EXT2?.placeOrder === 'function') {
+        const result = await window.__LEONES_BROKER_EXT2.placeOrder(side);
+        return result;
+      }
+
+      if (typeof window.placeBrokerOrder === 'function') {
+
+        const result = await window.placeBrokerOrder({
+          symbol: realSymbol,
+          tvSymbol: symbolMeta?.tvSymbol || realSymbol,
+          amount,
+          direction: side,
+          type,
+          price: Number.isFinite(price) ? price : null
+        });
+
+        return result;
+      }
+
+      if (typeof window.openTrade === 'function') {
+
+        const result = await window.openTrade(
+          realSymbol,
+          amount,
+          side,
+          Number.isFinite(price) ? price : null
+        );
+
+        return result;
+      }
+
+      alert('La orden no está disponible en este momento.');
+      return null;
+
+    } catch (err) {
+
+      console.warn('[BROKER-UI-FIX] submitOrder', err);
+
+      alert(err?.message || 'No se pudo enviar la orden');
+
+      return null;
+    }
+  })();
+}
   function mirrorMarketPanel() {
     const source = document.getElementById('brokerSymbolsPanel');
     const target = document.getElementById('marketPanel') || document.getElementById('marketsPanel');
