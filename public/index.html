@@ -6218,16 +6218,18 @@ async function loadHistoryPanel() {
   const tbody = document.getElementById("historyRows");
   if (!tbody) return;
 
-  const userId = localStorage.getItem("userId");
+ const user = JSON.parse(localStorage.getItem("user") || "{}");
+const userId = user._id || user.id || localStorage.getItem("userId");
 
-  // 🔴 FIX IMPORTANTE
-  if (!userId || userId === "null" || userId === "undefined") {
-    console.warn("❌ userId inválido");
-    tbody.innerHTML = `
-      <tr><td colspan="6" class="muted">No hay sesión activa</td></tr>
-    `;
-    return;
-  }
+// 🔴 FIX IMPORTANTE
+if (!userId || userId === "null" || userId === "undefined") {
+  console.warn("❌ userId inválido");
+
+  tbody.innerHTML = `
+    <tr><td colspan="6" class="muted">No hay sesión activa</td></tr>
+  `;
+  return;
+}
 
   try {
     const res = await fetch(`/api/transactions/${userId}`, {
