@@ -5694,82 +5694,45 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* =========================
      🔥 ORDEN REAL SIN ERROR
   ========================= */
-async function forceTrade(direction) {
+function forceTrade(direction) {
   const api = ext();
 
   const amountInput = document.getElementById("brokerOrderSize");
-
-  const amount = parseFloat(
-    amountInput ? amountInput.value : 0
-  );
+  const amount = parseFloat(amountInput?.value);
 
   if (!amount || amount <= 0) {
     alert("Coloca un monto válido");
     return;
   }
 
-  let symbol =
-    window.selectedSymbol ||
-    (api ? api.activeSymbol : null) ||
-    (window.TR ? window.TR.activeSymbol : null);
+  const symbol = window.selectedSymbol || api.activeSymbol || window.TR?.activeSymbol;
 
   if (!symbol) {
     alert("Selecciona un símbolo");
     return;
   }
 
-  // 🔥 PRECIO ACTUAL
-  let price = null;
+  // 🔥 PRECIO ACTUAL (FIX REAL)
+  const price =
+    api?.prices?.[symbol] ??
+    api?.lastPrice ??
+    null;
 
-  if (
-    api &&
-    api.prices &&
-    api.prices[symbol]
-  ) {
-    price = api.prices[symbol];
-  } else if (api && api.lastPrice) {
-    price = api.lastPrice;
-  }
-
-  let finalPrice = Number(price);
-
-  if (
-    !Number.isFinite(finalPrice) ||
-    finalPrice <= 0
-  ) {
-    console.warn("⚠️ Precio fallback automático");
-
-    finalPrice = await getPrice(symbol);
-
-    if (
-      !Number.isFinite(finalPrice) ||
-      finalPrice <= 0
-    ) {
-      finalPrice = generatePrice(symbol);
-    }
+  if (!price) {
+    console.warn("⚠️ Precio no disponible, usando entry temporal");
   }
 
   const payload = {
     symbol: symbol,
     side: direction,
     qty: amount,
-    entryPrice: finalPrice,
-    currentPrice: finalPrice,
-    marketPrice: finalPrice,
-    lastPrice: finalPrice,
-    close: finalPrice,
-    price: finalPrice
+    entryPrice: price || 0 // 🔥 evita que falle el backend y el pnl
   };
 
   console.log("🚀 Enviando orden:", payload);
 
-  if (
-    api &&
-    typeof api.placeOrder === "function"
-  ) {
-    api.placeOrder(payload);
-  }
-}
+  api.placeOrder?.(payload);
+
   /* =========================
      🔥 FETCH CORRECTO (AQUÍ DENTRO)
   ========================= */
@@ -6227,7 +6190,6 @@ function createFloatingTradesPanel() {
 
 });
 </script>
-
   
 </div>
 
