@@ -5446,23 +5446,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.body.appendChild(floatingMenuBtn);
     }
 
-    floatingMenuBtn.style.position = "fixed";
-    floatingMenuBtn.style.left = "2px";
-    floatingMenuBtn.style.bottom = "340px";
-    floatingMenuBtn.style.zIndex = "999999";
-    floatingMenuBtn.style.display = "flex";
-    floatingMenuBtn.style.alignItems = "center";
-    floatingMenuBtn.style.justifyContent = "center";
-    floatingMenuBtn.style.visibility = "visible";
-    floatingMenuBtn.style.opacity = "1";
-    floatingMenuBtn.style.pointerEvents = "auto";
+   floatingMenuBtn.style.position = "fixed";
+floatingMenuBtn.style.left = "2px";
+floatingMenuBtn.style.bottom = "340px";
+floatingMenuBtn.style.zIndex = "999999";
+floatingMenuBtn.style.display = "flex";
+floatingMenuBtn.style.alignItems = "center";
+floatingMenuBtn.style.justifyContent = "center";
+floatingMenuBtn.style.visibility = "visible";
+floatingMenuBtn.style.opacity = "1";
+floatingMenuBtn.style.pointerEvents = "auto";
 
-    // 🔥 quitar el contenedor visual
+// 🔥 quitar estilo del contenedor
 floatingMenuBtn.style.background = "transparent";
 floatingMenuBtn.style.border = "none";
 floatingMenuBtn.style.boxShadow = "none";
-    
-  }
+
+// 👉 AQUÍ VA ESTO (justo después)
+floatingMenuBtn.querySelectorAll("*").forEach(el => {
+  el.style.background = "transparent";
+  el.style.border = "none";
+  el.style.boxShadow = "none";
+});
   
 
   function syncMenuButtons() {
