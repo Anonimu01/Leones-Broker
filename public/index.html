@@ -3339,13 +3339,57 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   // 🔥 SI EXISTE TU INIT PERSONALIZADO
   if (typeof window.initTradingWidget === 'function') {
     try {
+
       const widget = window.initTradingWidget(symbol, containerId);
 
-      // 🔥 CONECTAR SYNC
-      if (widget) connectTradingView(widget);
+      // 🔥 SOLO SI EL WIDGET REAL EXISTE
+      if (widget && typeof widget.onChartReady === 'function') {
+
+        connectTradingView(widget);
+
+        widget.onChartReady(() => {
+
+          const chart = widget.activeChart();
+
+          function syncSymbolFromChart() {
+            try {
+
+              const fullSymbol = chart.symbol();
+
+              const cleanSymbol = String(fullSymbol || "")
+                .split(":")
+                .pop()
+                .trim()
+                .toUpperCase();
+
+              // 🔥 GLOBAL REAL
+              window.currentSymbol = cleanSymbol;
+
+              // 🔥 FALLBACKS
+              window.selectedSymbol = cleanSymbol;
+              state.lastChartSymbol = cleanSymbol;
+
+              console.log("✅ Symbol synced:", cleanSymbol);
+
+            } catch (err) {
+              console.error("❌ syncSymbolFromChart error", err);
+            }
+          }
+
+          // primera vez
+          syncSymbolFromChart();
+
+          // cuando cambie desde el buscador
+          chart.onSymbolChanged().subscribe(null, () => {
+            syncSymbolFromChart();
+          });
+
+        });
+      }
 
       state.lastChartSymbol = symbol;
       return symbol;
+
     } catch (e) {
       warn('window.initTradingWidget failed', e);
     }
@@ -3373,47 +3417,47 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   });
 
   // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
- connectTradingView(widget);
+  connectTradingView(widget);
 
-// 🔥 SYNC DEL SÍMBOLO REAL DEL GRÁFICO
-widget.onChartReady(() => {
+  // 🔥 SYNC DEL SÍMBOLO REAL DEL GRÁFICO
+  widget.onChartReady(() => {
 
-  const chart = widget.activeChart();
+    const chart = widget.activeChart();
 
-  function syncSymbolFromChart() {
-    try {
+    function syncSymbolFromChart() {
+      try {
 
-      const fullSymbol = chart.symbol();
+        const fullSymbol = chart.symbol();
 
-      const cleanSymbol = String(fullSymbol || "")
-        .split(":")
-        .pop()
-        .trim()
-        .toUpperCase();
+        const cleanSymbol = String(fullSymbol || "")
+          .split(":")
+          .pop()
+          .trim()
+          .toUpperCase();
 
-      // 🔥 GLOBAL REAL
-      window.currentSymbol = cleanSymbol;
+        // 🔥 GLOBAL REAL
+        window.currentSymbol = cleanSymbol;
 
-      // 🔥 FALLBACKS
-      window.selectedSymbol = cleanSymbol;
-      state.lastChartSymbol = cleanSymbol;
+        // 🔥 FALLBACKS
+        window.selectedSymbol = cleanSymbol;
+        state.lastChartSymbol = cleanSymbol;
 
-      console.log("✅ Symbol synced:", cleanSymbol);
+        console.log("✅ Symbol synced:", cleanSymbol);
 
-    } catch (err) {
-      console.error("❌ syncSymbolFromChart error", err);
+      } catch (err) {
+        console.error("❌ syncSymbolFromChart error", err);
+      }
     }
-  }
 
-  // primera vez
-  syncSymbolFromChart();
-
-  // cuando cambie desde el buscador
-  chart.onSymbolChanged().subscribe(null, () => {
+    // primera vez
     syncSymbolFromChart();
-  });
 
-});
+    // cuando cambie desde el buscador
+    chart.onSymbolChanged().subscribe(null, () => {
+      syncSymbolFromChart();
+    });
+
+  });
 
   state.lastChartSymbol = symbol;
 
