@@ -5698,7 +5698,9 @@ async function forceTrade(direction) {
   const api = ext();
 
   const amountInput = document.getElementById("brokerOrderSize");
-  const amount = parseFloat(amountInput?.value);
+  const amount = parseFloat(
+    amountInput ? amountInput.value : 0
+  );
 
   if (!amount || amount <= 0) {
     alert("Coloca un monto válido");
@@ -5708,7 +5710,7 @@ async function forceTrade(direction) {
   const symbol =
     window.selectedSymbol ||
     api.activeSymbol ||
-    window.TR?.activeSymbol;
+    (window.TR ? window.TR.activeSymbol : null);
 
   if (!symbol) {
     alert("Selecciona un símbolo");
@@ -5717,8 +5719,10 @@ async function forceTrade(direction) {
 
   // 🔥 PRECIO ACTUAL (FIX REAL)
   const price =
-    api?.prices?.[symbol] ??
-    api?.lastPrice ??
+    (api &&
+      api.prices &&
+      api.prices[symbol]) ||
+    api.lastPrice ||
     null;
 
   let finalPrice = Number(price);
@@ -5747,9 +5751,10 @@ async function forceTrade(direction) {
 
   console.log("🚀 Enviando orden:", payload);
 
-  api.placeOrder?.(payload);
+  if (api && typeof api.placeOrder === "function") {
+    api.placeOrder(payload);
+  }
 }
-
   /* =========================
      🔥 FETCH CORRECTO (AQUÍ DENTRO)
   ========================= */
