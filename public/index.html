@@ -6174,11 +6174,15 @@ function createFloatingTradesPanel() {
   /* =========================
      🔥 INIT
   ========================= */
-  if (window.startBrokerUI) {
-    await window.startBrokerUI();
+ if (window.startBrokerUI) {
+  try {
+    Promise.resolve(window.startBrokerUI());
+  } catch (e) {
+    console.warn("startBrokerUI error:", e);
   }
+}
 
-  await waitForBroker();
+Promise.resolve(waitForBroker()).then(() => {
 
   bindMenuButtons();
   observeChanges();
@@ -6193,6 +6197,7 @@ function createFloatingTradesPanel() {
 
   showPanel("dashboardPanel");
 
+});
   /* =========================
      🔥 REFORZAR BOTÓN FLOTANTE
   ========================= */
