@@ -6219,18 +6219,16 @@ async function loadHistoryPanel() {
   const tbody = document.getElementById("historyRows");
   if (!tbody) return;
 
- const user = JSON.parse(localStorage.getItem("user") || "{}");
-const userId = user._id || user.id || localStorage.getItem("userId");
+  const user = JSON.parse(localStorage.getItem("BROKERPRO_SESSION_USER") || "{}");
+  const userId = user._id || user.id;
 
-// 🔴 FIX IMPORTANTE
-if (!userId || userId === "null" || userId === "undefined") {
-  console.warn("❌ userId inválido");
-
-  tbody.innerHTML = `
-    <tr><td colspan="6" class="muted">No hay sesión activa</td></tr>
-  `;
-  return;
-}
+  if (!userId) {
+    console.warn("❌ userId inválido");
+    tbody.innerHTML = `
+      <tr><td colspan="6" class="muted">No hay sesión activa</td></tr>
+    `;
+    return;
+  }
 
   try {
     const res = await fetch(`/api/transactions/${userId}`, {
@@ -6255,32 +6253,17 @@ if (!userId || userId === "null" || userId === "undefined") {
 
       let color = "#fff";
 
-      if (type.toLowerCase().includes("deposit")) {
-        color = "#00ff88";
-      }
-
-      if (type.toLowerCase().includes("withdraw")) {
-        color = "#ff4d4d";
-      }
-
-      if (type.toLowerCase().includes("trade")) {
-        color = "#ffd700";
-      }
+      if (type.toLowerCase().includes("deposit")) color = "#00ff88";
+      if (type.toLowerCase().includes("withdraw")) color = "#ff4d4d";
+      if (type.toLowerCase().includes("trade")) color = "#ffd700";
 
       return `
         <tr>
           <td>${tx._id?.slice(-6) || "----"}</td>
           <td>${new Date(tx.createdAt).toLocaleString()}</td>
-
-          <td style="color:${color}; font-weight:bold">
-            ${type}
-          </td>
-
-          <td>${tx.method || tx.Método || "--"}</td>
-
-          <td style="color:${color}; font-weight:bold">
-            ${amount}</td>
-
+          <td style="color:${color}; font-weight:bold">${type}</td>
+          <td>${tx.method || "--"}</td>
+          <td style="color:${color}; font-weight:bold">${amount}</td>
           <td>${tx.status || "N/A"}</td>
         </tr>
       `;
@@ -6288,7 +6271,6 @@ if (!userId || userId === "null" || userId === "undefined") {
 
   } catch (err) {
     console.error("❌ Error historial:", err);
-
     tbody.innerHTML = `
       <tr><td colspan="6" class="muted">Error cargando transacciones</td></tr>
     `;
