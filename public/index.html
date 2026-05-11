@@ -577,6 +577,7 @@ if (window.__LEONES_BOOTED__) {
       const sess = {
         ...(user && typeof user === 'object' ? user : {}),
         token: token || (user && user.token) || null,
+          userId: user?._id || user?.id || null,
       };
 
       localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
