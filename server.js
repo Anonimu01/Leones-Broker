@@ -996,6 +996,39 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
   };
 }
 
+
+/* ======================================================
+   TRANSACTIONS API
+   ====================================================== */
+
+const Transaction = require("./models/Transaction");
+
+app.get("/api/transactions/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        ok: false,
+        message: "userId requerido"
+      });
+    }
+
+    const transactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 });
+
+    return res.json(transactions);
+
+  } catch (err) {
+    console.error("❌ ERROR transactions:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno del servidor"
+    });
+  }
+});
+
+        
 /* ======================================================
    HEALTH / MAIL
    ====================================================== */
