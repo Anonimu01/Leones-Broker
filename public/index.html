@@ -6213,12 +6213,21 @@ setInterval(() => {
 
 });
 
-  //historial de transacion 
-  async function loadHistoryPanel() {
+  // historial de transaccion 
+async function loadHistoryPanel() {
   const tbody = document.getElementById("historyRows");
   if (!tbody) return;
 
   const userId = localStorage.getItem("userId");
+
+  // 🔴 FIX IMPORTANTE
+  if (!userId || userId === "null" || userId === "undefined") {
+    console.warn("❌ userId inválido");
+    tbody.innerHTML = `
+      <tr><td colspan="6" class="muted">No hay sesión activa</td></tr>
+    `;
+    return;
+  }
 
   try {
     const res = await fetch(`/api/transactions/${userId}`, {
@@ -6241,19 +6250,18 @@ setInterval(() => {
       const type = tx.type || tx.Tipo || "N/A";
       const amount = tx.amount || tx.Cantidad || 0;
 
-      // 🔥 COLOR POR TIPO
       let color = "#fff";
 
-      if (type.toLowerCase().includes("deposit") || type.toLowerCase().includes("depósito")) {
-        color = "#00ff88"; // verde
+      if (type.toLowerCase().includes("deposit")) {
+        color = "#00ff88";
       }
 
-      if (type.toLowerCase().includes("withdraw") || type.toLowerCase().includes("retiro")) {
-        color = "#ff4d4d"; // rojo
+      if (type.toLowerCase().includes("withdraw")) {
+        color = "#ff4d4d";
       }
 
-      if (type.includes("trade")) {
-        color = "#ffd700"; // amarillo trading
+      if (type.toLowerCase().includes("trade")) {
+        color = "#ffd700";
       }
 
       return `
@@ -6268,10 +6276,9 @@ setInterval(() => {
           <td>${tx.method || tx.Método || "--"}</td>
 
           <td style="color:${color}; font-weight:bold">
-            ${amount}
-          </td>
+            ${amount}</td>
 
-          <td>${tx.status || tx.Estado || "N/A"}</td>
+          <td>${tx.status || "N/A"}</td>
         </tr>
       `;
     }).join("");
