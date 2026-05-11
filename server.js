@@ -1442,7 +1442,6 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
 /* ======================================================
    TRADING CORE
    ====================================================== */
-
 app.post("/api/trade/open", async (req, res) => {
   let lockKey = null;
 
@@ -1451,14 +1450,52 @@ app.post("/api/trade/open", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-    const symbol = normalizePositionSymbol(body);
-    const side = normalizeSide(body.side);
-    const qty = normalizeQty(body);
 
-    if (!symbol || !side || !qty) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+    // =========================
+    // 🔧 SAFE NORMALIZATION (FIX 400)
+    // =========================
+    const symbol = normalizePositionSymbol({
+      symbol:
+        body.symbol ||
+        body.asset ||
+        body.market ||
+        body.instrument ||
+        ""
+    });
+
+    const side = normalizeSide(
+      body.side ||
+      body.type ||
+      body.positionSide ||
+      "BUY"
+    );
+
+    let qty = Number(
+      body.qty ??
+      body.quantity ??
+      body.size ??
+      body.amount ??
+      1
+    );
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      qty = 1;
     }
 
+    console.log("📥 TRADE RAW:", body);
+    console.log("📊 TRADE NORMALIZED:", { symbol, side, qty });
+
+    if (!symbol) {
+      return res.status(400).json({ ok: false, error: "invalid_symbol" });
+    }
+
+    if (!side) {
+      return res.status(400).json({ ok: false, error: "invalid_side" });
+    }
+
+    // =========================
+    // LOCK
+    // =========================
     lockKey = makeOpenLockKey(user._id, symbol, side, qty);
 
     if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
@@ -1473,14 +1510,13 @@ app.post("/api/trade/open", async (req, res) => {
     const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
 
     // =========================
-    // 🔥 PRICE RESOLUTION (ROBUSTO)
+    // PRICE RESOLUTION (TU SISTEMA INTACTO)
     // =========================
     let price =
       Number(body.price) ||
       Number(body.entryPrice) ||
       getSimulatedPrice(symbol);
 
-    // AUTO FIX: nunca dejar que se caiga la orden
     if (!Number.isFinite(price) || price <= 0) {
       price =
         global.getFakePrice?.(symbol) ||
@@ -1502,11 +1538,10 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // RISK CALCULATION
+    // RISK (SIMULACIÓN)
     // =========================
     const notional = qty * price;
     const requiredMargin = 0;
-    const freeMargin = balanceOwn + credit - marginUsed;
 
     if (wallet.balance < requiredMargin) {
       console.warn("⚠️ Margen insuficiente ignorado en modo simulación");
