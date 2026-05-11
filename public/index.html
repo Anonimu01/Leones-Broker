@@ -5456,7 +5456,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     floatingMenuBtn.style.visibility = "visible";
     floatingMenuBtn.style.opacity = "1";
     floatingMenuBtn.style.pointerEvents = "auto";
+
+    // 🔥 quitar el contenedor visual
+floatingMenuBtn.style.background = "transparent";
+floatingMenuBtn.style.border = "none";
+floatingMenuBtn.style.boxShadow = "none";
+    
   }
+  
 
   function syncMenuButtons() {
     const sidebar = document.getElementById("sidebar");
