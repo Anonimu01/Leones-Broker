@@ -5543,12 +5543,19 @@ floatingMenuBtn.querySelectorAll("*").forEach(el => {
     }
   }
 
-  function showOnlyPanel(id) {
-    panels.forEach(p => p.style.display = "none");
-    const el = document.getElementById(id);
-    if (el) el.style.display = "block";
-    setActiveButton(id);
+function showOnlyPanel(id) {
+  panels.forEach(p => p.style.display = "none");
+
+  const el = document.getElementById(id);
+  if (el) el.style.display = "block";
+
+  setActiveButton(id);
+
+  // 🔥 AQUÍ SE CARGA EL HISTORIAL
+  if (id === "historyPanel") {
+    loadHistoryPanel();
   }
+}
 
   /* =========================
      🔥 ESPERAR JS2
@@ -6205,6 +6212,78 @@ setInterval(() => {
 }, 1000);
 
 });
+
+  //historial de transacion 
+  async function loadHistoryPanel() {
+  const tbody = document.getElementById("historyRows");
+  if (!tbody) return;
+
+  const userId = localStorage.getItem("userId");
+
+  try {
+    const res = await fetch(`/api/transactions/${userId}`, {
+      headers: {
+        "Authorization": "Bearer " + (localStorage.getItem("token") || "")
+      }
+    });
+
+    const data = await res.json();
+
+    if (!Array.isArray(data) || data.length === 0) {
+      tbody.innerHTML = `
+        <tr><td colspan="6" class="muted">Sin transacciones</td></tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = data.map(tx => {
+
+      const type = tx.type || tx.Tipo || "N/A";
+      const amount = tx.amount || tx.Cantidad || 0;
+
+      // 🔥 COLOR POR TIPO
+      let color = "#fff";
+
+      if (type.toLowerCase().includes("deposit") || type.toLowerCase().includes("depósito")) {
+        color = "#00ff88"; // verde
+      }
+
+      if (type.toLowerCase().includes("withdraw") || type.toLowerCase().includes("retiro")) {
+        color = "#ff4d4d"; // rojo
+      }
+
+      if (type.includes("trade")) {
+        color = "#ffd700"; // amarillo trading
+      }
+
+      return `
+        <tr>
+          <td>${tx._id?.slice(-6) || "----"}</td>
+          <td>${new Date(tx.createdAt).toLocaleString()}</td>
+
+          <td style="color:${color}; font-weight:bold">
+            ${type}
+          </td>
+
+          <td>${tx.method || tx.Método || "--"}</td>
+
+          <td style="color:${color}; font-weight:bold">
+            ${amount}
+          </td>
+
+          <td>${tx.status || tx.Estado || "N/A"}</td>
+        </tr>
+      `;
+    }).join("");
+
+  } catch (err) {
+    console.error("❌ Error historial:", err);
+
+    tbody.innerHTML = `
+      <tr><td colspan="6" class="muted">Error cargando transacciones</td></tr>
+    `;
+  }
+}
 </script>
   
 </div>
