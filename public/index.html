@@ -6191,19 +6191,18 @@ Promise.resolve(waitForBroker()).then(() => {
   persistAmount();
   createFloatingTradesPanel();
 
-  document.querySelectorAll("[data-target]").forEach(btn => {
-    btn.onclick = () => showPanel(btn.dataset.target);
-  });
+ document.querySelectorAll("[data-target]").forEach(btn => {
+  btn.onclick = () => showPanel(btn.dataset.target);
+});
 
-  showPanel("dashboardPanel");
+showPanel("dashboardPanel");
 
-
-   /* =========================
-     🔥 REFORZAR BOTÓN FLOTANTE
-  ========================= */
-  setInterval(() => {
-    bindMenuButtons();
-  }, 1000);
+/* =========================
+   🔥 REFORZAR BOTÓN FLOTANTE
+========================= */
+setInterval(() => {
+  bindMenuButtons();
+}, 1000);
 
 });
 </script>
