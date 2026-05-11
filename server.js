@@ -1000,8 +1000,6 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
 /* ======================================================
    TRANSACTIONS API
    ====================================================== */
-
-
 app.get("/api/transactions/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -1026,7 +1024,6 @@ app.get("/api/transactions/:userId", async (req, res) => {
     });
   }
 });
-
         
 /* ======================================================
    HEALTH / MAIL
