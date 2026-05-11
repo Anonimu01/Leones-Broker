@@ -1628,46 +1628,7 @@ function getSimulatedPrice(symbol) {
    API PRICE
    ====================================================== */
 
-app.get("/api/price", async (req, res) => {
-  try {
-    let symbol = String(req.query.symbol || "UNKNOWN")
-      .trim()
-      .toUpperCase();
 
-    const price = getSimulatedPrice(symbol);
-
-    return res.json({
-      ok: true,
-      simulated: true,
-      symbol,
-      price
-    });
-
-  } catch (err) {
-    console.error("❌ PRICE ERROR:", err);
-
-    // fallback ABSOLUTO
-    return res.json({
-      ok: true,
-      simulated: true,
-      symbol: "FALLBACK",
-      price: 100
-    });
-  }
-});
-
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/verification", verificationRoutes);
-app.use("/api/wallet", walletRoutes);
-app.use("/api/positions", positionsRoutes);
-app.use("/api/trade", tradeRoutes);
-app.use("/api/account", accountRoutes);
-
-app.use("/api/api", (req, res) => {
-  const newUrl = req.originalUrl.replace(/^\/api\/api/, "/api");
-  return res.redirect(307, newUrl);
-});
 
 /* ======================================================
    SOCKET.IO
@@ -1996,14 +1957,22 @@ app.get("/api/price", async (req, res) => {
     const rawSymbol = String(
       req.query.symbol || req.query.tvSymbol || req.query.selectedSymbol || ""
     );
+
     const symbol = normalizeSymbol(rawSymbol);
 
     if (!symbol) {
-      return res.status(400).json({ ok: false, error: "Símbolo requerido" });
+      return res.status(400).json({
+        ok: false,
+        error: "Símbolo requerido"
+      });
     }
 
     // 🔥 AUTO-SEED TOTAL
-    forcePriceExists(symbol);
+    try {
+      forcePriceExists(symbol);
+    } catch (e) {
+      console.warn("forcePriceExists error:", e?.message || e);
+    }
 
     let found = null;
 
@@ -2017,14 +1986,23 @@ app.get("/api/price", async (req, res) => {
         found = findBestPriceMatch(symbol, store || {});
       }
 
+      // fallback secondary store
       if (!found) {
-        found = findBestPriceMatch(symbol, getPriceStore?.() || {});
+        found = findBestPriceMatch(
+          symbol,
+          getPriceStore?.() || {}
+        );
       }
+
     } catch (err) {
       console.warn("❌ STORE SEARCH ERROR:", err?.message || err);
     }
 
     let price = null;
+
+    // =====================================================
+    // EXTRACT PRICE FROM STORE
+    // =====================================================
 
     if (found) {
       price =
@@ -2043,64 +2021,190 @@ app.get("/api/price", async (req, res) => {
         null;
     }
 
-    // 🔥 FIX 1: usar motor fake local si no hay precio
+    // =====================================================
+    // FIX 1 — LOCAL FAKE ENGINE
+    // =====================================================
+
     if (!price || !Number.isFinite(price) || price <= 0) {
-      price = global.getFakePrice?.(symbol);
-      if (price && Number.isFinite(price) && price > 0) {
-        safeStorePrice(symbol, price, found?.raw || null);
+
+      try {
+        price = global.getFakePrice?.(symbol);
+
+        if (price && Number.isFinite(price) && price > 0) {
+          safeStorePrice(symbol, price, found?.raw || null);
+
+          console.log("🔥 FAKE ENGINE PRICE:", symbol, price);
+        }
+
+      } catch (err) {
+        console.warn("❌ FAKE ENGINE ERROR:", err?.message || err);
       }
     }
 
-    // 🔥 FIX 2: mantener respaldo externo si existe
+    // =====================================================
+    // FIX 2 — SIMULATED ENGINE
+    // =====================================================
+
     if (!price || !Number.isFinite(price) || price <= 0) {
+
+      try {
+        price = getSimulatedPrice(symbol);
+
+        if (price && Number.isFinite(price) && price > 0) {
+          safeStorePrice(symbol, price, found?.raw || null);
+
+          console.log("🎮 SIMULATED PRICE:", symbol, price);
+        }
+
+      } catch (err) {
+        console.warn("❌ SIMULATED ENGINE ERROR:", err?.message || err);
+      }
+    }
+
+    // =====================================================
+    // FIX 3 — POLYGON FALLBACK
+    // =====================================================
+
+    if (!price || !Number.isFinite(price) || price <= 0) {
+
       try {
         const fallback = await fetchPolygonLastPrice(symbol);
+
         const fallbackPrice = Number(fallback?.price);
 
         if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+
           price = fallbackPrice;
-          safeStorePrice(symbol, fallbackPrice, fallback?.raw || null);
+
+          safeStorePrice(
+            symbol,
+            fallbackPrice,
+            fallback?.raw || null
+          );
+
+          console.log("🌍 POLYGON FALLBACK PRICE:", symbol, price);
         }
+
       } catch (err) {
-        console.warn("❌ FALLBACK ERROR:", err?.message || err);
+        console.warn("❌ POLYGON FALLBACK ERROR:", err?.message || err);
       }
     }
 
-    // 🔥 FIX 3: garantía final absoluta
-    if (!price || !Number.isFinite(price) || price <= 0) {
-      price = forcePriceExists(symbol) || global.getFakePrice?.(symbol);
+    // =====================================================
+    // FIX 4 — ABSOLUTE GUARANTEE
+    // =====================================================
 
-      if (!price || !Number.isFinite(price) || price <= 0) {
-        price = 50 + Math.random() * 1000;
+    if (!price || !Number.isFinite(price) || price <= 0) {
+
+      try {
+
+        price =
+          forcePriceExists(symbol) ||
+          global.getFakePrice?.(symbol) ||
+          getSimulatedPrice(symbol);
+
+      } catch (err) {
+        console.warn("❌ FINAL RECOVERY ERROR:", err?.message || err);
       }
 
-      safeStorePrice(symbol, price, found?.raw || null);
+      // emergency random
+      if (!price || !Number.isFinite(price) || price <= 0) {
+
+        price = Number(
+          (50 + Math.random() * 1000).toFixed(2)
+        );
+
+        console.warn("🚨 EMERGENCY RANDOM PRICE:", symbol, price);
+      }
+
+      try {
+        safeStorePrice(
+          symbol,
+          price,
+          found?.raw || null
+        );
+      } catch (err) {
+        console.warn("❌ FINAL STORE ERROR:", err?.message || err);
+      }
+    }
+
+    // =====================================================
+    // FINAL NORMALIZATION
+    // =====================================================
+
+    price = Number(price);
+
+    if (!Number.isFinite(price) || price <= 0) {
+
+      return res.status(500).json({
+        ok: false,
+        error: "price_unrecoverable",
+        symbol
+      });
     }
 
     return res.json({
       ok: true,
       symbol,
-      price: Number(price),
-      currentPrice: Number(price),
-      last: Number(price),
-      close: Number(price),
-      updatedAt: found?.updatedAt || new Date().toISOString(),
+      simulated: true,
+      realtime: !!found,
+      source:
+        found ? "store" :
+        process.env.POLYGON_API_KEY ? "polygon/fallback" :
+        "simulation",
+
+      price,
+      currentPrice: price,
+      last: price,
+      close: price,
+      bid: price,
+      ask: price,
+
+      updatedAt:
+        found?.updatedAt ||
+        new Date().toISOString()
     });
+
   } catch (err) {
-    console.error("Error /api/price:", err);
-    return res.status(500).json({ ok: false, error: "Error interno" });
+
+    console.error("❌ Error /api/price:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "Error interno",
+      message: err?.message || "Unknown error"
+    });
   }
 });
 
 app.get("*", (req, res) => {
-  if (req.path.startsWith("/api/") || req.path === "/api") {
-    return res.status(404).json({ error: "API endpoint not found" });
+
+  if (
+    req.path.startsWith("/api/") ||
+    req.path === "/api"
+  ) {
+    return res.status(404).json({
+      error: "API endpoint not found"
+    });
   }
-  const indexPath = path.join(staticPath, "index.html");
+
+  const indexPath = path.join(
+    staticPath,
+    "index.html"
+  );
+
   res.sendFile(indexPath, (err) => {
+
     if (err) {
-      console.error("Error sirviendo index.html:", err);
-      res.status(err.status || 500).send("Error loading app");
+
+      console.error(
+        "Error sirviendo index.html:",
+        err
+      );
+
+      res
+        .status(err.status || 500)
+        .send("Error loading app");
     }
   });
 });
