@@ -1001,7 +1001,6 @@ async function applyCloseToPosition({ user, positionDoc, currentPrice, source = 
    TRANSACTIONS API
    ====================================================== */
 
-const Transaction = require("./models/Transaction");
 
 app.get("/api/transactions/:userId", async (req, res) => {
   try {
