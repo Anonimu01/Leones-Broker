@@ -5258,7 +5258,19 @@ document.addEventListener("click", async (e) => {
 async function placeBrokerOrder(payload = {}) {
   try {
     const symbol = toPriceSymbol(payload.symbol);
-    const amount = Number(payload.qty || 0);
+
+    ///////////////////////////////////////////////////////
+    // FIX CRÍTICO: QTY VALIDADO SIN ROMPER FLUJO
+    ///////////////////////////////////////////////////////
+
+    let amount = Number(payload.qty);
+
+    // fallback seguro (no rompe nada existente)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      console.warn("⚠️ INVALID QTY FALLBACK:", payload.qty);
+      amount = 0;
+    }
+
     const side = String(
       payload.direction || payload.side || ""
     ).toUpperCase();
@@ -5297,6 +5309,8 @@ async function placeBrokerOrder(payload = {}) {
       symbol,
       side,
       type: "market",
+
+      // FIX aplicado aquí sin cambiar estructura
       qty: amount,
 
       price,
