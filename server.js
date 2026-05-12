@@ -1505,7 +1505,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-  const balanceOwn = Number(
+ const balanceOwn = Number(
   wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
 ) || 0;
 
