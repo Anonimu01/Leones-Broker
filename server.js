@@ -1505,11 +1505,18 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-   const balanceOwn = Number(wallet.balanceOwn || 0);
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-    const leverage = Math.max(Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1, 1);
+  const balanceOwn = Number(
+  wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
+) || 0;
 
+const credit = Number(wallet.credit ?? 0) || 0;
+
+const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+
+const leverage = Math.max(
+  Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1,
+  1
+);
     // =========================
     // 🔥 PRICE RESOLUTION (ROBUSTO)
     // =========================
