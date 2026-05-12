@@ -757,6 +757,19 @@ async function buildAccountForUser(userDoc) {
   return {
     account: {
       ...normalizedWallet,
+      name:
+      userDoc.name ||
+      userDoc.username ||
+      userDoc.fullName ||
+      "Cliente",
+
+    username:
+      userDoc.username ||
+      userDoc.name ||
+      "Cliente",
+
+    email: userDoc.email || "",
+
       balance,
       balanceOwn: balance,
       availableBalance: normalizedWallet.availableBalance,
