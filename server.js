@@ -1493,20 +1493,10 @@ app.post("/api/trade/open", async (req, res) => {
     const body = req.body || {};
     const symbol = normalizePositionSymbol(body);
     const side = normalizeSide(body.side);
-    const qty = normalizeQty(body);
+    let qty = normalizeQty(body);
 
     if (!symbol || !side || !qty) {
       return res.status(400).json({ ok: false, error: "invalid_params" });
-    }
-
-    if (!Number.isFinite(qty) || qty <= 0) {
-      return res.status(400).json({ ok: false, error: "invalid_qty" });
-    }
-
-    lockKey = makeOpenLockKey(user._id, symbol, side, qty);
-
-    if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
-      return res.status(429).json({ ok: false, error: "duplicate_order_blocked" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1517,89 +1507,80 @@ app.post("/api/trade/open", async (req, res) => {
 
     const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
-      Number.isFinite(rawLeverage) && rawLeverage > 0
-        ? rawLeverage
-        : 10;
+      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
+    // =========================
     // PRICE
+    // =========================
     let price =
       Number(body.price) ||
       Number(body.entryPrice) ||
       getSimulatedPrice(symbol);
 
     if (!Number.isFinite(price) || price <= 0) {
-      price =
-        global.getFakePrice?.(symbol) ||
-        forcePriceExists?.(symbol) ||
-        getSimulatedPrice(symbol) ||
-        (50 + Math.random() * 1000);
-    }
-
-    price = Number(price);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.status(500).json({
-        ok: false,
-        error: "price_unrecoverable",
-        symbol
-      });
+      price = getSimulatedPrice(symbol);
     }
 
     // =========================
-    // 🔥 NUEVO CONTROL DE RIESGO (ANTI CUENTAS REVENTADAS)
+    // 🧠 AUTO LOT SYSTEM (BROKER STYLE)
     // =========================
 
-    const maxRiskPerTrade = (balanceOwn + credit) * 0.3; 
-    // 👆 SOLO 30% DEL BALANCE COMO MÁXIMO POR TRADE
+    const accountSize = balanceOwn + credit;
+
+    // riesgo base por trade (MUY suave, no bloquea)
+    const riskPerTrade = accountSize * 0.05; // 5% realista
+
+    // margin por 1 unidad
+    const marginPerUnit = price / leverage;
+
+    // qty máxima segura automática
+    const maxQty = Math.max(riskPerTrade / marginPerUnit, 0.01);
+
+    // 🔥 normalización tipo broker
+    if (qty <= 0.05) qty = 0.01;
+    else if (qty <= 0.5) qty = 0.1;
+    else qty = 1.0;
+
+    // ajuste final si excede capacidad
+    if (qty > maxQty) {
+      qty = Math.max(0.01, Number(maxQty.toFixed(2)));
+    }
+
+    // =========================
+    // RISK CALCULATION REAL
+    // =========================
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
     const freeMargin = (balanceOwn + credit) - marginUsed;
 
-    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_margin"
-      });
-    }
-
-    // 🔥 BLOQUEO REAL DE TRADE DEMASIADO GRANDE
-    if (requiredMargin > maxRiskPerTrade) {
-      return res.status(400).json({
-        ok: false,
-        error: "trade_too_large",
-        message: "Trade excede el riesgo permitido (30% del balance)",
-        required: requiredMargin,
-        available: balanceOwn + credit,
-        maxAllowed: maxRiskPerTrade
-      });
-    }
-
-    // 🔥 BLOQUEO DE SALDO REAL
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
-        message: "Saldo insuficiente para este trade",
+        message: "Saldo insuficiente para este lote automático",
         required: requiredMargin,
         available: freeMargin
       });
     }
 
+    // =========================
     // WALLET UPDATE
+    // =========================
+
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
 
     wallet.equity = balanceOwn + credit;
     wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
-    wallet.marginLevel =
-      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
-
-    wallet.updatedAt = new Date();
 
     await wallet.save();
+
+    // =========================
+    // POSITION
+    // =========================
 
     const position = await Position.create({
       user: user._id,
@@ -1617,9 +1598,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const account = await safeBuildAccountForUser(user);
 
-    const annotatedPosition = annotatePosition(
-      position.toObject ? position.toObject() : position
-    );
+    const annotatedPosition = annotatePosition(position.toObject());
 
     emitStateUpdates(user._id, account, [annotatedPosition], null);
     scheduleLivePnLSync(symbol);
@@ -1628,6 +1607,7 @@ app.post("/api/trade/open", async (req, res) => {
       ok: true,
       msg: "OPENED",
       position,
+      autoLot: true,
       wallet: account.wallet,
       account: account.account,
     });
