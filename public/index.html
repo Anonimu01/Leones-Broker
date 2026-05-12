@@ -3340,10 +3340,23 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   if (typeof window.initTradingWidget === 'function') {
     try {
 
-      const widget = window.initTradingWidget(symbol, containerId);
+      // 🔥 INICIAR WIDGET
+      window.initTradingWidget(symbol, containerId);
 
-      // 🔥 SOLO SI EL WIDGET REAL EXISTE
-      if (widget && typeof widget.onChartReady === 'function') {
+      // 🔥 ESPERAR EL WIDGET REAL
+      setTimeout(() => {
+
+        const widget =
+          window.tvWidget ||
+          window.widget ||
+          window.tradingViewWidget ||
+          window.__tvWidget__;
+
+        // 🔥 VALIDAR
+        if (!widget || typeof widget.onChartReady !== 'function') {
+          console.warn("❌ TradingView widget real no encontrado");
+          return;
+        }
 
         connectTradingView(widget);
 
@@ -3376,19 +3389,25 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
             }
           }
 
-          // primera vez
+          // 🔥 PRIMERA VEZ
           syncSymbolFromChart();
 
-          // cuando cambie desde el buscador
+          // 🔥 CUANDO CAMBIE DESDE EL BUSCADOR
           chart.onSymbolChanged().subscribe(null, () => {
             syncSymbolFromChart();
           });
 
         });
-      }
 
-      state.lastChartSymbol = symbol;
-      return symbol;
+      }, 1200);
+
+      // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL
+      state.lastChartSymbol = window.currentSymbol || symbol;
+
+      // 🔥 FALLBACK GLOBAL
+      window.selectedSymbol = window.currentSymbol || symbol;
+
+      return window.currentSymbol || symbol;
 
     } catch (e) {
       warn('window.initTradingWidget failed', e);
@@ -3416,10 +3435,10 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     save_image: false
   });
 
-  // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
+  // 🔥 CONECTAR TRADINGVIEW
   connectTradingView(widget);
 
-  // 🔥 SYNC DEL SÍMBOLO REAL DEL GRÁFICO
+  // 🔥 SYNC DEL SÍMBOLO REAL
   widget.onChartReady(() => {
 
     const chart = widget.activeChart();
@@ -3449,25 +3468,24 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
       }
     }
 
-    // primera vez
+    // 🔥 PRIMERA VEZ
     syncSymbolFromChart();
 
-    // cuando cambie desde el buscador
+    // 🔥 CUANDO CAMBIE DESDE EL BUSCADOR
     chart.onSymbolChanged().subscribe(null, () => {
       syncSymbolFromChart();
     });
 
   });
 
- // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL DEL GRÁFICO
-state.lastChartSymbol = window.currentSymbol || symbol;
+  // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL
+  state.lastChartSymbol = window.currentSymbol || symbol;
 
-// 🔥 FALLBACK GLOBAL
-window.selectedSymbol = window.currentSymbol || symbol;
+  // 🔥 FALLBACK GLOBAL
+  window.selectedSymbol = window.currentSymbol || symbol;
 
-return window.currentSymbol || symbol;
+  return window.currentSymbol || symbol;
 }
-
   function selectSymbol(meta, options = {}) {
     if (!meta) return;
     const openChart = options.openChart !== false;
