@@ -151,26 +151,287 @@ router.get("/email/:token", async (req, res) => {
     const result = await verifyUserByToken({ token, email });
 
     if (!result.ok) {
-      return res.status(result.status || 400).send(result.html || "<h2>Error verificando cuenta</h2>");
+      return res.status(result.status || 400).send(`
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Error de Verificación</title>
+
+<style>
+
+body{
+  margin:0;
+  padding:0;
+  background:#0b1020;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:Arial,sans-serif;
+}
+
+.card{
+  width:90%;
+  max-width:600px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,0,0,0.25);
+  border-radius:25px;
+  padding:50px;
+  text-align:center;
+  color:white;
+  backdrop-filter:blur(15px);
+}
+
+h1{
+  color:#ff4d4d;
+  font-size:40px;
+  margin-bottom:20px;
+}
+
+p{
+  font-size:20px;
+  line-height:1.7;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h1>❌ Error</h1>
+  <p>
+    El enlace de verificación no es válido o ha expirado.
+  </p>
+</div>
+
+</body>
+</html>
+`);
     }
 
     const redirect = getBaseUrl(req);
 
     return res.send(`
-      <h2>✅ Correo verificado correctamente</h2>
-      <p>Redirigiendo...</p>
-      <script>
-        setTimeout(() => {
-          window.location.href = "${redirect}";
-        }, 2000);
-      </script>
-    `);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Cuenta Verificada</title>
+
+<style>
+
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+body{
+  background:#0b1020;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  font-family:Arial, sans-serif;
+}
+
+.glow{
+  position:absolute;
+  width:500px;
+  height:500px;
+  border-radius:50%;
+  background:rgba(212,175,55,0.15);
+  filter:blur(120px);
+}
+
+.glow.one{
+  top:-150px;
+  left:-100px;
+}
+
+.glow.two{
+  bottom:-150px;
+  right:-100px;
+}
+
+.card{
+  position:relative;
+  z-index:2;
+  width:90%;
+  max-width:700px;
+  padding:70px 50px;
+  border-radius:30px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(212,175,55,0.25);
+  backdrop-filter:blur(20px);
+  text-align:center;
+  box-shadow:0 0 50px rgba(212,175,55,0.2);
+  animation:fadeIn 1s ease;
+}
+
+.icon{
+  width:130px;
+  height:130px;
+  margin:auto;
+  border-radius:50%;
+  background:linear-gradient(135deg,#d4af37,#f5d76e);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:70px;
+  color:#111;
+  margin-bottom:35px;
+  box-shadow:0 0 30px rgba(212,175,55,0.5);
+}
+
+h1{
+  color:#f5d76e;
+  font-size:45px;
+  margin-bottom:25px;
+}
+
+p{
+  color:white;
+  font-size:22px;
+  line-height:1.8;
+  opacity:0.95;
+}
+
+.btn{
+  display:inline-block;
+  margin-top:40px;
+  padding:18px 42px;
+  border-radius:14px;
+  text-decoration:none;
+  background:linear-gradient(135deg,#d4af37,#f5d76e);
+  color:#111;
+  font-size:18px;
+  font-weight:bold;
+  transition:0.3s;
+}
+
+.btn:hover{
+  transform:scale(1.05);
+  box-shadow:0 0 25px rgba(212,175,55,0.5);
+}
+
+@keyframes fadeIn{
+  from{
+    opacity:0;
+    transform:translateY(30px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0);
+  }
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="glow one"></div>
+<div class="glow two"></div>
+
+<div class="card">
+
+  <div class="icon">
+    ✓
+  </div>
+
+  <h1>Bienvenido a Leones Broker</h1>
+
+  <p>
+    Tu correo electrónico ha sido confirmado correctamente.
+    <br><br>
+    Ya puedes iniciar sesión en tu cuenta.
+  </p>
+
+  <a class="btn" href="${redirect}">
+    Iniciar Sesión
+  </a>
+
+</div>
+
+<script>
+setTimeout(() => {
+  window.location.href = "${redirect}";
+}, 6000);
+</script>
+
+</body>
+</html>
+`);
   } catch (error) {
     console.error("Verification error:", error);
-    return res.status(500).send("<h2>Error del servidor</h2>");
+
+    return res.status(500).send(`
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Error del servidor</title>
+
+<style>
+
+body{
+  margin:0;
+  padding:0;
+  background:#0b1020;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:Arial,sans-serif;
+}
+
+.card{
+  width:90%;
+  max-width:600px;
+  background:rgba(255,255,255,0.05);
+  border-radius:25px;
+  padding:50px;
+  text-align:center;
+  color:white;
+  border:1px solid rgba(255,255,255,0.1);
+}
+
+h1{
+  color:#ff4d4d;
+  font-size:40px;
+  margin-bottom:20px;
+}
+
+p{
+  font-size:20px;
+  line-height:1.7;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h1>⚠️ Error del servidor</h1>
+  <p>
+    Ocurrió un problema verificando tu cuenta.
+    <br><br>
+    Inténtalo nuevamente más tarde.
+  </p>
+</div>
+
+</body>
+</html>
+`);
   }
 });
-
 /*
 ============================
  RESEND SAFE REDIRECT TEST
