@@ -105,15 +105,25 @@ router.post("/login", validateLogin, async (req, res, next) => {
 
 /*
 ============================
- VERIFY EMAIL
+ VERIFY EMAIL (REDIRECT A HTML BONITO)
 ============================
 */
-router.get("/verify", async (req, res, next) => {
+router.get("/verify", (req, res) => {
   try {
-    await verifyUser(req, res);
+    const token = req.query.token || "";
+    const email = req.query.email || "";
+
+    const redirectUrl =
+      `/api/verification/verify?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+
+    return res.redirect(redirectUrl);
   } catch (err) {
     console.error("AUTH VERIFY ROUTE ERROR:", err);
-    next(err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Error interno en verificación"
+    });
   }
 });
 
