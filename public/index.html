@@ -2455,7 +2455,7 @@ if (window.__LEONES_BOOTED__) {
   async function apiFetch(path, opts = {}) {
     if (typeof NS.apiFetch === 'function') return NS.apiFetch(path, opts);
 
-    const token = getToken();
+   const token = localStorage.getItem("token");
     let url = '';
     if (typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) {
       url = path;
