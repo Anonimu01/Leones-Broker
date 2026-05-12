@@ -1529,13 +1529,41 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     // RISK CALCULATION
     // =========================
-    const notional = qty * price;
-    const requiredMargin = 0;
-    const freeMargin = balanceOwn + credit - marginUsed;
+   // =========================
+// RISK CALCULATION
+// =========================
 
-    if (wallet.balance < requiredMargin) {
-      console.warn("⚠️ Margen insuficiente ignorado en modo simulación");
-    }
+// valor de la operación usando el precio simulado
+const notional = qty * price;
+
+// margen requerido usando leverage
+const requiredMargin = notional / leverage;
+
+// margen libre real
+const freeMargin =
+  (balanceOwn + credit) - marginUsed;
+
+// seguridad extra
+if (
+  !Number.isFinite(requiredMargin) ||
+  requiredMargin <= 0
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "invalid_margin"
+  });
+}
+
+// bloquear si no tiene saldo suficiente
+if (freeMargin < requiredMargin) {
+  return res.status(400).json({
+    ok: false,
+    error: "insufficient_balance",
+    message: "Saldo insuficiente",
+    required: requiredMargin,
+    available: freeMargin
+  });
+}
 
     // =========================
     // WALLET UPDATE
