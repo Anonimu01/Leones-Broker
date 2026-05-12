@@ -1499,12 +1499,8 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    // 🔧 FIX SEGURIDAD: qty válido (sin romper lógica)
     if (!Number.isFinite(qty) || qty <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_qty"
-      });
+      return res.status(400).json({ ok: false, error: "invalid_qty" });
     }
 
     lockKey = makeOpenLockKey(user._id, symbol, side, qty);
@@ -1515,24 +1511,17 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn = Number(
-      wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
-    ) || 0;
-
+    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const credit = Number(wallet.credit ?? 0) || 0;
-
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
-    // 🔧 FIX LEVERAGE SEGURO (sin romper nada)
     const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
       Number.isFinite(rawLeverage) && rawLeverage > 0
         ? rawLeverage
         : 10;
 
-    // =========================
-    // 🔥 PRICE RESOLUTION (ROBUSTO)
-    // =========================
+    // PRICE
     let price =
       Number(body.price) ||
       Number(body.entryPrice) ||
@@ -1544,8 +1533,6 @@ app.post("/api/trade/open", async (req, res) => {
         forcePriceExists?.(symbol) ||
         getSimulatedPrice(symbol) ||
         (50 + Math.random() * 1000);
-
-      console.warn("⚠️ PRICE AUTO-FIX TRADE:", symbol, price);
     }
 
     price = Number(price);
@@ -1559,16 +1546,14 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // RISK CALCULATION
+    // CORE RISK LOGIC (SIN LÍMITES ARTIFICIALES)
     // =========================
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    const freeMargin =
-      (balanceOwn + credit) - marginUsed;
+    const freeMargin = (balanceOwn + credit) - marginUsed;
 
-    // 🔧 FIX SEGURIDAD: required inválido
     if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
       return res.status(400).json({
         ok: false,
@@ -1576,49 +1561,31 @@ app.post("/api/trade/open", async (req, res) => {
       });
     }
 
-    // 🔧 FIX CLAVE: evitar required absurdo sin romper sistema
-    const maxSafeMargin = (balanceOwn + credit) * 5;
-
-    if (requiredMargin > maxSafeMargin) {
+    // 🔥 SOLO VALIDACIÓN REAL (ESTO ES LO CORRECTO)
+    if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
         error: "trade_too_large",
-        message: "Trade demasiado grande para el balance actual",
-        required: requiredMargin,
-        available: balanceOwn + credit
-      });
-    }
-
-    // bloquear si no tiene saldo suficiente
-    if (freeMargin < requiredMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "Saldo insuficiente",
+        message: "Saldo insuficiente para este trade",
         required: requiredMargin,
         available: freeMargin
       });
     }
 
-    // =========================
     // WALLET UPDATE
-    // =========================
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
 
-    // 🔧 FIX leve (solo estabilidad, no lógica de trading)
     wallet.equity = balanceOwn + credit;
-
     wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
-    wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+    wallet.marginLevel =
+      wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
+
     wallet.updatedAt = new Date();
 
     await wallet.save();
 
-    // =========================
-    // POSITION CREATE
-    // =========================
     const position = await Position.create({
       user: user._id,
       symbol,
