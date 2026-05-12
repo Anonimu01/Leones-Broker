@@ -5064,18 +5064,38 @@ let sendingOrder = false;
    ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
-  const api = window.__LEONES_BROKER_EXT2 || {};
 
-  return (
-    state.activeSymbol ||
-    TR.activeSymbol ||
-    window.tvSymbol ||
+  ///////////////////////////////////////////////////////
+  // 🔥 PRIORIDAD GLOBAL REAL
+  ///////////////////////////////////////////////////////
+
+  const globalSymbol =
     window.selectedSymbol ||
-    api.activeSymbol ||
+    window.tvSymbol ||
+    TR.activeSymbol ||
+    state.activeSymbol;
+
+  if (globalSymbol) {
+    return toPriceSymbol(globalSymbol);
+  }
+
+  ///////////////////////////////////////////////////////
+  // FALLBACK UI
+  ///////////////////////////////////////////////////////
+
+  const domSymbol =
     document.getElementById("tradingSymbol")?.textContent?.trim() ||
-    document.getElementById("op-symbol")?.textContent?.trim() ||
-    "BTCUSDT"
-  );
+    document.getElementById("op-symbol")?.textContent?.trim();
+
+  if (domSymbol) {
+    return toPriceSymbol(domSymbol);
+  }
+
+  ///////////////////////////////////////////////////////
+  // FINAL FALLBACK
+  ///////////////////////////////////////////////////////
+
+  return "BTCUSDT";
 }
 /* =========================
    🔥 UNIVERSAL PRICE ENGINE
