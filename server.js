@@ -1507,7 +1507,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
- const balanceOwn = Number(
+const balanceOwn = Number(
   wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
 ) || 0;
 
@@ -1515,8 +1515,9 @@ const credit = Number(wallet.credit ?? 0) || 0;
 
 const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
+// FIX: asegurar leverage real sin caer a 1 por valores vacíos
 const leverage = Math.max(
-  Number(wallet.leverageFactor ?? user.leverage ?? 1) || 1,
+  Number(wallet.leverageFactor ?? user.leverage ?? 10) || 10,
   1
 );
     // =========================
