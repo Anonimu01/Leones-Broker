@@ -4872,17 +4872,47 @@ return;
     await requestBackendRefresh();
     await nextFrame();
 
-    const list = getSymbols();
-    const meta = getActiveSymbolMeta() || list[0] || null;
+  ///////////////////////////////////////////////////////
+// 🔥 KEEP ACTIVE SELECTED SYMBOL
+///////////////////////////////////////////////////////
 
-    if (meta) {
-      state.activeSymbol = meta.symbol;
-      TR.activeSymbol = meta.symbol;
-      TR.activeMeta = meta;
+const list = getSymbols();
 
-      renderSymbolDetails(meta);
-      renderBottomPanels();
+const meta =
+  TR.activeMeta ||
+  getActiveSymbolMeta() ||
+  list[0] ||
+  null;
 
+   if (meta) {
+
+  ///////////////////////////////////////////////////////
+  // 🔥 GLOBAL SYMBOL SYNC
+  ///////////////////////////////////////////////////////
+
+  window.selectedSymbol = meta.symbol;
+  window.tvSymbol = meta.symbol;
+
+  state.activeSymbol = meta.symbol;
+  TR.activeSymbol = meta.symbol;
+  TR.activeMeta = meta;
+
+  console.log("🔥 ACTIVE SYMBOL:", meta.symbol);
+
+  renderSymbolDetails(meta);
+  renderBottomPanels();
+
+  if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
+    await openTradingView(meta, 'tv_chart_container').catch(e =>
+      setMessage(e?.message || 'No se pudo cargar el gráfico', 'error')
+    );
+
+    await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+  }
+
+  requestRealtimeForSymbol(meta);
+
+} else {
       if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
         await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
         await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
