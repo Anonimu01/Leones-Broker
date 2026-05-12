@@ -5250,19 +5250,8 @@ console.log("🔥 state.activeSymbol:", state.activeSymbol);
 
     const leverage = Number(user?.leverage || 1);
 
-    const maxQty = (balance * leverage) / price;
-
-    if (amount > maxQty) {
-      console.warn("⚠️ ORDER BLOCKED - TOO LARGE");
-
-      // opción segura: limitar automáticamente
-      amount = maxQty;
-
-      if (amount <= 0) {
-        console.warn("❌ ORDER TOO SMALL AFTER LIMIT");
-        return;
-      }
-    }
+  
+  
 
     ///////////////////////////////////////////////////////
     // PAYLOAD
