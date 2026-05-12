@@ -3343,71 +3343,14 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
       // 🔥 INICIAR WIDGET
       window.initTradingWidget(symbol, containerId);
 
-      // 🔥 ESPERAR EL WIDGET REAL
-      setTimeout(() => {
+      // 🔥 GUARDAR SÍMBOLO REAL INMEDIATAMENTE
+      window.currentSymbol = symbol;
+      window.selectedSymbol = symbol;
+      state.lastChartSymbol = symbol;
 
-        const widget =
-          window.tvWidget ||
-          window.widget ||
-          window.tradingViewWidget ||
-          window.__tvWidget__;
+      console.log("✅ Symbol selected:", symbol);
 
-        // 🔥 VALIDAR
-        if (!widget || typeof widget.onChartReady !== 'function') {
-          console.warn("❌ TradingView widget real no encontrado");
-          return;
-        }
-
-        connectTradingView(widget);
-
-        widget.onChartReady(() => {
-
-          const chart = widget.activeChart();
-
-          function syncSymbolFromChart() {
-            try {
-
-              const fullSymbol = chart.symbol();
-
-              const cleanSymbol = String(fullSymbol || "")
-                .split(":")
-                .pop()
-                .trim()
-                .toUpperCase();
-
-              // 🔥 GLOBAL REAL
-              window.currentSymbol = cleanSymbol;
-
-              // 🔥 FALLBACKS
-              window.selectedSymbol = cleanSymbol;
-              state.lastChartSymbol = cleanSymbol;
-
-              console.log("✅ Symbol synced:", cleanSymbol);
-
-            } catch (err) {
-              console.error("❌ syncSymbolFromChart error", err);
-            }
-          }
-
-          // 🔥 PRIMERA VEZ
-          syncSymbolFromChart();
-
-          // 🔥 CUANDO CAMBIE DESDE EL BUSCADOR
-          chart.onSymbolChanged().subscribe(null, () => {
-            syncSymbolFromChart();
-          });
-
-        });
-
-      }, 1200);
-
-      // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL
-      state.lastChartSymbol = window.currentSymbol || symbol;
-
-      // 🔥 FALLBACK GLOBAL
-      window.selectedSymbol = window.currentSymbol || symbol;
-
-      return window.currentSymbol || symbol;
+      return symbol;
 
     } catch (e) {
       warn('window.initTradingWidget failed', e);
@@ -3438,53 +3381,14 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   // 🔥 CONECTAR TRADINGVIEW
   connectTradingView(widget);
 
-  // 🔥 SYNC DEL SÍMBOLO REAL
-  widget.onChartReady(() => {
+  // 🔥 GUARDAR SÍMBOLO REAL
+  window.currentSymbol = symbol;
+  window.selectedSymbol = symbol;
+  state.lastChartSymbol = symbol;
 
-    const chart = widget.activeChart();
+  console.log("✅ Symbol selected:", symbol);
 
-    function syncSymbolFromChart() {
-      try {
-
-        const fullSymbol = chart.symbol();
-
-        const cleanSymbol = String(fullSymbol || "")
-          .split(":")
-          .pop()
-          .trim()
-          .toUpperCase();
-
-        // 🔥 GLOBAL REAL
-        window.currentSymbol = cleanSymbol;
-
-        // 🔥 FALLBACKS
-        window.selectedSymbol = cleanSymbol;
-        state.lastChartSymbol = cleanSymbol;
-
-        console.log("✅ Symbol synced:", cleanSymbol);
-
-      } catch (err) {
-        console.error("❌ syncSymbolFromChart error", err);
-      }
-    }
-
-    // 🔥 PRIMERA VEZ
-    syncSymbolFromChart();
-
-    // 🔥 CUANDO CAMBIE DESDE EL BUSCADOR
-    chart.onSymbolChanged().subscribe(null, () => {
-      syncSymbolFromChart();
-    });
-
-  });
-
-  // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL
-  state.lastChartSymbol = window.currentSymbol || symbol;
-
-  // 🔥 FALLBACK GLOBAL
-  window.selectedSymbol = window.currentSymbol || symbol;
-
-  return window.currentSymbol || symbol;
+  return symbol;
 }
   function selectSymbol(meta, options = {}) {
     if (!meta) return;
