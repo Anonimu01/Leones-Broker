@@ -3459,12 +3459,13 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
   });
 
-  state.lastChartSymbol = symbol;
+ // 🔥 USAR EL ÚLTIMO SÍMBOLO REAL DEL GRÁFICO
+state.lastChartSymbol = window.currentSymbol || symbol;
 
-  // 🔥 GUARDAR TAMBIÉN COMO FALLBACK GLOBAL
-  window.selectedSymbol = symbol;
+// 🔥 FALLBACK GLOBAL
+window.selectedSymbol = window.currentSymbol || symbol;
 
-  return symbol;
+return window.currentSymbol || symbol;
 }
 
   function selectSymbol(meta, options = {}) {
