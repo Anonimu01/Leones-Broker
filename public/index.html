@@ -4640,8 +4640,29 @@ async function loadPositions() {
             getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
             null;
 
-          if (meta) selectSymbol(meta, { openChart: true });
-          return;
+        if (meta) {
+
+  ///////////////////////////////////////////////////////
+  // 🔥 GLOBAL SYMBOL SYNC
+  ///////////////////////////////////////////////////////
+
+  window.selectedSymbol = meta.symbol;
+  window.tvSymbol = meta.symbol;
+
+  state.activeSymbol = meta.symbol;
+  TR.activeSymbol = meta.symbol;
+  TR.activeMeta = meta;
+
+  console.log("🔥 SYMBOL SELECTED:", meta.symbol);
+
+  ///////////////////////////////////////////////////////
+  // OPEN CHART
+  ///////////////////////////////////////////////////////
+
+  selectSymbol(meta, { openChart: true });
+}
+
+return;
         }
 
         const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
@@ -4987,6 +5008,8 @@ function getActiveSymbol() {
   const api = window.__LEONES_BROKER_EXT2 || {};
 
   return (
+    state.activeSymbol ||
+    TR.activeSymbol ||
     window.tvSymbol ||
     window.selectedSymbol ||
     api.activeSymbol ||
@@ -4995,7 +5018,6 @@ function getActiveSymbol() {
     "BTCUSDT"
   );
 }
-
 /* =========================
    🔥 UNIVERSAL PRICE ENGINE
 ========================= */
@@ -5175,6 +5197,11 @@ async function placeOrder(input) {
       amount = Number(input?.qty || input?.amount || 0);
       type = input?.type || "market";
     }
+
+    console.log("🔥 ACTIVE SYMBOL:", symbol);
+console.log("🔥 tvSymbol:", window.tvSymbol);
+console.log("🔥 selectedSymbol:", window.selectedSymbol);
+console.log("🔥 state.activeSymbol:", state.activeSymbol);
 
     symbol = toPriceSymbol(symbol);
     side = String(side || "").toLowerCase();
