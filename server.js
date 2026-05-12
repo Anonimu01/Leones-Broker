@@ -1546,8 +1546,11 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // CORE RISK LOGIC (SIN LÍMITES ARTIFICIALES)
+    // 🔥 NUEVO CONTROL DE RIESGO (ANTI CUENTAS REVENTADAS)
     // =========================
+
+    const maxRiskPerTrade = (balanceOwn + credit) * 0.3; 
+    // 👆 SOLO 30% DEL BALANCE COMO MÁXIMO POR TRADE
 
     const notional = qty * price;
     const requiredMargin = notional / leverage;
@@ -1561,11 +1564,23 @@ app.post("/api/trade/open", async (req, res) => {
       });
     }
 
-    // 🔥 SOLO VALIDACIÓN REAL (ESTO ES LO CORRECTO)
-    if (requiredMargin > freeMargin) {
+    // 🔥 BLOQUEO REAL DE TRADE DEMASIADO GRANDE
+    if (requiredMargin > maxRiskPerTrade) {
       return res.status(400).json({
         ok: false,
         error: "trade_too_large",
+        message: "Trade excede el riesgo permitido (30% del balance)",
+        required: requiredMargin,
+        available: balanceOwn + credit,
+        maxAllowed: maxRiskPerTrade
+      });
+    }
+
+    // 🔥 BLOQUEO DE SALDO REAL
+    if (requiredMargin > freeMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
         message: "Saldo insuficiente para este trade",
         required: requiredMargin,
         available: freeMargin
