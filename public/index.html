@@ -4835,98 +4835,127 @@ return;
     });
   }
 
-  async function initTradingUI(context = {}) {
-    if (!isLoggedIn()) return null;
+ async function initTradingUI(context = {}) {
+  if (!isLoggedIn()) return null;
 
-    injectUiStyles();
+  injectUiStyles();
 
-    const root = ensureRoot();
-    if (!root) return null;
+  const root = ensureRoot();
+  if (!root) return null;
 
-    if (!state.started) {
-      ensureShell(root);
-      state.started = true;
+  if (!state.started) {
+    ensureShell(root);
+    state.started = true;
+  }
+
+  clearMessage();
+
+  if (context && context.user && typeof context.user === 'object') {
+    state.account = { ...(state.account || {}), ...context.user };
+    updatePrivateHeaderName(context.user);
+    syncAccountView(context.user);
+  } else {
+    const user = getUser();
+
+    if (user && Object.keys(user).length) {
+      updatePrivateHeaderName(user);
+    }
+  }
+
+  bindMenuButtons();
+  bindOrderUi();
+  attachGlobalDelegation();
+
+  await ensureSocket();
+
+  bindSocketListeners();
+
+  createFloatingTradesPanel();
+
+  startAutoRefresh();
+
+  await requestBackendRefresh();
+  await nextFrame();
+
+  ///////////////////////////////////////////////////////
+  // 🔥 KEEP ACTIVE SELECTED SYMBOL
+  ///////////////////////////////////////////////////////
+
+  const list = getSymbols();
+
+  const meta =
+    TR.activeMeta ||
+    getActiveSymbolMeta() ||
+    list[0] ||
+    null;
+
+  ///////////////////////////////////////////////////////
+  // 🔥 ACTIVE SYMBOL
+  ///////////////////////////////////////////////////////
+
+  if (meta) {
+
+    window.selectedSymbol = meta.symbol;
+    window.tvSymbol = meta.symbol;
+
+    state.activeSymbol = meta.symbol;
+
+    TR.activeSymbol = meta.symbol;
+    TR.activeMeta = meta;
+
+    console.log("🔥 ACTIVE SYMBOL:", meta.symbol);
+
+    renderSymbolDetails(meta);
+
+    renderBottomPanels();
+
+    ///////////////////////////////////////////////////////
+    // OPEN CHART
+    ///////////////////////////////////////////////////////
+
+    if (
+      !state.lastChartSymbol ||
+      state.lastChartSymbol !== meta.tvSymbol
+    ) {
+
+      await openTradingView(
+        meta,
+        'tv_chart_container'
+      ).catch(e =>
+        setMessage(
+          e?.message || 'No se pudo cargar el gráfico',
+          'error'
+        )
+      );
+
+      await openTradingView(
+        meta,
+        'tv_chart_container_bottom'
+      ).catch(() => {});
     }
 
-    clearMessage();
+    ///////////////////////////////////////////////////////
+    // REALTIME
+    ///////////////////////////////////////////////////////
 
-    if (context && context.user && typeof context.user === 'object') {
-      state.account = { ...(state.account || {}), ...context.user };
-      updatePrivateHeaderName(context.user);
-      syncAccountView(context.user);
-    } else {
-      const user = getUser();
-      if (user && Object.keys(user).length) {
-        updatePrivateHeaderName(user);
-      }
-    }
+    requestRealtimeForSymbol(meta);
 
-    bindMenuButtons();
-    bindOrderUi();
-    attachGlobalDelegation();
-    await ensureSocket();
-    bindSocketListeners();
-    createFloatingTradesPanel();
-    startAutoRefresh();
+  } else {
 
-    await requestBackendRefresh();
-    await nextFrame();
-
-  ///////////////////////////////////////////////////////
-// 🔥 KEEP ACTIVE SELECTED SYMBOL
-///////////////////////////////////////////////////////
-
-const list = getSymbols();
-
-const meta =
-  TR.activeMeta ||
-  getActiveSymbolMeta() ||
-  list[0] ||
-  null;
-
-   if (meta) {
-
-  ///////////////////////////////////////////////////////
-  // 🔥 GLOBAL SYMBOL SYNC
-  ///////////////////////////////////////////////////////
-
-  window.selectedSymbol = meta.symbol;
-  window.tvSymbol = meta.symbol;
-
-  state.activeSymbol = meta.symbol;
-  TR.activeSymbol = meta.symbol;
-  TR.activeMeta = meta;
-
-  console.log("🔥 ACTIVE SYMBOL:", meta.symbol);
-
-  renderSymbolDetails(meta);
-  renderBottomPanels();
-
-  if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
-    await openTradingView(meta, 'tv_chart_container').catch(e =>
-      setMessage(e?.message || 'No se pudo cargar el gráfico', 'error')
+    setMessage(
+      'No hay símbolos disponibles todavía. Revisa la conexión de datos.',
+      'error'
     );
-
-    await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
   }
 
-  requestRealtimeForSymbol(meta);
+  ///////////////////////////////////////////////////////
+  // FINAL UI SYNC
+  ///////////////////////////////////////////////////////
 
-} else {
-      if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
-        await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
-        await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
-      }
+  syncOrderFields();
 
-      requestRealtimeForSymbol(meta);
-    } else {
-      setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
-    }
-
-    syncOrderFields();
-    return true;
-  }
-
+  return true;
+}
   function openTrade(symbol, amount, direction, price) {
     if (amount > ACCOUNT.balance) {
       alert('Fondos insuficientes');
