@@ -5209,19 +5209,32 @@ async function placeOrder(input) {
     }
 
     ///////////////////////////////////////////////////////
-    // 🔧 FIX AGREGADO (SIN ROMPER NADA)
+    // 🔧 FIX REAL (SIN ROMPER NADA)
+    // SIN LEVERAGE FIJO
     ///////////////////////////////////////////////////////
 
-    const balance = Number(getUser()?.balance || 0);
-    const leverage = 10;
+    const user = getUser();
+
+    const balance = Number(
+      user?.balanceOwn ||
+      user?.balance ||
+      0
+    );
+
+    const leverage = Number(user?.leverage || 1);
 
     const maxQty = (balance * leverage) / price;
 
     if (amount > maxQty) {
       console.warn("⚠️ ORDER BLOCKED - TOO LARGE");
 
-      // opción segura: limitar en vez de romper flujo
+      // opción segura: limitar automáticamente
       amount = maxQty;
+
+      if (amount <= 0) {
+        console.warn("❌ ORDER TOO SMALL AFTER LIMIT");
+        return;
+      }
     }
 
     ///////////////////////////////////////////////////////
