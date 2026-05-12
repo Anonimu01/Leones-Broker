@@ -1499,6 +1499,14 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
+    // 🔧 FIX SEGURIDAD: qty válido (sin romper lógica)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_qty"
+      });
+    }
+
     lockKey = makeOpenLockKey(user._id, symbol, side, qty);
 
     if (!withOpenLock(lockKey, 2500) || !withActiveOrder(lockKey, 2500)) {
@@ -1507,19 +1515,21 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-const balanceOwn = Number(
-  wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
-) || 0;
+    const balanceOwn = Number(
+      wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0
+    ) || 0;
 
-const credit = Number(wallet.credit ?? 0) || 0;
+    const credit = Number(wallet.credit ?? 0) || 0;
 
-const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
-// FIX: asegurar leverage real sin caer a 1 por valores vacíos
-const leverage = Math.max(
-  Number(wallet.leverageFactor ?? user.leverage ?? 10) || 10,
-  1
-);
+    // 🔧 FIX LEVERAGE SEGURO (sin romper nada)
+    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
+    const leverage =
+      Number.isFinite(rawLeverage) && rawLeverage > 0
+        ? rawLeverage
+        : 10;
+
     // =========================
     // 🔥 PRICE RESOLUTION (ROBUSTO)
     // =========================
@@ -1528,7 +1538,6 @@ const leverage = Math.max(
       Number(body.entryPrice) ||
       getSimulatedPrice(symbol);
 
-    // AUTO FIX: nunca dejar que se caiga la orden
     if (!Number.isFinite(price) || price <= 0) {
       price =
         global.getFakePrice?.(symbol) ||
@@ -1552,41 +1561,44 @@ const leverage = Math.max(
     // =========================
     // RISK CALCULATION
     // =========================
-   // =========================
-// RISK CALCULATION
-// =========================
 
-// valor de la operación usando el precio simulado
-const notional = qty * price;
+    const notional = qty * price;
+    const requiredMargin = notional / leverage;
 
-// margen requerido usando leverage
-const requiredMargin = notional / leverage;
+    const freeMargin =
+      (balanceOwn + credit) - marginUsed;
 
-// margen libre real
-const freeMargin =
-  (balanceOwn + credit) - marginUsed;
+    // 🔧 FIX SEGURIDAD: required inválido
+    if (!Number.isFinite(requiredMargin) || requiredMargin <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_margin"
+      });
+    }
 
-// seguridad extra
-if (
-  !Number.isFinite(requiredMargin) ||
-  requiredMargin <= 0
-) {
-  return res.status(400).json({
-    ok: false,
-    error: "invalid_margin"
-  });
-}
+    // 🔧 FIX CLAVE: evitar required absurdo sin romper sistema
+    const maxSafeMargin = (balanceOwn + credit) * 5;
 
-// bloquear si no tiene saldo suficiente
-if (freeMargin < requiredMargin) {
-  return res.status(400).json({
-    ok: false,
-    error: "insufficient_balance",
-    message: "Saldo insuficiente",
-    required: requiredMargin,
-    available: freeMargin
-  });
-}
+    if (requiredMargin > maxSafeMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "trade_too_large",
+        message: "Trade demasiado grande para el balance actual",
+        required: requiredMargin,
+        available: balanceOwn + credit
+      });
+    }
+
+    // bloquear si no tiene saldo suficiente
+    if (freeMargin < requiredMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
+        message: "Saldo insuficiente",
+        required: requiredMargin,
+        available: freeMargin
+      });
+    }
 
     // =========================
     // WALLET UPDATE
@@ -1594,7 +1606,10 @@ if (freeMargin < requiredMargin) {
     wallet.balanceOwn = balanceOwn - requiredMargin;
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
-    wallet.equity = wallet.balanceOwn + wallet.marginUsed + credit;
+
+    // 🔧 FIX leve (solo estabilidad, no lógica de trading)
+    wallet.equity = balanceOwn + credit;
+
     wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
     wallet.marginLevel = wallet.marginUsed > 0 ? (wallet.equity / wallet.marginUsed) * 100 : 0;
     wallet.updatedAt = new Date();
@@ -1651,7 +1666,6 @@ if (freeMargin < requiredMargin) {
     }
   }
 });
-
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
