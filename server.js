@@ -631,8 +631,9 @@ async function getUserDocFromBearer(req) {
 
 async function getWalletDocForUser(userId) {
   let wallet = await Wallet.findOne({ user: userId }).catch(() => null);
+
   if (!wallet) {
-    wallet = new Wallet({
+    wallet = await Wallet.create({
       user: userId,
       balanceOwn: 0,
       balance: 0,
@@ -644,6 +645,7 @@ async function getWalletDocForUser(userId) {
       marginLevel: 0,
     });
   }
+
   return wallet;
 }
 
