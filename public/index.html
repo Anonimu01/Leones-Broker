@@ -5143,16 +5143,82 @@ let sendingOrder = false;
    ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
+
+  ///////////////////////////////////////////////////////
+  // 🔥 PRIORIDAD REAL DEL GRÁFICO ACTIVO
+  ///////////////////////////////////////////////////////
+
+  if (TR?.activeMeta?.tvSymbol) {
+    return String(TR.activeMeta.tvSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  if (TR?.activeMeta?.symbol) {
+    return String(TR.activeMeta.symbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  ///////////////////////////////////////////////////////
+  // 🔥 FALLBACKS GLOBALES
+  ///////////////////////////////////////////////////////
+
+  if (window.tvSymbol) {
+    return String(window.tvSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  if (window.selectedSymbol) {
+    return String(window.selectedSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  ///////////////////////////////////////////////////////
+  // 🔥 API FALLBACK
+  ///////////////////////////////////////////////////////
+
   const api = window.__LEONES_BROKER_EXT2 || {};
 
-  return (
-    window.tvSymbol ||
-    window.selectedSymbol ||
-    api.activeSymbol ||
-    document.getElementById("tradingSymbol")?.textContent?.trim() ||
-    document.getElementById("op-symbol")?.textContent?.trim() ||
-    "BTCUSDT"
-  );
+  if (api.activeSymbol) {
+    return String(api.activeSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  ///////////////////////////////////////////////////////
+  // 🔥 HTML FALLBACK
+  ///////////////////////////////////////////////////////
+
+  const tradingSymbol =
+    document.getElementById("tradingSymbol")
+      ?.textContent
+      ?.trim();
+
+  if (tradingSymbol) {
+    return String(tradingSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  const opSymbol =
+    document.getElementById("op-symbol")
+      ?.textContent
+      ?.trim();
+
+  if (opSymbol) {
+    return String(opSymbol)
+      .trim()
+      .toUpperCase();
+  }
+
+  ///////////////////////////////////////////////////////
+  // 🔥 DEFAULT
+  ///////////////////////////////////////////////////////
+
+  return "XAUUSD";
 }
 
 /* =========================
