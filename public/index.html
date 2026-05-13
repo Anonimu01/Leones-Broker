@@ -3320,6 +3320,21 @@ function initChart(widget) {
   }
 }
 async function openTradingView(meta, containerId = 'tv_chart_container') {
+
+///////////////////////////////////////////////////////
+// 🔥 FORCE GLOBAL SYMBOL SYNC
+///////////////////////////////////////////////////////
+
+window.selectedSymbol = meta.symbol;
+window.tvSymbol = meta.symbol;
+
+state.activeSymbol = meta.symbol;
+
+TR.activeSymbol = meta.symbol;
+TR.activeMeta = meta;
+
+console.log("🔥 TV OPEN SYMBOL:", meta.symbol);
+  
   const resolved = meta || getActiveSymbolMeta();
   if (!resolved) throw new Error('No hay símbolos reales para graficar');
 
