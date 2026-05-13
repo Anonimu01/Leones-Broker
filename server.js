@@ -1491,7 +1491,15 @@ app.post("/api/trade/open", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-    const symbol = normalizePositionSymbol(body);
+   const symbol = String(body.symbol || "").trim().toUpperCase();
+   if (!symbol) {
+  return res.status(400).json({
+    ok: false,
+    error: "symbol_required",
+    message: "El símbolo no llegó desde el frontend"
+  });
+}
+    
     const side = normalizeSide(body.side);
     let qty = normalizeQty(body);
 
