@@ -5181,9 +5181,11 @@ function getUser() {
 ========================= */
 function placeOrder(data) {
 
+  const symbol = window.currentSymbol; // 💥 ÚNICA FUENTE REAL
+
   const trade = {
     id: generateId(),
-    symbol: data.symbol, // 💥 NUNCA recalcular
+    symbol,
     openPrice: data.price,
     type: data.type,
     volume: data.volume,
