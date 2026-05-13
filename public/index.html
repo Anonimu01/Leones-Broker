@@ -3226,16 +3226,20 @@ if (window.__LEONES_BOOTED__) {
     if (document.getElementById('marginLevel')) document.getElementById('marginLevel').innerText = Number(ACCOUNT.marginLevel).toFixed(2) + '%';
   }
 
-  function openChartContainer(containerId, symbol) {
+ function openChartContainer(containerId, symbol) {
   return new Promise(async (resolve, reject) => {
     try {
       await ensureTradingViewScript();
 
       const container = document.getElementById(containerId);
-      if (!container) return reject(new Error('No existe el contenedor del gráfico'));
+      if (!container) {
+        return reject(new Error('No existe el contenedor del gráfico'));
+      }
 
-      const tv = String(symbol || '').trim();
-      if (!tv) return reject(new Error('El símbolo no es válido'));
+      const tv = String(symbol || '').trim().toUpperCase();
+      if (!tv) {
+        return reject(new Error('El símbolo no es válido'));
+      }
 
       container.innerHTML = '';
 
@@ -3246,7 +3250,6 @@ if (window.__LEONES_BOOTED__) {
 
           if (widget) {
             connectTradingView(widget);
-            return resolve(tv);
           }
 
           return resolve(tv);
@@ -3278,14 +3281,13 @@ if (window.__LEONES_BOOTED__) {
 
       connectTradingView(widget);
 
-      resolve(tv);
+      return resolve(tv);
 
     } catch (e) {
-      reject(e);
+      return reject(e);
     }
   });
 }
-
 
 function connectTradingView(widget) {
   try {
@@ -3302,28 +3304,32 @@ function connectTradingView(widget) {
   }
 }
 
-
 function initChart(widget) {
   try {
     const chart = widget.activeChart?.();
     if (!chart) return;
 
-    // 🔥 EVITAR MULTI SUBSCRIPTIONS
+    // 🔥 evitar doble binding
     if (!widget.__leonesBound) {
       widget.__leonesBound = true;
 
       try {
         chart.onSymbolChanged?.().subscribe(null, (symbolInfo) => {
           if (!symbolInfo?.name) return;
+
           window.tvSymbol = symbolInfo.name;
           window.selectedSymbol = symbolInfo.name;
+
+          // 🔥 sincroniza también con estado global
+          state.activeSymbol = symbolInfo.name;
+          TR.activeSymbol = symbolInfo.name;
         });
       } catch (e) {
         console.warn("Symbol listener error:", e);
       }
     }
 
-    // 🔥 PRICE LOOP PROTECTED
+    // 🔥 loop de precio protegido
     if (!widget.__priceInterval) {
       widget.__priceInterval = setInterval(() => {
         try {
@@ -3358,6 +3364,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     throw new Error('No hay símbolos reales para graficar');
   }
 
+  // 🔥 SIEMPRE NORMALIZA DESDE META REAL
   const symbol = String(
     resolved.tvSymbol ||
     resolved.symbol ||
@@ -3368,6 +3375,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     throw new Error('El símbolo no es válido');
   }
 
+  // 🔥 SINCRONIZACIÓN TOTAL
   state.activeSymbol = symbol;
   TR.activeSymbol = symbol;
 
@@ -3399,8 +3407,9 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
       if (widget) {
         connectTradingView(widget);
-        return symbol;
       }
+
+      return symbol;
 
     } catch (e) {
       warn('window.initTradingWidget failed', e);
@@ -3436,7 +3445,6 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   return symbol;
 }
 
-
 function selectSymbol(meta, options = {}) {
   if (!meta) return;
 
@@ -3453,6 +3461,7 @@ function selectSymbol(meta, options = {}) {
     return;
   }
 
+  // 🔥 SINCRONIZACIÓN GLOBAL (IMPORTANTE)
   state.activeSymbol = symbol;
   TR.activeSymbol = symbol;
 
@@ -3472,7 +3481,9 @@ function selectSymbol(meta, options = {}) {
 
   if (openChart) {
     openTradingView(TR.activeMeta, 'tv_chart_container')
-      .catch(e => setMessage(e?.message || 'No se pudo abrir el gráfico', 'error'));
+      .catch(e =>
+        setMessage(e?.message || 'No se pudo abrir el gráfico', 'error')
+      );
   }
 }
   
