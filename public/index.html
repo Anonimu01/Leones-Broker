@@ -5145,82 +5145,31 @@ let sendingOrder = false;
 function getActiveSymbol() {
 
   ///////////////////////////////////////////////////////
-  // 🔥 PRIORIDAD REAL DEL GRÁFICO ACTIVO
+  // 🔥 ÚNICA FUENTE OFICIAL DEL SISTEMA
   ///////////////////////////////////////////////////////
 
-  if (TR?.activeMeta?.tvSymbol) {
-    return String(TR.activeMeta.tvSymbol)
-      .trim()
-      .toUpperCase();
-  }
-
-  if (TR?.activeMeta?.symbol) {
-    return String(TR.activeMeta.symbol)
-      .trim()
-      .toUpperCase();
-  }
+  const symbol =
+    TR?.activeMeta?.tvSymbol ||
+    TR?.activeMeta?.symbol ||
+    TR?.activeSymbol;
 
   ///////////////////////////////////////////////////////
-  // 🔥 FALLBACKS GLOBALES
+  // 🔥 NO HAY SÍMBOLO ACTIVO
   ///////////////////////////////////////////////////////
 
-  if (window.tvSymbol) {
-    return String(window.tvSymbol)
-      .trim()
-      .toUpperCase();
-  }
-
-  if (window.selectedSymbol) {
-    return String(window.selectedSymbol)
-      .trim()
-      .toUpperCase();
+  if (!symbol) {
+    console.warn("❌ NO ACTIVE SYMBOL FOUND");
+    return null;
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 API FALLBACK
+  // 🔥 NORMALIZAR
   ///////////////////////////////////////////////////////
 
-  const api = window.__LEONES_BROKER_EXT2 || {};
-
-  if (api.activeSymbol) {
-    return String(api.activeSymbol)
-      .trim()
-      .toUpperCase();
-  }
-
-  ///////////////////////////////////////////////////////
-  // 🔥 HTML FALLBACK
-  ///////////////////////////////////////////////////////
-
-  const tradingSymbol =
-    document.getElementById("tradingSymbol")
-      ?.textContent
-      ?.trim();
-
-  if (tradingSymbol) {
-    return String(tradingSymbol)
-      .trim()
-      .toUpperCase();
-  }
-
-  const opSymbol =
-    document.getElementById("op-symbol")
-      ?.textContent
-      ?.trim();
-
-  if (opSymbol) {
-    return String(opSymbol)
-      .trim()
-      .toUpperCase();
-  }
-
-  ///////////////////////////////////////////////////////
-  // 🔥 DEFAULT
-  ///////////////////////////////////////////////////////
-
-  return "XAUUSD";
+  return String(symbol)
+    .trim()
+    .toUpperCase();
 }
-
 /* =========================
    🔥 UNIVERSAL PRICE ENGINE
 ========================= */
@@ -5382,59 +5331,128 @@ async function placeOrder(input) {
   try {
     sendingOrder = true;
 
+    ///////////////////////////////////////////////////////
+    // 🔥 VARIABLES
+    ///////////////////////////////////////////////////////
+
     let side;
     let symbol;
     let amount;
     let type;
 
+    ///////////////////////////////////////////////////////
+    // 🔥 SI VIENE STRING
+    ///////////////////////////////////////////////////////
+
     if (typeof input === "string") {
+
       side = input;
-      symbol = getActiveSymbol();
+
+      ///////////////////////////////////////////////////////
+      // 🔥 SIEMPRE DESDE EL ESTADO REAL
+      ///////////////////////////////////////////////////////
+
+      symbol =
+        TR?.activeMeta?.tvSymbol ||
+        TR?.activeMeta?.symbol ||
+        TR?.activeSymbol;
+
       amount = Number(
         document.getElementById("brokerOrderSize")?.value || 0
       );
+
       type = "market";
+
     } else {
+
       side = input?.side || input?.direction;
-      symbol = input?.symbol || getActiveSymbol();
-      amount = Number(input?.qty || input?.amount || 0);
+
+      ///////////////////////////////////////////////////////
+      // 🔥 NUNCA USAR SYMBOL EXTERNO SI ESTÁ CORRUPTO
+      ///////////////////////////////////////////////////////
+
+      symbol =
+        TR?.activeMeta?.tvSymbol ||
+        TR?.activeMeta?.symbol ||
+        TR?.activeSymbol ||
+        input?.symbol;
+
+      amount = Number(
+        input?.qty ||
+        input?.amount ||
+        0
+      );
+
       type = input?.type || "market";
     }
 
-    symbol = toPriceSymbol(symbol);
-    side = String(side || "").toLowerCase();
+    ///////////////////////////////////////////////////////
+    // 🔥 VALIDAR SÍMBOLO REAL
+    ///////////////////////////////////////////////////////
+
+    if (!symbol) {
+      console.error("❌ ORDER BLOCKED - NO ACTIVE SYMBOL");
+      return null;
+    }
 
     ///////////////////////////////////////////////////////
-    // VALIDACIONES
+    // 🔥 NORMALIZAR
+    ///////////////////////////////////////////////////////
+
+    symbol = toPriceSymbol(
+      String(symbol)
+        .trim()
+        .toUpperCase()
+    );
+
+    side = String(side || "")
+      .trim()
+      .toLowerCase();
+
+    ///////////////////////////////////////////////////////
+    // 🔥 DEBUG CRÍTICO
+    ///////////////////////////////////////////////////////
+
+    console.log("=================================");
+    console.log("🚀 PLACE ORDER");
+    console.log("TR.activeMeta =", TR?.activeMeta);
+    console.log("TR.activeSymbol =", TR?.activeSymbol);
+    console.log("FINAL SYMBOL =", symbol);
+    console.log("SIDE =", side);
+    console.log("AMOUNT =", amount);
+    console.log("=================================");
+
+    ///////////////////////////////////////////////////////
+    // 🔥 VALIDACIONES
     ///////////////////////////////////////////////////////
 
     if (!isValidSymbol(symbol)) {
       console.warn("❌ INVALID SYMBOL:", symbol);
-      return;
+      return null;
     }
 
     if (!Number.isFinite(amount) || amount <= 0) {
       console.warn("❌ INVALID AMOUNT:", amount);
-      return;
+      return null;
     }
 
     if (!["buy", "sell"].includes(side)) {
       console.warn("❌ INVALID SIDE:", side);
-      return;
+      return null;
     }
 
     ///////////////////////////////////////////////////////
-    // PRICE
+    // 🔥 PRICE
     ///////////////////////////////////////////////////////
 
     const price = await getPrice(symbol);
 
     if (!Number.isFinite(price) || price <= 0) {
-      throw new Error("Precio inválido");
+      throw new Error("❌ INVALID PRICE");
     }
 
     ///////////////////////////////////////////////////////
-    // PAYLOAD
+    // 🔥 PAYLOAD FINAL
     ///////////////////////////////////////////////////////
 
     const payload = {
@@ -5445,13 +5463,26 @@ async function placeOrder(input) {
       price,
     };
 
+    ///////////////////////////////////////////////////////
+    // 🔥 DEBUG BACKEND
+    ///////////////////////////////////////////////////////
+
+    console.log("📩 PAYLOAD SENT =", payload);
+
+    ///////////////////////////////////////////////////////
+    // 🔥 ENVIAR ORDEN
+    ///////////////////////////////////////////////////////
+
     return await placeBrokerOrder(payload);
 
   } catch (err) {
+
     console.error("❌ placeOrder error:", err);
+
     return null;
 
   } finally {
+
     setTimeout(() => {
       sendingOrder = false;
     }, 300);
