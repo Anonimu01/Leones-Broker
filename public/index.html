@@ -3342,21 +3342,18 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   const symbol = String(
     resolved.tvSymbol ||
     resolved.symbol ||
-    window.tvSymbol ||
-    window.selectedSymbol ||
     ''
-  ).trim();
+  )
+    .trim()
+    .toUpperCase();
 
   if (!symbol) {
     throw new Error('El símbolo no es válido');
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 GLOBAL SYNC
+  // 🔥 ÚNICA SINCRONIZACIÓN REAL
   ///////////////////////////////////////////////////////
-
-  window.selectedSymbol = symbol;
-  window.tvSymbol = symbol;
 
   state.activeSymbol = symbol;
 
@@ -3383,7 +3380,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 DESTROY PREVIOUS
+  // 🔥 LIMPIAR GRÁFICO ANTERIOR
   ///////////////////////////////////////////////////////
 
   container.innerHTML = '';
@@ -3405,6 +3402,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   ///////////////////////////////////////////////////////
 
   if (typeof window.initTradingWidget === 'function') {
+
     try {
 
       const widget =
@@ -3417,6 +3415,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
       return symbol;
 
     } catch (e) {
+
       warn('window.initTradingWidget failed', e);
     }
   }
@@ -3437,6 +3436,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   ///////////////////////////////////////////////////////
 
   const widget = new TradingView.widget({
+
     autosize: true,
 
     symbol: symbol,
@@ -3503,7 +3503,9 @@ function selectSymbol(meta, options = {}) {
     meta.tvSymbol ||
     meta.symbol ||
     ''
-  ).trim();
+  )
+    .trim()
+    .toUpperCase();
 
   if (!symbol) {
     console.warn("❌ INVALID SYMBOL META:", meta);
@@ -3511,12 +3513,8 @@ function selectSymbol(meta, options = {}) {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 GLOBAL SYNC
+  // 🔥 ÚNICA SINCRONIZACIÓN REAL
   ///////////////////////////////////////////////////////
-
-  window.selectedSymbol = symbol;
-
-  window.tvSymbol = symbol;
 
   state.activeSymbol = symbol;
 
@@ -3543,7 +3541,7 @@ function selectSymbol(meta, options = {}) {
   renderBottomPanels();
 
   ///////////////////////////////////////////////////////
-  // 🔥 OPEN SINGLE CHART
+  // 🔥 ABRIR SOLO UN GRÁFICO
   ///////////////////////////////////////////////////////
 
   if (openChart) {
