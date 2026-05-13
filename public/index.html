@@ -2101,8 +2101,6 @@ if (window.__LEONES_BOOTED__) {
     Stocks: '🏢',
     Commodities: '⛏️'
   };
-
- 
   const SYMBOL_LABELS = {
     EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
     NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
@@ -3277,26 +3275,21 @@ if (window.__LEONES_BOOTED__) {
   }
 
 
-function connectTradingView(widget) {
+ function connectTradingView(widget) {
+  try {
+    if (!widget) return;
 
-  if (!widget) return;
+    // ⚠️ algunos builds no tienen onChartReady
+    if (typeof widget.onChartReady === "function") {
+      widget.onChartReady(() => initChart(widget));
+    } else {
+      // fallback inmediato
+      initChart(widget);
+    }
 
-  widget.onChartReady(() => {
-
-    const chart = widget.activeChart();
-
-    chart.onSymbolChanged().subscribe(null, (symbol) => {
-
-      // 💣 ESTA ES LA VERDAD DEL MERCADO (NO EL DOM)
-      window.currentSymbol = symbol;
-      window.tvSymbol = symbol;
-      window.selectedSymbol = symbol;
-      state.lastChartSymbol = symbol;
-
-      console.log("📊 SYMBOL REAL DEL CHART:", symbol);
-    });
-
-  });
+  } catch (e) {
+    console.warn("⚠️ No se pudo conectar TradingView:", e);
+  }
 }
 
 function initChart(widget) {
@@ -3326,23 +3319,6 @@ function initChart(widget) {
     console.warn("initChart error:", e);
   }
 }
-
-  function openTrade(data) {
-  const symbol = getActiveSymbolMeta(); // solo aquí
-
-  const trade = {
-    id: generateId(),
-    symbol, // 🔥 queda congelado
-    openPrice: data.price,
-    type: data.type,
-    volume: data.volume,
-    time: Date.now()
-  };
-
-  saveTrade(trade);
-}
-
-  
 async function openTradingView(meta, containerId = 'tv_chart_container') {
   const resolved = meta || getActiveSymbolMeta();
   if (!resolved) throw new Error('No hay símbolos reales para graficar');
@@ -3356,18 +3332,18 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   container.innerHTML = '';
   await ensureTradingViewScript();
 
-  // 🔥 SOLO INICIALIZAR SI NO EXISTE
-  window.currentSymbol = symbol;
-  window.tvSymbol = symbol;
-  window.selectedSymbol = symbol;
+  // 🌐 RESET GLOBALS
+  window.tvSymbol = null;
+  window.tvPrice = null;
 
-  let widget;
-
-  // 🔥 CUSTOM INIT
+  // 🔥 SI EXISTE TU INIT PERSONALIZADO
   if (typeof window.initTradingWidget === 'function') {
     try {
-      widget = window.initTradingWidget(symbol, containerId);
+      const widget = window.initTradingWidget(symbol, containerId);
+
+      // 🔥 CONECTAR SYNC
       if (widget) connectTradingView(widget);
+
       state.lastChartSymbol = symbol;
       return symbol;
     } catch (e) {
@@ -3379,8 +3355,8 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     throw new Error('TradingView no está disponible');
   }
 
-  // 🔥 WIDGET NATIVO
-  widget = new TradingView.widget({
+  // 🔥 CREAR WIDGET
+  const widget = new TradingView.widget({
     autosize: true,
     symbol,
     interval: '5',
@@ -3396,13 +3372,17 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     save_image: false
   });
 
-  // 🔥 CONECTAR SYNC REAL
+  // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
   connectTradingView(widget);
 
   state.lastChartSymbol = symbol;
 
+  // 🔥 GUARDAR TAMBIÉN COMO FALLBACK GLOBAL
+  window.selectedSymbol = symbol;
+
   return symbol;
 }
+
   function selectSymbol(meta, options = {}) {
     if (!meta) return;
     const openChart = options.openChart !== false;
@@ -4928,98 +4908,40 @@ async function loadPositions() {
     }
   }
 
- function exposeAPI() {
-  // 🔥 DOM es la única fuente de verdad del símbolo
-  window.currentSymbol = window.currentSymbol || null;
+  function exposeAPI() {
+    window.startBrokerUI = initTradingUI;
+    window.refreshBrokerUI = requestBackendRefresh;
+    window.openBrokerTradingView = openTradingView;
+    window.selectBrokerSymbol = selectSymbol;
 
-  // DOM selector (ÚNICO controlador del símbolo)
-  window.selectBrokerSymbol = (symbol) => {
-    window.currentSymbol = symbol;
-    selectSymbol(symbol); // mantiene tu UI del gráfico sincronizada
-  };
+    window.openTrade = openTrade;
+    window.placeBrokerOrder = placeBrokerOrder;
+    window.updateTradesPrices = updateTradesPrices;
+    window.updateAccountMetrics = updateAccountMetrics;
+    window.closeAllTrades = closeAllTrades;
+    window.adminDeposit = adminDeposit;
 
-  // UI / sistema
-  window.startBrokerUI = initTradingUI;
-  window.refreshBrokerUI = requestBackendRefresh;
-  window.openBrokerTradingView = openTradingView;
-
-  // TRADING
-  window.openTrade = openTrade;
-  window.placeBrokerOrder = placeBrokerOrder;
-  window.updateTradesPrices = updateTradesPrices;
-  window.updateAccountMetrics = updateAccountMetrics;
-  window.closeAllTrades = closeAllTrades;
-  window.adminDeposit = adminDeposit;
-
-  // 🔥 API expuesta LIMPIA (sin símbolos globales rotos)
-  window.__LEONES_BROKER_EXT2 = {
-    initTradingUI,
-    refreshBrokerUI: requestBackendRefresh,
-    openTradingView,
-
-    selectSymbol: window.selectBrokerSymbol, // 👈 DOM manda
-
-    loadMarketsAndQuotes,
-    loadRealMarkets,
-    loadRealQuotes,
-    loadAccount,
-    loadPositions,
-
-    placeOrder,
-    placeBrokerOrder,
-    openTrade,
-    closePosition,
-    requestBackendRefresh,
-
-    positions: state.positions,
-
-    // ❌ ELIMINADO:
-    // activeSymbol
-    // TR.activeSymbol
-    // state.activeSymbol
-
-    activeMeta: TR.activeMeta || null,
-    symbolPrices: TR.symbolPrices || {}
-  };
-}
-
-
-  function onChartSymbolChange(symbol) {
-  window.currentSymbol = symbol;
-}
-
-function onChartSymbolChange(symbol) {
-  if (window.chart) {
-    window.chart.symbol = symbol;
+    window.__LEONES_BROKER_EXT2 = {
+      initTradingUI,
+      refreshBrokerUI: requestBackendRefresh,
+      openTradingView,
+      selectSymbol,
+      loadMarketsAndQuotes,
+      loadRealMarkets,
+      loadRealQuotes,
+      loadAccount,
+      loadPositions,
+      placeOrder,
+      placeBrokerOrder,
+      openTrade,
+      closePosition,
+      requestBackendRefresh,
+      positions: state.positions,
+      activeSymbol: state.activeSymbol,
+      activeMeta: TR.activeMeta || null,
+      symbolPrices: TR.symbolPrices || {}
+    };
   }
-}
-
-  function updateSymbolUI(symbol) {
-  const el = document.getElementById("tradingSymbol");
-  if (el) el.textContent = symbol;
-}
-
- function onClickBuy(data) {
-  placeOrder({
-    ...data,
-    symbol: getActiveSymbol()
-  });
-} 
-
-  function onClickOpenPosition() {
-
-  const symbol = getActiveSymbol();
-
-  if (!symbol) {
-    console.error("No hay símbolo activo");
-    return;
-  }
-
-  console.log("🔥 Abriendo posición con:", symbol);
-
-  openTrade(symbol);
-}
- 
 
 /* =========================
    NORMALIZE SYMBOL
@@ -5062,11 +4984,15 @@ let sendingOrder = false;
    ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
+  const api = window.__LEONES_BROKER_EXT2 || {};
+
   return (
-    window.currentSymbol ||
     window.tvSymbol ||
-    state.lastChartSymbol ||
-    null
+    window.selectedSymbol ||
+    api.activeSymbol ||
+    document.getElementById("tradingSymbol")?.textContent?.trim() ||
+    document.getElementById("op-symbol")?.textContent?.trim() ||
+    "BTCUSDT"
   );
 }
 
@@ -5225,23 +5151,6 @@ function getUser() {
 /* =========================
    PLACE ORDER
 ========================= */
-function placeOrder(data) {
-
-  const symbol = window.currentSymbol; // 💥 ÚNICA FUENTE REAL
-
-  const trade = {
-    id: generateId(),
-    symbol,
-    openPrice: data.price,
-    type: data.type,
-    volume: data.volume,
-    time: Date.now()
-  };
-
-  saveTrade(trade);
-}
-  
-  
 async function placeOrder(input) {
   if (sendingOrder) return;
 
