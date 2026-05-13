@@ -5228,7 +5228,7 @@ async function placeOrder(input) {
     // SIN LEVERAGE FIJO
     ///////////////////////////////////////////////////////
 
-   ///////////////////////////////////////////////////////
+ ///////////////////////////////////////////////////////
 // PAYLOAD
 ///////////////////////////////////////////////////////
 
@@ -5241,28 +5241,14 @@ const payload = {
 };
 
 return await placeBrokerOrder(payload);
-    ///////////////////////////////////////////////////////
-    // PAYLOAD
-    ///////////////////////////////////////////////////////
 
-    const payload = {
-      symbol,
-      direction: side,
-      type,
-      qty: amount,
-      price,
-    };
-
-    return await placeBrokerOrder(payload);
-
-  } catch (err) {
-    console.error("❌ placeOrder error:", err);
-    return null;
-  } finally {
-    setTimeout(() => {
-      sendingOrder = false;
-    }, 300);
-  }
+} catch (err) {
+  console.error("❌ placeOrder error:", err);
+  return null;
+} finally {
+  setTimeout(() => {
+    sendingOrder = false;
+  }, 300);
 }
 /* =========================
    BACKEND ORDER
