@@ -4960,6 +4960,17 @@ async function loadPositions() {
     };
   }
 
+  function onClickBuy(data) {
+
+  // 💥 CAPTURA INMEDIATA DEL CHART
+  const symbol = window.chart?.symbol;
+
+  placeOrder({
+    ...data,
+    symbol // 🔥 se congela aquí
+  });
+}
+
 /* =========================
    NORMALIZE SYMBOL
 ========================= */
@@ -5169,11 +5180,10 @@ function getUser() {
    PLACE ORDER
 ========================= */
 function placeOrder(data) {
-  const symbol = getActiveSymbolMeta(); // 🔥 SOLO AQUÍ
 
   const trade = {
     id: generateId(),
-    symbol, // 💥 queda fijo para siempre
+    symbol: data.symbol, // 💥 NUNCA recalcular
     openPrice: data.price,
     type: data.type,
     volume: data.volume,
@@ -5182,7 +5192,6 @@ function placeOrder(data) {
 
   saveTrade(trade);
 }
-
   
   
 async function placeOrder(input) {
