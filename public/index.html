@@ -3319,6 +3319,23 @@ function initChart(widget) {
     console.warn("initChart error:", e);
   }
 }
+
+  function openTrade(data) {
+  const symbol = getActiveSymbolMeta(); // solo aquí
+
+  const trade = {
+    id: generateId(),
+    symbol, // 🔥 queda congelado
+    openPrice: data.price,
+    type: data.type,
+    volume: data.volume,
+    time: Date.now()
+  };
+
+  saveTrade(trade);
+}
+
+  
 async function openTradingView(meta, containerId = 'tv_chart_container') {
   const resolved = meta || getActiveSymbolMeta();
   if (!resolved) throw new Error('No hay símbolos reales para graficar');
