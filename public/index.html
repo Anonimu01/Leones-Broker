@@ -5168,6 +5168,23 @@ function getUser() {
 /* =========================
    PLACE ORDER
 ========================= */
+function placeOrder(data) {
+  const symbol = getActiveSymbolMeta(); // 🔥 SOLO AQUÍ
+
+  const trade = {
+    id: generateId(),
+    symbol, // 💥 queda fijo para siempre
+    openPrice: data.price,
+    type: data.type,
+    volume: data.volume,
+    time: Date.now()
+  };
+
+  saveTrade(trade);
+}
+
+  
+  
 async function placeOrder(input) {
   if (sendingOrder) return;
 
