@@ -4640,29 +4640,8 @@ async function loadPositions() {
             getSymbols().find(x => String(x.symbol).toUpperCase() === String(symbol).toUpperCase()) ||
             null;
 
-        if (meta) {
-
-  ///////////////////////////////////////////////////////
-  // 🔥 GLOBAL SYMBOL SYNC
-  ///////////////////////////////////////////////////////
-
-  window.selectedSymbol = meta.symbol;
-  window.tvSymbol = meta.symbol;
-
-  state.activeSymbol = meta.symbol;
-  TR.activeSymbol = meta.symbol;
-  TR.activeMeta = meta;
-
-  console.log("🔥 SYMBOL SELECTED:", meta.symbol);
-
-  ///////////////////////////////////////////////////////
-  // OPEN CHART
-  ///////////////////////////////////////////////////////
-
-  selectSymbol(meta, { openChart: true });
-}
-
-return;
+          if (meta) selectSymbol(meta, { openChart: true });
+          return;
         }
 
         const closeBtn = ev.target.closest && ev.target.closest('[data-close-position]');
@@ -4835,127 +4814,68 @@ return;
     });
   }
 
- async function initTradingUI(context = {}) {
-  if (!isLoggedIn()) return null;
+  async function initTradingUI(context = {}) {
+    if (!isLoggedIn()) return null;
 
-  injectUiStyles();
+    injectUiStyles();
 
-  const root = ensureRoot();
-  if (!root) return null;
+    const root = ensureRoot();
+    if (!root) return null;
 
-  if (!state.started) {
-    ensureShell(root);
-    state.started = true;
-  }
-
-  clearMessage();
-
-  if (context && context.user && typeof context.user === 'object') {
-    state.account = { ...(state.account || {}), ...context.user };
-    updatePrivateHeaderName(context.user);
-    syncAccountView(context.user);
-  } else {
-    const user = getUser();
-
-    if (user && Object.keys(user).length) {
-      updatePrivateHeaderName(user);
-    }
-  }
-
-  bindMenuButtons();
-  bindOrderUi();
-  attachGlobalDelegation();
-
-  await ensureSocket();
-
-  bindSocketListeners();
-
-  createFloatingTradesPanel();
-
-  startAutoRefresh();
-
-  await requestBackendRefresh();
-  await nextFrame();
-
-  ///////////////////////////////////////////////////////
-  // 🔥 KEEP ACTIVE SELECTED SYMBOL
-  ///////////////////////////////////////////////////////
-
-  const list = getSymbols();
-
-  const meta =
-    TR.activeMeta ||
-    getActiveSymbolMeta() ||
-    list[0] ||
-    null;
-
-  ///////////////////////////////////////////////////////
-  // 🔥 ACTIVE SYMBOL
-  ///////////////////////////////////////////////////////
-
-  if (meta) {
-
-    window.selectedSymbol = meta.symbol;
-    window.tvSymbol = meta.symbol;
-
-    state.activeSymbol = meta.symbol;
-
-    TR.activeSymbol = meta.symbol;
-    TR.activeMeta = meta;
-
-    console.log("🔥 ACTIVE SYMBOL:", meta.symbol);
-
-    renderSymbolDetails(meta);
-
-    renderBottomPanels();
-
-    ///////////////////////////////////////////////////////
-    // OPEN CHART
-    ///////////////////////////////////////////////////////
-
-    if (
-      !state.lastChartSymbol ||
-      state.lastChartSymbol !== meta.tvSymbol
-    ) {
-
-      await openTradingView(
-        meta,
-        'tv_chart_container'
-      ).catch(e =>
-        setMessage(
-          e?.message || 'No se pudo cargar el gráfico',
-          'error'
-        )
-      );
-
-      await openTradingView(
-        meta,
-        'tv_chart_container_bottom'
-      ).catch(() => {});
+    if (!state.started) {
+      ensureShell(root);
+      state.started = true;
     }
 
-    ///////////////////////////////////////////////////////
-    // REALTIME
-    ///////////////////////////////////////////////////////
+    clearMessage();
 
-    requestRealtimeForSymbol(meta);
+    if (context && context.user && typeof context.user === 'object') {
+      state.account = { ...(state.account || {}), ...context.user };
+      updatePrivateHeaderName(context.user);
+      syncAccountView(context.user);
+    } else {
+      const user = getUser();
+      if (user && Object.keys(user).length) {
+        updatePrivateHeaderName(user);
+      }
+    }
 
-  } else {
+    bindMenuButtons();
+    bindOrderUi();
+    attachGlobalDelegation();
+    await ensureSocket();
+    bindSocketListeners();
+    createFloatingTradesPanel();
+    startAutoRefresh();
 
-    setMessage(
-      'No hay símbolos disponibles todavía. Revisa la conexión de datos.',
-      'error'
-    );
+    await requestBackendRefresh();
+    await nextFrame();
+
+    const list = getSymbols();
+    const meta = getActiveSymbolMeta() || list[0] || null;
+
+    if (meta) {
+      state.activeSymbol = meta.symbol;
+      TR.activeSymbol = meta.symbol;
+      TR.activeMeta = meta;
+
+      renderSymbolDetails(meta);
+      renderBottomPanels();
+
+      if (!state.lastChartSymbol || state.lastChartSymbol !== meta.tvSymbol) {
+        await openTradingView(meta, 'tv_chart_container').catch(e => setMessage(e?.message || 'No se pudo cargar el gráfico', 'error'));
+        await openTradingView(meta, 'tv_chart_container_bottom').catch(() => {});
+      }
+
+      requestRealtimeForSymbol(meta);
+    } else {
+      setMessage('No hay símbolos disponibles todavía. Revisa la conexión de datos.', 'error');
+    }
+
+    syncOrderFields();
+    return true;
   }
 
-  ///////////////////////////////////////////////////////
-  // FINAL UI SYNC
-  ///////////////////////////////////////////////////////
-
-  syncOrderFields();
-
-  return true;
-}
   function openTrade(symbol, amount, direction, price) {
     if (amount > ACCOUNT.balance) {
       alert('Fondos insuficientes');
@@ -5064,39 +4984,18 @@ let sendingOrder = false;
    ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
+  const api = window.__LEONES_BROKER_EXT2 || {};
 
-  ///////////////////////////////////////////////////////
-  // 🔥 PRIORIDAD GLOBAL REAL
-  ///////////////////////////////////////////////////////
-
-  const globalSymbol =
-    window.selectedSymbol ||
+  return (
     window.tvSymbol ||
-    TR.activeSymbol ||
-    state.activeSymbol;
-
-  if (globalSymbol) {
-    return toPriceSymbol(globalSymbol);
-  }
-
-  ///////////////////////////////////////////////////////
-  // FALLBACK UI
-  ///////////////////////////////////////////////////////
-
-  const domSymbol =
+    window.selectedSymbol ||
+    api.activeSymbol ||
     document.getElementById("tradingSymbol")?.textContent?.trim() ||
-    document.getElementById("op-symbol")?.textContent?.trim();
-
-  if (domSymbol) {
-    return toPriceSymbol(domSymbol);
-  }
-
-  ///////////////////////////////////////////////////////
-  // FINAL FALLBACK
-  ///////////////////////////////////////////////////////
-
-  return "BTCUSDT";
+    document.getElementById("op-symbol")?.textContent?.trim() ||
+    "BTCUSDT"
+  );
 }
+
 /* =========================
    🔥 UNIVERSAL PRICE ENGINE
 ========================= */
@@ -5277,11 +5176,6 @@ async function placeOrder(input) {
       type = input?.type || "market";
     }
 
-    console.log("🔥 ACTIVE SYMBOL:", symbol);
-console.log("🔥 tvSymbol:", window.tvSymbol);
-console.log("🔥 selectedSymbol:", window.selectedSymbol);
-console.log("🔥 state.activeSymbol:", state.activeSymbol);
-
     symbol = toPriceSymbol(symbol);
     side = String(side || "").toLowerCase();
 
@@ -5329,8 +5223,19 @@ console.log("🔥 state.activeSymbol:", state.activeSymbol);
 
     const leverage = Number(user?.leverage || 1);
 
-  
-  
+    const maxQty = (balance * leverage) / price;
+
+    if (amount > maxQty) {
+      console.warn("⚠️ ORDER BLOCKED - TOO LARGE");
+
+      // opción segura: limitar automáticamente
+      amount = maxQty;
+
+      if (amount <= 0) {
+        console.warn("❌ ORDER TOO SMALL AFTER LIMIT");
+        return;
+      }
+    }
 
     ///////////////////////////////////////////////////////
     // PAYLOAD
