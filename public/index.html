@@ -3322,7 +3322,7 @@ function initChart(widget) {
 async function openTradingView(meta, containerId = 'tv_chart_container') {
 
   ///////////////////////////////////////////////////////
-  // 🔥 SAFE META RESOLUTION
+  // 🔥 SAFE META
   ///////////////////////////////////////////////////////
 
   const resolved =
@@ -3336,7 +3336,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 RESOLVE SYMBOL
+  // 🔥 SYMBOL
   ///////////////////////////////////////////////////////
 
   const symbol = String(
@@ -3352,7 +3352,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 FORCE GLOBAL SYMBOL SYNC
+  // 🔥 GLOBAL SYNC
   ///////////////////////////////////////////////////////
 
   window.selectedSymbol = symbol;
@@ -3361,6 +3361,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   state.activeSymbol = symbol;
 
   TR.activeSymbol = symbol;
+
   TR.activeMeta = {
     ...resolved,
     symbol,
@@ -3379,6 +3380,10 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     throw new Error('No existe el contenedor del gráfico');
   }
 
+  ///////////////////////////////////////////////////////
+  // 🔥 DESTROY PREVIOUS
+  ///////////////////////////////////////////////////////
+
   container.innerHTML = '';
 
   ///////////////////////////////////////////////////////
@@ -3388,7 +3393,7 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   await ensureTradingViewScript();
 
   ///////////////////////////////////////////////////////
-  // RESET PRICE CACHE ONLY
+  // RESET PRICE ONLY
   ///////////////////////////////////////////////////////
 
   window.tvPrice = null;
@@ -3400,13 +3405,12 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   if (typeof window.initTradingWidget === 'function') {
     try {
 
-      const widget = window.initTradingWidget(symbol, containerId);
+      const widget =
+        window.initTradingWidget(symbol, containerId);
 
       if (widget) {
         connectTradingView(widget);
       }
-
-      state.lastChartSymbol = symbol;
 
       return symbol;
 
@@ -3432,14 +3436,17 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
   const widget = new TradingView.widget({
     autosize: true,
-    symbol,
+    symbol: symbol,
     interval: '5',
     timezone: 'Etc/UTC',
     theme: 'dark',
     style: '1',
     locale: 'es',
     enable_publishing: false,
-    allow_symbol_change: true,
+
+    // 🔥 IMPORTANTE
+    allow_symbol_change: false,
+
     container_id: container.id,
     hide_side_toolbar: false,
     withdateranges: true,
@@ -3452,8 +3459,6 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
   connectTradingView(widget);
 
-  state.lastChartSymbol = symbol;
-
   return symbol;
 }
 
@@ -3464,7 +3469,7 @@ function selectSymbol(meta, options = {}) {
   const openChart = options.openChart !== false;
 
   ///////////////////////////////////////////////////////
-  // 🔥 RESOLVE SYMBOL
+  // 🔥 SYMBOL
   ///////////////////////////////////////////////////////
 
   const symbol = String(
@@ -3479,7 +3484,19 @@ function selectSymbol(meta, options = {}) {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 GLOBAL SYMBOL SYNC
+  // 🔥 PREVENT DUPLICATE OPEN
+  ///////////////////////////////////////////////////////
+
+  if (
+    state.activeSymbol === symbol &&
+    state.lastChartSymbol === symbol
+  ) {
+    console.log("⚠️ SYMBOL ALREADY ACTIVE:", symbol);
+    return;
+  }
+
+  ///////////////////////////////////////////////////////
+  // 🔥 GLOBAL SYNC
   ///////////////////////////////////////////////////////
 
   window.selectedSymbol = symbol;
@@ -3510,24 +3527,22 @@ function selectSymbol(meta, options = {}) {
   renderBottomPanels();
 
   ///////////////////////////////////////////////////////
-  // OPEN CHART
+  // OPEN SINGLE CHART ONLY
   ///////////////////////////////////////////////////////
 
   if (openChart) {
 
-    openTradingView(TR.activeMeta, 'tv_chart_container')
-      .catch(e =>
-        setMessage(
-          e?.message || 'No se pudo abrir el gráfico',
-          'error'
-        )
-      );
-
-    openTradingView(TR.activeMeta, 'tv_chart_container_bottom')
-      .catch(() => {});
+    openTradingView(
+      TR.activeMeta,
+      'tv_chart_container'
+    ).catch(e =>
+      setMessage(
+        e?.message || 'No se pudo abrir el gráfico',
+        'error'
+      )
+    );
   }
 }
-
   function applySearchValue(value) {
     state.marketSearch = String(value || '');
     renderSymbolsGrid();
