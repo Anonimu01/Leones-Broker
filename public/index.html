@@ -4979,27 +4979,31 @@ async function loadPositions() {
     symbolPrices: TR.symbolPrices || {}
   };
 }
-window.currentSymbol = null;
-  function onSelectFromDOM(symbol) {
-  window.currentSymbol = symbol;
-}
+
 
   function onChartSymbolChange(symbol) {
   window.currentSymbol = symbol;
 }
 
+function onChartSymbolChange(symbol) {
+  if (window.chart) {
+    window.chart.symbol = symbol;
+  }
+}
 
-  
-  function onClickBuy(data) {
+  function updateSymbolUI(symbol) {
+  const el = document.getElementById("tradingSymbol");
+  if (el) el.textContent = symbol;
+}
 
-  // 💥 CAPTURA INMEDIATA DEL CHART
-  const symbol = window.chart?.symbol;
-
+ function onClickBuy(data) {
   placeOrder({
     ...data,
-    symbol // 🔥 se congela aquí
+    symbol: getActiveSymbol()
   });
-}
+} 
+  
+ 
 
 /* =========================
    NORMALIZE SYMBOL
