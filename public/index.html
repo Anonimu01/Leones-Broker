@@ -3368,6 +3368,8 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     tvSymbol: symbol
   };
 
+  state.lastChartSymbol = symbol;
+
   console.log("🔥 TV OPEN SYMBOL:", symbol);
 
   ///////////////////////////////////////////////////////
@@ -3436,21 +3438,46 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
 
   const widget = new TradingView.widget({
     autosize: true,
+
     symbol: symbol,
+
     interval: '5',
+
     timezone: 'Etc/UTC',
+
     theme: 'dark',
+
     style: '1',
+
     locale: 'es',
+
     enable_publishing: false,
 
-    // 🔥 IMPORTANTE
-    allow_symbol_change: false,
+    ///////////////////////////////////////////////////////
+    // 🔥 BUSCADOR ACTIVADO
+    ///////////////////////////////////////////////////////
+
+    allow_symbol_change: true,
+
+    ///////////////////////////////////////////////////////
+    // 🔥 TOOLBAR SUPERIOR
+    ///////////////////////////////////////////////////////
+
+    hide_top_toolbar: false,
 
     container_id: container.id,
+
     hide_side_toolbar: false,
+
     withdateranges: true,
-    save_image: false
+
+    save_image: false,
+
+    details: true,
+
+    hotlist: true,
+
+    calendar: true
   });
 
   ///////////////////////////////////////////////////////
@@ -3484,22 +3511,11 @@ function selectSymbol(meta, options = {}) {
   }
 
   ///////////////////////////////////////////////////////
-  // 🔥 PREVENT DUPLICATE OPEN
-  ///////////////////////////////////////////////////////
-
-  if (
-    state.activeSymbol === symbol &&
-    state.lastChartSymbol === symbol
-  ) {
-    console.log("⚠️ SYMBOL ALREADY ACTIVE:", symbol);
-    return;
-  }
-
-  ///////////////////////////////////////////////////////
   // 🔥 GLOBAL SYNC
   ///////////////////////////////////////////////////////
 
   window.selectedSymbol = symbol;
+
   window.tvSymbol = symbol;
 
   state.activeSymbol = symbol;
@@ -3527,7 +3543,7 @@ function selectSymbol(meta, options = {}) {
   renderBottomPanels();
 
   ///////////////////////////////////////////////////////
-  // OPEN SINGLE CHART ONLY
+  // 🔥 OPEN SINGLE CHART
   ///////////////////////////////////////////////////////
 
   if (openChart) {
@@ -3543,6 +3559,8 @@ function selectSymbol(meta, options = {}) {
     );
   }
 }
+
+  
   function applySearchValue(value) {
     state.marketSearch = String(value || '');
     renderSymbolsGrid();
