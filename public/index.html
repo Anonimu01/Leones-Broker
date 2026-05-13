@@ -5228,30 +5228,19 @@ async function placeOrder(input) {
     // SIN LEVERAGE FIJO
     ///////////////////////////////////////////////////////
 
-    const user = getUser();
+   ///////////////////////////////////////////////////////
+// PAYLOAD
+///////////////////////////////////////////////////////
 
-    const balance = Number(
-      user?.balanceOwn ||
-      user?.balance ||
-      0
-    );
+const payload = {
+  symbol,
+  direction: side,
+  type,
+  qty: amount,
+  price,
+};
 
-    const leverage = Number(user?.leverage || 1);
-
-    const maxQty = (balance * leverage) / price;
-
-    if (amount > maxQty) {
-      console.warn("⚠️ ORDER BLOCKED - TOO LARGE");
-
-      // opción segura: limitar automáticamente
-      amount = maxQty;
-
-      if (amount <= 0) {
-        console.warn("❌ ORDER TOO SMALL AFTER LIMIT");
-        return;
-      }
-    }
-
+return await placeBrokerOrder(payload);
     ///////////////////////////////////////////////////////
     // PAYLOAD
     ///////////////////////////////////////////////////////
