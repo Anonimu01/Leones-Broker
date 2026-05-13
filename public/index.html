@@ -3277,21 +3277,26 @@ if (window.__LEONES_BOOTED__) {
   }
 
 
- function connectTradingView(widget) {
-  try {
-    if (!widget) return;
+function connectTradingView(widget) {
 
-    // ⚠️ algunos builds no tienen onChartReady
-    if (typeof widget.onChartReady === "function") {
-      widget.onChartReady(() => initChart(widget));
-    } else {
-      // fallback inmediato
-      initChart(widget);
-    }
+  if (!widget) return;
 
-  } catch (e) {
-    console.warn("⚠️ No se pudo conectar TradingView:", e);
-  }
+  widget.onChartReady(() => {
+
+    const chart = widget.activeChart();
+
+    chart.onSymbolChanged().subscribe(null, (symbol) => {
+
+      // 💣 ESTA ES LA VERDAD DEL MERCADO (NO EL DOM)
+      window.currentSymbol = symbol;
+      window.tvSymbol = symbol;
+      window.selectedSymbol = symbol;
+      state.lastChartSymbol = symbol;
+
+      console.log("📊 SYMBOL REAL DEL CHART:", symbol);
+    });
+
+  });
 }
 
 function initChart(widget) {
@@ -3351,18 +3356,18 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
   container.innerHTML = '';
   await ensureTradingViewScript();
 
-  // 🌐 RESET GLOBALS
-  window.tvSymbol = null;
-  window.tvPrice = null;
+  // 🔥 SOLO INICIALIZAR SI NO EXISTE
+  window.currentSymbol = symbol;
+  window.tvSymbol = symbol;
+  window.selectedSymbol = symbol;
 
-  // 🔥 SI EXISTE TU INIT PERSONALIZADO
+  let widget;
+
+  // 🔥 CUSTOM INIT
   if (typeof window.initTradingWidget === 'function') {
     try {
-      const widget = window.initTradingWidget(symbol, containerId);
-
-      // 🔥 CONECTAR SYNC
+      widget = window.initTradingWidget(symbol, containerId);
       if (widget) connectTradingView(widget);
-
       state.lastChartSymbol = symbol;
       return symbol;
     } catch (e) {
@@ -3374,8 +3379,8 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     throw new Error('TradingView no está disponible');
   }
 
-  // 🔥 CREAR WIDGET
-  const widget = new TradingView.widget({
+  // 🔥 WIDGET NATIVO
+  widget = new TradingView.widget({
     autosize: true,
     symbol,
     interval: '5',
@@ -3391,17 +3396,13 @@ async function openTradingView(meta, containerId = 'tv_chart_container') {
     save_image: false
   });
 
-  // 🔥 🔥 🔥 CLAVE: CONECTAR TRADINGVIEW
+  // 🔥 CONECTAR SYNC REAL
   connectTradingView(widget);
 
   state.lastChartSymbol = symbol;
 
-  // 🔥 GUARDAR TAMBIÉN COMO FALLBACK GLOBAL
-  window.selectedSymbol = symbol;
-
   return symbol;
 }
-
   function selectSymbol(meta, options = {}) {
     if (!meta) return;
     const openChart = options.openChart !== false;
@@ -5004,7 +5005,20 @@ function onChartSymbolChange(symbol) {
     symbol: getActiveSymbol()
   });
 } 
-  
+
+  function onClickOpenPosition() {
+
+  const symbol = getActiveSymbol();
+
+  if (!symbol) {
+    console.error("No hay símbolo activo");
+    return;
+  }
+
+  console.log("🔥 Abriendo posición con:", symbol);
+
+  openTrade(symbol);
+}
  
 
 /* =========================
@@ -5048,15 +5062,11 @@ let sendingOrder = false;
    ACTIVE SYMBOL
 ========================= */
 function getActiveSymbol() {
-  const api = window.__LEONES_BROKER_EXT2 || {};
-
   return (
+    window.currentSymbol ||
     window.tvSymbol ||
-    window.selectedSymbol ||
-    api.activeSymbol ||
-    document.getElementById("tradingSymbol")?.textContent?.trim() ||
-    document.getElementById("op-symbol")?.textContent?.trim() ||
-    "BTCUSDT"
+    state.lastChartSymbol ||
+    null
   );
 }
 
