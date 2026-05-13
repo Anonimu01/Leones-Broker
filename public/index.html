@@ -4925,41 +4925,71 @@ async function loadPositions() {
     }
   }
 
-  function exposeAPI() {
-    window.startBrokerUI = initTradingUI;
-    window.refreshBrokerUI = requestBackendRefresh;
-    window.openBrokerTradingView = openTradingView;
-    window.selectBrokerSymbol = selectSymbol;
+ function exposeAPI() {
+  // 🔥 DOM es la única fuente de verdad del símbolo
+  window.currentSymbol = window.currentSymbol || null;
 
-    window.openTrade = openTrade;
-    window.placeBrokerOrder = placeBrokerOrder;
-    window.updateTradesPrices = updateTradesPrices;
-    window.updateAccountMetrics = updateAccountMetrics;
-    window.closeAllTrades = closeAllTrades;
-    window.adminDeposit = adminDeposit;
+  // DOM selector (ÚNICO controlador del símbolo)
+  window.selectBrokerSymbol = (symbol) => {
+    window.currentSymbol = symbol;
+    selectSymbol(symbol); // mantiene tu UI del gráfico sincronizada
+  };
 
-    window.__LEONES_BROKER_EXT2 = {
-      initTradingUI,
-      refreshBrokerUI: requestBackendRefresh,
-      openTradingView,
-      selectSymbol,
-      loadMarketsAndQuotes,
-      loadRealMarkets,
-      loadRealQuotes,
-      loadAccount,
-      loadPositions,
-      placeOrder,
-      placeBrokerOrder,
-      openTrade,
-      closePosition,
-      requestBackendRefresh,
-      positions: state.positions,
-      activeSymbol: state.activeSymbol,
-      activeMeta: TR.activeMeta || null,
-      symbolPrices: TR.symbolPrices || {}
-    };
-  }
+  // UI / sistema
+  window.startBrokerUI = initTradingUI;
+  window.refreshBrokerUI = requestBackendRefresh;
+  window.openBrokerTradingView = openTradingView;
 
+  // TRADING
+  window.openTrade = openTrade;
+  window.placeBrokerOrder = placeBrokerOrder;
+  window.updateTradesPrices = updateTradesPrices;
+  window.updateAccountMetrics = updateAccountMetrics;
+  window.closeAllTrades = closeAllTrades;
+  window.adminDeposit = adminDeposit;
+
+  // 🔥 API expuesta LIMPIA (sin símbolos globales rotos)
+  window.__LEONES_BROKER_EXT2 = {
+    initTradingUI,
+    refreshBrokerUI: requestBackendRefresh,
+    openTradingView,
+
+    selectSymbol: window.selectBrokerSymbol, // 👈 DOM manda
+
+    loadMarketsAndQuotes,
+    loadRealMarkets,
+    loadRealQuotes,
+    loadAccount,
+    loadPositions,
+
+    placeOrder,
+    placeBrokerOrder,
+    openTrade,
+    closePosition,
+    requestBackendRefresh,
+
+    positions: state.positions,
+
+    // ❌ ELIMINADO:
+    // activeSymbol
+    // TR.activeSymbol
+    // state.activeSymbol
+
+    activeMeta: TR.activeMeta || null,
+    symbolPrices: TR.symbolPrices || {}
+  };
+}
+window.currentSymbol = null;
+  function onSelectFromDOM(symbol) {
+  window.currentSymbol = symbol;
+}
+
+  function onChartSymbolChange(symbol) {
+  window.currentSymbol = symbol;
+}
+
+
+  
   function onClickBuy(data) {
 
   // 💥 CAPTURA INMEDIATA DEL CHART
