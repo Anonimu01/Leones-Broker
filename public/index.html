@@ -330,52 +330,23 @@
           </div>
         </div>
 
-        <div style="text-align:right;margin-top:10px">
-  <a href="#" id="forgotPasswordLink" 
-     style="color:var(--gold);font-size:14px;font-weight:600;">
-     ¿Olvidaste tu contraseña?
+       <div style="margin-top:14px">
+
+  <a
+    href="#"
+    id="forgotPasswordLink"
+    style="
+      color:var(--gold);
+      font-size:14px;
+      font-weight:600;
+      text-decoration:none;
+    "
+  >
+    ¿Olvidaste tu contraseña?
   </a>
-</div>
-
-        <!-- MODAL RECUPERAR CONTRASEÑA -->
-<div id="forgotModal" class="forgot-modal">
-  
-  <div class="forgot-box">
-
-    <button class="close-forgot" id="closeForgot">
-      ✕
-    </button>
-
-    <div class="forgot-header">
-      <h2>Restablecer Contraseña</h2>
-      <p>
-        Ingresa tu correo electrónico y te enviaremos
-        un enlace seguro para recuperar tu cuenta.
-      </p>
-    </div>
-
-    <form id="forgotForm">
-
-      <div class="input-group">
-        <input 
-          type="email"
-          id="forgotEmail"
-          placeholder="Correo electrónico"
-          required
-        />
-      </div>
-
-      <button type="submit" class="btn forgot-btn glow">
-        Enviar enlace
-      </button>
-
-      <div id="forgotMessage"></div>
-
-    </form>
-
-  </div>
 
 </div>
+
 
 
         <div class="hero-visual" aria-hidden="true">
@@ -6814,7 +6785,45 @@ async function loadHistoryPanel() {
 })();
 </script>
 
+        <!-- MODAL RECUPERAR CONTRASEÑA -->
+<div id="forgotModal" class="forgot-modal">
+  
+  <div class="forgot-box">
 
+    <button class="close-forgot" id="closeForgot">
+      ✕
+    </button>
+
+    <div class="forgot-header">
+      <h2>Restablecer Contraseña</h2>
+      <p>
+        Ingresa tu correo electrónico y te enviaremos
+        un enlace seguro para recuperar tu cuenta.
+      </p>
+    </div>
+
+    <form id="forgotForm">
+
+      <div class="input-group">
+        <input 
+          type="email"
+          id="forgotEmail"
+          placeholder="Correo electrónico"
+          required
+        />
+      </div>
+
+      <button type="submit" class="btn forgot-btn glow">
+        Enviar enlace
+      </button>
+
+      <div id="forgotMessage"></div>
+
+    </form>
+
+  </div>
+
+</div>
 
 </body>
 </html>
