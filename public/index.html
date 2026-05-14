@@ -290,6 +290,20 @@
     opacity:1;
   }
 }
+  /* =========================================
+   FIX HERO POR LINK RECUPERAR CONTRASEÑA
+========================================= */
+
+.hero-inner{
+  position:relative;
+}
+
+#forgotPasswordLink{
+  position:absolute;
+  top:0;
+  right:24px;
+  z-index:20;
+}
   /* End deposit block styles */
 </style>
 </head>
@@ -330,21 +344,11 @@
           </div>
         </div>
 
-       <div style="margin-top:14px">
-
-  <a
-    href="#"
-    id="forgotPasswordLink"
-    style="
-      color:var(--gold);
-      font-size:14px;
-      font-weight:600;
-      text-decoration:none;
-    "
-  >
-    ¿Olvidaste tu contraseña?
+     <div style="text-align:right;margin-top:10px">
+  <a href="#" id="forgotPasswordLink" 
+     style="color:var(--gold);font-size:14px;font-weight:600;">
+     ¿Olvidaste tu contraseña?
   </a>
-
 </div>
 
 
