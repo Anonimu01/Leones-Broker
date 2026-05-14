@@ -166,6 +166,130 @@
   .segment-4 { bottom:0; left:0; }
   .segment-5 { bottom:0; left:0; }
   .segment i { color:#e9e6e1; position:absolute; font-size:1.6em; }
+
+
+  /* =========================================
+   MODAL RECUPERAR CONTRASEÑA
+========================================= */
+
+.forgot-modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.75);
+  backdrop-filter:blur(6px);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:5000;
+  animation:fadeIn .3s ease;
+}
+
+.forgot-box{
+  width:100%;
+  max-width:420px;
+  background:linear-gradient(180deg,#111,#181818);
+  border:1px solid rgba(207,162,64,.25);
+  border-radius:22px;
+  padding:30px;
+  position:relative;
+  box-shadow:
+    0 0 25px rgba(207,162,64,.15),
+    0 20px 60px rgba(0,0,0,.7);
+  animation:scaleIn .35s ease;
+}
+
+.forgot-header h2{
+  margin:0;
+  color:var(--gold);
+  font-size:28px;
+}
+
+.forgot-header p{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:15px;
+  line-height:1.6;
+}
+
+.input-group{
+  margin-top:22px;
+}
+
+.input-group input{
+  width:100%;
+  padding:14px 16px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.08);
+  background:#0f0f0f;
+  color:#fff;
+  font-size:15px;
+  outline:none;
+  transition:.25s;
+}
+
+.input-group input:focus{
+  border-color:var(--gold);
+  box-shadow:0 0 12px rgba(207,162,64,.25);
+}
+
+.forgot-btn{
+  width:100%;
+  margin-top:20px;
+  padding:14px;
+  border-radius:12px;
+  font-size:15px;
+}
+
+.close-forgot{
+  position:absolute;
+  top:12px;
+  right:12px;
+  width:38px;
+  height:38px;
+  border:none;
+  border-radius:50%;
+  background:#1f1f1f;
+  color:#fff;
+  cursor:pointer;
+  font-size:18px;
+  transition:.25s;
+}
+
+.close-forgot:hover{
+  background:var(--gold);
+  color:#111;
+  transform:rotate(90deg);
+}
+
+#forgotMessage{
+  margin-top:16px;
+  text-align:center;
+  font-size:14px;
+}
+
+.success-message{
+  color:#55d66b;
+}
+
+.error-message{
+  color:#ff6b6b;
+}
+
+@keyframes fadeIn{
+  from{opacity:0}
+  to{opacity:1}
+}
+
+@keyframes scaleIn{
+  from{
+    transform:scale(.9);
+    opacity:0;
+  }
+  to{
+    transform:scale(1);
+    opacity:1;
+  }
+}
   /* End deposit block styles */
 </style>
 </head>
@@ -205,6 +329,64 @@
             <button class="btn ghost glow" id="ctaLogin">Iniciar Sesión</button>
           </div>
         </div>
+
+        <div style="text-align:right;margin-top:10px">
+  <a href="#" id="forgotPasswordLink" 
+     style="color:var(--gold);font-size:14px;font-weight:600;">
+     ¿Olvidaste tu contraseña?
+  </a>
+</div>
+
+        <!-- MODAL RECUPERAR CONTRASEÑA -->
+<div id="forgotModal" class="forgot-modal">
+  
+  <div class="forgot-box">
+
+    <button class="close-forgot" id="closeForgot">
+      ✕
+    </button>
+
+    <div class="forgot-header">
+      <h2>Restablecer Contraseña</h2>
+      <p>
+        Ingresa tu correo electrónico y te enviaremos
+        un enlace seguro para recuperar tu cuenta.
+      </p>
+    </div>
+
+    <form id="forgotForm">
+
+      <div class="input-group">
+        <input 
+          type="email"
+          id="forgotEmail"
+          placeholder="Correo electrónico"
+          required
+        />
+      </div>
+
+      <button type="submit" class="btn forgot-btn glow">
+        Enviar enlace
+      </button>
+
+      <div id="forgotMessage"></div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+        <h2>Nueva Contraseña</h2>
+
+<input type="password" placeholder="Nueva contraseña">
+
+<input type="password" placeholder="Confirmar contraseña">
+
+<button>
+  Guardar contraseña
+</button>
 
         <div class="hero-visual" aria-hidden="true">
           <img src="/imge.img/cc80JmF0w-yls-Phj6T3e.jpg" alt="Visual" onerror="this.style.display='none'">
@@ -1631,6 +1813,95 @@ if (window.__LEONES_BOOTED__) {
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
 
 <!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
+
+  <script>
+
+/* =========================
+   ABRIR / CERRAR MODAL
+========================= */
+
+const forgotModal = document.getElementById("forgotModal");
+const forgotLink = document.getElementById("forgotPasswordLink");
+const closeForgot = document.getElementById("closeForgot");
+
+forgotLink.addEventListener("click", (e)=>{
+  e.preventDefault();
+  forgotModal.style.display = "flex";
+});
+
+closeForgot.addEventListener("click", ()=>{
+  forgotModal.style.display = "none";
+});
+
+window.addEventListener("click", (e)=>{
+  if(e.target === forgotModal){
+    forgotModal.style.display = "none";
+  }
+});
+
+/* =========================
+   ENVIAR RECUPERACIÓN
+========================= */
+
+const forgotForm = document.getElementById("forgotForm");
+
+forgotForm.addEventListener("submit", async (e)=>{
+
+  e.preventDefault();
+
+  const email = document.getElementById("forgotEmail").value;
+  const message = document.getElementById("forgotMessage");
+
+  message.innerHTML = "Enviando enlace...";
+
+  try{
+
+    /*
+      CAMBIA ESTA URL
+      POR TU API REAL
+    */
+
+    const response = await fetch("/api/forgot-password",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({ email })
+    });
+
+    const data = await response.json();
+
+    if(response.ok){
+
+      message.innerHTML = `
+        <span class="success-message">
+          ✓ Hemos enviado un enlace de recuperación.
+        </span>
+      `;
+
+      forgotForm.reset();
+
+    }else{
+
+      message.innerHTML = `
+        <span class="error-message">
+          ${data.message || "No se pudo enviar el correo"}
+        </span>
+      `;
+    }
+
+  }catch(error){
+
+    message.innerHTML = `
+      <span class="error-message">
+        Error del servidor.
+      </span>
+    `;
+  }
+
+});
+
+</script>
 
 
 <style>
