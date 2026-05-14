@@ -206,14 +206,16 @@
 
   .hero-inner{
     display:grid;
-    grid-template-columns:1fr 700px;
+    grid-template-columns:1fr 480px;
     gap:28px;
     align-items:center;
+    justify-content:center;
     width:100%;
+    max-width:1600px;
+    margin:0 auto;
     padding:24px;
     position:relative;
-  }
-
+}
   .hero-text{
     color:#f6efe6;
     text-align:left;
@@ -243,7 +245,7 @@
     flex-wrap:wrap
   }
 
-  .hero-visual{
+ .hero-visual{
     border-radius:12px;
     overflow:hidden;
     box-shadow:0 18px 60px rgba(0,0,0,0.6);
@@ -251,7 +253,8 @@
     display:flex;
     align-items:center;
     justify-content:center;
-  }
+    transform:translateX(-80px);
+}
 
   /* =========================
      FIX IMAGEN HERO
@@ -263,13 +266,13 @@
 }
 
 .hero-visual img{
-    width:120%;
+    width:135%;
     max-width:none;
-    height:90vh;
-    min-height:850px;
+    height:78vh;
+    min-height:700px;
     object-fit:contain;
+    object-position:center;
     background:#000;
-    transform:scale(1.35);
 }
   /* =========================
      TITLES
