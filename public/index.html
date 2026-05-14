@@ -204,18 +204,25 @@
     align-items:center
   }
 
-  .hero-inner{
+ .hero-inner{
     display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:60px;
+
+    /* MÁS ESPACIO PARA LA IMAGEN */
+    grid-template-columns:0.9fr 1.4fr;
+
+    gap:40px;
+
     align-items:center;
-    justify-content:center;
 
     width:100%;
-    max-width:1800px;
+
+    /* HERO MÁS ANCHO */
+    max-width:2200px;
 
     margin:0 auto;
-    padding:40px 80px;
+
+    /* MÁS ESPACIO LATERAL */
+    padding:40px 120px;
 
     position:relative;
 }
@@ -226,19 +233,25 @@
 
 .hero-text{
     color:#f6efe6;
+
     text-align:left;
 
-    padding:40px;
+    padding:50px;
 
     background:linear-gradient(
         180deg,
-        rgba(0,0,0,0.20),
-        rgba(0,0,0,0.05)
+        rgba(0,0,0,0.22),
+        rgba(0,0,0,0.04)
     );
 
-    border-radius:20px;
+    border-radius:24px;
 
-    max-width:850px;
+    max-width:900px;
+
+    /* MOVER MÁS A LA DERECHA */
+    transform:translateX(120px);
+
+    z-index:2;
 }
 
 .hero-text h2{
@@ -246,31 +259,33 @@
 
     color:var(--gold);
 
-    font-size:clamp(42px,6vw,82px);
+    font-size:clamp(52px,6vw,92px);
 
-    line-height:1.05;
+    line-height:1;
 
-    font-weight:800;
+    font-weight:900;
+
+    letter-spacing:-2px;
 }
 
 .hero-text p.lead{
-    margin:20px 0 0;
+    margin:24px 0 0;
 
     color:var(--muted);
 
-    font-size:clamp(18px,2vw,26px);
+    font-size:clamp(20px,2vw,28px);
 
-    line-height:1.6;
+    line-height:1.7;
 
-    max-width:760px;
+    max-width:780px;
 }
 
 .cta-group{
-    margin-top:30px;
+    margin-top:35px;
 
     display:flex;
 
-    gap:18px;
+    gap:20px;
 
     flex-wrap:wrap;
 }
@@ -282,9 +297,10 @@
 .hero-visual{
     width:100%;
 
-    min-height:850px;
+    /* MÁS ALTA */
+    min-height:950px;
 
-    border-radius:20px;
+    border-radius:28px;
 
     overflow:hidden;
 
@@ -296,13 +312,17 @@
 
     justify-content:center;
 
-    box-shadow:0 18px 60px rgba(0,0,0,0.6);
+    box-shadow:0 25px 80px rgba(0,0,0,0.65);
 
     position:relative;
+
+    /* MOVER IMAGEN MÁS A LA DERECHA */
+    transform:translateX(80px);
 }
 
 .hero-visual img{
-    width:100%;
+    /* IMAGEN MÁS GRANDE */
+    width:125%;
 
     height:100%;
 
@@ -310,7 +330,8 @@
 
     object-position:center;
 
-    transform:scale(1.35) translateX(40px);
+    /* MÁS ZOOM Y MÁS CENTRADA */
+    transform:scale(1.55) translateX(90px);
 
     transition:transform .4s ease;
 }
