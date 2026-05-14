@@ -168,7 +168,7 @@
   .segment i { color:#e9e6e1; position:absolute; font-size:1.6em; }
 
 
- /* =========================================
+/* =========================================
    MODAL RECUPERAR CONTRASEÑA
 ========================================= */
 
@@ -291,6 +291,28 @@
   }
 }
 
+/* =========================================
+   FIX HERO POR LINK RECUPERAR CONTRASEÑA
+========================================= */
+
+.hero-strip{
+  height:auto;
+  min-height:650px;
+  padding-bottom:40px;
+}
+
+.hero-inner{
+  position:relative;
+  align-items:start;
+}
+
+#forgotPasswordLink{
+  position:absolute;
+  top:10px;
+  right:24px;
+  z-index:20;
+}
+
 
   /* End deposit block styles */
 </style>
@@ -339,6 +361,47 @@
   </a>
 </div>
 
+   <!-- MODAL RECUPERAR CONTRASEÑA -->
+<div id="forgotModal" class="forgot-modal">
+  
+  <div class="forgot-box">
+
+    <button class="close-forgot" id="closeForgot">
+      ✕
+    </button>
+
+    <div class="forgot-header">
+      <h2>Restablecer Contraseña</h2>
+      <p>
+        Ingresa tu correo electrónico y te enviaremos
+        un enlace seguro para recuperar tu cuenta.
+      </p>
+    </div>
+
+    <form id="forgotForm">
+
+      <div class="input-group">
+        <input 
+          type="email"
+          id="forgotEmail"
+          placeholder="Correo electrónico"
+          required
+        />
+      </div>
+
+      <button type="submit" class="btn forgot-btn glow">
+        Enviar enlace
+      </button>
+
+      <div id="forgotMessage"></div>
+
+    </form>
+
+  </div>
+
+</div>
+
+        
 
 
         <div class="hero-visual" aria-hidden="true">
@@ -6777,45 +6840,6 @@ async function loadHistoryPanel() {
 })();
 </script>
 
-        <!-- MODAL RECUPERAR CONTRASEÑA -->
-<div id="forgotModal" class="forgot-modal">
-  
-  <div class="forgot-box">
-
-    <button class="close-forgot" id="closeForgot">
-      ✕
-    </button>
-
-    <div class="forgot-header">
-      <h2>Restablecer Contraseña</h2>
-      <p>
-        Ingresa tu correo electrónico y te enviaremos
-        un enlace seguro para recuperar tu cuenta.
-      </p>
-    </div>
-
-    <form id="forgotForm">
-
-      <div class="input-group">
-        <input 
-          type="email"
-          id="forgotEmail"
-          placeholder="Correo electrónico"
-          required
-        />
-      </div>
-
-      <button type="submit" class="btn forgot-btn glow">
-        Enviar enlace
-      </button>
-
-      <div id="forgotMessage"></div>
-
-    </form>
-
-  </div>
-
-</div>
-
+        
 </body>
 </html>
