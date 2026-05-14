@@ -113,7 +113,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
-
+app.use(express.static(path.join(__dirname, "public")));
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5000,
