@@ -91,6 +91,17 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    resetPasswordToken: {
+  type: String,
+  default: null,
+  index: true,
+},
+
+resetPasswordExpire: {
+  type: Date,
+  default: null,
+},
+
     active: {
       type: Boolean,
       default: true,
@@ -151,5 +162,9 @@ userSchema.pre("save", function (next) {
 //
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ verifyToken: 1 }, { sparse: true });
+userSchema.index(
+  { resetPasswordToken: 1 },
+  { sparse: true }
+);
 
 export default mongoose.model("User", userSchema);
