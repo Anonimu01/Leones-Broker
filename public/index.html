@@ -259,28 +259,37 @@
     z-index:-2;
 }
 
-/* LUZ HORIZONTAL ENTRE TEXTO E IMAGEN */
+/* LUZ EXACTA ENTRE TEXTO E IMAGEN */
 .hero-text::after{
     content:"";
+
     position:absolute;
+
     left:0;
-    top:58%;
-    width:640px;
-    height:10px;
+
+    top:61%;
+
+    width:820px;
+
+    height:12px;
+
     border-radius:999px;
+
     background:linear-gradient(
         90deg,
         rgba(255,190,90,0) 0%,
-        rgba(255,212,125,1) 45%,
+        rgba(255,215,130,1) 50%,
         rgba(255,190,90,0) 100%
     );
+
     box-shadow:
-        0 0 18px rgba(255,190,90,0.95),
-        0 0 40px rgba(255,190,90,0.70),
-        0 0 80px rgba(255,190,90,0.40);
-    pointer-events:none;
+        0 0 25px rgba(255,200,90,.95),
+        0 0 55px rgba(255,200,90,.75),
+        0 0 110px rgba(255,200,90,.45);
+
     z-index:-1;
 }
+
 
 .hero-text h2{
     margin:0;
@@ -324,17 +333,26 @@
    IMAGEN HERO
 ========================= */
 
+/* IMAGEN PEGADA AL TEXTO */
 .hero-visual{
     width:100%;
+
     min-height:100vh;
+
     overflow:hidden;
-    background:#000;
+
     display:flex;
+
     align-items:center;
+
     justify-content:flex-start;
+
     position:relative;
-    margin-left:-85px;
-    z-index:3;
+
+    /* ESTO PEGA LA IMAGEN */
+    margin-left:-220px;
+
+    z-index:2;
 }
 
 .hero-visual::before{
@@ -355,11 +373,19 @@
 }
 
 .hero-visual img{
-    width:155%;
+
+    /* TAMAÑO COMO LA REFERENCIA */
+    width:135%;
+
     height:100%;
+
     object-fit:cover;
-    object-position:right center;
-    transform:scale(1.16) translateX(120px);
+
+    object-position:center right;
+
+    /* AJUSTE FINO */
+    transform:scale(1.08) translateX(40px);
+
     transition:transform .4s ease;
 }
   /* =========================
