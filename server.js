@@ -33,6 +33,7 @@ import sendEmail from "./utils/sendEmail.js";
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
+import passwordRoutes from "./routes/password.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -120,6 +121,7 @@ const limiter = rateLimit({
   skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
 });
 app.use("/api", limiter);
+app.use("/api/password", passwordRoutes);
 
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
