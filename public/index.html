@@ -38,6 +38,10 @@
     --card:#141414;
   }
 
+  /* =========================
+     FIX GENERAL IMAGES
+  ========================= */
+
   img{
     display:block;
     max-width:100%;
@@ -48,6 +52,10 @@
     color:var(--gold);
     text-decoration:none
   }
+
+  /* =========================
+     HEADER
+  ========================= */
 
   header{
     position:fixed;
@@ -106,18 +114,25 @@
     border:2px solid rgba(207,162,67,0.12)
   }
 
+  /* =========================
+     GLOW
+  ========================= */
+
   .glow{
     box-shadow:
       0 0 8px rgba(207,162,67,0.9),
       0 0 20px rgba(207,162,67,0.18) inset;
+
     animation:pulseGlow 2.6s infinite ease-in-out;
   }
 
   @keyframes pulseGlow{
+
     0%{
       box-shadow:
         0 0 6px rgba(207,162,67,0.7),
         0 0 12px rgba(207,162,67,0.12) inset;
+
       transform:translateY(0);
     }
 
@@ -125,6 +140,7 @@
       box-shadow:
         0 0 12px rgba(207,162,67,0.95),
         0 0 26px rgba(207,162,67,0.18) inset;
+
       transform:translateY(-1px);
     }
 
@@ -132,6 +148,7 @@
       box-shadow:
         0 0 6px rgba(207,162,67,0.7),
         0 0 12px rgba(207,162,67,0.12) inset;
+
       transform:translateY(0);
     }
   }
@@ -156,10 +173,9 @@
   .hero-strip{
     position:relative;
     height:auto;
-    min-height:680px;
+    min-height:650px;
     display:flex;
     align-items:center;
-    justify-content:center;
     overflow:hidden;
     padding-bottom:40px;
   }
@@ -185,18 +201,15 @@
     z-index:3;
     width:100%;
     display:flex;
-    justify-content:center;
     align-items:center
   }
 
   .hero-inner{
     display:grid;
-    grid-template-columns:1fr minmax(520px, 620px);
-    gap:40px;
+    grid-template-columns:1fr 480px;
+    gap:28px;
     align-items:center;
-    justify-content:center;
     width:100%;
-    max-width:1450px;
     padding:24px;
     position:relative;
   }
@@ -206,10 +219,7 @@
     text-align:left;
     padding:20px;
     background:linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.06));
-    border-radius:12px;
-    display:flex;
-    flex-direction:column;
-    justify-content:center;
+    border-radius:12px
   }
 
   .hero-text h2{
@@ -230,8 +240,7 @@
     margin-top:18px;
     display:flex;
     gap:12px;
-    flex-wrap:wrap;
-    align-items:center;
+    flex-wrap:wrap
   }
 
   .hero-visual{
@@ -242,22 +251,23 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    width:100%;
-    min-height:650px;
   }
 
   /* =========================
-     IMAGEN PRINCIPAL PC
+     FIX IMAGEN HERO
   ========================= */
 
   .hero-visual img{
     width:100%;
-    height:100%;
+    height:56vh;
+    min-height:320px;
     object-fit:contain;
-    object-position:center center;
     background:#000;
-    transform:scale(1.12);
   }
+
+  /* =========================
+     TITLES
+  ========================= */
 
   h3{
     color:var(--gold);
@@ -275,6 +285,10 @@
     color:var(--muted);
     line-height:1.6
   }
+
+  /* =========================
+     GRID
+  ========================= */
 
   .grid-3{
     display:grid;
@@ -296,6 +310,10 @@
     border-radius:8px;
     overflow:hidden
   }
+
+  /* =========================
+     ACCENT CARDS
+  ========================= */
 
   .card-list{
     display:flex;
@@ -322,6 +340,10 @@
     border-radius:8px;
     background:linear-gradient(180deg,#D9B34A,#C79E40)
   }
+
+  /* =========================
+     PRIVATE AREA
+  ========================= */
 
   .private-wrapper{
     display:flex;
@@ -368,6 +390,10 @@
     color:var(--muted)
   }
 
+  /* =========================
+     MODAL
+  ========================= */
+
   #modal{
     display:none;
     position:fixed;
@@ -399,6 +425,119 @@
     text-align:center
   }
 
+  /* =========================
+     DEPOSIT SECTION
+  ========================= */
+
+  .deposit-section{
+    padding:40px 0 60px 0;
+    background-color:var(--background, #0b0b0b);
+    color:#e9e6e1;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+  }
+
+  .deposit-title{
+    text-align:left;
+    font-size:2rem;
+    font-weight:400;
+    color:var(--gold);
+    margin-bottom:18px;
+  }
+
+  .deposit-content{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:30px;
+    flex-wrap:wrap;
+  }
+
+  .info-column{
+    flex:1;
+    max-width:380px;
+    padding:0 12px;
+  }
+
+  .info-item{
+    margin:18px 0;
+    line-height:1.5;
+  }
+
+  .item-title{
+    font-size:1.2rem;
+    font-weight:600;
+    margin-bottom:6px;
+    color:#fff
+  }
+
+  .item-description{
+    font-size:1rem;
+    color:var(--muted)
+  }
+
+  .deposit-footer{
+    text-align:left;
+    color:var(--muted);
+    margin-top:20px;
+    font-size:0.9rem
+  }
+
+  .circle-chart{
+    position:relative;
+    width:380px;
+    height:380px;
+    border-radius:50%;
+    background-color:transparent;
+    flex-shrink:0;
+    margin:0 20px;
+    overflow:hidden;
+    box-shadow:0 0 15px rgba(0,0,0,0.4);
+  }
+
+  .center-circle{
+    position:absolute;
+    top:50%;
+    left:50%;
+    width:160px;
+    height:160px;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    background-color:var(--center-color, #0b0b0b);
+    z-index:2;
+  }
+
+  .segment{
+    --segment-size:50%;
+    position:absolute;
+    width:var(--segment-size);
+    height:var(--segment-size);
+    background-color:var(--segment-color, #333333);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:#fff;
+    font-size:2em;
+    z-index:1;
+    box-sizing:border-box;
+    border:1px solid rgba(0,0,0,0.2);
+  }
+
+  .segment-1{top:0;left:0;}
+  .segment-2{top:0;right:0;}
+  .segment-3{bottom:0;right:0;}
+  .segment-4{bottom:0;left:0;}
+  .segment-5{bottom:0;left:0;}
+
+  .segment i{
+    color:#e9e6e1;
+    position:absolute;
+    font-size:1.6em;
+  }
+
+  /* =========================
+     FORGOT PASSWORD MODAL
+  ========================= */
+
   .forgot-modal{
     position:fixed;
     inset:0;
@@ -422,6 +561,7 @@
     box-shadow:
       0 0 25px rgba(207,162,64,.15),
       0 20px 60px rgba(0,0,0,.7);
+
     animation:scaleIn .35s ease;
   }
 
@@ -512,6 +652,7 @@
       transform:scale(.9);
       opacity:0;
     }
+
     to{
       transform:scale(1);
       opacity:1;
@@ -519,12 +660,12 @@
   }
 
   /* =========================
-     BOTON OLVIDASTE CONTRASEÑA
+     FORGOT PASSWORD LINK
   ========================= */
 
   #forgotPasswordLink{
     position:absolute;
-    top:66px;
+    top:10px;
     right:24px;
     z-index:20;
   }
@@ -538,25 +679,16 @@
     .hero-inner{
       grid-template-columns:1fr;
       padding:16px;
-      gap:20px;
     }
 
     .hero-visual{
-      width:100%;
-      min-height:420px;
+      min-height:auto;
     }
 
-    /* =========================
-       IMAGEN MOVIL MAS GRANDE
-    ========================= */
-
     .hero-visual img{
-      width:100%;
-      height:55vh;
-      min-height:360px;
+      height:40vh;
+      min-height:220px;
       object-fit:contain;
-      object-position:center;
-      transform:scale(1.22);
     }
 
     .grid-3{
@@ -577,10 +709,6 @@
       padding:18px
     }
 
-    /* =========================
-       BOTON DEBAJO DE LOS BOTONES
-    ========================= */
-
     #forgotPasswordLink{
       position:static;
       display:block;
@@ -598,18 +726,26 @@
 
   @media (max-width:500px){
 
-    .hero-visual{
-      min-height:380px;
+    .circle-chart{
+      width:300px;
+      height:300px;
+      margin:0 auto;
+    }
+
+    .info-column{
+      max-width:100%;
+      text-align:center;
     }
 
     .hero-visual img{
-      min-height:320px;
+      min-height:180px;
       height:52vh;
-      transform:scale(1.28);
+      transform:scale(1.18);
     }
   }
-
 </style>
+
+  
 </head>
 
 
