@@ -206,28 +206,18 @@
 
 .hero-inner{
     display:grid;
-
-    grid-template-columns:0.92fr 1.58fr;
-
-    align-items:center;
-
+    grid-template-columns:minmax(0, 0.98fr) minmax(0, 1.45fr);
     gap:0;
-
+    align-items:center;
     width:100%;
-
     max-width:2600px;
-
     min-height:100vh;
-
     margin:0 auto;
-
     padding:0 0 0 70px;
-
-    overflow:hidden;
-
-    background:#000;
-
     position:relative;
+    overflow:hidden;
+    background:#000;
+    isolation:isolate;
 }
 
 /* =========================
@@ -235,115 +225,99 @@
 ========================= */
 
 .hero-text{
-    position:relative;
-
-    z-index:10;
-
-    max-width:920px;
-
-    width:100%;
-
-    transform:translateX(10px);
-
+    color:#f6efe6;
     text-align:left;
+    padding:40px 20px;
+    background:none;
+    border-radius:0;
+    max-width:980px;
+    width:100%;
+    transform:translateX(10px);
+    z-index:5;
+    position:relative;
+    overflow:visible;
 }
 
-/* LUZ EXACTA COMO LA IMAGEN */
+/* LUZ SUAVE DE FONDO DETRÁS DEL TEXTO */
+.hero-text::before{
+    content:"";
+    position:absolute;
+    left:-25px;
+    top:54%;
+    width:680px;
+    height:180px;
+    transform:translateY(-50%);
+    background:radial-gradient(
+        circle,
+        rgba(255,200,90,0.34) 0%,
+        rgba(255,200,90,0.18) 20%,
+        rgba(255,200,90,0.06) 42%,
+        rgba(255,200,90,0) 72%
+    );
+    filter:blur(24px);
+    pointer-events:none;
+    z-index:-2;
+}
+
+/* LUZ HORIZONTAL ENTRE TEXTO E IMAGEN */
 .hero-text::after{
     content:"";
-
     position:absolute;
-
     left:0;
-
-    top:57%;
-
-    width:620px;
-
+    top:58%;
+    width:640px;
     height:10px;
-
     border-radius:999px;
-
     background:linear-gradient(
         90deg,
-        rgba(255,190,90,0),
-        rgba(255,210,120,1),
-        rgba(255,190,90,0)
+        rgba(255,190,90,0) 0%,
+        rgba(255,212,125,1) 45%,
+        rgba(255,190,90,0) 100%
     );
-
     box-shadow:
-        0 0 20px rgba(255,200,90,.95),
-        0 0 45px rgba(255,200,90,.75),
-        0 0 90px rgba(255,200,90,.45);
-
+        0 0 18px rgba(255,190,90,0.95),
+        0 0 40px rgba(255,190,90,0.70),
+        0 0 80px rgba(255,190,90,0.40);
+    pointer-events:none;
     z-index:-1;
 }
 
-/* TITULO DORADO */
 .hero-text h2{
     margin:0;
-
     color:#dca648;
-
-    font-size:clamp(72px,5vw,110px);
-
-    line-height:0.98;
-
-    font-weight:900;
-
-    letter-spacing:-3px;
-
-    font-family:Arial, Helvetica, sans-serif;
-
-    text-shadow:
-        0 0 8px rgba(255,190,90,.15),
-        0 0 25px rgba(255,190,90,.12);
-}
-
-/* TITULO BLANCO */
-.hero-text h3{
-    margin:8px 0 0;
-
-    color:#ffffff;
-
-    font-size:clamp(70px,5vw,105px);
-
+    font-size:clamp(62px,5vw,100px);
     line-height:1;
-
     font-weight:900;
-
-    letter-spacing:-3px;
-
-    font-family:Arial, Helvetica, sans-serif;
-
+    letter-spacing:-2px;
+    max-width:1000px;
     text-shadow:
-        0 0 8px rgba(255,255,255,.08);
+        0 0 10px rgba(255,190,90,0.25),
+        0 0 30px rgba(255,190,90,0.18);
 }
 
-/* TEXTO PEQUEÑO */
+.hero-text h3{
+    margin:10px 0 0;
+    color:#ffffff;
+    font-size:clamp(58px,5vw,92px);
+    line-height:1.02;
+    font-weight:850;
+    letter-spacing:-2px;
+    max-width:1000px;
+}
+
 .hero-text p.lead{
-    margin-top:55px;
-
-    color:#d7d7d7;
-
+    margin:45px 0 0;
+    color:#d0d0d0;
     font-size:24px;
-
-    line-height:1.6;
-
+    line-height:1.7;
     max-width:760px;
-
-    font-weight:400;
 }
 
-/* BOTONES */
 .cta-group{
+    margin-top:45px;
     display:flex;
-
-    align-items:center;
-
-    gap:28px;
-
-    margin-top:50px;
+    gap:22px;
+    flex-wrap:wrap;
 }
 
 /* =========================
@@ -352,33 +326,40 @@
 
 .hero-visual{
     width:100%;
-
     min-height:100vh;
-
     overflow:hidden;
-
+    background:#000;
     display:flex;
-
     align-items:center;
-
-    justify-content:flex-end;
-
+    justify-content:flex-start;
     position:relative;
+    margin-left:-85px;
+    z-index:3;
+}
 
-    transform:translateX(260px);
+.hero-visual::before{
+    content:"";
+    position:absolute;
+    left:-35px;
+    top:0;
+    bottom:0;
+    width:160px;
+    background:linear-gradient(
+        90deg,
+        rgba(0,0,0,1) 0%,
+        rgba(0,0,0,0.78) 35%,
+        rgba(0,0,0,0) 100%
+    );
+    pointer-events:none;
+    z-index:2;
 }
 
 .hero-visual img{
-    width:185%;
-
+    width:155%;
     height:100%;
-
     object-fit:cover;
-
     object-position:right center;
-
-    transform:scale(1.28) translateX(220px);
-
+    transform:scale(1.16) translateX(120px);
     transition:transform .4s ease;
 }
   /* =========================
