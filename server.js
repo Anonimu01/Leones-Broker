@@ -23,6 +23,7 @@ import walletRoutes from "./routes/wallet.routes.js";
 import positionsRoutes from "./routes/positions.routes.js";
 import tradeRoutes from "./routes/trade.routes.js";
 import accountRoutes from "./routes/account.routes.js";
+import passwordRoutes from "./routes/password.routes.js";
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
 import PolygonSocket from "./sockets/polygonSocket.js";
@@ -33,7 +34,7 @@ import sendEmail from "./utils/sendEmail.js";
 import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
-import passwordRoutes from "./routes/password.routes.js";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
