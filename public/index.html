@@ -38,10 +38,6 @@
     --card:#141414;
   }
 
-  /* =========================
-     FIX GENERAL IMAGES
-  ========================= */
-
   img{
     display:block;
     max-width:100%;
@@ -52,10 +48,6 @@
     color:var(--gold);
     text-decoration:none
   }
-
-  /* =========================
-     HEADER
-  ========================= */
 
   header{
     position:fixed;
@@ -114,41 +106,30 @@
     border:2px solid rgba(207,162,67,0.12)
   }
 
-  /* =========================
-     GLOW
-  ========================= */
-
   .glow{
     box-shadow:
       0 0 8px rgba(207,162,67,0.9),
       0 0 20px rgba(207,162,67,0.18) inset;
-
     animation:pulseGlow 2.6s infinite ease-in-out;
   }
 
   @keyframes pulseGlow{
-
     0%{
       box-shadow:
         0 0 6px rgba(207,162,67,0.7),
         0 0 12px rgba(207,162,67,0.12) inset;
-
       transform:translateY(0);
     }
-
     50%{
       box-shadow:
         0 0 12px rgba(207,162,67,0.95),
         0 0 26px rgba(207,162,67,0.18) inset;
-
       transform:translateY(-1px);
     }
-
     100%{
       box-shadow:
         0 0 6px rgba(207,162,67,0.7),
         0 0 12px rgba(207,162,67,0.12) inset;
-
       transform:translateY(0);
     }
   }
@@ -166,14 +147,10 @@
     padding:24px
   }
 
-  /* =========================
-     HERO
-  ========================= */
-
   .hero-strip{
     position:relative;
     height:auto;
-    min-height:650px;
+    min-height:680px;
     display:flex;
     align-items:center;
     overflow:hidden;
@@ -206,7 +183,7 @@
 
   .hero-inner{
     display:grid;
-    grid-template-columns:1fr 480px;
+    grid-template-columns:1fr minmax(500px, 540px);
     gap:28px;
     align-items:start;
     width:100%;
@@ -251,23 +228,18 @@
     display:flex;
     align-items:center;
     justify-content:center;
+    width:100%;
+    min-height:640px;
   }
-
-  /* =========================
-     FIX IMAGEN HERO
-  ========================= */
 
   .hero-visual img{
     width:100%;
-    height:56vh;
-    min-height:320px;
+    height:100%;
     object-fit:contain;
+    object-position:center;
     background:#000;
+    transform:scale(1.08);
   }
-
-  /* =========================
-     TITLES
-  ========================= */
 
   h3{
     color:var(--gold);
@@ -285,10 +257,6 @@
     color:var(--muted);
     line-height:1.6
   }
-
-  /* =========================
-     GRID
-  ========================= */
 
   .grid-3{
     display:grid;
@@ -310,10 +278,6 @@
     border-radius:8px;
     overflow:hidden
   }
-
-  /* =========================
-     ACCENT CARDS
-  ========================= */
 
   .card-list{
     display:flex;
@@ -340,10 +304,6 @@
     border-radius:8px;
     background:linear-gradient(180deg,#D9B34A,#C79E40)
   }
-
-  /* =========================
-     PRIVATE AREA
-  ========================= */
 
   .private-wrapper{
     display:flex;
@@ -390,10 +350,6 @@
     color:var(--muted)
   }
 
-  /* =========================
-     MODAL
-  ========================= */
-
   #modal{
     display:none;
     position:fixed;
@@ -424,10 +380,6 @@
     padding:10px;
     text-align:center
   }
-
-  /* =========================
-     DEPOSIT SECTION
-  ========================= */
 
   .deposit-section{
     padding:40px 0 60px 0;
@@ -534,10 +486,6 @@
     font-size:1.6em;
   }
 
-  /* =========================
-     FORGOT PASSWORD MODAL
-  ========================= */
-
   .forgot-modal{
     position:fixed;
     inset:0;
@@ -561,7 +509,6 @@
     box-shadow:
       0 0 25px rgba(207,162,64,.15),
       0 20px 60px rgba(0,0,0,.7);
-
     animation:scaleIn .35s ease;
   }
 
@@ -652,27 +599,18 @@
       transform:scale(.9);
       opacity:0;
     }
-
     to{
       transform:scale(1);
       opacity:1;
     }
   }
 
-  /* =========================
-     FORGOT PASSWORD LINK
-  ========================= */
-
   #forgotPasswordLink{
     position:absolute;
-    top:10px;
+    top:44px;
     right:24px;
     z-index:20;
   }
-
-  /* =========================
-     RESPONSIVE
-  ========================= */
 
   @media (max-width:900px){
 
@@ -681,10 +619,15 @@
       padding:16px;
     }
 
+    .hero-visual{
+      min-height:auto;
+    }
+
     .hero-visual img{
       height:40vh;
       min-height:220px;
       object-fit:contain;
+      transform:scale(1);
     }
 
     .grid-3{
@@ -705,14 +648,12 @@
       padding:18px
     }
 
-    /* FIX FORGOT LINK MOBILE */
-
     #forgotPasswordLink{
       position:static;
       display:block;
       width:100%;
       text-align:center;
-      margin-top:15px;
+      margin-top:12px;
     }
 
     .hero-strip{
@@ -738,7 +679,6 @@
       min-height:180px;
     }
   }
-
 </style>
 </head>
 
