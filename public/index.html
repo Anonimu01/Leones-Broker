@@ -1814,92 +1814,319 @@ if (window.__LEONES_BOOTED__) {
 
 <!-- ESTILOS EXCLUSIVOS (PARTE PRIVADA) -->
 
-  <script>
+ <script>
 
-/* =========================
-   ABRIR / CERRAR MODAL
-========================= */
+/* =========================================
+   MODAL RECUPERAR CONTRASEÑA
+========================================= */
 
-const forgotModal = document.getElementById("forgotModal");
-const forgotLink = document.getElementById("forgotPasswordLink");
-const closeForgot = document.getElementById("closeForgot");
+const forgotModal =
+  document.getElementById("forgotModal");
 
-forgotLink.addEventListener("click", (e)=>{
+const forgotLink =
+  document.getElementById("forgotPasswordLink");
+
+const closeForgot =
+  document.getElementById("closeForgot");
+
+/* ABRIR MODAL */
+
+forgotLink.addEventListener("click", (e) => {
+
   e.preventDefault();
+
   forgotModal.style.display = "flex";
+
 });
 
-closeForgot.addEventListener("click", ()=>{
+/* CERRAR MODAL */
+
+closeForgot.addEventListener("click", () => {
+
   forgotModal.style.display = "none";
+
 });
 
-window.addEventListener("click", (e)=>{
-  if(e.target === forgotModal){
+/* CERRAR HACIENDO CLICK AFUERA */
+
+window.addEventListener("click", (e) => {
+
+  if (e.target === forgotModal) {
+
     forgotModal.style.display = "none";
+
   }
+
 });
 
-/* =========================
-   ENVIAR RECUPERACIÓN
-========================= */
+/* =========================================
+   FORGOT PASSWORD
+========================================= */
 
-const forgotForm = document.getElementById("forgotForm");
+const forgotForm =
+  document.getElementById("forgotForm");
 
-forgotForm.addEventListener("submit", async (e)=>{
+forgotForm.addEventListener("submit", async (e) => {
 
   e.preventDefault();
 
-  const email = document.getElementById("forgotEmail").value;
-  const message = document.getElementById("forgotMessage");
+  const email =
+    document.getElementById("forgotEmail").value.trim();
 
-  message.innerHTML = "Enviando enlace...";
+  const message =
+    document.getElementById("forgotMessage");
 
-  try{
+  /* VALIDACIÓN */
 
-    /*
-      CAMBIA ESTA URL
-      POR TU API REAL
-    */
+  if (!email) {
 
-    const response = await fetch("/api/forgot-password",{
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json"
-      },
-      body:JSON.stringify({ email })
-    });
+    message.innerHTML = `
+      <span class="error-message">
+        Ingresa tu correo electrónico
+      </span>
+    `;
+
+    return;
+
+  }
+
+  /* LOADING */
+
+  message.innerHTML = `
+    <span style="color:#cfa240">
+      Enviando enlace...
+    </span>
+  `;
+
+  try {
+
+    /* =====================================
+       API REAL
+    ===================================== */
+
+    const response = await fetch(
+      "/api/password/forgot-password",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          email,
+        }),
+      }
+    );
 
     const data = await response.json();
 
-    if(response.ok){
+    /* SUCCESS */
+
+    if (response.ok) {
 
       message.innerHTML = `
         <span class="success-message">
-          ✓ Hemos enviado un enlace de recuperación.
+          ✓ Hemos enviado un enlace
+          de recuperación a tu correo.
         </span>
       `;
 
       forgotForm.reset();
 
-    }else{
+      /* AUTO CERRAR */
+
+      setTimeout(() => {
+
+        forgotModal.style.display = "none";
+
+        message.innerHTML = "";
+
+      }, 4000);
+
+    }
+
+    /* ERROR */
+
+    else {
 
       message.innerHTML = `
         <span class="error-message">
           ${data.message || "No se pudo enviar el correo"}
         </span>
       `;
+
     }
 
-  }catch(error){
+  }
+
+  catch (error) {
+
+    console.error(error);
 
     message.innerHTML = `
       <span class="error-message">
         Error del servidor.
       </span>
     `;
+
   }
 
 });
+
+/* =========================================
+   RESET PASSWORD
+   (PARA reset-password.html)
+========================================= */
+
+const resetForm =
+  document.getElementById("resetForm");
+
+if (resetForm) {
+
+  resetForm.addEventListener("submit", async (e) => {
+
+    e.preventDefault();
+
+    const password =
+      document.getElementById("password").value;
+
+    const confirmPassword =
+      document.getElementById("confirmPassword").value;
+
+    const message =
+      document.getElementById("resetMessage");
+
+    /* VALIDAR */
+
+    if (password.length < 6) {
+
+      message.innerHTML = `
+        <span class="error-message">
+          La contraseña debe tener
+          mínimo 6 caracteres
+        </span>
+      `;
+
+      return;
+
+    }
+
+    if (password !== confirmPassword) {
+
+      message.innerHTML = `
+        <span class="error-message">
+          Las contraseñas no coinciden
+        </span>
+      `;
+
+      return;
+
+    }
+
+    /* TOKEN */
+
+    const params =
+      new URLSearchParams(window.location.search);
+
+    const token =
+      params.get("token");
+
+    if (!token) {
+
+      message.innerHTML = `
+        <span class="error-message">
+          Token inválido
+        </span>
+      `;
+
+      return;
+
+    }
+
+    /* LOADING */
+
+    message.innerHTML = `
+      <span style="color:#cfa240">
+        Actualizando contraseña...
+      </span>
+    `;
+
+    try {
+
+      /* =====================================
+         API RESET PASSWORD
+      ===================================== */
+
+      const response = await fetch(
+        "/api/password/reset-password",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            token,
+            password,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      /* SUCCESS */
+
+      if (response.ok) {
+
+        message.innerHTML = `
+          <span class="success-message">
+            ✓ Contraseña actualizada correctamente
+          </span>
+        `;
+
+        resetForm.reset();
+
+        /* REDIRECT LOGIN */
+
+        setTimeout(() => {
+
+          window.location.href = "/";
+
+        }, 3000);
+
+      }
+
+      /* ERROR */
+
+      else {
+
+        message.innerHTML = `
+          <span class="error-message">
+            ${data.message || "No se pudo actualizar"}
+          </span>
+        `;
+
+      }
+
+    }
+
+    catch (error) {
+
+      console.error(error);
+
+      message.innerHTML = `
+        <span class="error-message">
+          Error del servidor
+        </span>
+      `;
+
+    }
+
+  });
+
+}
 
 </script>
 
