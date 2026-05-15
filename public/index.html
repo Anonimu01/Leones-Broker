@@ -146,49 +146,63 @@ main{
   pointer-events:none;
 }
 
-.hero-strip::after{
-  content:"";
-  position:absolute;
+/* =========================
+   SOLO PC
+========================= */
+@media (min-width:901px){
 
-  /* POSICION EXACTA */
-  left:10px;
+  .hero-strip::after{
+    content:"";
+    position:absolute;
 
-  /* SUBIRLA */
-  top:345px;
+    /* POSICION EXACTA */
+    left:10px;
 
-  /* TAMAÑO */
-  width:640px;
-  height:36px;
+    /* SUBIRLA */
+    top:345px;
 
-  z-index:3;
+    /* TAMAÑO */
+    width:640px;
+    height:36px;
 
-  pointer-events:none;
+    z-index:3;
 
- background:
-  radial-gradient(
-    ellipse at center,
+    pointer-events:none;
 
-    /* CENTRO BLANCO FUERTE */
-    rgba(255,255,255,1) 0%,
+    background:
+      radial-gradient(
+        ellipse at center,
 
-    rgba(255,245,210,1) 6%,
+        rgba(255,255,255,1) 0%,
+        rgba(255,245,210,1) 6%,
+        rgba(255,225,140,.98) 14%,
+        rgba(255,205,90,.95) 24%,
+        rgba(255,180,40,.58) 40%,
+        rgba(255,160,0,.22) 56%,
+        rgba(255,140,0,.08) 68%,
+        rgba(255,140,0,0) 82%
+      );
 
-    /* DORADO INTENSO */
-    rgba(255,225,140,.98) 14%,
+    filter:blur(10px);
 
-    rgba(255,205,90,.95) 24%,
+    box-shadow:
+      0 0 10px rgba(255,240,180,.95),
+      0 0 24px rgba(255,210,90,.75),
+      0 0 55px rgba(255,180,40,.42),
+      0 0 95px rgba(255,160,0,.20);
+  }
 
-    /* DIFUMINADO SUAVE */
-    rgba(255,180,40,.58) 40%,
+}
 
-    rgba(255,160,0,.22) 56%,
+/* =========================
+   MOVIL = OCULTAR LUZ
+========================= */
+@media (max-width:900px){
 
-    rgba(255,140,0,.08) 68%,
+  .hero-strip::after{
+    display:none !important;
+  }
 
-    rgba(255,140,0,0) 82%
-  );
-
-  filter:blur(10px);
 }
 
 .hero-line,
