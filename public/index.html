@@ -330,19 +330,21 @@ main{
 
   .hero-visual{
 
-    /* TAMAÑO MAS NATURAL COMO LA REFERENCIA */
+    /* TAMAÑO */
     transform:scale(1.02);
 
-    /* BAJAR ALTURA */
+    /* ALTURA */
     min-height:620px;
     max-height:620px;
 
-    /* REDONDEADO */
+    /* FORMA */
     border-radius:58px;
 
     /* POSICION */
     margin-right:-10px;
     margin-top:10px;
+
+    overflow:hidden;
 
     box-shadow:
       0 0 0 1px rgba(255,190,40,.08),
@@ -350,31 +352,40 @@ main{
       0 0 120px rgba(255,170,0,.06),
       inset 0 0 40px rgba(255,210,90,.04);
 
+    position:relative;
   }
 
   .hero-visual img{
 
-    /* ALTURA EXACTA */
+    /* LLENAR EL CIRCULO */
+    width:100%;
+    height:100%;
+
     min-height:620px;
     max-height:620px;
 
-    /* AJUSTE */
-    transform:scale(1.02);
-
     object-fit:cover;
 
-    /* COMO LA REFERENCIA */
+    /* INFLAR SOLO ADENTRO */
+    transform:scale(1.18);
+
+    /* AJUSTE */
     object-position:center center;
+
+    position:relative;
+    z-index:1;
   }
 
-  /* LUZ */
+  /* LUZ ABAJO */
   .hero-visual::after{
+    content:"";
+    position:absolute;
 
+    left:-5%;
     bottom:-42px;
 
+    width:110%;
     height:145px;
-
-    filter:blur(18px);
 
     background:
       radial-gradient(
@@ -384,19 +395,73 @@ main{
         rgba(255,160,0,.22) 44%,
         rgba(255,140,0,0) 74%
       );
+
+    filter:blur(18px);
+
+    pointer-events:none;
+    z-index:3;
+  }
+
+  /* LUZ ENTRE TITULO Y TEXTO */
+  .hero-copy{
+    position:relative;
+  }
+
+  .hero-copy::after{
+    content:"";
+    position:absolute;
+
+    left:40px;
+
+    /* ALTURA EXACTA ENTRE LETRAS */
+    top:355px;
+
+    width:540px;
+    height:68px;
+
+    background:
+      radial-gradient(
+        ellipse at center,
+        rgba(255,245,190,1) 0%,
+        rgba(255,220,120,.95) 10%,
+        rgba(255,190,40,.62) 28%,
+        rgba(255,160,0,.18) 50%,
+        rgba(255,140,0,0) 75%
+      );
+
+    filter:blur(12px);
+
+    pointer-events:none;
+    z-index:0;
   }
 
 }
-/* secciones */
-h3{color:var(--gold);font-size:28px;margin:0 0 12px}
-h4{color:var(--gold);margin:0 0 8px}
-p{margin:0;color:var(--muted);line-height:1.6}
+
+/* =========================
+   SECCIONES
+========================= */
+h3{
+  color:var(--gold);
+  font-size:28px;
+  margin:0 0 12px;
+}
+
+h4{
+  color:var(--gold);
+  margin:0 0 8px;
+}
+
+p{
+  margin:0;
+  color:var(--muted);
+  line-height:1.6;
+}
 
 .grid-3{
   display:grid;
   grid-template-columns:repeat(3,1fr);
   gap:18px;
-  margin-top:18px
+  margin-top:18px;
 }
 
 .card{
