@@ -402,38 +402,51 @@ main{
     z-index:3;
   }
 
-  /* LUZ ENTRE TITULO Y TEXTO */
-  .hero-copy{
-    position:relative;
-  }
+ /* LUZ ENTRE TITULO Y TEXTO */
+.hero-copy{
+  position:relative;
+  z-index:2;
+}
 
-  .hero-copy::after{
-    content:"";
-    position:absolute;
+/* LINEA EXACTA COMO LA REFERENCIA */
+.hero-copy::after{
+  content:"";
+  position:absolute;
 
-    left:40px;
+  /* POSICION */
+  left:55px;
+  top:352px;
 
-    /* ALTURA EXACTA ENTRE LETRAS */
-    top:355px;
+  /* TAMAÑO */
+  width:620px;
+  height:16px;
 
-    width:540px;
-    height:68px;
+  /* LUZ HORIZONTAL */
+  background:
+    linear-gradient(
+      to right,
+      rgba(255,170,0,0) 0%,
+      rgba(255,210,90,.12) 18%,
+      rgba(255,235,170,.98) 50%,
+      rgba(255,210,90,.12) 82%,
+      rgba(255,170,0,0) 100%
+    );
 
-    background:
-      radial-gradient(
-        ellipse at center,
-        rgba(255,245,190,1) 0%,
-        rgba(255,220,120,.95) 10%,
-        rgba(255,190,40,.62) 28%,
-        rgba(255,160,0,.18) 50%,
-        rgba(255,140,0,0) 75%
-      );
+  /* BRILLO */
+  box-shadow:
+    0 0 8px rgba(255,210,90,.95),
+    0 0 18px rgba(255,190,40,.75),
+    0 0 40px rgba(255,170,0,.45),
+    0 0 85px rgba(255,160,0,.25);
 
-    filter:blur(12px);
+  border-radius:999px;
 
-    pointer-events:none;
-    z-index:0;
-  }
+  filter:blur(1px);
+
+  pointer-events:none;
+
+  z-index:0;
+}
 
 }
 
