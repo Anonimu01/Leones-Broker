@@ -802,18 +802,25 @@ footer{
 /* =========================================
    FIX HERO POR LINK RECUPERAR CONTRASEÑA
 ========================================= */
-.hero-strip{
-  height:auto;
-  min-height:650px;
-  padding-bottom:40px;
-}
 
 .hero-inner{
   position:relative;
-  align-items:center;
+  align-items:start;
 }
 
-/* por si el propio link es el que tienes con id */
+/* PC → debajo de los botones pero al otro lado */
+.hero-inner > div[style*="text-align:right"]{
+  grid-area:link;
+  justify-self:end;
+  align-self:start;
+  margin-top:-58px; /* SUBE o BAJA */
+  margin-right:40px; /* MUEVE derecha/izquierda */
+  text-align:right !important;
+  z-index:20;
+  position:relative;
+}
+
+/* estilo del link */
 #forgotPasswordLink{
   color:var(--gold);
   font-weight:700;
@@ -824,30 +831,28 @@ footer{
   text-decoration:none;
 }
 
-/* el link no afecta el layout */
-.hero-inner > div[style*="text-align:right"]{
-  position:absolute !important;
-  top:10px;
-  right:24px;
-  z-index:20;
-  margin-top:0 !important;
-  text-align:right !important;
-}
-
+/* MOVIL */
 @media (max-width:900px){
+
   .hero-inner{
     grid-template-columns:1fr;
-    gap:22px;
-    padding:0 20px;
+    grid-template-areas:
+      "link"
+      "text"
+      "visual";
+  }
+
+  /* en móvil arriba */
+  .hero-inner > div[style*="text-align:right"]{
+    justify-self:end;
+    align-self:start;
+    margin-top:-10px; /* SUBIR MÁS */
+    margin-right:6px;
+    text-align:right !important;
     position:relative;
   }
 
-  .hero-inner > div[style*="text-align:right"]{
-    top:8px;
-    right:20px;
-  }
 }
-
 /* End deposit block styles */
 </style>
   
