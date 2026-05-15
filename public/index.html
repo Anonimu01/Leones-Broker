@@ -621,24 +621,34 @@ footer{
     max-width:360px;
   }
 
- /* MOVIL */
+/* MOVIL */
 .hero-visual{
-  min-height:360px;
+
+  /* AGRANDAR EL CONTENEDOR */
+  min-height:520px;
+
+  height:520px;
+
   overflow:hidden;
+
+  border-radius:38px;
 }
 
 .hero-visual img{
-  min-height:360px;
-  height:600px;
 
-  /* INFLAR MAS LA IMAGEN */
-  transform:scale(1.16);
+  /* HACER LA IMAGEN MAS GRANDE */
+  width:100%;
+  height:100%;
 
-  /* AJUSTE */
+  min-height:520px;
+
+  /* INFLAR ADENTRO */
+  transform:scale(1.18);
+
   object-fit:cover;
+
   object-position:center center;
 }
-
   .grid-3{grid-template-columns:1fr}
   .private-aside{position:static;width:100%;margin-bottom:12px}
   .private-main{margin-left:0}
