@@ -800,27 +800,25 @@ footer{
 }
 
 /* =========================================
-   FIX HERO POR LINK RECUPERAR CONTRASEÑA
+   FIX LINK OLVIDASTE CONTRASEÑA
 ========================================= */
 
-.hero-inner{
-  position:relative;
-  align-items:start;
-}
-
-/* PC → debajo de los botones pero al otro lado */
+/* PC */
 .hero-inner > div[style*="text-align:right"]{
   grid-area:link;
-  justify-self:end;
+  justify-self:start;
   align-self:start;
-  margin-top:-58px; /* SUBE o BAJA */
-  margin-right:40px; /* MUEVE derecha/izquierda */
-  text-align:right !important;
-  z-index:20;
-  position:relative;
+  position:relative !important;
+
+  /* debajo de los botones del hero */
+  margin-top:-120px;
+  margin-left:430px;
+
+  text-align:left !important;
+  z-index:50;
 }
 
-/* estilo del link */
+/* link */
 #forgotPasswordLink{
   color:var(--gold);
   font-weight:700;
@@ -835,21 +833,20 @@ footer{
 @media (max-width:900px){
 
   .hero-inner{
-    grid-template-columns:1fr;
-    grid-template-areas:
-      "link"
-      "text"
-      "visual";
+    position:relative;
   }
 
-  /* en móvil arriba */
   .hero-inner > div[style*="text-align:right"]{
-    justify-self:end;
-    align-self:start;
-    margin-top:-10px; /* SUBIR MÁS */
-    margin-right:6px;
+    position:absolute !important;
+
+    /* PEGADO ARRIBA A LA DERECHA */
+    top:-8px;
+    right:6px;
+
+    margin:0 !important;
+    z-index:100;
+
     text-align:right !important;
-    position:relative;
   }
 
 }
