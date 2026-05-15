@@ -199,24 +199,18 @@ main{
   width:100%;
   display:grid;
   grid-template-columns:minmax(420px, 1.02fr) minmax(420px, .98fr);
+  grid-template-areas:
+    "text visual"
+    "link visual";
   gap:18px;
   align-items:center;
   padding:0 34px;
   position:relative;
 }
 
-/* el link no debe ocupar espacio en el grid */
-.hero-inner > div[style*="text-align:right"]{
-  position:absolute !important;
-  top:10px;
-  right:24px;
-  z-index:20;
-  margin-top:0 !important;
-  text-align:right !important;
-}
-
 /* bloque de texto */
 .hero-text{
+  grid-area:text;
   color:#f6efe6;
   text-align:left;
   max-width:760px;
@@ -306,8 +300,31 @@ main{
   background:rgba(207,162,67,0.08);
 }
 
+/* LINK "OLVIDASTE TU CONTRASEÑA" */
+#forgotPasswordLink{
+  color:var(--gold);
+  font-weight:700;
+  font-size:15px;
+  line-height:1.2;
+  display:inline-flex;
+  width:max-content;
+  text-decoration:none;
+}
+
+/* si el link está dentro de un div alineado a la derecha */
+.hero-inner > div[style*="text-align:right"]{
+  grid-area:link;
+  justify-self:start;
+  align-self:start;
+  position:static !important;
+  margin-top:14px;
+  text-align:left !important;
+  z-index:20;
+}
+
 /* imagen derecha visible */
 .hero-visual{
+  grid-area:visual;
   display:block !important;
   position:relative;
   border-radius:0;
@@ -464,14 +481,20 @@ footer{
 
   .hero-inner{
     grid-template-columns:1fr;
+    grid-template-areas:
+      "link"
+      "text"
+      "visual";
     gap:22px;
     padding:0 20px;
     position:relative;
   }
 
   .hero-inner > div[style*="text-align:right"]{
+    justify-self:end;
+    align-self:start;
     position:static !important;
-    margin-top:10px !important;
+    margin:0 0 8px 0;
     text-align:right !important;
   }
 
@@ -797,40 +820,46 @@ footer{
   align-items:start;
 }
 
-/* LINK "OLVIDASTE TU CONTRASEÑA" EN SU LUGAR CORRECTO */
-.hero-text{
-  display:flex;
-  flex-direction:column;
+/* link en desktop debajo de los botones */
+.hero-inner > div[style*="text-align:right"]{
+  grid-area:link;
+  justify-self:start;
+  align-self:start;
+  position:static !important;
+  margin-top:16px;
+  text-align:left !important;
+  z-index:20;
 }
 
+/* por si el propio link es el que tienes con id */
 #forgotPasswordLink{
-  position:static !important;
-  display:inline-flex;
-  width:max-content;
-  margin-top:14px;
   color:var(--gold);
   font-weight:700;
   font-size:15px;
   line-height:1.2;
-  z-index:auto !important;
+  display:inline-flex;
+  width:max-content;
+  text-decoration:none;
 }
 
-/* PC: debajo de los botones, en el bloque izquierdo */
-@media (min-width:901px){
-  #forgotPasswordLink{
-    align-self:flex-start;
-    margin-top:16px;
-  }
-}
-
-/* MÓVIL: arriba a la derecha, como en la imagen */
 @media (max-width:900px){
-  #forgotPasswordLink{
-    order:-1;
-    align-self:flex-end;
-    margin:0 0 12px 0;
+  .hero-inner{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "link"
+      "text"
+      "visual";
+  }
+
+  .hero-inner > div[style*="text-align:right"]{
+    justify-self:end;
+    align-self:start;
+    position:static !important;
+    margin:0 0 10px 0;
+    text-align:right !important;
   }
 }
+
 /* End deposit block styles */
 </style>
   
