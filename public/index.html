@@ -111,7 +111,6 @@ main{
   background:#000;
 }
 
-/* Fondo principal */
 .hero-strip .bg{
   position:absolute;
   inset:0;
@@ -130,7 +129,6 @@ main{
   transform:scale(1.01);
 }
 
-/* Oscurecimiento suave a la izquierda */
 .hero-strip::before{
   content:"";
   position:absolute;
@@ -148,7 +146,6 @@ main{
   pointer-events:none;
 }
 
-/* Brillo dorado más sutil */
 .hero-strip::after{
   content:"";
   position:absolute;
@@ -167,7 +164,6 @@ main{
       rgba(255,205,90,0) 70%);
 }
 
-/* Líneas decorativas suaves */
 .hero-line,
 .hero-strip .line,
 .hero-glow-line{
@@ -206,9 +202,20 @@ main{
   gap:18px;
   align-items:center;
   padding:0 34px;
+  position:relative;
 }
 
-/* Texto */
+/* el link no debe ocupar espacio en el grid */
+.hero-inner > div[style*="text-align:right"]{
+  position:absolute !important;
+  top:10px;
+  right:24px;
+  z-index:20;
+  margin-top:0 !important;
+  text-align:right !important;
+}
+
+/* bloque de texto */
 .hero-text{
   color:#f6efe6;
   text-align:left;
@@ -237,7 +244,7 @@ main{
   max-width:680px;
 }
 
-/* Botones */
+/* botones */
 .cta-group{
   margin-top:28px;
   display:flex;
@@ -299,9 +306,9 @@ main{
   background:rgba(207,162,67,0.08);
 }
 
-/* Imagen derecha visible */
+/* imagen derecha visible */
 .hero-visual{
-  display:block;
+  display:block !important;
   position:relative;
   border-radius:0;
   overflow:hidden;
@@ -319,7 +326,7 @@ main{
   filter:contrast(1.02) saturate(.98) brightness(.9);
 }
 
-/* Secciones */
+/* secciones */
 h3{color:var(--gold);font-size:28px;margin:0 0 12px}
 h4{color:var(--gold);margin:0 0 8px}
 p{margin:0;color:var(--muted);line-height:1.6}
@@ -459,6 +466,13 @@ footer{
     grid-template-columns:1fr;
     gap:22px;
     padding:0 20px;
+    position:relative;
+  }
+
+  .hero-inner > div[style*="text-align:right"]{
+    position:static !important;
+    margin-top:10px !important;
+    text-align:right !important;
   }
 
   .hero-text{
