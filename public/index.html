@@ -797,44 +797,39 @@ footer{
   align-items:start;
 }
 
-.forgot-wrapper{
-  margin-top:16px;
+/* LINK "OLVIDASTE TU CONTRASEÑA" EN SU LUGAR CORRECTO */
+.hero-text{
+  display:flex;
+  flex-direction:column;
 }
 
 #forgotPasswordLink{
+  position:static !important;
+  display:inline-flex;
+  width:max-content;
+  margin-top:14px;
   color:var(--gold);
-  font-size:14px;
-  font-weight:600;
-  transition:.25s;
+  font-weight:700;
+  font-size:15px;
+  line-height:1.2;
+  z-index:auto !important;
 }
 
-#forgotPasswordLink:hover{
-  color:#fff;
-  text-shadow:0 0 10px rgba(207,162,64,.45);
-}
-
-/* ===== PC ===== */
+/* PC: debajo de los botones, en el bloque izquierdo */
 @media (min-width:901px){
-
- .forgot-wrapper{
-    position:absolute;
-    top:-55px;
-    right:20px;
-    z-index:30;
+  #forgotPasswordLink{
+    align-self:flex-start;
+    margin-top:16px;
   }
-
 }
 
-/* ===== MOVIL ===== */
+/* MÓVIL: arriba a la derecha, como en la imagen */
 @media (max-width:900px){
-
- .forgot-wrapper{
-    position:relative;
-    margin-top:16px;
-    text-align:left;
-    z-index:20;
+  #forgotPasswordLink{
+    order:-1;
+    align-self:flex-end;
+    margin:0 0 12px 0;
   }
-
 }
 /* End deposit block styles */
 </style>
