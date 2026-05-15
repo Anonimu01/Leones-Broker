@@ -805,18 +805,19 @@ footer{
 
 /* PC */
 .hero-inner > div[style*="text-align:right"]{
-  grid-area:link;
-  justify-self:start;
-  align-self:start;
-  position:relative !important;
+  position:absolute !important;
 
-  /* debajo de los botones del hero */
-  margin-top:-120px;
-  margin-left:430px;
+    /* PEGADO ARRIBA A LA DERECHA */
+    top:-8px;
+    right:6px;
 
-  text-align:left !important;
-  z-index:50;
-}
+    margin:0 !important;
+    z-index:100;
+
+    text-align:right !important;
+  }
+
+
 
 /* link */
 #forgotPasswordLink{
@@ -837,18 +838,18 @@ footer{
   }
 
   .hero-inner > div[style*="text-align:right"]{
-    position:absolute !important;
+    grid-area:link;
+  justify-self:start;
+  align-self:start;
+  position:relative !important;
 
-    /* PEGADO ARRIBA A LA DERECHA */
-    top:-8px;
-    right:6px;
+  /* debajo de los botones del hero */
+  margin-top:-120px;
+  margin-left:430px;
 
-    margin:0 !important;
-    z-index:100;
-
-    text-align:right !important;
-  }
-
+  text-align:left !important;
+  z-index:50;
+}
 }
 /* End deposit block styles */
 </style>
