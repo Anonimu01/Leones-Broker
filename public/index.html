@@ -198,10 +198,7 @@ main{
 .hero-inner{
   width:100%;
   display:grid;
-  grid-template-columns:minmax(420px, 1.02fr) minmax(420px, .98fr);
-  grid-template-areas:
-    "text visual"
-    "link visual";
+  grid-template-columns:minmax(420px, 1.06fr) minmax(420px, .94fr);
   gap:18px;
   align-items:center;
   padding:0 34px;
@@ -210,7 +207,6 @@ main{
 
 /* bloque de texto */
 .hero-text{
-  grid-area:text;
   color:#f6efe6;
   text-align:left;
   max-width:760px;
@@ -218,17 +214,23 @@ main{
   background:none;
   border-radius:0;
   margin-left:0;
+  position:relative;
+  z-index:5;
 }
 
 .hero-text h2{
   margin:0;
-  color:#f0bb4e;
   font-size:clamp(30px, 4.2vw, 56px);
   line-height:1.03;
   font-weight:800;
   letter-spacing:-1.2px;
   text-shadow:none;
   max-width:760px;
+  background:linear-gradient(180deg, #f0bb4e 0%, #f0bb4e 48%, #ffffff 49%, #ffffff 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  -webkit-text-fill-color:transparent;
 }
 
 .hero-text p.lead{
@@ -311,20 +313,18 @@ main{
   text-decoration:none;
 }
 
-/* si el link está dentro de un div alineado a la derecha */
+/* el link no afecta el layout */
 .hero-inner > div[style*="text-align:right"]{
-  grid-area:link;
-  justify-self:start;
-  align-self:start;
-  position:static !important;
-  margin-top:14px;
-  text-align:left !important;
+  position:absolute !important;
+  top:10px;
+  right:24px;
   z-index:20;
+  margin-top:0 !important;
+  text-align:right !important;
 }
 
 /* imagen derecha visible */
 .hero-visual{
-  grid-area:visual;
   display:block !important;
   position:relative;
   border-radius:0;
@@ -481,21 +481,14 @@ footer{
 
   .hero-inner{
     grid-template-columns:1fr;
-    grid-template-areas:
-      "link"
-      "text"
-      "visual";
     gap:22px;
     padding:0 20px;
     position:relative;
   }
 
   .hero-inner > div[style*="text-align:right"]{
-    justify-self:end;
-    align-self:start;
-    position:static !important;
-    margin:0 0 8px 0;
-    text-align:right !important;
+    top:8px;
+    right:20px;
   }
 
   .hero-text{
@@ -817,18 +810,7 @@ footer{
 
 .hero-inner{
   position:relative;
-  align-items:start;
-}
-
-/* link en desktop debajo de los botones */
-.hero-inner > div[style*="text-align:right"]{
-  grid-area:link;
-  justify-self:start;
-  align-self:start;
-  position:static !important;
-  margin-top:16px;
-  text-align:left !important;
-  z-index:20;
+  align-items:center;
 }
 
 /* por si el propio link es el que tienes con id */
@@ -842,21 +824,27 @@ footer{
   text-decoration:none;
 }
 
+/* el link no afecta el layout */
+.hero-inner > div[style*="text-align:right"]{
+  position:absolute !important;
+  top:10px;
+  right:24px;
+  z-index:20;
+  margin-top:0 !important;
+  text-align:right !important;
+}
+
 @media (max-width:900px){
   .hero-inner{
     grid-template-columns:1fr;
-    grid-template-areas:
-      "link"
-      "text"
-      "visual";
+    gap:22px;
+    padding:0 20px;
+    position:relative;
   }
 
   .hero-inner > div[style*="text-align:right"]{
-    justify-self:end;
-    align-self:start;
-    position:static !important;
-    margin:0 0 10px 0;
-    text-align:right !important;
+    top:8px;
+    right:20px;
   }
 }
 
