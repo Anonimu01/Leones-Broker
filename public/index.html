@@ -800,26 +800,20 @@ footer{
 }
 
 /* =========================================
-   FIX LINK OLVIDASTE CONTRASEÑA
+   FIX HERO POR LINK RECUPERAR CONTRASEÑA
 ========================================= */
+.hero-strip{
+  height:auto;
+  min-height:650px;
+  padding-bottom:40px;
+}
 
-/* PC */
-.hero-inner > div[style*="text-align:right"]{
-  position:absolute !important;
+.hero-inner{
+  position:relative;
+  align-items:center;
+}
 
-    /* PEGADO ARRIBA A LA DERECHA */
-    top:-8px;
-    right:6px;
-
-    margin:0 !important;
-    z-index:100;
-
-    text-align:right !important;
-  }
-
-
-
-/* link */
+/* LINK */
 #forgotPasswordLink{
   color:var(--gold);
   font-weight:700;
@@ -830,26 +824,47 @@ footer{
   text-decoration:none;
 }
 
-/* MOVIL */
+/* =========================
+   PC
+   debajo de botones inferiores
+   lado izquierdo
+========================= */
+.hero-inner > div[style*="text-align:right"]{
+  position:absolute !important;
+  bottom:85px;
+  left:24px;
+  right:auto;
+  top:auto;
+  z-index:20;
+  margin-top:0 !important;
+  text-align:left !important;
+}
+
+/* =========================
+   MOVIL
+   arriba debajo botones registro
+   lado derecho
+========================= */
 @media (max-width:900px){
 
   .hero-inner{
+    grid-template-columns:1fr;
+    gap:22px;
+    padding:0 20px;
     position:relative;
   }
 
   .hero-inner > div[style*="text-align:right"]{
-    grid-area:link;
-  justify-self:start;
-  align-self:start;
-  position:relative !important;
+    top:58px;
+    right:20px;
+    left:auto;
+    bottom:auto;
+    text-align:right !important;
+  }
 
-  /* debajo de los botones del hero */
-  margin-top:-120px;
-  margin-left:430px;
-
-  text-align:left !important;
-  z-index:50;
-}
+  #forgotPasswordLink{
+    font-size:14px;
+  }
 }
 /* End deposit block styles */
 </style>
