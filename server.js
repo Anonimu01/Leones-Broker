@@ -35,6 +35,38 @@ import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
+/* ======================================================
+   DOCUMENTS (CLIENTE Y ADMIN)
+   ====================================================== */
+
+// Modelo Document
+const documentSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  type: String,
+  status: String,
+  file: String, // ruta o URL del documento
+  createdAt: { type: Date, default: Date.now },
+});
+
+const Document = mongoose.models.Document || mongoose.model("Document", documentSchema);
+
+// Admin
+app.get("/api/admin/documents", requireAdmin, async (req,res)=>{
+  const docs = await Document.find().sort({createdAt:-1});
+  res.json({ok:true, count: docs.length, documents: docs});
+});
+
+// Cliente
+app.get("/api/documents", async (req,res)=>{
+  const user = await safeGetUserFromBearer(req);
+  if(!user) return res.status(401).json({ok:false,error:"Unauthorized"});
+  const docs = await Document.find({user:user._id}).sort({createdAt:-1});
+  res.json({ok:true,count:docs.length,documents:docs});
+});
+
+/* ======================================================
+   CONFIGURACIÓN SERVIDOR
+   ====================================================== */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
