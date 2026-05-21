@@ -1,10 +1,9 @@
-// routes/adminWithdrawRoutes.js
 import express from "express";
 import Withdraw from "../models/withdraw.model.js";
 import User from "../models/user.model.js";
 import Wallet from "../models/wallet.model.js";
 import { recordTransaction } from "../utils/transactions.js";
-import { requireAdmin } from "../middleware/authAdmin.js";
+import { requireAdmin } from "../middlewares/authAdmin.js"; // ruta corregida
 import sendEmail from "../utils/sendEmail.js";
 
 const router = express.Router();
