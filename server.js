@@ -35,38 +35,9 @@ import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
-/* ======================================================
-   DOCUMENTS (CLIENTE Y ADMIN)
-   ====================================================== */
-
-// Modelo Document
-const documentSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  type: String,
-  status: String,
-  file: String, // ruta o URL del documento
-  createdAt: { type: Date, default: Date.now },
-});
-
-const Document = mongoose.models.Document || mongoose.model("Document", documentSchema);
-
-// Admin
-app.get("/api/admin/documents", requireAdmin, async (req,res)=>{
-  const docs = await Document.find().sort({createdAt:-1});
-  res.json({ok:true, count: docs.length, documents: docs});
-});
-
-// Cliente
-app.get("/api/documents", async (req,res)=>{
-  const user = await safeGetUserFromBearer(req);
-  if(!user) return res.status(401).json({ok:false,error:"Unauthorized"});
-  const docs = await Document.find({user:user._id}).sort({createdAt:-1});
-  res.json({ok:true,count:docs.length,documents:docs});
-});
-
-/* ======================================================
-   CONFIGURACIÓN SERVIDOR
-   ====================================================== */
+// ======================================================
+// CONFIGURACIÓN SERVIDOR
+// ======================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +49,7 @@ dotenv.config({
       : path.resolve(__dirname, ".env"),
 });
 
-const app = express();
+const app = express(); // <--- app debe declararse antes de usarlo
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
@@ -124,9 +95,7 @@ const corsOptions = {
     if (allowedOrigins.has(origin)) return callback(null, true);
     try {
       const url = new URL(origin);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-        return callback(null, true);
-      }
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
     } catch {}
     console.warn("CORS denied for origin:", origin);
     callback(new Error("Not allowed by CORS"));
@@ -146,6 +115,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5000,
@@ -153,8 +123,44 @@ const limiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
 });
+
 app.use("/api", limiter);
 app.use("/api/password", passwordRoutes);
+
+// ======================================================
+// DOCUMENTS (CLIENTE Y ADMIN)
+// ======================================================
+
+// Modelo Document
+const documentSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  type: { type: String, default: "identity" },
+  documentUrl: { type: String, required: true },
+  status: { type: String, enum: ["pending","approved","rejected"], default: "pending" },
+  adminNote: { type: String, default: "" },
+}, { timestamps: true });
+
+const Document = mongoose.models.Document || mongoose.model("Document", documentSchema);
+
+// Rutas Document
+
+// Admin
+app.get("/api/admin/documents", requireAdmin, async (req, res) => {
+  const docs = await Document.find().sort({ createdAt: -1 });
+  res.json({ ok: true, count: docs.length, documents: docs });
+});
+
+// Cliente
+app.get("/api/documents", async (req, res) => {
+  const user = await safeGetUserFromBearer(req);
+  if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+  const docs = await Document.find({ userId: user._id }).sort({ createdAt: -1 });
+  res.json({ ok: true, count: docs.length, documents: docs });
+});
+
+// ======================================================
+// SOCKET.IO & SERVER
+// ======================================================
 
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
@@ -168,6 +174,8 @@ const io = new IOServer(httpServer, {
 const priceHandler = new PriceHandler(io);
 app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
+
+
 
 /* ======================================================
    HELPERS
