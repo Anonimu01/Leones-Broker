@@ -38,12 +38,8 @@ import User from "./models/user.model.js";
 import Wallet from "./models/wallet.model.js";
 import Position from "./models/position.model.js";
 
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const clientRoutes = require("./routes/clientRoutes");
-const adminDocumentRoutes = require("./routes/adminDocumentRoutes");
-const adminWithdrawRoutes = require("./routes/adminWithdrawRoutes");
 
 dotenv.config({
   path:
@@ -80,9 +76,7 @@ app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
 app.use("/api/client", clientRoutes);
-
 app.use("/api/admin/documents", adminDocumentRoutes);
-
 app.use("/api/admin/withdraws", adminWithdrawRoutes);
 
 const allowedOrigins = new Set(
