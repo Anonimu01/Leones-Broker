@@ -6,16 +6,15 @@ import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { createServer } from "http";
 import { Server as IOServer } from "socket.io";
-import fs from "fs";
 
 import helmet from "helmet";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
-import jwt from "jsonwebtoken";
 
 import { connectDB } from "./config/db.js";
+
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import verificationRoutes from "./routes/verification.routes.js";
@@ -27,8 +26,8 @@ import passwordRoutes from "./routes/password.routes.js";
 import clientRoutes from "./routes/clientRoutes.js";
 import adminDocumentRoutes from "./routes/adminDocumentRoutes.js";
 import adminWithdrawRoutes from "./routes/adminWithdrawRoutes.js";
-import { startRiskWatcher } from "./jobs/risk.job.js";
 
+import { startRiskWatcher } from "./jobs/risk.job.js";
 import PolygonSocket from "./sockets/polygonSocket.js";
 import PriceHandler from "./utils/priceHandler.js";
 import marketRoutesFactory from "./routes/market.routes.js";
@@ -42,20 +41,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config({
-  path:
-    process.env.NODE_ENV === "production"
-      ? undefined
-      : path.resolve(__dirname, ".env"),
+  path: process.env.NODE_ENV === "production" ? undefined : path.resolve(__dirname, ".env"),
 });
 
 const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
+// Conectar a MongoDB
 connectDB();
 
 mongoose.connection.on("connected", () => {
-  console.log("✅ MongoDB conectado. DB:", mongoose.connection.name);
+  console.log("✅ MongoDB conectado:", mongoose.connection.name);
   try {
     const intervalMs = Number(process.env.RISK_JOB_INTERVAL_MS) || 30000;
     const alertThreshold = Number(process.env.RISK_ALERT_THRESHOLD) || 30;
@@ -71,68 +68,88 @@ mongoose.connection.on("connected", () => {
 mongoose.connection.on("error", (err) => console.error("❌ Mongo error:", err));
 mongoose.connection.on("disconnected", () => console.warn("⚠️ Mongo desconectado"));
 
+// Middlewares de seguridad
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
 
-app.use("/api/client", clientRoutes);
-app.use("/api/admin/documents", adminDocumentRoutes);
-app.use("/api/admin/withdraws", adminWithdrawRoutes);
-
-const allowedOrigins = new Set(
-  [
-    process.env.CLIENT_URL,
-    process.env.BASE_URL,
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:4000",
-    "http://127.0.0.1:4000",
-    "https://leones-broker.onrender.com",
-  ].filter(Boolean)
-);
+// CORS
+const allowedOrigins = new Set([
+  process.env.CLIENT_URL,
+  process.env.BASE_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:4000",
+  "http://127.0.0.1:4000",
+  "https://leones-broker.onrender.com",
+].filter(Boolean));
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.has(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
     try {
       const url = new URL(origin);
       if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
     } catch {}
-    console.warn("CORS denied for origin:", origin);
-    callback(new Error("Not allowed by CORS"));
+    return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 };
-
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
+// Logger simple
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} › ${req.method} ${req.originalUrl}`);
   next();
 });
 
+// Body parsers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// Archivos estáticos
 app.use(express.static(path.join(__dirname, "public")));
 
+// Rate limiter
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS",
+  skip: (req) => ["GET", "HEAD", "OPTIONS"].includes(req.method),
 });
 app.use("/api", limiter);
-app.use("/api/password", passwordRoutes);
 
+// Rutas
+app.use("/api/auth", authRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/verify", verificationRoutes);
+app.use("/api/wallet", walletRoutes);
+app.use("/api/positions", positionsRoutes);
+app.use("/api/trade", tradeRoutes);
+app.use("/api/account", accountRoutes);
+app.use("/api/password", passwordRoutes);
+app.use("/api/client", clientRoutes);
+app.use("/api/admin/documents", adminDocumentRoutes);
+app.use("/api/admin/withdraws", adminWithdrawRoutes);
+
+// 404
+app.use((req, res) => res.status(404).json({ msg: "Ruta no encontrada" }));
+
+// Error global
+app.use((err, req, res, next) => {
+  console.error("Global error handler:", err);
+  res.status(500).json({ msg: "Error interno del servidor" });
+});
+
+// HTTP + Socket.io
 const httpServer = createServer(app);
 const io = new IOServer(httpServer, {
   cors: {
-    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : process.env.CLIENT_URL || "*",
+    origin: Array.from(allowedOrigins).length ? Array.from(allowedOrigins) : "*",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -142,7 +159,13 @@ const priceHandler = new PriceHandler(io);
 app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
-// Export limpio para ES Modules
+// Iniciar servidor
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+});
+
+// Export para ES Modules
 export { app, httpServer, io };
 /* ======================================================
    HELPERS
