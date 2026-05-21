@@ -144,6 +144,7 @@ const priceHandler = new PriceHandler(io);
 app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
+export default { app, httpServer, io };
 /* ======================================================
    HELPERS
    ====================================================== */
