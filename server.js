@@ -75,6 +75,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
+
 app.use("/api/client", clientRoutes);
 app.use("/api/admin/documents", adminDocumentRoutes);
 app.use("/api/admin/withdraws", adminWithdrawRoutes);
@@ -97,9 +98,7 @@ const corsOptions = {
     if (allowedOrigins.has(origin)) return callback(null, true);
     try {
       const url = new URL(origin);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-        return callback(null, true);
-      }
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return callback(null, true);
     } catch {}
     console.warn("CORS denied for origin:", origin);
     callback(new Error("Not allowed by CORS"));
@@ -119,7 +118,6 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
-app.use(express.json());
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -144,7 +142,8 @@ const priceHandler = new PriceHandler(io);
 app.locals.sendEmail = sendEmail;
 app.locals.priceHandler = priceHandler;
 
-export default { app, httpServer, io };
+// Export limpio para ES Modules
+export { app, httpServer, io };
 /* ======================================================
    HELPERS
    ====================================================== */
