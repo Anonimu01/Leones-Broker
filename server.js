@@ -24,6 +24,9 @@ import positionsRoutes from "./routes/positions.routes.js";
 import tradeRoutes from "./routes/trade.routes.js";
 import accountRoutes from "./routes/account.routes.js";
 import passwordRoutes from "./routes/password.routes.js";
+import clientRoutes from "./routes/clientRoutes.js";
+import adminDocumentRoutes from "./routes/adminDocumentRoutes.js";
+import adminWithdrawRoutes from "./routes/adminWithdrawRoutes.js";
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
 import PolygonSocket from "./sockets/polygonSocket.js";
@@ -38,6 +41,9 @@ import Position from "./models/position.model.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const clientRoutes = require("./routes/clientRoutes");
+const adminDocumentRoutes = require("./routes/adminDocumentRoutes");
+const adminWithdrawRoutes = require("./routes/adminWithdrawRoutes");
 
 dotenv.config({
   path:
@@ -73,6 +79,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(mongoSanitize());
 app.use(xss());
+app.use("/api/client", clientRoutes);
+
+app.use("/api/admin/documents", adminDocumentRoutes);
+
+app.use("/api/admin/withdraws", adminWithdrawRoutes);
 
 const allowedOrigins = new Set(
   [
@@ -114,6 +125,8 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5000,
