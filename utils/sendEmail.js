@@ -67,6 +67,7 @@ function initSmtp() {
 
   const host = SMTP_HOST || MAIL_HOST || "smtp.gmail.com";
   const port = Number(SMTP_PORT || MAIL_PORT || 465);
+
   const secure =
     typeof SMTP_SECURE === "string"
       ? SMTP_SECURE.toLowerCase() === "true"
@@ -74,7 +75,7 @@ function initSmtp() {
 
   if (!SMTP_USER_FINAL || !SMTP_PASS_FINAL) {
     console.warn(
-      "[MAIL] SMTP no configurado: faltan SMTP_USER / SMTP_PASS (o EMAIL_USER / EMAIL_PASS)"
+      "[MAIL] SMTP no configurado: faltan SMTP_USER / SMTP_PASS"
     );
     return null;
   }
@@ -111,7 +112,10 @@ function initSmtp() {
 
 async function ensureTransporter() {
   if (!transporter) initSmtp();
-  if (!transporter) throw new Error("SMTP_NOT_CONFIGURED");
+
+  if (!transporter) {
+    throw new Error("SMTP_NOT_CONFIGURED");
+  }
 
   if (transporterVerifyPromise) {
     await transporterVerifyPromise;
@@ -131,6 +135,7 @@ function stripHtml(html = "") {
 
 async function sendOnce({ toArr, subject, html, text }) {
   const tr = await ensureTransporter();
+
   const fromHeader = buildFromHeader();
 
   if (!fromHeader) {
@@ -167,9 +172,13 @@ export const sendEmail = async (...args) => {
     }
 
     const toArr = normalizeRecipients(payload.to);
+
     if (!toArr.length) {
-      console.warn("[MAIL] destinatario vacío, no se envía correo");
-      return { ok: false, error: "empty_recipient" };
+      console.warn("[MAIL] destinatario vacío");
+      return {
+        ok: false,
+        error: "empty_recipient",
+      };
     }
 
     const subject = payload.subject || "Notificación";
@@ -178,17 +187,30 @@ export const sendEmail = async (...args) => {
 
     if (!SMTP_USER_FINAL || !SMTP_PASS_FINAL) {
       console.error(
-        "[MAIL] SMTP no configurado. Revisa SMTP_USER / SMTP_PASS (usa App Password en Gmail)."
+        "[MAIL] SMTP no configurado"
       );
-      return { ok: false, error: "smtp_not_configured" };
+
+      return {
+        ok: false,
+        error: "smtp_not_configured",
+      };
     }
 
     let lastErr = null;
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`[MAIL] Enviando intento ${attempt} ->`, toArr.join(", "));
-        const info = await sendOnce({ toArr, subject, html, text });
+        console.log(
+          `[MAIL] Enviando intento ${attempt} ->`,
+          toArr.join(", ")
+        );
+
+        const info = await sendOnce({
+          toArr,
+          subject,
+          html,
+          text,
+        });
 
         console.log("[MAIL] ✅ enviado:", {
           messageId: info?.messageId || null,
@@ -204,12 +226,15 @@ export const sendEmail = async (...args) => {
           rejected: info?.rejected || [],
           response: info?.response || null,
         };
+
       } catch (err) {
         lastErr = err;
+
         console.error(
           `[MAIL] fallo intento ${attempt}:`,
           err?.message || err
         );
+
         await sleep(400 * attempt);
       }
     }
@@ -219,14 +244,233 @@ export const sendEmail = async (...args) => {
       provider: "smtp",
       error: lastErr?.message || String(lastErr),
     };
+
   } catch (err) {
-    console.error("[MAIL] error inesperado:", err?.message || err);
+    console.error(
+      "[MAIL] error inesperado:",
+      err?.message || err
+    );
+
     return {
       ok: false,
       provider: "smtp",
       error: err?.message || String(err),
     };
   }
+};
+
+/* =========================================================
+   NUEVO
+   DOCUMENTOS + RETIROS + ESTADOS
+========================================================= */
+
+export const sendDocumentUploadedEmail = async ({
+  to,
+  name,
+  documentType,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Documento recibido",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Documento recibido</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Hemos recibido correctamente tu documento:
+          <b>${documentType || "Documento"}</b>
+        </p>
+
+        <p>
+          Nuestro equipo administrativo lo revisará pronto.
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
+};
+
+export const sendDocumentApprovedEmail = async ({
+  to,
+  name,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Documento aprobado",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Documento aprobado</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Tu documento fue aprobado correctamente.
+        </p>
+
+        <p>
+          Tu cuenta ya se encuentra verificada.
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
+};
+
+export const sendDocumentRejectedEmail = async ({
+  to,
+  name,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Documento rechazado",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Documento rechazado</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Tu documento fue rechazado.
+        </p>
+
+        <p>
+          Por favor vuelve a subir un documento válido.
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
+};
+
+export const sendWithdrawPendingEmail = async ({
+  to,
+  name,
+  amount,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Solicitud de retiro recibida",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Retiro recibido</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Hemos recibido tu solicitud de retiro.
+        </p>
+
+        <p>
+          Monto solicitado:
+          <b>$${amount}</b>
+        </p>
+
+        <p>
+          Estado actual:
+          <b>PENDIENTE</b>
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
+};
+
+export const sendWithdrawApprovedEmail = async ({
+  to,
+  name,
+  amount,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Retiro aprobado",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Retiro aprobado</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Tu retiro fue aprobado correctamente.
+        </p>
+
+        <p>
+          Monto:
+          <b>$${amount}</b>
+        </p>
+
+        <p>
+          Estado:
+          <b>APROBADO</b>
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
+};
+
+export const sendWithdrawRejectedEmail = async ({
+  to,
+  name,
+  amount,
+}) => {
+  return sendEmail({
+    to,
+    subject: "Retiro rechazado",
+    html: `
+      <div style="font-family:Arial;padding:20px">
+        <h2>Retiro rechazado</h2>
+
+        <p>Hola ${name || "Cliente"},</p>
+
+        <p>
+          Tu retiro fue rechazado.
+        </p>
+
+        <p>
+          Monto:
+          <b>$${amount}</b>
+        </p>
+
+        <p>
+          Estado:
+          <b>RECHAZADO</b>
+        </p>
+
+        <hr />
+
+        <p>
+          Leones Broker
+        </p>
+      </div>
+    `,
+  });
 };
 
 export default sendEmail;
