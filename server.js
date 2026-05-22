@@ -1541,6 +1541,95 @@ app.post("/api/admin/deposit", requireAdmin, async (req, res) => {
   }
 });
 
+        // ======================================================
+// CLIENT WITHDRAW REQUEST
+// ======================================================
+
+app.post("/api/withdraw/request", async (req, res) => {
+  try {
+
+    const user = await getUserDocFromBearer(req);
+
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized"
+      });
+    }
+
+    const body = req.body || {};
+
+    const amount = Number(body.amount || 0);
+
+    const method =
+      String(body.method || body.withdrawMethod || "USDT").trim();
+
+    const walletAddress =
+      String(body.walletAddress || body.address || "").trim();
+
+    const note =
+      String(body.note || "").trim();
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_amount"
+      });
+    }
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        ok: false,
+        error: "wallet_required"
+      });
+    }
+
+    const wallet = await getWalletDocForUser(user._id);
+
+    const balance =
+      Number(wallet.balanceOwn ?? wallet.balance ?? 0);
+
+    if (amount > balance) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance"
+      });
+    }
+
+    // 🔥 GUARDAR EN MONGODB
+    const withdraw = await Withdraw.create({
+      user: user._id,
+      amount,
+      method,
+      walletAddress,
+      note,
+      status: "pending",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    console.log("✅ WITHDRAW CREATED:", withdraw._id);
+
+    io.emit("withdraw:new", withdraw);
+
+    return res.json({
+      ok: true,
+      message: "Retiro enviado",
+      withdraw
+    });
+
+  } catch (err) {
+
+    console.error("❌ /api/withdraw/request:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "server_error",
+      message: err?.message || "Error interno"
+    });
+  }
+});
+
 app.post("/api/admin/withdraw", requireAdmin, async (req, res) => {
   try {
     const body = req.body || {};
