@@ -134,29 +134,6 @@ app.use("/api/withdraws", withdrawRoutes);
 // HELPERS AUTH
 // ======================================================
 
-async function safeGetUserFromBearer(req) {
-  try {
-    const auth = req.headers.authorization || "";
-
-    if (!auth.startsWith("Bearer ")) {
-      return null;
-    }
-
-    const token = auth.split(" ")[1];
-
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
-
-    const user = await User.findById(decoded.id);
-
-    return user || null;
-  } catch (err) {
-    return null;
-  }
-}
-
 
 // ======================================================
 // DOCUMENT UPLOAD STORAGE
