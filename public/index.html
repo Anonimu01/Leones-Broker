@@ -3040,9 +3040,9 @@ if (resetForm) {
 
         <div class="menu-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i> Overview</div>
         <div class="menu-item" data-target="tradingPanel"><i class="fa-solid fa-chart-line"></i> Trading</div>
-
+        <div class="menu-item" data-target="historyPanel"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
         <div class="menu-item" data-target="verificationPanel"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
-        
+        <div class="menu-item" data-target="depositPanel"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
         <div class="menu-item" data-target="withdrawPanel"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
 
         <div style="height:8px"></div>
@@ -3050,7 +3050,177 @@ if (resetForm) {
         <div class="menu-item" id="btnInfo"><i class="fa-solid fa-circle-info"></i> Info</div>
       </aside>
 
-       <section class="panel" id="historyPanel" style="display:none">
+      <button id="floatingMenuBtn" title="Abrir/Cerrar menú">☰</button>
+
+      <!-- DASHBOARD PANEL -->
+      <section class="panel" id="dashboardPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Bienvenido, <span style="color:var(--gold)" id="privateWelcomeName">Usuario</span></div>
+            <div class="muted">Resumen rápido de tu cuenta — abajo verás el listado completo de símbolos</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted">Saldo disponible</div>
+            <div style="font-weight:900;color:var(--gold);font-size:20px">$<span id="bal-usdt-top">—</span></div>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card"><div class="muted">Balance Total</div><div class="value" id="balanceTotal">—</div><div class="muted" style="margin-top:6px">Estado en tiempo real</div></div>
+          <div class="card"><div class="muted">Inversiones Activas</div><div class="value" id="activeInvestments">—</div><div class="muted" style="margin-top:6px">Posiciones: <strong id="pos-count">0</strong></div></div>
+          <div class="card"><div class="muted">Efectivo Disponible</div><div class="value" id="cashAvail">—</div><div class="muted" style="margin-top:6px">Listo para operar</div></div>
+          <div class="card"><div class="muted">Ganancia / Pérdida</div><div class="value" id="pnlTotal">—</div><div class="muted" style="margin-top:6px">Este mes</div></div>
+        </div>
+
+        <div>
+          <div class="symbols-top">
+            <div class="cat-tabs" id="catTabs"></div>
+            <input id="symbolSearch" class="search-input" placeholder="Buscar símbolo, ej: BTC, ETH, EURUSD, AAPL..." />
+          </div>
+          <div id="symbolsGrid" class="symbols-grid"></div>
+        </div>
+      </section>
+
+      <!-- TRADING PANEL -->
+      <section class="panel" id="tradingPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div class="title" id="trading-title">Trading — <span id="tradingSymbol">BTC/USDT</span></div>
+            <div class="muted" id="trading-sub">Market: BINANCE</div>
+          </div>
+          <div class="muted">Estado: <span id="ws-status">conectando</span></div>
+        </div>
+
+        <div class="market-list" id="market-list"></div>
+
+        <div style="display:flex;gap:12px;flex-direction:column">
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div class="chart-area" style="flex:1; min-width:320px; position:relative">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div id="op-symbol" style="font-weight:900;color:var(--gold);font-size:22px">BTC/USDT</div>
+                  <div class="muted" id="op-exchange">Market: BINANCE</div>
+                </div>
+                <div style="text-align:right">
+                  <div id="op-price" style="font-weight:900;color:var(--gold);font-size:22px">—</div>
+                  <div class="muted-small">Último</div>
+                </div>
+              </div>
+
+              <div id="tv_chart_container" style="margin-top:12px; height:420px;"></div>
+
+              <div class="order-book-grid">
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">BIDS</div>
+                  <div id="ob-bids" class="muted"></div>
+                </div>
+                <div class="ob-col">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">ASKS</div>
+                  <div id="ob-asks" class="muted"></div>
+                </div>
+              </div>
+            </div>
+
+            <aside style="width:320px">
+              <div class="trade-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-weight:800;color:var(--gold)">Crear Orden</div>
+                  <div class="muted-small">Saldo USDT: $<span id="bal-usdt">—</span></div>
+                </div>
+
+                <div style="margin-bottom:8px">
+                  <label class="muted-small">Tipo</label>
+                  <select id="order-type" class="form-select">
+                    <option>Market</option>
+                    <option>Limit</option>
+                    <option>Stop Loss</option>
+                    <option>Take Profit</option>
+                    <option>Stop Limit</option>
+                  </select>
+                </div>
+
+                <div id="priceBox" style="display:none; margin-bottom:8px;">
+                  <label class="muted-small">Precio</label>
+                  <input id="order-price" class="form-input" type="number" step="0.01" placeholder="0.00">
+                </div>
+
+                <div class="form-row">
+                  <div style="flex:1">
+                    <label class="muted-small">Cantidad (ej. BTC)</label>
+                    <input id="brokerOrderSize" class="form-input" type="number" step="0.000001" placeholder="0.01">
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <button class="btn-primary" data-action="buy">Buy</button>
+                  <button class="btn-secondary" data-action="sell">Sell</button>
+                </div>
+
+                <div style="margin-top:12px; border-top:1px solid #222; padding-top:10px;">
+                  <label class="muted-small">Tipo de Orden</label>
+                  <select id="order-type-bottom" class="form-select">
+                    <option value="Market">Market</option>
+                    <option value="Limit">Limit</option>
+                    <option value="Stop Loss">Stop Loss</option>
+                    <option value="Take Profit">Take Profit</option>
+                    <option value="Stop Limit">Stop Limit</option>
+                  </select>
+
+                  <div id="priceBoxBottom" style="display:none; margin-top:8px;">
+                    <label class="muted-small">Precio</label>
+                    <input id="order-price-bottom" class="form-input" type="number" step="0.01" placeholder="Precio">
+                  </div>
+                </div>
+
+                <div class="orders-box" id="orders-box" style="margin-top:12px">
+                  <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Órdenes Pendientes</div>
+                  <div id="orders-list" class="muted-small">— no hay órdenes —</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- POSITIONS PANEL -->
+      <section class="panel" id="positionsPanel" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div>
+            <div class="title">Posiciones Abiertas</div>
+            <div class="muted">Clic en una posición para abrirla en Trading con su gráfico</div>
+          </div>
+          <div class="muted">Total: <span id="pos-count-top">0</span></div>
+        </div>
+        <div id="positionsList" class="positions-list"></div>
+      </section>
+
+      <!-- MARKETS PANEL -->
+      <section class="panel" id="marketsPanel" style="display:none">
+        <div class="title">Mercados</div>
+        <div class="muted" style="margin-bottom:8px">Selecciona un mercado desde la lista — todo el mercado disponible</div>
+
+        <div class="symbols-top" style="margin-top:8px">
+          <div id="catTabsMarket" class="cat-tabs"></div>
+          <input id="marketSearch" class="search-input" placeholder="Buscar símbolo o mercado..." />
+        </div>
+
+        <div id="marketsSymbolsGrid" class="symbols-grid"></div>
+      </section>
+
+      <!-- ASSETS PANEL -->
+      <section class="panel" id="activosPanel" style="display:none">
+        <div class="title">Activos</div>
+        <div class="table-box">
+          <div style="font-weight:800;color:var(--gold);margin-bottom:8px">Billetera</div>
+          <table>
+            <thead><tr><th>Activo</th><th>Cantidad</th><th>Valor Estimado</th></tr></thead>
+            <tbody id="walletRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- HISTORY PANEL (no tocar) -->
+      <section class="panel" id="historyPanel" style="display:none">
         <div class="title">Historial de Transacciones</div>
         <div class="table-box">
           <table>
@@ -3060,42 +3230,6 @@ if (resetForm) {
             </tbody>
           </table>
         </div>
-      </section>
-
-
-         <section class="panel" id="depositPanel" style="display:none">
-        <div class="title">Depósito</div>
-        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
-        <div style="margin-top:12px" class="table-box">
-          <form>
-            <label class="muted-small">Monto</label>
-            <input class="form-input" type="number" step="0.01" required id="tx-amount-deposit">
-            <label class="muted-small">Método</label>
-            <select class="form-select" style="margin-bottom:8px" id="tx-method-deposit">
-              <option>Transferencia</option>
-              <option>Crypto</option>
-            </select>
-            <button class="btn-primary" type="submit">Enviar</button>
-          </form>
-        </div>
-      </section>
-
-
-      <button id="floatingMenuBtn" title="Abrir/Cerrar menú">☰</button>
-
-      <!-- DASHBOARD PANEL -->
-      <section class="panel" id="dashboardPanel">
-        <!-- contenido existente del dashboard -->
-      </section>
-
-      <!-- TRADING PANEL -->
-      <section class="panel" id="tradingPanel" style="display:none">
-        <!-- contenido existente del trading -->
-      </section>
-
-      <!-- HISTORY PANEL -->
-      <section class="panel" id="historyPanel" style="display:none">
-        <!-- historial existente -->
       </section>
 
       <!-- VERIFICATION PANEL -->
@@ -3115,9 +3249,22 @@ if (resetForm) {
         </div>
       </section>
 
-      <!-- DEPOSIT PANEL -->
+      <!-- DEPOSIT PANEL (no tocar) -->
       <section class="panel" id="depositPanel" style="display:none">
-        <!-- contenido de deposit -->
+        <div class="title">Depósito</div>
+        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
+        <div style="margin-top:12px" class="table-box">
+          <form>
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-deposit">
+            <label class="muted-small">Método</label>
+            <select class="form-select" style="margin-bottom:8px" id="tx-method-deposit">
+              <option>Transferencia</option>
+              <option>Crypto</option>
+            </select>
+            <button class="btn-primary" type="submit">Enviar</button>
+          </form>
+        </div>
       </section>
 
       <!-- WITHDRAW PANEL -->
@@ -3143,7 +3290,6 @@ if (resetForm) {
     </div>
   </div>
 
-  <!-- FOOTER NAV -->
   <nav class="footer-nav">
     <div class="fnav-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i>Inicio</div>
     <div class="fnav-item" data-target="tradingPanel"><i class="fa-solid fa-chart-line"></i>Trading</div>
