@@ -14,6 +14,7 @@ import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import xss from "xss-clean";
 import jwt from "jsonwebtoken";
+import multer from "multer";
 
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -128,6 +129,107 @@ const limiter = rateLimit({
 app.use("/api", limiter);
 app.use("/api/password", passwordRoutes);
 app.use("/api/withdraws", withdrawRoutes);
+
+// ======================================================
+// HELPERS AUTH
+// ======================================================
+
+async function safeGetUserFromBearer(req) {
+  try {
+    const auth = req.headers.authorization || "";
+
+    if (!auth.startsWith("Bearer ")) {
+      return null;
+    }
+
+    const token = auth.split(" ")[1];
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    const user = await User.findById(decoded.id);
+
+    return user || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await safeGetUserFromBearer(req);
+
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized",
+      });
+    }
+
+    if (
+      user.role !== "admin" &&
+      user.isAdmin !== true
+    ) {
+      return res.status(403).json({
+        ok: false,
+        error: "Admin only",
+      });
+    }
+
+    req.user = user;
+
+    next();
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
+}
+
+// ======================================================
+// DOCUMENT UPLOAD STORAGE
+// ======================================================
+
+const documentsDir = path.join(
+  process.cwd(),
+  "uploads",
+  "documents"
+);
+
+if (!fs.existsSync(documentsDir)) {
+  fs.mkdirSync(documentsDir, {
+    recursive: true,
+  });
+}
+
+const documentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, documentsDir);
+  },
+
+  filename: (req, file, cb) => {
+    const unique =
+      Date.now() +
+      "-" +
+      Math.round(Math.random() * 1e9);
+
+    cb(
+      null,
+      unique + path.extname(file.originalname)
+    );
+  },
+});
+
+const uploadDocument = multer({
+  storage: documentStorage,
+
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+});
 
 // ======================================================
 // DOCUMENTS (CLIENTE Y ADMIN)
@@ -1162,7 +1264,61 @@ app.post("/api/documents/upload", async (req, res) => {
 });
 
 
+// ======================================================
+// SUBIR DOCUMENTO
+// ======================================================
 
+app.post(
+  "/api/documents",
+  uploadDocument.single("document"),
+  async (req, res) => {
+    try {
+      const user = await safeGetUserFromBearer(req);
+
+      if (!user) {
+        return res.status(401).json({
+          ok: false,
+          error: "Unauthorized",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          ok: false,
+          error: "Documento requerido",
+        });
+      }
+
+      const document = await Document.create({
+        userId: user._id,
+
+        type:
+          req.body.type || "identity",
+
+        documentUrl:
+          "/uploads/documents/" +
+          req.file.filename,
+
+        status: "pending",
+      });
+
+      res.json({
+        ok: true,
+        document,
+      });
+    } catch (err) {
+      console.error(
+        "DOCUMENT UPLOAD ERROR:",
+        err
+      );
+
+      res.status(500).json({
+        ok: false,
+        error: err.message,
+      });
+    }
+  }
+);
         
 /* ======================================================
    HEALTH / MAIL
