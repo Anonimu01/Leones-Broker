@@ -24,6 +24,7 @@ import positionsRoutes from "./routes/positions.routes.js";
 import tradeRoutes from "./routes/trade.routes.js";
 import accountRoutes from "./routes/account.routes.js";
 import passwordRoutes from "./routes/password.routes.js";
+import withdrawRoutes from "./routes/withdraw.routes.js";
 import { startRiskWatcher } from "./jobs/risk.job.js";
 
 import PolygonSocket from "./sockets/polygonSocket.js";
@@ -126,6 +127,7 @@ const limiter = rateLimit({
 
 app.use("/api", limiter);
 app.use("/api/password", passwordRoutes);
+app.use("/api/withdraws", withdrawRoutes);
 
 // ======================================================
 // DOCUMENTS (CLIENTE Y ADMIN)
