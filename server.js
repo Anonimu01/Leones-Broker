@@ -1082,6 +1082,85 @@ app.get("/api/transactions/:userId", async (req, res) => {
     });
   }
 });
+
+// ======================================================
+// RETIRO CLIENTE
+// ======================================================
+app.post("/api/withdraw/request", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const { amount, note } = req.body || {};
+    const numericAmount = Number(amount);
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ ok: false, error: "amount_required" });
+    }
+
+    const wallet = await getWalletDocForUser(user._id);
+    const balance = Number(wallet.balanceOwn ?? wallet.balance ?? 0);
+
+    if (numericAmount > balance) {
+      return res.status(400).json({ ok: false, error: "insufficient_balance" });
+    }
+
+    // Guardar el retiro en la colección Withdraw
+    const withdraw = await Withdraw.create({
+      user: user._id,
+      amount: numericAmount,
+      status: "pending",
+      note: note || "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Opcional: emitir evento a admin vía socket
+    io.emit("withdraw:new", { withdraw });
+
+    return res.json({ ok: true, msg: "Solicitud de retiro creada", withdraw });
+  } catch (err) {
+    console.error("/api/withdraw/request error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+// ======================================================
+// DOCUMENTOS CLIENTE
+// ======================================================
+app.post("/api/documents/upload", async (req, res) => {
+  try {
+    const user = await safeGetUserFromBearer(req);
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const { type, documentUrl } = req.body || {};
+
+    if (!documentUrl || typeof documentUrl !== "string") {
+      return res.status(400).json({ ok: false, error: "documentUrl_required" });
+    }
+
+    const doc = await Document.create({
+      userId: user._id,
+      type: type || "identity",
+      documentUrl,
+      status: "pending",
+      adminNote: "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Opcional: notificar admin
+    io.emit("document:new", { document: doc });
+
+    return res.json({ ok: true, msg: "Documento subido", document: doc });
+  } catch (err) {
+    console.error("/api/documents/upload error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", message: err?.message || "Error interno" });
+  }
+});
+
+
+
         
 /* ======================================================
    HEALTH / MAIL
