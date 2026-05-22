@@ -1,4 +1,4 @@
-<script>
+
 (function () {
   "use strict";
 
@@ -81,4 +81,4 @@
     SOCKET_URL
   };
 })();
-</script>
+
