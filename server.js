@@ -157,37 +157,6 @@ async function safeGetUserFromBearer(req) {
   }
 }
 
-async function requireAdmin(req, res, next) {
-  try {
-    const user = await safeGetUserFromBearer(req);
-
-    if (!user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Unauthorized",
-      });
-    }
-
-    if (
-      user.role !== "admin" &&
-      user.isAdmin !== true
-    ) {
-      return res.status(403).json({
-        ok: false,
-        error: "Admin only",
-      });
-    }
-
-    req.user = user;
-
-    next();
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
-  }
-}
 
 // ======================================================
 // DOCUMENT UPLOAD STORAGE
