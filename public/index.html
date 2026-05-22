@@ -7388,67 +7388,7 @@ async function loadHistoryPanel() {
 }
 
 
-  document.addEventListener("DOMContentLoaded", () => {
-
-  const form = document.getElementById("withdrawForm");
-  const message = document.getElementById("withdrawMessage");
-
-  if (!form) return;
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    message.style.color = "#fff";
-    message.textContent = "Enviando retiro...";
-
-    const amount = document.getElementById("withdrawAmount").value;
-    const wallet = document.getElementById("withdrawWallet").value;
-    const bank = document.getElementById("withdrawBank").value;
-    const proofFile = document.getElementById("withdrawProof").files[0];
-
-    if (!amount || !wallet || !proofFile) {
-      message.style.color = "red";
-      message.textContent = "Completa todos los campos obligatorios.";
-      return;
-    }
-
-    try {
-      const fd = new FormData();
-      fd.append("amount", amount);
-      fd.append("wallet", wallet);
-      fd.append("bank", bank || "");
-      fd.append("proof", proofFile);
-
-      const res = await fetch("/api/withdraws", {
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer " + (localStorage.getItem("token") || "")
-        },
-        body: fd
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        message.style.color = "red";
-        message.textContent = data?.message || "Error enviando retiro";
-        console.error("❌ Retiro error:", data);
-        return;
-      }
-
-      message.style.color = "lime";
-      message.textContent = "✅ Retiro enviado correctamente";
-      console.log("✅ Retiro enviado:", data);
-
-      form.reset();
-
-    } catch (err) {
-      message.style.color = "red";
-      message.textContent = "❌ Error enviando retiro";
-      console.error("❌ Error fetch retiro:", err);
-    }
-  });
-
-});
+ 
 
 </script>
   
