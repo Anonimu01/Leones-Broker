@@ -1,17 +1,20 @@
 /* =========================================================
    🔥 WITHDRAW SYSTEM
    ========================================================= */
-
 document.addEventListener("DOMContentLoaded", () => {
 
-  const withdrawForm = document.getElementById("withdrawForm");
+  const withdrawForm =
+    document.getElementById("withdrawForm") ||
+    document.getElementById("retiroForm") ||
+    document.querySelector(".withdraw-form") ||
+    document.querySelector("form[data-withdraw]");
 
   if (!withdrawForm) {
-    console.warn("❌ withdrawForm no encontrado");
+    console.error("❌ FORMULARIO DE RETIRO NO EXISTE");
     return;
   }
 
-  console.log("✅ Withdraw JS cargado");
+  console.log("✅ Withdraw form detectado");
 
   withdrawForm.addEventListener("submit", async (e) => {
 
@@ -19,48 +22,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
 
-      // =====================================================
-      // CAMPOS
-      // =====================================================
-
       const amount =
-        document.getElementById("withdrawAmount")?.value?.trim() || "";
+        document.getElementById("withdrawAmount")?.value ||
+        document.getElementById("amount")?.value ||
+        "";
 
       const method =
-        document.getElementById("withdrawMethod")?.value?.trim() || "";
+        document.getElementById("withdrawMethod")?.value ||
+        document.getElementById("method")?.value ||
+        "";
 
       const wallet =
-        document.getElementById("withdrawWallet")?.value?.trim() || "";
+        document.getElementById("withdrawWallet")?.value ||
+        document.getElementById("wallet")?.value ||
+        "";
 
       const bank =
-        document.getElementById("withdrawBank")?.value?.trim() || "";
+        document.getElementById("withdrawBank")?.value ||
+        document.getElementById("bank")?.value ||
+        "";
 
       const note =
-        document.getElementById("withdrawNote")?.value?.trim() || "";
+        document.getElementById("withdrawNote")?.value ||
+        "";
 
       const proofInput =
-        document.getElementById("withdrawProof");
+        document.getElementById("withdrawProof") ||
+        document.getElementById("proof") ||
+        document.querySelector('input[type="file"]');
 
       const proofFile =
         proofInput?.files?.[0] || null;
 
-      // =====================================================
-      // VALIDACIÓN
-      // =====================================================
-
-      if (!amount || Number(amount) <= 0) {
-        alert("Monto inválido");
+      if (!amount) {
+        alert("Monto requerido");
         return;
       }
-
-      if (!method) {
-        alert("Selecciona método");
-        return;
-      }
-
-      // =====================================================
-      // FORMDATA
-      // =====================================================
 
       const fd = new FormData();
 
@@ -74,32 +71,12 @@ document.addEventListener("DOMContentLoaded", () => {
         fd.append("proof", proofFile);
       }
 
-      // =====================================================
-      // TOKEN
-      // =====================================================
+      console.log("📦 FormData listo");
 
       const token =
         localStorage.getItem("token") ||
-        localStorage.getItem("authToken") ||
+        localStorage.getItem("BROKER_TOKEN") ||
         "";
-
-      // =====================================================
-      // BOTÓN
-      // =====================================================
-
-      const submitBtn =
-        withdrawForm.querySelector('button[type="submit"]');
-
-      const oldText = submitBtn?.innerHTML;
-
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = "Procesando...";
-      }
-
-      // =====================================================
-      // FETCH
-      // =====================================================
 
       console.log("🚀 Enviando retiro...");
 
@@ -111,58 +88,24 @@ document.addEventListener("DOMContentLoaded", () => {
         body: fd
       });
 
-      let data = {};
-
-      try {
-        data = await res.json();
-      } catch {}
+      const data = await res.json();
 
       console.log("📩 RESPUESTA:", data);
 
-      // =====================================================
-      // ERROR
-      // =====================================================
-
       if (!res.ok) {
-
-        console.error("❌ ERROR:", data);
-
-        alert(
-          data?.message ||
-          data?.error ||
-          "Error enviando retiro"
-        );
-
+        alert(data.message || "Error enviando retiro");
         return;
       }
 
-      // =====================================================
-      // SUCCESS
-      // =====================================================
-
-      alert("✅ Solicitud enviada correctamente");
+      alert("✅ Retiro enviado");
 
       withdrawForm.reset();
 
-      if (typeof loadHistoryPanel === "function") {
-        loadHistoryPanel();
-      }
-
     } catch (err) {
 
-      console.error("❌ withdraw error:", err);
+      console.error("❌ ERROR RETIRO:", err);
 
       alert("Error de conexión");
-
-    } finally {
-
-      const submitBtn =
-        withdrawForm.querySelector('button[type="submit"]');
-
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = "Enviar Retiro";
-      }
     }
 
   });
