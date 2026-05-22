@@ -3040,9 +3040,44 @@ if (resetForm) {
 
         <div class="menu-item active" data-target="dashboardPanel"><i class="fa-solid fa-house"></i> Overview</div>
         <div class="menu-item" data-target="tradingPanel"><i class="fa-solid fa-chart-line"></i> Trading</div>
-        <div class="menu-item" data-target="historyPanel"><i class="fa-solid fa-clock-rotate-left"></i> Historial de transacciones</div>
+
+
+         <section class="panel" id="historyPanel" style="display:none">
+        <div class="title">Historial de Transacciones</div>
+        <div class="table-box">
+          <table>
+            <thead><tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Método</th><th>Monto</th><th>Estado</th></tr></thead>
+            <tbody id="historyRows">
+              <tr><td colspan="6" class="muted">Sin transacciones cargadas todavía</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+
+         <section class="panel" id="depositPanel" style="display:none">
+        <div class="title">Depósito</div>
+        <div class="muted">Opciones: Transferencia bancaria / Crypto</div>
+        <div style="margin-top:12px" class="table-box">
+          <form>
+            <label class="muted-small">Monto</label>
+            <input class="form-input" type="number" step="0.01" required id="tx-amount-deposit">
+            <label class="muted-small">Método</label>
+            <select class="form-select" style="margin-bottom:8px" id="tx-method-deposit">
+              <option>Transferencia</option>
+              <option>Crypto</option>
+            </select>
+            <button class="btn-primary" type="submit">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+
+
+
+        
         <div class="menu-item" data-target="verificationPanel"><i class="fa-solid fa-id-card"></i> Verificación de documentos</div>
-        <div class="menu-item" data-target="depositPanel"><i class="fa-solid fa-arrow-down"></i> Depósito</div>
+        
         <div class="menu-item" data-target="withdrawPanel"><i class="fa-solid fa-arrow-up"></i> Retiro</div>
 
         <div style="height:8px"></div>
