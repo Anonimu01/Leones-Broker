@@ -4,6 +4,7 @@
   
 
 
+
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Leones Broker — Tu Puerta al Mercado Global</title>
@@ -11,6 +12,9 @@
 
 <!-- FONT AWESOME (necesario para los íconos del bloque de depósito) -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/css/intlTelInput.css">
+
 
 <style>
 *{box-sizing:border-box}
@@ -1395,7 +1399,7 @@ footer{
   </div>
 </div>
 
-
+<script src="https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/intlTelInput.min.js"></script>
 
 <script>
 /* LEONES / BROKER FRONT — JS #1
@@ -2561,6 +2565,79 @@ if (window.__LEONES_BOOTED__) {
 
   log('[LEONES] unified script loaded (clean real mode)');
 }
+</script>
+
+
+  
+
+  <script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  const phoneInput = document.getElementById("r_phone");
+  if (!phoneInput) return;
+
+  const box = document.createElement("div");
+  box.style.cssText = `
+    margin-top:6px;
+    font-size:14px;
+    display:flex;
+    gap:8px;
+    align-items:center;
+  `;
+
+  phoneInput.parentNode.appendChild(box);
+
+  function validatePhone(num) {
+    // limpia espacios
+    const clean = num.replace(/\s+/g, '');
+
+    // solo + y números
+    if (!/^\+\d{7,15}$/.test(clean)) {
+      return { valid: false };
+    }
+
+    return { valid: true, value: clean };
+  }
+
+  function getFlag(num) {
+    if (num.startsWith("+1")) return "🇺🇸";
+    if (num.startsWith("+52")) return "🇲🇽";
+    if (num.startsWith("+54")) return "🇦🇷";
+    if (num.startsWith("+56")) return "🇨🇱";
+    if (num.startsWith("+34")) return "🇪🇸";
+    if (num.startsWith("+57")) return "🇨🇴";
+    if (num.startsWith("+58")) return "🇻🇪";
+    return "🌍";
+  }
+
+  phoneInput.addEventListener("input", () => {
+
+    const value = phoneInput.value.trim();
+    const result = validatePhone(value);
+
+    if (!value) {
+      box.innerHTML = "";
+      phoneInput.setCustomValidity("");
+      return;
+    }
+
+    if (!result.valid) {
+      box.innerHTML = `<span style="color:red">❌ Número inválido</span>`;
+      phoneInput.setCustomValidity("Número inválido");
+      return;
+    }
+
+    phoneInput.setCustomValidity("");
+
+    const flag = getFlag(result.value);
+
+    box.innerHTML = `
+      <span>${flag}</span>
+      <span style="color:#0f0">✓ válido</span>
+    `;
+  });
+
+});
 </script>
 <!-- ================= PARTE PRIVADA COMPLETA (ENTREGA ÚNICA - COMPLETA Y CORREGIDA) ================= -->
 <!-- Incluye HTML, CSS y JS corregidos. Pega esto tal cual en tu proyecto donde quieras el área privada. -->
