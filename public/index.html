@@ -1481,6 +1481,32 @@ if (window.__LEONES_BOOTED__) {
     });
   }
 
+function initPhone() {
+  const input = document.querySelector("#r_phone");
+  if (!input || input.dataset.iti) return;
+
+  const iti = window.intlTelInput(input, {
+    initialCountry: "auto",
+    separateDialCode: true,
+    utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@25.3.0/build/js/utils.js"
+  });
+
+  input.dataset.iti = "1";
+
+  input.addEventListener("input", () => {
+    input.setCustomValidity(
+      iti.isValidNumber() ? "" : "Número inválido"
+    );
+  });
+
+  window._iti_phone = iti;
+}
+
+
+
+
+  
+
   function getSavedToken() {
     try {
       const t1 = localStorage.getItem('token') || localStorage.getItem('BROKER_TOKEN');
