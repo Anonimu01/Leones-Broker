@@ -1874,6 +1874,23 @@ app.post("/api/trade/open", async (req, res) => {
     const freeMargin = (balanceOwn + credit) - marginUsed;
 
     // =========================
+// 🔒 SOLO BLOQUEO POR SALDO REAL
+// =========================
+
+const availableBalance = balanceOwn + credit - marginUsed;
+
+// si no tiene saldo suficiente para el margen requerido
+if (requiredMargin > availableBalance) {
+  return res.status(400).json({
+    ok: false,
+    error: "insufficient_balance",
+    message: "No puedes abrir la operación porque excede tu saldo disponible",
+    requiredMargin,
+    availableBalance,
+  });
+}
+
+    // =========================
     // 🔒 VALIDACIÓN CRÍTICA (BLOQUEA TODO SI NO ALCANZA)
     // =========================
 
