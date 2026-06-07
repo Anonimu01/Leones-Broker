@@ -1819,34 +1819,11 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     const side = normalizeSide(body.side);
-
-    // =========================================================
-    // IMPORTANTE:
-    // No auto-modificar el tamaño pedido.
-    // Se valida el valor exacto que llega desde el frontend.
-    // =========================================================
-    const rawQty =
-      body.qty ??
-      body.volume ??
-      body.lot ??
-      body.amount ??
-      body.size;
-
-    const qty = Number(rawQty);
-
     if (!side) {
       return res.status(400).json({
         ok: false,
         error: "invalid_side",
         message: "La dirección de la operación no es válida",
-      });
-    }
-
-    if (!Number.isFinite(qty) || qty <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_qty",
-        message: "La cantidad solicitada no es válida",
       });
     }
 
@@ -1874,49 +1851,110 @@ app.post("/api/trade/open", async (req, res) => {
       price = getSimulatedPrice(symbol);
     }
 
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_price",
+        message: "No se pudo calcular un precio válido",
+      });
+    }
+
     // =========================
-    // ACCOUNT + MARGIN
+    // ACCOUNT
     // =========================
     const equity = balanceOwn + credit;
     const freeMargin = Math.max(equity - marginUsed, 0);
+    const buyingPower = freeMargin * leverage;
 
     // =========================
-    // RISK / LIMITS
+    // INPUT AMOUNT / QTY
     // =========================
-    const notional = qty * price;
-    const requiredMargin = notional / leverage;
-    const maxNotionalAllowed = freeMargin * leverage;
+    const rawAmount =
+      body.amount ??
+      body.notional ??
+      body.orderValue ??
+      body.value ??
+      body.tradeAmount;
 
-    // =========================================================
-    // VALIDACIÓN REAL
-    // Si el monto pedido supera el poder de compra,
-    // NO se abre la operación.
-    // =========================================================
+    const rawQty =
+      body.qty ??
+      body.volume ??
+      body.lot ??
+      body.size;
+
+    let qty = null;
+    let requestedNotional = null;
+
+    // Si el frontend manda amount/notional, se usa como monto total de operación
+    if (rawAmount !== undefined && rawAmount !== null && rawAmount !== "") {
+      requestedNotional = Number(rawAmount);
+      if (!Number.isFinite(requestedNotional) || requestedNotional <= 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_amount",
+          message: "El monto solicitado no es válido",
+        });
+      }
+
+      qty = requestedNotional / price;
+    } else if (rawQty !== undefined && rawQty !== null && rawQty !== "") {
+      qty = Number(rawQty);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_qty",
+          message: "La cantidad solicitada no es válida",
+        });
+      }
+
+      requestedNotional = qty * price;
+    } else {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_amount_or_qty",
+        message: "Debes enviar amount/notional o qty",
+      });
+    }
+
+    // =========================
+    // MARGIN CALCULATION
+    // =========================
+    const requiredMargin = requestedNotional / leverage;
+
+    // =========================
+    // VALIDATION
+    // =========================
+    // 1) Si el monto pedido supera el poder de compra, no abre.
+    if (requestedNotional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_buying_power",
+        message: "El monto solicitado supera tu saldo disponible con apalancamiento",
+        balanceOwn,
+        credit,
+        marginUsed,
+        equity,
+        freeMargin,
+        leverage,
+        buyingPower,
+        requestedNotional,
+        requiredMargin,
+      });
+    }
+
+    // 2) Si el margen requerido supera el margen libre, no abre.
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_margin",
         message: "No tienes margen suficiente para abrir esta operación",
-        requestedQty: qty,
-        price,
-        notional,
+        balanceOwn,
+        credit,
+        marginUsed,
+        equity,
+        freeMargin,
+        leverage,
         requiredMargin,
-        freeMargin,
-        leverage,
-      });
-    }
-
-    if (notional > maxNotionalAllowed) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_buying_power",
-        message: "El monto solicitado supera tu poder de compra",
-        requestedQty: qty,
-        price,
-        notional,
-        maxNotionalAllowed,
-        freeMargin,
-        leverage,
       });
     }
 
@@ -1924,9 +1962,6 @@ app.post("/api/trade/open", async (req, res) => {
     // WALLET UPDATE
     // =========================
     wallet.marginUsed = marginUsed + requiredMargin;
-
-    // No bajamos el saldo manualmente, solo reservamos margen.
-    // Así evitas abrir operaciones con montos que no corresponden.
     wallet.balanceOwn = balanceOwn;
     wallet.balance = balanceOwn;
     wallet.equity = equity;
@@ -1963,6 +1998,19 @@ app.post("/api/trade/open", async (req, res) => {
       position,
       wallet: account.wallet,
       account: account.account,
+      debug: {
+        balanceOwn,
+        credit,
+        marginUsed,
+        equity,
+        freeMargin,
+        leverage,
+        price,
+        qty,
+        requestedNotional,
+        requiredMargin,
+        buyingPower,
+      },
     });
   } catch (err) {
     console.error("/api/trade/open error:", err);
