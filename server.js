@@ -1807,6 +1807,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const body = req.body || {};
     const symbol = String(body.symbol || "").trim().toUpperCase();
+
     if (!symbol) {
       return res.status(400).json({
         ok: false,
@@ -1845,7 +1846,7 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // 🧠 AUTO LOT SYSTEM (BROKER STYLE)
+    // 🧠 AUTO LOT SYSTEM (NO TOCADO)
     // =========================
 
     const accountSize = balanceOwn + credit;
@@ -1868,63 +1869,36 @@ app.post("/api/trade/open", async (req, res) => {
     // RISK CALCULATION REAL
     // =========================
 
+    const equity = balanceOwn + credit;
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    const freeMargin = (balanceOwn + credit) - marginUsed;
+    const availableMargin = equity - marginUsed;
+    const maxExposure = equity * leverage;
 
-    // =========================
-// 🔒 SOLO BLOQUEO POR SALDO REAL
-// =========================
-
-const availableBalance = balanceOwn + credit - marginUsed;
-
-// si no tiene saldo suficiente para el margen requerido
-if (requiredMargin > availableBalance) {
-  return res.status(400).json({
-    ok: false,
-    error: "insufficient_balance",
-    message: "No puedes abrir la operación porque excede tu saldo disponible",
-    requiredMargin,
-    availableBalance,
-  });
-}
-
-    // =========================
-    // 🔒 VALIDACIÓN CRÍTICA (BLOQUEA TODO SI NO ALCANZA)
-    // =========================
-
-    const buyingPower = freeMargin * leverage;
-
-    if (requiredMargin > freeMargin && notional > buyingPower) {
+    // ======================================================
+    // 🔥 1. BLOQUEO POR EXPOSICIÓN REAL (CRÍTICO)
+    // ======================================================
+    if (notional > maxExposure) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_funds_and_leverage",
-        message: "Ni el saldo ni el apalancamiento son suficientes para abrir esta operación",
+        error: "exceeds_leverage_exposure",
+        message: "Excede el poder de compra con apalancamiento",
+        notional,
+        maxExposure
+      });
+    }
+
+    // ======================================================
+    // 🔥 2. BLOQUEO POR MARGEN REAL (CRÍTICO)
+    // ======================================================
+    if (requiredMargin > availableMargin) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_margin",
+        message: "No tienes margen suficiente",
         requiredMargin,
-        freeMargin,
-        buyingPower,
-        notional
-      });
-    }
-
-    if (requiredMargin > freeMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "Saldo insuficiente para este lote automático",
-        required: requiredMargin,
-        available: freeMargin
-      });
-    }
-
-    if (notional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_leverage",
-        message: "El apalancamiento no es suficiente para esta operación",
-        buyingPower,
-        notional
+        availableMargin
       });
     }
 
@@ -1936,8 +1910,8 @@ if (requiredMargin > availableBalance) {
     wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
 
-    wallet.equity = balanceOwn + credit;
-    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
+    wallet.equity = equity;
+    wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
@@ -1960,7 +1934,6 @@ if (requiredMargin > availableBalance) {
     });
 
     const account = await safeBuildAccountForUser(user);
-
     const annotatedPosition = annotatePosition(position.toObject());
 
     emitStateUpdates(user._id, account, [annotatedPosition], null);
