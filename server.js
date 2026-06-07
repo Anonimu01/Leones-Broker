@@ -1803,61 +1803,34 @@ app.post("/api/trade/open", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
+    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
     const symbol = String(body.symbol || "").trim().toUpperCase();
-
     if (!symbol) {
       return res.status(400).json({
         ok: false,
         error: "symbol_required",
-        message: "El símbolo no llegó desde el frontend",
+        message: "El símbolo no llegó desde el frontend"
       });
     }
 
     const side = normalizeSide(body.side);
-    if (!side) {
-      return res.status(400).json({ ok: false, error: "invalid_side" });
+    let qty = normalizeQty(body);
+
+    if (!symbol || !side || !qty) {
+      return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
 
-    // 🚨 DEBUG IMPORTANTE (quítalo después si quieres)
-    console.log("WALLET RAW =>", wallet);
+    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+    const credit = Number(wallet.credit ?? 0) || 0;
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
-    if (!wallet) {
-      return res.status(400).json({
-        ok: false,
-        error: "wallet_not_found",
-        message: "No se encontró wallet del usuario",
-      });
-    }
-
-    // =========================
-    // 🔥 SALDO REAL (ARREGLADO)
-    // =========================
-    const balanceOwn = Number(wallet.balanceOwn);
-    const balanceFallback = Number(wallet.balance);
-    const userBalanceFallback = Number(user.balance);
-
-    const equity =
-      Number.isFinite(balanceOwn) && balanceOwn > 0
-        ? balanceOwn
-        : Number.isFinite(balanceFallback) && balanceFallback > 0
-        ? balanceFallback
-        : Number.isFinite(userBalanceFallback)
-        ? userBalanceFallback
-        : 0;
-
-    const credit = Number(wallet.credit) || 0;
-    const marginUsed = Number(wallet.marginUsed) || 0;
-
-    const leverageRaw = Number(wallet.leverageFactor ?? user.leverage);
+    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
-      Number.isFinite(leverageRaw) && leverageRaw > 0 ? leverageRaw : 10;
+      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
     // =========================
     // PRICE
@@ -1872,64 +1845,89 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // MARGEN REAL
+    // 🧠 AUTO LOT SYSTEM (BROKER STYLE)
     // =========================
-    const freeMargin = equity + credit - marginUsed;
 
-    if (freeMargin <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "no_margin",
-        message: "No tienes margen disponible",
-        equity,
-        credit,
-        marginUsed,
-      });
-    }
+    const accountSize = balanceOwn + credit;
 
-    const buyingPower = freeMargin * leverage;
+    const riskPerTrade = accountSize * 0.05;
 
-    const qty = normalizeQty(body);
+    const marginPerUnit = price / leverage;
 
-    if (!qty || qty <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_qty",
-      });
+    const maxQty = Math.max(riskPerTrade / marginPerUnit, 0.01);
+
+    if (qty <= 0.05) qty = 0.01;
+    else if (qty <= 0.5) qty = 0.1;
+    else qty = 1.0;
+
+    if (qty > maxQty) {
+      qty = Math.max(0.01, Number(maxQty.toFixed(2)));
     }
 
     // =========================
-    // VALIDACIÓN REAL
+    // RISK CALCULATION REAL
     // =========================
+
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    // 🔥 SI EXCEDE → BLOQUEA
+    const freeMargin = (balanceOwn + credit) - marginUsed;
+
+    // =========================
+    // 🔒 VALIDACIÓN CRÍTICA (BLOQUEA TODO SI NO ALCANZA)
+    // =========================
+
+    const buyingPower = freeMargin * leverage;
+
+    if (requiredMargin > freeMargin && notional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds_and_leverage",
+        message: "Ni el saldo ni el apalancamiento son suficientes para abrir esta operación",
+        requiredMargin,
+        freeMargin,
+        buyingPower,
+        notional
+      });
+    }
+
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_funds",
-        message: "Saldo insuficiente para abrir la operación",
-        debug: {
-          equity,
-          freeMargin,
-          buyingPower,
-          requiredMargin,
-          notional,
-        },
+        error: "insufficient_balance",
+        message: "Saldo insuficiente para este lote automático",
+        required: requiredMargin,
+        available: freeMargin
+      });
+    }
+
+    if (notional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_leverage",
+        message: "El apalancamiento no es suficiente para esta operación",
+        buyingPower,
+        notional
       });
     }
 
     // =========================
-    // UPDATE WALLET
+    // WALLET UPDATE
     // =========================
+
+    wallet.balanceOwn = balanceOwn - requiredMargin;
+    wallet.balance = wallet.balanceOwn;
     wallet.marginUsed = marginUsed + requiredMargin;
+
+    wallet.equity = balanceOwn + credit;
+    wallet.freeMargin = Math.max(wallet.balanceOwn + credit - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
     // POSITION
     // =========================
+
     const position = await Position.create({
       user: user._id,
       symbol,
@@ -1945,6 +1943,7 @@ app.post("/api/trade/open", async (req, res) => {
     });
 
     const account = await safeBuildAccountForUser(user);
+
     const annotatedPosition = annotatePosition(position.toObject());
 
     emitStateUpdates(user._id, account, [annotatedPosition], null);
@@ -1954,6 +1953,7 @@ app.post("/api/trade/open", async (req, res) => {
       ok: true,
       msg: "OPENED",
       position,
+      autoLot: true,
       wallet: account.wallet,
       account: account.account,
     });
@@ -1964,7 +1964,7 @@ app.post("/api/trade/open", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: "server_error",
-      message: err?.message || "Error interno",
+      message: err?.message || "Error interno"
     });
 
   } finally {
