@@ -1807,6 +1807,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const body = req.body || {};
     const symbol = String(body.symbol || "").trim().toUpperCase();
+
     if (!symbol) {
       return res.status(400).json({
         ok: false,
@@ -1816,10 +1817,9 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     const side = normalizeSide(body.side);
-    let qty = normalizeQty(body);
 
-    if (!symbol || !side || !qty) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+    if (!side) {
+      return res.status(400).json({ ok: false, error: "invalid_side" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1844,16 +1844,43 @@ app.post("/api/trade/open", async (req, res) => {
       price = getSimulatedPrice(symbol);
     }
 
+    const freeMargin = (balanceOwn + credit) - marginUsed;
+    const buyingPower = freeMargin * leverage;
+
+    // ======================================================
+    // 🔥 VALIDACIÓN REAL (ANTES DE MODIFICAR QTY)
+    // ======================================================
+
+    const userRequestedQty = normalizeQty(body);
+
+    if (!userRequestedQty || userRequestedQty <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_qty"
+      });
+    }
+
+    const userNotional = userRequestedQty * price;
+
+    if (userNotional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds_and_leverage",
+        message: "Ni saldo ni apalancamiento permiten esta operación",
+        userNotional,
+        buyingPower
+      });
+    }
+
     // =========================
-    // 🧠 AUTO LOT SYSTEM (BROKER STYLE)
+    // 🧠 AUTO LOT SYSTEM (DESPUÉS DE VALIDAR)
     // =========================
+
+    let qty = userRequestedQty;
 
     const accountSize = balanceOwn + credit;
-
     const riskPerTrade = accountSize * 0.05;
-
     const marginPerUnit = price / leverage;
-
     const maxQty = Math.max(riskPerTrade / marginPerUnit, 0.01);
 
     if (qty <= 0.05) qty = 0.01;
@@ -1871,43 +1898,13 @@ app.post("/api/trade/open", async (req, res) => {
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    const freeMargin = (balanceOwn + credit) - marginUsed;
-
-    // =========================
-    // 🔒 VALIDACIÓN CRÍTICA (BLOQUEA TODO SI NO ALCANZA)
-    // =========================
-
-    const buyingPower = freeMargin * leverage;
-
-    if (requiredMargin > freeMargin && notional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_funds_and_leverage",
-        message: "Ni el saldo ni el apalancamiento son suficientes para abrir esta operación",
-        requiredMargin,
-        freeMargin,
-        buyingPower,
-        notional
-      });
-    }
-
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_balance",
-        message: "Saldo insuficiente para este lote automático",
-        required: requiredMargin,
-        available: freeMargin
-      });
-    }
-
-    if (notional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_leverage",
-        message: "El apalancamiento no es suficiente para esta operación",
-        buyingPower,
-        notional
+        error: "insufficient_margin",
+        message: "Margen insuficiente",
+        requiredMargin,
+        freeMargin
       });
     }
 
