@@ -1820,209 +1820,96 @@ app.post("/api/trade/open", async (req, res) => {
 
     const side = normalizeSide(body.side);
     if (!side) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_side",
-        message: "La dirección de la operación no es válida",
-      });
+      return res.status(400).json({ ok: false, error: "invalid_side" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const toNum = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    const firstFinite = (...values) => {
-      for (const v of values) {
-        const n = toNum(v);
-        if (n !== null) return n;
-      }
-      return 0;
-    };
-
     // =========================
-    // SALDO REAL DEL USUARIO
+    // 🔥 SALDO REAL (SIN INVENTAR)
     // =========================
-    // Toma el primer valor válido entre varios campos posibles.
-    // Así no te falla si tu schema usa otro nombre.
-    const balanceOwn = firstFinite(
-      wallet.balanceOwn,
-      wallet.availableBalance,
-      wallet.balance,
-      wallet.saldo,
-      wallet.cash,
-      user.balance,
-      user.saldo,
-      0
-    );
+    const balanceOwn =
+      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
 
-    const credit = firstFinite(
-      wallet.credit,
-      wallet.creditBalance,
-      wallet.bonus,
-      0
-    );
+    const credit = Number(wallet.credit ?? 0) || 0;
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
-    const marginUsed = firstFinite(
-      wallet.marginUsed,
-      wallet.usedMargin,
-      0
-    );
-
-    const rawLeverage = firstFinite(
-      wallet.leverageFactor,
-      wallet.leverage,
-      user.leverage,
-      10
-    );
-
-    const leverage = rawLeverage > 0 ? rawLeverage : 10;
+    const leverageRaw = Number(wallet.leverageFactor ?? user.leverage);
+    const leverage =
+      Number.isFinite(leverageRaw) && leverageRaw > 0 ? leverageRaw : 10;
 
     // =========================
     // PRICE
     // =========================
     let price =
-      firstFinite(body.price, body.entryPrice, 0) || getSimulatedPrice(symbol);
+      Number(body.price) ||
+      Number(body.entryPrice) ||
+      getSimulatedPrice(symbol);
 
     if (!Number.isFinite(price) || price <= 0) {
       price = getSimulatedPrice(symbol);
     }
 
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_price",
-        message: "No se pudo calcular un precio válido",
-      });
-    }
-
     // =========================
-    // EQUITY / FREE MARGIN
+    // 🔥 SALDO REAL DISPONIBLE
     // =========================
     const equity = balanceOwn + credit;
+    const freeMargin = equity - marginUsed;
 
-    // Si ya tienes freeMargin guardado en wallet, úsalo.
-    // Si no, lo calculamos.
-    const computedFreeMargin = Math.max(equity - marginUsed, 0);
-
-    const freeMargin = Math.max(
-      firstFinite(wallet.freeMargin, wallet.availableMargin, computedFreeMargin),
-      0
-    );
+    if (freeMargin <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "no_margin",
+        message: "No tienes margen disponible",
+      });
+    }
 
     const buyingPower = freeMargin * leverage;
 
     // =========================
-    // INPUT: amount o qty
+    // 🔥 QTY DEL USUARIO (NO SE TOCA)
     // =========================
-    const rawAmount =
-      body.amount ??
-      body.notional ??
-      body.orderValue ??
-      body.value ??
-      body.tradeAmount;
+    const qty = normalizeQty(body);
 
-    const rawQty =
-      body.qty ??
-      body.volume ??
-      body.lot ??
-      body.size;
-
-    let qty = null;
-    let requestedNotional = null;
-
-    if (rawAmount !== undefined && rawAmount !== null && rawAmount !== "") {
-      requestedNotional = toNum(rawAmount);
-      if (!Number.isFinite(requestedNotional) || requestedNotional <= 0) {
-        return res.status(400).json({
-          ok: false,
-          error: "invalid_amount",
-          message: "El monto solicitado no es válido",
-        });
-      }
-
-      qty = requestedNotional / price;
-    } else if (rawQty !== undefined && rawQty !== null && rawQty !== "") {
-      qty = toNum(rawQty);
-      if (!Number.isFinite(qty) || qty <= 0) {
-        return res.status(400).json({
-          ok: false,
-          error: "invalid_qty",
-          message: "La cantidad solicitada no es válida",
-        });
-      }
-
-      requestedNotional = qty * price;
-    } else {
+    if (!qty || qty <= 0) {
       return res.status(400).json({
         ok: false,
-        error: "missing_amount_or_qty",
-        message: "Debes enviar amount/notional o qty",
+        error: "invalid_qty",
       });
     }
 
     // =========================
-    // MARGIN NEEDED
+    // 🔥 VALIDACIÓN REAL (CLAVE)
     // =========================
-    const requiredMargin = requestedNotional / leverage;
+    const notional = qty * price;
+    const requiredMargin = notional / leverage;
 
-    // =========================
-    // VALIDACIONES REALES
-    // =========================
-    // Solo bloquea si el monto pedido supera lo que realmente puede usar.
-    if (requiredMargin > freeMargin) {
+    // ❌ SI EXCEDE SALDO O APALANCAMIENTO → NO ABRE
+    if (notional > buyingPower || requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_margin",
-        message: "No tienes margen suficiente para abrir esta operación",
-        balanceOwn,
-        credit,
-        marginUsed,
-        equity,
+        error: "insufficient_funds",
+        message: "No tienes saldo o margen suficiente para esta operación",
+        balance: equity,
         freeMargin,
-        leverage,
-        price,
-        qty,
-        requestedNotional,
-        requiredMargin,
-      });
-    }
-
-    if (requestedNotional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_buying_power",
-        message: "El monto solicitado supera tu poder de compra con apalancamiento",
-        balanceOwn,
-        credit,
-        marginUsed,
-        equity,
-        freeMargin,
-        leverage,
         buyingPower,
-        price,
-        qty,
-        requestedNotional,
         requiredMargin,
+        notional,
       });
     }
 
     // =========================
-    // UPDATE WALLET
+    // 🧾 UPDATE WALLET (SOLO MARGEN)
     // =========================
-    wallet.balanceOwn = balanceOwn;
-    wallet.balance = balanceOwn;
-    wallet.credit = credit;
     wallet.marginUsed = marginUsed + requiredMargin;
+
     wallet.equity = equity;
     wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
-    // CREATE POSITION
+    // POSITION (SIN AUTO CAMBIAR QTY)
     // =========================
     const position = await Position.create({
       user: user._id,
@@ -2050,20 +1937,8 @@ app.post("/api/trade/open", async (req, res) => {
       position,
       wallet: account.wallet,
       account: account.account,
-      debug: {
-        balanceOwn,
-        credit,
-        marginUsed,
-        equity,
-        freeMargin,
-        leverage,
-        price,
-        qty,
-        requestedNotional,
-        requiredMargin,
-        buyingPower,
-      },
     });
+
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
@@ -2072,6 +1947,7 @@ app.post("/api/trade/open", async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
+
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
