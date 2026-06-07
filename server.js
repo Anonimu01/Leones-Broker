@@ -1829,6 +1829,8 @@ app.post("/api/trade/open", async (req, res) => {
     const credit = Number(wallet.credit ?? 0) || 0;
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
+    const equity = balanceOwn + credit;
+
     const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
       Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
@@ -1849,7 +1851,7 @@ app.post("/api/trade/open", async (req, res) => {
     // 🧠 AUTO LOT SYSTEM (NO TOCADO)
     // =========================
 
-    const accountSize = balanceOwn + credit;
+    const accountSize = equity;
 
     const riskPerTrade = accountSize * 0.05;
 
@@ -1869,29 +1871,23 @@ app.post("/api/trade/open", async (req, res) => {
     // RISK CALCULATION REAL
     // =========================
 
-    const equity = balanceOwn + credit;
     const notional = qty * price;
-    const requiredMargin = notional / leverage;
 
-    const availableMargin = equity - marginUsed;
-    const maxExposure = equity * leverage;
-
-    // ======================================================
-    // 🔥 1. BLOQUEO POR EXPOSICIÓN REAL (CRÍTICO)
-    // ======================================================
-    if (notional > maxExposure) {
+    // 🔥 SOLO SALDO REAL (SIN LEVERAGE COMO EXPANSIÓN)
+    if (notional > equity) {
       return res.status(400).json({
         ok: false,
-        error: "exceeds_leverage_exposure",
-        message: "Excede el poder de compra con apalancamiento",
+        error: "insufficient_balance",
+        message: "No puedes abrir la operación porque excede tu saldo disponible",
         notional,
-        maxExposure
+        equity
       });
     }
 
-    // ======================================================
-    // 🔥 2. BLOQUEO POR MARGEN REAL (CRÍTICO)
-    // ======================================================
+    const requiredMargin = notional / leverage;
+
+    const availableMargin = equity - marginUsed;
+
     if (requiredMargin > availableMargin) {
       return res.status(400).json({
         ok: false,
