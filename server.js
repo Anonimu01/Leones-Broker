@@ -1806,15 +1806,15 @@ app.post("/api/trade/open", async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
     const body = req.body || {};
-   const symbol = String(body.symbol || "").trim().toUpperCase();
-   if (!symbol) {
-  return res.status(400).json({
-    ok: false,
-    error: "symbol_required",
-    message: "El símbolo no llegó desde el frontend"
-  });
-}
-    
+    const symbol = String(body.symbol || "").trim().toUpperCase();
+    if (!symbol) {
+      return res.status(400).json({
+        ok: false,
+        error: "symbol_required",
+        message: "El símbolo no llegó desde el frontend"
+      });
+    }
+
     const side = normalizeSide(body.side);
     let qty = normalizeQty(body);
 
@@ -1850,21 +1850,16 @@ app.post("/api/trade/open", async (req, res) => {
 
     const accountSize = balanceOwn + credit;
 
-    // riesgo base por trade (MUY suave, no bloquea)
-    const riskPerTrade = accountSize * 0.05; // 5% realista
+    const riskPerTrade = accountSize * 0.05;
 
-    // margin por 1 unidad
     const marginPerUnit = price / leverage;
 
-    // qty máxima segura automática
     const maxQty = Math.max(riskPerTrade / marginPerUnit, 0.01);
 
-    // 🔥 normalización tipo broker
     if (qty <= 0.05) qty = 0.01;
     else if (qty <= 0.5) qty = 0.1;
     else qty = 1.0;
 
-    // ajuste final si excede capacidad
     if (qty > maxQty) {
       qty = Math.max(0.01, Number(maxQty.toFixed(2)));
     }
@@ -1878,6 +1873,24 @@ app.post("/api/trade/open", async (req, res) => {
 
     const freeMargin = (balanceOwn + credit) - marginUsed;
 
+    // =========================
+    // 🔒 VALIDACIÓN CRÍTICA (BLOQUEA TODO SI NO ALCANZA)
+    // =========================
+
+    const buyingPower = freeMargin * leverage;
+
+    if (requiredMargin > freeMargin && notional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_funds_and_leverage",
+        message: "Ni el saldo ni el apalancamiento son suficientes para abrir esta operación",
+        requiredMargin,
+        freeMargin,
+        buyingPower,
+        notional
+      });
+    }
+
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
@@ -1885,6 +1898,16 @@ app.post("/api/trade/open", async (req, res) => {
         message: "Saldo insuficiente para este lote automático",
         required: requiredMargin,
         available: freeMargin
+      });
+    }
+
+    if (notional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_leverage",
+        message: "El apalancamiento no es suficiente para esta operación",
+        buyingPower,
+        notional
       });
     }
 
