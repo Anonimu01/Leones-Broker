@@ -1819,10 +1819,35 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     const side = normalizeSide(body.side);
-    let qty = normalizeQty(body);
 
-    if (!side || !qty) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+    // =========================================================
+    // IMPORTANTE:
+    // No auto-modificar el tamaño pedido.
+    // Se valida el valor exacto que llega desde el frontend.
+    // =========================================================
+    const rawQty =
+      body.qty ??
+      body.volume ??
+      body.lot ??
+      body.amount ??
+      body.size;
+
+    const qty = Number(rawQty);
+
+    if (!side) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_side",
+        message: "La dirección de la operación no es válida",
+      });
+    }
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_qty",
+        message: "La cantidad solicitada no es válida",
+      });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1856,52 +1881,42 @@ app.post("/api/trade/open", async (req, res) => {
     const freeMargin = Math.max(equity - marginUsed, 0);
 
     // =========================
-    // AUTO LOT SYSTEM
-    // =========================
-    const riskPerTrade = equity * 0.05;
-    const marginPerUnit = price / leverage;
-
-    let maxQty = marginPerUnit > 0 ? riskPerTrade / marginPerUnit : 0.01;
-    maxQty = Math.max(maxQty, 0.01);
-
-    if (qty <= 0.05) qty = 0.01;
-    else if (qty <= 0.5) qty = 0.1;
-    else qty = 1.0;
-
-    if (qty > maxQty) {
-      qty = Number(maxQty.toFixed(2));
-    }
-
-    // =========================
-    // RISK CALCULATION
+    // RISK / LIMITS
     // =========================
     const notional = qty * price;
     const requiredMargin = notional / leverage;
-    const buyingPower = freeMargin * leverage;
+    const maxNotionalAllowed = freeMargin * leverage;
 
-    // =========================
-    // 🔒 VALIDACIÓN REAL (CRÍTICA)
-    // =========================
-
-    // 1. NO hay margen libre suficiente
+    // =========================================================
+    // VALIDACIÓN REAL
+    // Si el monto pedido supera el poder de compra,
+    // NO se abre la operación.
+    // =========================================================
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_margin",
         message: "No tienes margen suficiente para abrir esta operación",
+        requestedQty: qty,
+        price,
+        notional,
         requiredMargin,
         freeMargin,
+        leverage,
       });
     }
 
-    // 2. Apalancamiento no alcanza
-    if (notional > buyingPower) {
+    if (notional > maxNotionalAllowed) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_leverage",
-        message: "El apalancamiento no es suficiente para esta operación",
-        buyingPower,
+        error: "insufficient_buying_power",
+        message: "El monto solicitado supera tu poder de compra",
+        requestedQty: qty,
+        price,
         notional,
+        maxNotionalAllowed,
+        freeMargin,
+        leverage,
       });
     }
 
@@ -1910,9 +1925,10 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     wallet.marginUsed = marginUsed + requiredMargin;
 
+    // No bajamos el saldo manualmente, solo reservamos margen.
+    // Así evitas abrir operaciones con montos que no corresponden.
     wallet.balanceOwn = balanceOwn;
-    wallet.balance = wallet.balanceOwn;
-
+    wallet.balance = balanceOwn;
     wallet.equity = equity;
     wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
@@ -1945,11 +1961,9 @@ app.post("/api/trade/open", async (req, res) => {
       ok: true,
       msg: "OPENED",
       position,
-      autoLot: true,
       wallet: account.wallet,
       account: account.account,
     });
-
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
@@ -1958,7 +1972,6 @@ app.post("/api/trade/open", async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
-
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
