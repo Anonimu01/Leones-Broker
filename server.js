@@ -1829,23 +1829,62 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-    const balanceOwn =
-      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+    const toNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
 
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    const firstFinite = (...values) => {
+      for (const v of values) {
+        const n = toNum(v);
+        if (n !== null) return n;
+      }
+      return 0;
+    };
 
-    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
-    const leverage =
-      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
+    // =========================
+    // SALDO REAL DEL USUARIO
+    // =========================
+    // Toma el primer valor válido entre varios campos posibles.
+    // Así no te falla si tu schema usa otro nombre.
+    const balanceOwn = firstFinite(
+      wallet.balanceOwn,
+      wallet.availableBalance,
+      wallet.balance,
+      wallet.saldo,
+      wallet.cash,
+      user.balance,
+      user.saldo,
+      0
+    );
+
+    const credit = firstFinite(
+      wallet.credit,
+      wallet.creditBalance,
+      wallet.bonus,
+      0
+    );
+
+    const marginUsed = firstFinite(
+      wallet.marginUsed,
+      wallet.usedMargin,
+      0
+    );
+
+    const rawLeverage = firstFinite(
+      wallet.leverageFactor,
+      wallet.leverage,
+      user.leverage,
+      10
+    );
+
+    const leverage = rawLeverage > 0 ? rawLeverage : 10;
 
     // =========================
     // PRICE
     // =========================
     let price =
-      Number(body.price) ||
-      Number(body.entryPrice) ||
-      getSimulatedPrice(symbol);
+      firstFinite(body.price, body.entryPrice, 0) || getSimulatedPrice(symbol);
 
     if (!Number.isFinite(price) || price <= 0) {
       price = getSimulatedPrice(symbol);
@@ -1860,14 +1899,23 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // ACCOUNT
+    // EQUITY / FREE MARGIN
     // =========================
     const equity = balanceOwn + credit;
-    const freeMargin = Math.max(equity - marginUsed, 0);
+
+    // Si ya tienes freeMargin guardado en wallet, úsalo.
+    // Si no, lo calculamos.
+    const computedFreeMargin = Math.max(equity - marginUsed, 0);
+
+    const freeMargin = Math.max(
+      firstFinite(wallet.freeMargin, wallet.availableMargin, computedFreeMargin),
+      0
+    );
+
     const buyingPower = freeMargin * leverage;
 
     // =========================
-    // INPUT AMOUNT / QTY
+    // INPUT: amount o qty
     // =========================
     const rawAmount =
       body.amount ??
@@ -1885,9 +1933,8 @@ app.post("/api/trade/open", async (req, res) => {
     let qty = null;
     let requestedNotional = null;
 
-    // Si el frontend manda amount/notional, se usa como monto total de operación
     if (rawAmount !== undefined && rawAmount !== null && rawAmount !== "") {
-      requestedNotional = Number(rawAmount);
+      requestedNotional = toNum(rawAmount);
       if (!Number.isFinite(requestedNotional) || requestedNotional <= 0) {
         return res.status(400).json({
           ok: false,
@@ -1898,7 +1945,7 @@ app.post("/api/trade/open", async (req, res) => {
 
       qty = requestedNotional / price;
     } else if (rawQty !== undefined && rawQty !== null && rawQty !== "") {
-      qty = Number(rawQty);
+      qty = toNum(rawQty);
       if (!Number.isFinite(qty) || qty <= 0) {
         return res.status(400).json({
           ok: false,
@@ -1917,32 +1964,14 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // MARGIN CALCULATION
+    // MARGIN NEEDED
     // =========================
     const requiredMargin = requestedNotional / leverage;
 
     // =========================
-    // VALIDATION
+    // VALIDACIONES REALES
     // =========================
-    // 1) Si el monto pedido supera el poder de compra, no abre.
-    if (requestedNotional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_buying_power",
-        message: "El monto solicitado supera tu saldo disponible con apalancamiento",
-        balanceOwn,
-        credit,
-        marginUsed,
-        equity,
-        freeMargin,
-        leverage,
-        buyingPower,
-        requestedNotional,
-        requiredMargin,
-      });
-    }
-
-    // 2) Si el margen requerido supera el margen libre, no abre.
+    // Solo bloquea si el monto pedido supera lo que realmente puede usar.
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
@@ -1954,23 +1983,46 @@ app.post("/api/trade/open", async (req, res) => {
         equity,
         freeMargin,
         leverage,
+        price,
+        qty,
+        requestedNotional,
+        requiredMargin,
+      });
+    }
+
+    if (requestedNotional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_buying_power",
+        message: "El monto solicitado supera tu poder de compra con apalancamiento",
+        balanceOwn,
+        credit,
+        marginUsed,
+        equity,
+        freeMargin,
+        leverage,
+        buyingPower,
+        price,
+        qty,
+        requestedNotional,
         requiredMargin,
       });
     }
 
     // =========================
-    // WALLET UPDATE
+    // UPDATE WALLET
     // =========================
-    wallet.marginUsed = marginUsed + requiredMargin;
     wallet.balanceOwn = balanceOwn;
     wallet.balance = balanceOwn;
+    wallet.credit = credit;
+    wallet.marginUsed = marginUsed + requiredMargin;
     wallet.equity = equity;
     wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
-    // POSITION
+    // CREATE POSITION
     // =========================
     const position = await Position.create({
       user: user._id,
