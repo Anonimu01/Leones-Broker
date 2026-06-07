@@ -1825,14 +1825,35 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-    // =========================
-    // 🔥 SALDO REAL (SIN INVENTAR)
-    // =========================
-    const balanceOwn =
-      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
+    // 🚨 DEBUG IMPORTANTE (quítalo después si quieres)
+    console.log("WALLET RAW =>", wallet);
 
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    if (!wallet) {
+      return res.status(400).json({
+        ok: false,
+        error: "wallet_not_found",
+        message: "No se encontró wallet del usuario",
+      });
+    }
+
+    // =========================
+    // 🔥 SALDO REAL (ARREGLADO)
+    // =========================
+    const balanceOwn = Number(wallet.balanceOwn);
+    const balanceFallback = Number(wallet.balance);
+    const userBalanceFallback = Number(user.balance);
+
+    const equity =
+      Number.isFinite(balanceOwn) && balanceOwn > 0
+        ? balanceOwn
+        : Number.isFinite(balanceFallback) && balanceFallback > 0
+        ? balanceFallback
+        : Number.isFinite(userBalanceFallback)
+        ? userBalanceFallback
+        : 0;
+
+    const credit = Number(wallet.credit) || 0;
+    const marginUsed = Number(wallet.marginUsed) || 0;
 
     const leverageRaw = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
@@ -1851,24 +1872,23 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // 🔥 SALDO REAL DISPONIBLE
+    // MARGEN REAL
     // =========================
-    const equity = balanceOwn + credit;
-    const freeMargin = equity - marginUsed;
+    const freeMargin = equity + credit - marginUsed;
 
     if (freeMargin <= 0) {
       return res.status(400).json({
         ok: false,
         error: "no_margin",
         message: "No tienes margen disponible",
+        equity,
+        credit,
+        marginUsed,
       });
     }
 
     const buyingPower = freeMargin * leverage;
 
-    // =========================
-    // 🔥 QTY DEL USUARIO (NO SE TOCA)
-    // =========================
     const qty = normalizeQty(body);
 
     if (!qty || qty <= 0) {
@@ -1879,37 +1899,36 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // 🔥 VALIDACIÓN REAL (CLAVE)
+    // VALIDACIÓN REAL
     // =========================
     const notional = qty * price;
     const requiredMargin = notional / leverage;
 
-    // ❌ SI EXCEDE SALDO O APALANCAMIENTO → NO ABRE
-    if (notional > buyingPower || requiredMargin > freeMargin) {
+    // 🔥 SI EXCEDE → BLOQUEA
+    if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_funds",
-        message: "No tienes saldo o margen suficiente para esta operación",
-        balance: equity,
-        freeMargin,
-        buyingPower,
-        requiredMargin,
-        notional,
+        message: "Saldo insuficiente para abrir la operación",
+        debug: {
+          equity,
+          freeMargin,
+          buyingPower,
+          requiredMargin,
+          notional,
+        },
       });
     }
 
     // =========================
-    // 🧾 UPDATE WALLET (SOLO MARGEN)
+    // UPDATE WALLET
     // =========================
     wallet.marginUsed = marginUsed + requiredMargin;
-
-    wallet.equity = equity;
-    wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
-    // POSITION (SIN AUTO CAMBIAR QTY)
+    // POSITION
     // =========================
     const position = await Position.create({
       user: user._id,
