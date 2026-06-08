@@ -1798,7 +1798,7 @@ app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/trade/open", async (req, res) => { 
+app.post("/api/trade/open", async (req, res) => {  
   let lockKey = null;
 
   try {
@@ -1853,7 +1853,9 @@ app.post("/api/trade/open", async (req, res) => {
     // ACCOUNT + MARGIN
     // =========================
     const equity = balanceOwn + credit;
-    const freeMargin = Math.max(equity - marginUsed, 0);
+
+    // saldo real disponible para validar
+    const availableBalance = equity;
 
     // =========================
     // AUTO LOT SYSTEM
@@ -1877,51 +1879,31 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     const notional = qty * price;
     const requiredMargin = notional / leverage;
-    const buyingPower = freeMargin * leverage;
+    const buyingPower = availableBalance * leverage;
 
     // =========================
-    // 🔒 VALIDACIÓN REAL (MEJORADA SIN ROMPER SISTEMA)
+    // 🔒 VALIDACIÓN REAL
     // =========================
 
-    // 1. Validación de margen (YA EXISTE → se mantiene)
-    if (requiredMargin > freeMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_margin",
-        message: "No tienes margen suficiente para abrir esta operación",
-        requiredMargin,
-        freeMargin,
-      });
-    }
-
-    // 2. VALIDACIÓN EXTRA: saldo real insuficiente (NO romper sistema)
-    const totalBalanceAvailable = balanceOwn + credit;
-
-    if (totalBalanceAvailable <= 0) {
+    // 1. Si no tiene saldo real suficiente, no abre
+    if (requiredMargin > availableBalance) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
-        message: "No tienes saldo disponible",
-      });
-    }
-
-    // 3. VALIDACIÓN DE SEGURIDAD: evitar sobreconsumo del balance real
-    if (requiredMargin > totalBalanceAvailable) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "La operación excede tu saldo disponible",
+        message: "No tienes saldo suficiente para abrir esta operación",
         requiredMargin,
-        totalBalanceAvailable,
+        availableBalance,
       });
     }
 
-    // 4. VALIDACIÓN DE APALANCAMIENTO REAL (sin romper tu lógica actual)
-    if (leverage <= 0 || !Number.isFinite(leverage)) {
+    // 2. Si supera el apalancamiento permitido, no abre
+    if (notional > buyingPower) {
       return res.status(400).json({
         ok: false,
-        error: "invalid_leverage",
-        message: "Apalancamiento inválido",
+        error: "insufficient_leverage",
+        message: "El apalancamiento no es suficiente para esta operación",
+        buyingPower,
+        notional,
       });
     }
 
