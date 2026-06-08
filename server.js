@@ -1803,7 +1803,9 @@ app.post("/api/trade/open", async (req, res) => {
 
   try {
     const user = await getUserDocFromBearer(req);
-    if (!user) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!user) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
     const body = req.body || {};
     const symbol = String(body.symbol || "").trim().toUpperCase();
@@ -1819,19 +1821,22 @@ app.post("/api/trade/open", async (req, res) => {
     const qty = normalizeQty(body);
 
     if (!side || !qty || qty <= 0) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_params",
+      });
     }
 
     // =========================
-    // FRONTEND AMOUNT (NO MODIFICAR)
+    // PRECIO (NO TOCAR)
     // =========================
-    const tradeAmount = Number(body.amount);
+    let price =
+      Number(body.price) ||
+      Number(body.entryPrice) ||
+      getSimulatedPrice(symbol);
 
-    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_amount",
-      });
+    if (!Number.isFinite(price) || price <= 0) {
+      price = getSimulatedPrice(symbol);
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1844,28 +1849,43 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // NORMALIZAR SALDO (EVITA BUGS NaN / string)
+    // SALDO REAL (NO MODIFICAR LÓGICA DE LECTURA)
     // =========================
-    const balanceOwn = Number(wallet.balanceOwn ?? 0);
-    const credit = Number(wallet.credit ?? 0);
+    const balanceOwn =
+      Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
 
-    const availableBalance = balanceOwn + credit;
+    const credit = Number(wallet.credit ?? 0) || 0;
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+
+    const equity = balanceOwn + credit;
 
     // =========================
-    // VALIDACIÓN REAL
+    // MODO SIMPLE: EL FRONTEND MANDA EL RIESGO REAL
     // =========================
-    if (tradeAmount > availableBalance) {
+    const tradeAmount = Number(body.amount);
+
+    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_amount",
+      });
+    }
+
+    // =========================
+    // 🔒 VALIDACIÓN ÚNICA (SIN AUTO AJUSTES)
+    // =========================
+    if (tradeAmount > equity) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
-        message: "Saldo insuficiente",
-        balance: availableBalance,
+        message: "No tienes saldo suficiente",
+        balance: equity,
         required: tradeAmount,
       });
     }
 
     // =========================
-    // DESCUENTO SEGURO
+    // DESCUENTO EXACTO (SIN PARTE, SIN PROPORCIÓN)
     // =========================
     let remaining = tradeAmount;
 
@@ -1886,33 +1906,20 @@ app.post("/api/trade/open", async (req, res) => {
     const newCredit = credit - fromCredit;
 
     // =========================
-    // UPDATE WALLET ATÓMICO
+    // UPDATE WALLET
     // =========================
     wallet.balanceOwn = newBalanceOwn;
+    wallet.balance = newBalanceOwn;
     wallet.credit = newCredit;
 
+    wallet.marginUsed = marginUsed + tradeAmount;
     wallet.equity = newBalanceOwn + newCredit;
-    wallet.freeMargin = Math.max(
-      wallet.equity - Number(wallet.marginUsed || 0),
-      0
-    );
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
-    // PRICE
-    // =========================
-    let price =
-      Number(body.price) ||
-      Number(body.entryPrice) ||
-      getSimulatedPrice(symbol);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      price = getSimulatedPrice(symbol);
-    }
-
-    // =========================
-    // POSITION
+    // POSITION (SIN AUTO LOT)
     // =========================
     const position = await Position.create({
       user: user._id,
