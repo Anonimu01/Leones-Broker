@@ -1853,9 +1853,7 @@ app.post("/api/trade/open", async (req, res) => {
     // ACCOUNT + MARGIN
     // =========================
     const equity = balanceOwn + credit;
-
-    // saldo real disponible para validar
-    const availableBalance = equity;
+    const freeMargin = Math.max(equity - marginUsed, 0);
 
     // =========================
     // AUTO LOT SYSTEM
@@ -1879,24 +1877,24 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     const notional = qty * price;
     const requiredMargin = notional / leverage;
-    const buyingPower = availableBalance * leverage;
+    const buyingPower = freeMargin * leverage;
 
     // =========================
-    // 🔒 VALIDACIÓN REAL
+    // 🔒 VALIDACIÓN REAL (CRÍTICA)
     // =========================
 
-    // 1. Si no tiene saldo real suficiente, no abre
-    if (requiredMargin > availableBalance) {
+    // 1. NO hay margen libre suficiente
+    if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_balance",
-        message: "No tienes saldo suficiente para abrir esta operación",
+        error: "insufficient_margin",
+        message: "No tienes margen suficiente para abrir esta operación",
         requiredMargin,
-        availableBalance,
+        freeMargin,
       });
     }
 
-    // 2. Si supera el apalancamiento permitido, no abre
+    // 2. Apalancamiento no alcanza
     if (notional > buyingPower) {
       return res.status(400).json({
         ok: false,
@@ -1967,7 +1965,7 @@ app.post("/api/trade/open", async (req, res) => {
       releaseActiveOrder(lockKey);
     }
   }
-});
+});   
 /* ======================================================
    ROUTES MODULARES
    ====================================================== */
