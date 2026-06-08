@@ -1812,7 +1812,7 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "symbol_required",
-        message: "El símbolo no llegó desde el frontend"
+        message: "El símbolo no llegó desde el frontend",
       });
     }
 
@@ -1823,13 +1823,24 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
+    // Monto real que el cliente quiere colocar
+    const tradeAmount = Number(body.amount);
+
+    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_amount",
+        message: "El monto de la operación no es válido",
+      });
+    }
+
     const wallet = await getWalletDocForUser(user._id);
 
     if (!wallet) {
       return res.status(400).json({
         ok: false,
         error: "wallet_not_found",
-        message: "No se encontró la billetera del usuario"
+        message: "No se encontró la billetera del usuario",
       });
     }
 
@@ -1837,7 +1848,7 @@ app.post("/api/trade/open", async (req, res) => {
     const credit = Number(wallet.credit ?? 0) || 0;
     const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
 
-    const equity = balanceOwn + credit;
+    const availableBalance = balanceOwn + credit;
 
     const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
@@ -1856,18 +1867,15 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // RIESGO REAL: MONTO EXACTO QUE QUIERE ABRIR EL CLIENTE
+    // VALIDACIÓN POR MONTO REAL
     // =========================
-    const notional = qty * price;
-
-    // Si supera el saldo real total, no abre
-    if (notional > equity) {
+    if (tradeAmount > availableBalance) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
         message: "No cuentas con saldo suficiente para esta operación",
-        balance: equity,
-        required: notional
+        balance: availableBalance,
+        required: tradeAmount,
       });
     }
 
@@ -1875,7 +1883,7 @@ app.post("/api/trade/open", async (req, res) => {
     // DEDUCCIÓN EXACTA DEL MONTO ABIERTO
     // Primero usa balanceOwn, luego crédito si hace falta
     // =========================
-    let remaining = notional;
+    let remaining = tradeAmount;
 
     const useFromBalance = Math.min(balanceOwn, remaining);
     const newBalanceOwn = balanceOwn - useFromBalance;
@@ -1885,14 +1893,13 @@ app.post("/api/trade/open", async (req, res) => {
     const newCredit = credit - useFromCredit;
     remaining -= useFromCredit;
 
-    // Seguridad extra
     if (remaining > 0) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
         message: "No cuentas con saldo suficiente para esta operación",
-        balance: equity,
-        required: notional
+        balance: availableBalance,
+        required: tradeAmount,
       });
     }
 
@@ -1903,7 +1910,7 @@ app.post("/api/trade/open", async (req, res) => {
     wallet.balance = newBalanceOwn;
     wallet.credit = newCredit;
 
-    // No se descuenta por margen, porque aquí el monto real es lo que se reserva
+    // Mantengo el resto de datos sin romper tu sistema
     wallet.marginUsed = marginUsed;
     wallet.equity = wallet.balanceOwn + wallet.credit;
     wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
@@ -1920,7 +1927,7 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: notional, // monto real reservado
+      marginReserved: tradeAmount, // monto real reservado
       leverage,
       status: "OPEN",
       createdAt: new Date(),
@@ -1940,16 +1947,14 @@ app.post("/api/trade/open", async (req, res) => {
       wallet: account.wallet,
       account: account.account,
     });
-
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
     return res.status(500).json({
       ok: false,
       error: "server_error",
-      message: err?.message || "Error interno"
+      message: err?.message || "Error interno",
     });
-
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
