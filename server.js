@@ -1822,7 +1822,10 @@ app.post("/api/trade/open", async (req, res) => {
     let qty = normalizeQty(body);
 
     if (!side || !qty) {
-      return res.status(400).json({ ok: false, error: "invalid_params" });
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_params",
+      });
     }
 
     const wallet = await getWalletDocForUser(user._id);
@@ -1832,9 +1835,7 @@ app.post("/api/trade/open", async (req, res) => {
 
     const credit = Number(wallet.credit ?? 0) || 0;
 
-    // =========================
-    // EQUITY REAL
-    // =========================
+    // Saldo real disponible
     const equity = balanceOwn + credit;
 
     // =========================
@@ -1850,102 +1851,71 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // AUTO LOT SYSTEM
+    // MONTO A ABRIR
     // =========================
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    // Si el frontend manda amount, se usa ese.
+    // Si no manda amount, se toma el margen estimado por qty * price / leverage.
     const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
     const leverage =
       Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
-    const riskPerTrade = equity * 0.05;
-    const marginPerUnit = price / leverage;
-
-    let maxQty = marginPerUnit > 0 ? riskPerTrade / marginPerUnit : 0.01;
-    maxQty = Math.max(maxQty, 0.01);
-
-    if (qty <= 0.05) qty = 0.01;
-    else if (qty <= 0.5) qty = 0.1;
-    else qty = 1.0;
-
-    if (qty > maxQty) {
-      qty = Number(maxQty.toFixed(2));
-    }
-
-    // =========================
-    // RISK CALCULATION
-    // =========================
     const notional = qty * price;
-    const requiredMargin = notional / leverage;
+    const estimatedMargin = notional / leverage;
 
-    const freeMargin = Math.max(equity - marginUsed, 0);
-    const buyingPower = freeMargin * leverage;
+    let tradeAmount = Number(body.amount);
 
-    // =========================
-    // 🔒 VALIDACIÓN MARGEN
-    // =========================
-    if (requiredMargin > freeMargin) {
+    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
+      tradeAmount = Number(estimatedMargin);
+    }
+
+    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_margin",
-        message: "No tienes margen suficiente para abrir esta operación",
-        requiredMargin,
-        freeMargin,
+        error: "invalid_amount",
+        message: "El monto de la operación no es válido",
       });
     }
 
-    if (notional > buyingPower) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_leverage",
-        message: "El apalancamiento no es suficiente para esta operación",
-        buyingPower,
-        notional,
-      });
-    }
-
-    // =========================================================
-    // 💰 LÓGICA CORRECTA: DESCUENTO BALANCE + CRÉDITO
-    // =========================================================
-
-    const tradeAmount = Number(requiredMargin);
-
-    const balanceOwnSafe = balanceOwn;
-    const creditSafe = credit;
-
-    // ❌ si no tiene dinero suficiente
-    if (tradeAmount > balanceOwnSafe + creditSafe) {
+    // =========================
+    // VALIDACIÓN REAL DE SALDO
+    // =========================
+    if (tradeAmount > equity) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
+        message: "No tienes saldo suficiente para abrir esta operación",
+        tradeAmount,
+        equity,
       });
     }
 
-    // ✔️ descuento exacto
+    // =========================
+    // DESCUENTO EXACTO
+    // =========================
     let remaining = tradeAmount;
 
-    const fromBalance = Math.min(balanceOwnSafe, remaining);
+    const fromBalance = Math.min(balanceOwn, remaining);
     remaining -= fromBalance;
 
-    const fromCredit = Math.min(creditSafe, remaining);
+    const fromCredit = Math.min(credit, remaining);
     remaining -= fromCredit;
 
     if (remaining > 0) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
+        message: "No tienes saldo suficiente para abrir esta operación",
       });
     }
 
-    wallet.balanceOwn = balanceOwnSafe - fromBalance;
-    wallet.credit = creditSafe - fromCredit;
+    wallet.balanceOwn = balanceOwn - fromBalance;
+    wallet.credit = credit - fromCredit;
 
-    // =========================
-    // WALLET UPDATE FINAL
-    // =========================
-    wallet.marginUsed = marginUsed + requiredMargin;
+    // Mantén marginUsed solo como registro interno si lo usas en reportes
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    wallet.marginUsed = marginUsed + tradeAmount;
 
     wallet.balance = wallet.balanceOwn;
-
     wallet.equity = wallet.balanceOwn + wallet.credit;
     wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
 
@@ -1961,7 +1931,7 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: requiredMargin,
+      marginReserved: tradeAmount,
       leverage,
       status: "OPEN",
       createdAt: new Date(),
@@ -1982,7 +1952,6 @@ app.post("/api/trade/open", async (req, res) => {
       wallet: account.wallet,
       account: account.account,
     });
-
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
@@ -1991,7 +1960,6 @@ app.post("/api/trade/open", async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
-
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
