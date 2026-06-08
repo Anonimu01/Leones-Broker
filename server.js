@@ -1817,13 +1817,21 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     const side = normalizeSide(body.side);
-    let qty = normalizeQty(body);
+    const qty = normalizeQty(body);
 
-    if (!symbol || !side || !qty) {
+    if (!side || !qty || qty <= 0) {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
     const wallet = await getWalletDocForUser(user._id);
+
+    if (!wallet) {
+      return res.status(400).json({
+        ok: false,
+        error: "wallet_not_found",
+        message: "No se encontró la billetera del usuario"
+      });
+    }
 
     const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
     const credit = Number(wallet.credit ?? 0) || 0;
@@ -1848,73 +1856,63 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // 🧠 AUTO LOT SYSTEM (NO TOCADO)
+    // RIESGO REAL: MONTO EXACTO QUE QUIERE ABRIR EL CLIENTE
     // =========================
-
-    const accountSize = equity;
-
-    const riskPerTrade = accountSize * 0.05;
-
-    const marginPerUnit = price / leverage;
-
-    const maxQty = Math.max(riskPerTrade / marginPerUnit, 0.01);
-
-    if (qty <= 0.05) qty = 0.01;
-    else if (qty <= 0.5) qty = 0.1;
-    else qty = 1.0;
-
-    if (qty > maxQty) {
-      qty = Math.max(0.01, Number(maxQty.toFixed(2)));
-    }
-
-    // =========================
-    // RISK CALCULATION REAL
-    // =========================
-
     const notional = qty * price;
 
-    // 🔥 SOLO SALDO REAL (SIN LEVERAGE COMO EXPANSIÓN)
+    // Si supera el saldo real total, no abre
     if (notional > equity) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
-        message: "No puedes abrir la operación porque excede tu saldo disponible",
-        notional,
-        equity
+        message: "No cuentas con saldo suficiente para esta operación",
+        balance: equity,
+        required: notional
       });
     }
 
-    const requiredMargin = notional / leverage;
+    // =========================
+    // DEDUCCIÓN EXACTA DEL MONTO ABIERTO
+    // Primero usa balanceOwn, luego crédito si hace falta
+    // =========================
+    let remaining = notional;
 
-    const availableMargin = equity - marginUsed;
+    const useFromBalance = Math.min(balanceOwn, remaining);
+    const newBalanceOwn = balanceOwn - useFromBalance;
+    remaining -= useFromBalance;
 
-    if (requiredMargin > availableMargin) {
+    const useFromCredit = Math.min(credit, remaining);
+    const newCredit = credit - useFromCredit;
+    remaining -= useFromCredit;
+
+    // Seguridad extra
+    if (remaining > 0) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_margin",
-        message: "No tienes margen suficiente",
-        requiredMargin,
-        availableMargin
+        error: "insufficient_balance",
+        message: "No cuentas con saldo suficiente para esta operación",
+        balance: equity,
+        required: notional
       });
     }
 
     // =========================
     // WALLET UPDATE
     // =========================
+    wallet.balanceOwn = newBalanceOwn;
+    wallet.balance = newBalanceOwn;
+    wallet.credit = newCredit;
 
-    wallet.balanceOwn = balanceOwn - requiredMargin;
-    wallet.balance = wallet.balanceOwn;
-    wallet.marginUsed = marginUsed + requiredMargin;
-
-    wallet.equity = equity;
-    wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
+    // No se descuenta por margen, porque aquí el monto real es lo que se reserva
+    wallet.marginUsed = marginUsed;
+    wallet.equity = wallet.balanceOwn + wallet.credit;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
     // =========================
     // POSITION
     // =========================
-
     const position = await Position.create({
       user: user._id,
       symbol,
@@ -1922,7 +1920,7 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: requiredMargin,
+      marginReserved: notional, // monto real reservado
       leverage,
       status: "OPEN",
       createdAt: new Date(),
@@ -1939,7 +1937,6 @@ app.post("/api/trade/open", async (req, res) => {
       ok: true,
       msg: "OPENED",
       position,
-      autoLot: true,
       wallet: account.wallet,
       account: account.account,
     });
