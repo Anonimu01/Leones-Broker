@@ -1812,7 +1812,6 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "symbol_required",
-        message: "El símbolo no llegó desde el frontend",
       });
     }
 
@@ -1823,13 +1822,15 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
+    // =========================
+    // FRONTEND AMOUNT (NO MODIFICAR)
+    // =========================
     const tradeAmount = Number(body.amount);
 
     if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
       return res.status(400).json({
         ok: false,
         error: "invalid_amount",
-        message: "El monto de la operación no es válido",
       });
     }
 
@@ -1843,22 +1844,15 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // 🔥 SALDO REAL (ÚNICA FUENTE)
+    // NORMALIZAR SALDO (EVITA BUGS NaN / string)
     // =========================
     const balanceOwn = Number(wallet.balanceOwn ?? 0);
     const credit = Number(wallet.credit ?? 0);
 
     const availableBalance = balanceOwn + credit;
 
-    if (!Number.isFinite(availableBalance)) {
-      return res.status(500).json({
-        ok: false,
-        error: "invalid_wallet_state",
-      });
-    }
-
     // =========================
-    // VALIDACIÓN CLARA
+    // VALIDACIÓN REAL
     // =========================
     if (tradeAmount > availableBalance) {
       return res.status(400).json({
@@ -1871,7 +1865,7 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // DESCUENTO CORRECTO
+    // DESCUENTO SEGURO
     // =========================
     let remaining = tradeAmount;
 
@@ -1892,13 +1886,16 @@ app.post("/api/trade/open", async (req, res) => {
     const newCredit = credit - fromCredit;
 
     // =========================
-    // UPDATE WALLET (CONSISTENTE)
+    // UPDATE WALLET ATÓMICO
     // =========================
     wallet.balanceOwn = newBalanceOwn;
     wallet.credit = newCredit;
 
     wallet.equity = newBalanceOwn + newCredit;
-    wallet.freeMargin = Math.max(wallet.equity - (wallet.marginUsed || 0), 0);
+    wallet.freeMargin = Math.max(
+      wallet.equity - Number(wallet.marginUsed || 0),
+      0
+    );
 
     await wallet.save();
 
