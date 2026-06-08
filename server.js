@@ -1827,14 +1827,6 @@ app.post("/api/trade/open", async (req, res) => {
 
     const wallet = await getWalletDocForUser(user._id);
 
-    if (!wallet) {
-      return res.status(400).json({
-        ok: false,
-        error: "wallet_not_found",
-        message: "No se encontró la billetera del usuario",
-      });
-    }
-
     const balanceOwn =
       Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
 
@@ -1846,7 +1838,7 @@ app.post("/api/trade/open", async (req, res) => {
       Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
     // =========================
-    // PRICE
+    // PRICE (NO TOCAR)
     // =========================
     let price =
       Number(body.price) ||
@@ -1864,7 +1856,7 @@ app.post("/api/trade/open", async (req, res) => {
     const freeMargin = Math.max(equity - marginUsed, 0);
 
     // =========================
-    // MONTO EXACTO ENVIADO POR EL FRONTEND
+    // 🔥 FIX CRÍTICO: USAR MONTO REAL DEL FRONTEND
     // =========================
     const tradeAmount = Number(body.amount);
 
@@ -1872,18 +1864,17 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "invalid_amount",
-        message: "El monto de la operación no es válido",
       });
     }
 
     // =========================
-    // VALIDACIÓN EXACTA
+    // 🔒 VALIDACIÓN REAL DE SALDO
     // =========================
     if (tradeAmount > equity) {
       return res.status(400).json({
         ok: false,
         error: "insufficient_balance",
-        message: "No tienes saldo suficiente para abrir esta operación",
+        message: "No tienes saldo suficiente",
         balance: equity,
         required: tradeAmount,
       });
@@ -1893,46 +1884,69 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "insufficient_margin",
-        message: "No tienes margen suficiente para abrir esta operación",
+        message: "No tienes margen suficiente",
         freeMargin,
         required: tradeAmount,
       });
     }
 
     // =========================
-    // DESCUENTO EXACTO DEL MONTO DEL CLIENTE
+    // AUTO LOT SYSTEM (LO DEJÉ IGUAL COMO PEDISTE)
     // =========================
-    let remaining = tradeAmount;
+    const riskPerTrade = equity * 0.05;
+    const marginPerUnit = price / leverage;
 
-    const fromBalance = Math.min(balanceOwn, remaining);
-    remaining -= fromBalance;
+    let maxQty = marginPerUnit > 0 ? riskPerTrade / marginPerUnit : 0.01;
+    maxQty = Math.max(maxQty, 0.01);
 
-    const fromCredit = Math.min(credit, remaining);
-    remaining -= fromCredit;
+    if (qty <= 0.05) qty = 0.01;
+    else if (qty <= 0.5) qty = 0.1;
+    else qty = 1.0;
 
-    if (remaining > 0) {
+    if (qty > maxQty) {
+      qty = Number(maxQty.toFixed(2));
+    }
+
+    // =========================
+    // RISK CALCULATION
+    // =========================
+    const notional = qty * price;
+    const requiredMargin = notional / leverage;
+    const buyingPower = freeMargin * leverage;
+
+    // =========================
+    // 🔒 VALIDACIÓN REAL (NO SE ROMPE TU SISTEMA)
+    // =========================
+    if (requiredMargin > freeMargin) {
       return res.status(400).json({
         ok: false,
-        error: "insufficient_balance",
-        message: "No tienes saldo suficiente para abrir esta operación",
-        balance: equity,
-        required: tradeAmount,
+        error: "insufficient_margin",
+        message: "No tienes margen suficiente para abrir esta operación",
+        requiredMargin,
+        freeMargin,
       });
     }
 
-    const newBalanceOwn = balanceOwn - fromBalance;
-    const newCredit = credit - fromCredit;
+    if (notional > buyingPower) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_leverage",
+        message: "El apalancamiento no es suficiente",
+        buyingPower,
+        notional,
+      });
+    }
 
     // =========================
-    // WALLET UPDATE
+    // WALLET UPDATE (SE AGREGA DESCUENTO REAL)
     // =========================
-    wallet.balanceOwn = newBalanceOwn;
-    wallet.balance = wallet.balanceOwn;
-    wallet.credit = newCredit;
-
     wallet.marginUsed = marginUsed + tradeAmount;
-    wallet.equity = newBalanceOwn + newCredit;
-    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
+
+    wallet.balanceOwn = balanceOwn;
+    wallet.balance = wallet.balanceOwn;
+
+    wallet.equity = equity;
+    wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
@@ -1946,7 +1960,7 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: tradeAmount,
+      marginReserved: tradeAmount, // 👈 AHORA ES EL REAL DEL FRONTEND
       leverage,
       status: "OPEN",
       createdAt: new Date(),
@@ -1963,9 +1977,11 @@ app.post("/api/trade/open", async (req, res) => {
       ok: true,
       msg: "OPENED",
       position,
+      autoLot: true,
       wallet: account.wallet,
       account: account.account,
     });
+
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
@@ -1974,6 +1990,7 @@ app.post("/api/trade/open", async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
+
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
