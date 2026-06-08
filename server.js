@@ -1831,14 +1831,14 @@ app.post("/api/trade/open", async (req, res) => {
       Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
 
     const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
-
-    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
-    const leverage =
-      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
     // =========================
-    // PRICE (NO TOCAR)
+    // EQUITY REAL
+    // =========================
+    const equity = balanceOwn + credit;
+
+    // =========================
+    // PRICE
     // =========================
     let price =
       Number(body.price) ||
@@ -1850,49 +1850,13 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // ACCOUNT + MARGIN
+    // AUTO LOT SYSTEM
     // =========================
-    const equity = balanceOwn + credit;
-    const freeMargin = Math.max(equity - marginUsed, 0);
+    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
+    const leverage =
+      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
 
-    // =========================
-    // 🔥 FIX CRÍTICO: USAR MONTO REAL DEL FRONTEND
-    // =========================
-    const tradeAmount = Number(body.amount);
-
-    if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "invalid_amount",
-      });
-    }
-
-    // =========================
-    // 🔒 VALIDACIÓN REAL DE SALDO
-    // =========================
-    if (tradeAmount > equity) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "No tienes saldo suficiente",
-        balance: equity,
-        required: tradeAmount,
-      });
-    }
-
-    if (tradeAmount > freeMargin) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_margin",
-        message: "No tienes margen suficiente",
-        freeMargin,
-        required: tradeAmount,
-      });
-    }
-
-    // =========================
-    // AUTO LOT SYSTEM (LO DEJÉ IGUAL COMO PEDISTE)
-    // =========================
     const riskPerTrade = equity * 0.05;
     const marginPerUnit = price / leverage;
 
@@ -1912,10 +1876,12 @@ app.post("/api/trade/open", async (req, res) => {
     // =========================
     const notional = qty * price;
     const requiredMargin = notional / leverage;
+
+    const freeMargin = Math.max(equity - marginUsed, 0);
     const buyingPower = freeMargin * leverage;
 
     // =========================
-    // 🔒 VALIDACIÓN REAL (NO SE ROMPE TU SISTEMA)
+    // 🔒 VALIDACIÓN MARGEN
     // =========================
     if (requiredMargin > freeMargin) {
       return res.status(400).json({
@@ -1931,22 +1897,57 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "insufficient_leverage",
-        message: "El apalancamiento no es suficiente",
+        message: "El apalancamiento no es suficiente para esta operación",
         buyingPower,
         notional,
       });
     }
 
-    // =========================
-    // WALLET UPDATE (SE AGREGA DESCUENTO REAL)
-    // =========================
-    wallet.marginUsed = marginUsed + tradeAmount;
+    // =========================================================
+    // 💰 LÓGICA CORRECTA: DESCUENTO BALANCE + CRÉDITO
+    // =========================================================
 
-    wallet.balanceOwn = balanceOwn;
+    const tradeAmount = Number(requiredMargin);
+
+    const balanceOwnSafe = balanceOwn;
+    const creditSafe = credit;
+
+    // ❌ si no tiene dinero suficiente
+    if (tradeAmount > balanceOwnSafe + creditSafe) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
+      });
+    }
+
+    // ✔️ descuento exacto
+    let remaining = tradeAmount;
+
+    const fromBalance = Math.min(balanceOwnSafe, remaining);
+    remaining -= fromBalance;
+
+    const fromCredit = Math.min(creditSafe, remaining);
+    remaining -= fromCredit;
+
+    if (remaining > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
+      });
+    }
+
+    wallet.balanceOwn = balanceOwnSafe - fromBalance;
+    wallet.credit = creditSafe - fromCredit;
+
+    // =========================
+    // WALLET UPDATE FINAL
+    // =========================
+    wallet.marginUsed = marginUsed + requiredMargin;
+
     wallet.balance = wallet.balanceOwn;
 
-    wallet.equity = equity;
-    wallet.freeMargin = Math.max(equity - wallet.marginUsed, 0);
+    wallet.equity = wallet.balanceOwn + wallet.credit;
+    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
 
     await wallet.save();
 
@@ -1960,7 +1961,7 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: tradeAmount, // 👈 AHORA ES EL REAL DEL FRONTEND
+      marginReserved: requiredMargin,
       leverage,
       status: "OPEN",
       createdAt: new Date(),
