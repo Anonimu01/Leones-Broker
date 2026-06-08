@@ -1823,7 +1823,6 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({ ok: false, error: "invalid_params" });
     }
 
-    // Monto real que el cliente quiere colocar
     const tradeAmount = Number(body.amount);
 
     if (!Number.isFinite(tradeAmount) || tradeAmount <= 0) {
@@ -1840,19 +1839,68 @@ app.post("/api/trade/open", async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: "wallet_not_found",
-        message: "No se encontró la billetera del usuario",
       });
     }
 
-    const balanceOwn = Number(wallet.balanceOwn ?? wallet.balance ?? user.balance ?? 0) || 0;
-    const credit = Number(wallet.credit ?? 0) || 0;
-    const marginUsed = Number(wallet.marginUsed ?? 0) || 0;
+    // =========================
+    // 🔥 SALDO REAL (ÚNICA FUENTE)
+    // =========================
+    const balanceOwn = Number(wallet.balanceOwn ?? 0);
+    const credit = Number(wallet.credit ?? 0);
 
     const availableBalance = balanceOwn + credit;
 
-    const rawLeverage = Number(wallet.leverageFactor ?? user.leverage);
-    const leverage =
-      Number.isFinite(rawLeverage) && rawLeverage > 0 ? rawLeverage : 10;
+    if (!Number.isFinite(availableBalance)) {
+      return res.status(500).json({
+        ok: false,
+        error: "invalid_wallet_state",
+      });
+    }
+
+    // =========================
+    // VALIDACIÓN CLARA
+    // =========================
+    if (tradeAmount > availableBalance) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
+        message: "Saldo insuficiente",
+        balance: availableBalance,
+        required: tradeAmount,
+      });
+    }
+
+    // =========================
+    // DESCUENTO CORRECTO
+    // =========================
+    let remaining = tradeAmount;
+
+    const fromBalance = Math.min(balanceOwn, remaining);
+    remaining -= fromBalance;
+
+    const fromCredit = Math.min(credit, remaining);
+    remaining -= fromCredit;
+
+    if (remaining > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "insufficient_balance",
+      });
+    }
+
+    const newBalanceOwn = balanceOwn - fromBalance;
+    const newCredit = credit - fromCredit;
+
+    // =========================
+    // UPDATE WALLET (CONSISTENTE)
+    // =========================
+    wallet.balanceOwn = newBalanceOwn;
+    wallet.credit = newCredit;
+
+    wallet.equity = newBalanceOwn + newCredit;
+    wallet.freeMargin = Math.max(wallet.equity - (wallet.marginUsed || 0), 0);
+
+    await wallet.save();
 
     // =========================
     // PRICE
@@ -1867,57 +1915,6 @@ app.post("/api/trade/open", async (req, res) => {
     }
 
     // =========================
-    // VALIDACIÓN POR MONTO REAL
-    // =========================
-    if (tradeAmount > availableBalance) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "No cuentas con saldo suficiente para esta operación",
-        balance: availableBalance,
-        required: tradeAmount,
-      });
-    }
-
-    // =========================
-    // DEDUCCIÓN EXACTA DEL MONTO ABIERTO
-    // Primero usa balanceOwn, luego crédito si hace falta
-    // =========================
-    let remaining = tradeAmount;
-
-    const useFromBalance = Math.min(balanceOwn, remaining);
-    const newBalanceOwn = balanceOwn - useFromBalance;
-    remaining -= useFromBalance;
-
-    const useFromCredit = Math.min(credit, remaining);
-    const newCredit = credit - useFromCredit;
-    remaining -= useFromCredit;
-
-    if (remaining > 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "insufficient_balance",
-        message: "No cuentas con saldo suficiente para esta operación",
-        balance: availableBalance,
-        required: tradeAmount,
-      });
-    }
-
-    // =========================
-    // WALLET UPDATE
-    // =========================
-    wallet.balanceOwn = newBalanceOwn;
-    wallet.balance = newBalanceOwn;
-    wallet.credit = newCredit;
-
-    // Mantengo el resto de datos sin romper tu sistema
-    wallet.marginUsed = marginUsed;
-    wallet.equity = wallet.balanceOwn + wallet.credit;
-    wallet.freeMargin = Math.max(wallet.equity - wallet.marginUsed, 0);
-
-    await wallet.save();
-
-    // =========================
     // POSITION
     // =========================
     const position = await Position.create({
@@ -1927,8 +1924,8 @@ app.post("/api/trade/open", async (req, res) => {
       qty,
       entryPrice: price,
       currentPrice: price,
-      marginReserved: tradeAmount, // monto real reservado
-      leverage,
+      marginReserved: tradeAmount,
+      leverage: Number(wallet.leverageFactor || 10),
       status: "OPEN",
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1947,6 +1944,7 @@ app.post("/api/trade/open", async (req, res) => {
       wallet: account.wallet,
       account: account.account,
     });
+
   } catch (err) {
     console.error("/api/trade/open error:", err);
 
@@ -1955,6 +1953,7 @@ app.post("/api/trade/open", async (req, res) => {
       error: "server_error",
       message: err?.message || "Error interno",
     });
+
   } finally {
     if (lockKey) {
       releaseOpenLock(lockKey);
