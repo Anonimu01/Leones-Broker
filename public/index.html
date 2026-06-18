@@ -3437,7 +3437,7 @@ if (resetForm) {
 
   const MARKET_ORDER = ['Forex', 'Crypto', 'Indices', 'Stocks', 'Commodities'];
 
- const MARKET_ICONS = {
+const MARKET_ICONS = {
   Forex: '🌍',
   Crypto: '₿',
   Indices: '📈',
@@ -3446,10 +3446,10 @@ if (resetForm) {
 };
 
 const TARGETS = {
-  Forex: 200,
-  Crypto: 150,
-  Indices: 100,
-  Stocks: 100,
+  Forex: 100,
+  Crypto: 80,
+  Indices: 60,
+  Stocks: 60,
   Commodities: 100
 };
 
@@ -3734,7 +3734,9 @@ const DEFAULT_SYMBOLS = [
 ].filter((item, index, arr) => arr.findIndex(x => x.symbol === item.symbol) === index);
 
 console.log('DEFAULT_SYMBOLS:', DEFAULT_SYMBOLS.length);
-
+if (DEFAULT_SYMBOLS.length !== 400) {
+  console.warn(`⚠️ Se esperaban 400 símbolos y se generaron ${DEFAULT_SYMBOLS.length}`);
+}
   const state = {
     started: false,
     booted: false,
