@@ -3454,7 +3454,6 @@ const TARGETS = {
 };
 
 const uniq = (arr) => [...new Set(arr)];
-
 const padTo = (arr, target, makeExtra) => {
   const out = uniq(arr.slice());
   let i = 1;
@@ -3467,318 +3466,156 @@ const padTo = (arr, target, makeExtra) => {
 };
 
 const makeLabel = (sym) => {
-  if (/^[A-Z]{3,5}USDT$/.test(sym)) return `${sym.replace(/USDT$/, '')}/USDT`;
-  if (/^[A-Z]{3,5}USDC$/.test(sym)) return `${sym.replace(/USDC$/, '')}/USDC`;
-  if (/^[A-Z]{3,5}USD$/.test(sym)) return `${sym.replace(/USD$/, '')}/USD`;
-  if (/^[A-Z]{3,5}BTC$/.test(sym)) return `${sym.replace(/BTC$/, '')}/BTC`;
-  if (/^[A-Z]{3,5}ETH$/.test(sym)) return `${sym.replace(/ETH$/, '')}/ETH`;
-  if (/^[A-Z]{3,6}1!$/.test(sym)) return sym.replace('1!', '');
+  if (/^[A-Z]{6}USDT$/.test(sym)) return `${sym.slice(0, 3)}/USDT`;
+  if (/^[A-Z]{6}USD$/.test(sym)) return `${sym.slice(0, 3)}/USD`;
+  if (/^[A-Z]{6}BTC$/.test(sym)) return `${sym.slice(0, 3)}/BTC`;
+  if (/^[A-Z]{6}ETH$/.test(sym)) return `${sym.slice(0, 3)}/ETH`;
   return sym;
 };
 
-const inferTvSymbol = (market, sym) => {
-  if (sym.includes(':')) return sym;
-
-  if (market === 'Forex') return `OANDA:${sym}`;
-  if (market === 'Crypto') return `BINANCE:${sym}`;
-  if (market === 'Stocks') {
-    if (STOCK_TV_HINTS[sym]) return STOCK_TV_HINTS[sym];
-    if (STOCK_AMEX.has(sym)) return `AMEX:${sym}`;
-    if (STOCK_NYSE.has(sym)) return `NYSE:${sym}`;
-    if (STOCK_NASDAQ.has(sym)) return `NASDAQ:${sym}`;
-    if (STOCK_NYSEARCA.has(sym)) return `NYSEARCA:${sym}`;
-    return `NASDAQ:${sym}`;
-  }
-  if (market === 'Indices') {
-    if (INDEX_TV_HINTS[sym]) return INDEX_TV_HINTS[sym];
-    return `TVC:${sym}`;
-  }
-  if (market === 'Commodities') {
-    if (COMMODITY_TV_HINTS[sym]) return COMMODITY_TV_HINTS[sym];
-    return `TVC:${sym}`;
-  }
-
-  return sym;
-};
-
-const buildSymbolObjects = (market, symbols) =>
+const buildSymbolObjects = (market, symbols, tvHintMap, labelMap) =>
   uniq(symbols).map((sym, idx) => ({
     symbol: sym,
-    tvSymbol: inferTvSymbol(market, sym),
-    label: makeLabel(sym),
+    tvSymbol: tvHintMap[sym] || (
+      market === 'Crypto' ? `BINANCE:${sym}` :
+      market === 'Stocks' ? `NASDAQ:${sym}` :
+      market === 'Indices' ? `TVC:${sym}` :
+      market === 'Commodities' ? `TVC:${sym}` :
+      `OANDA:${sym}`
+    ),
+    label: labelMap[sym] || makeLabel(sym),
     market,
     leverage: 'N/A',
     spread: 'Variable',
     hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
     contract: 'N/A',
     volatility: 'N/A',
-    source: 'TradingView',
+    source: 'catálogo',
     order: idx + 1
   }));
 
-/* ----------------------------- FOREX (100) ----------------------------- */
+const SYMBOL_LABELS = {
+  // Forex
+  EURUSD: 'EUR/USD', GBPUSD: 'GBP/USD', USDJPY: 'USD/JPY', USDCHF: 'USD/CHF', AUDUSD: 'AUD/USD',
+  NZDUSD: 'NZD/USD', USDCAD: 'USD/CAD', EURGBP: 'EUR/GBP', EURJPY: 'EUR/JPY', GBPJPY: 'GBP/JPY',
+  EURAUD: 'EUR/AUD', AUDJPY: 'AUD/JPY', CHFJPY: 'CHF/JPY', CADJPY: 'CAD/JPY', EURCAD: 'EUR/CAD',
+  EURNZD: 'EUR/NZD', GBPCAD: 'GBP/CAD', GBPAUD: 'GBP/AUD', GBPNZD: 'GBP/NZD', NZDJPY: 'NZD/JPY',
+  AUDCAD: 'AUD/CAD', AUDCHF: 'AUD/CHF', AUDNZD: 'AUD/NZD', CADCHF: 'CAD/CHF', EURCHF: 'EUR/CHF',
+  GBPCHF: 'GBP/CHF', NZDCAD: 'NZD/CAD', NZDCHF: 'NZD/CHF', USDNOK: 'USD/NOK', USDSEK: 'USD/SEK',
+  USDSGD: 'USD/SGD', USDHKD: 'USD/HKD', USDMXN: 'USD/MXN', USDZAR: 'USD/ZAR', USDTRY: 'USD/TRY',
+  USDCNH: 'USD/CNH', EURSEK: 'EUR/SEK', EURNOK: 'EUR/NOK', EURSGD: 'EUR/SGD',
 
-const FX_MAJOR = [
-  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD',
-  'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CHFJPY', 'EURAUD', 'EURCAD',
-  'EURNZD', 'GBPCAD', 'GBPAUD', 'GBPNZD', 'NZDJPY', 'AUDCAD', 'AUDCHF',
-  'AUDNZD', 'CADCHF', 'EURCHF', 'GBPCHF', 'NZDCAD', 'NZDCHF', 'USDNOK',
-  'USDSEK', 'USDSGD', 'USDHKD', 'USDMXN', 'USDZAR', 'USDTRY', 'USDCNH',
-  'EURSEK', 'EURNOK', 'EURSGD', 'EURDKK', 'USDPLN', 'USDCZK', 'USDHUF',
-  'USDILS', 'USDTHB', 'USDINR', 'USDBRL', 'USDCOP', 'USDCLP', 'USDPEN',
-  'USDKRW', 'USDTWD', 'USDIDR', 'USDPHP', 'USDVND', 'EURPLN', 'EURCZK',
-  'EURHUF', 'EURTRY', 'EURZAR', 'GBPLN', 'GBPCZK', 'GBPHUF', 'AUDSGD',
-  'CADJPY', 'CHFSGD', 'SGDJPY', 'HKDJPY', 'MXNJPY', 'ZARJPY', 'TRYJPY',
-  'CNHJPY', 'PLNJPY', 'CZKJPY', 'HUFJPY', 'DKKJPY'
-];
+  // Crypto
+  BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT', SOLUSDT: 'SOL/USDT', XRPUSDT: 'XRP/USDT',
+  ADAUSDT: 'ADA/USDT', DOGEUSDT: 'DOGE/USDT', DOTUSDT: 'DOT/USDT', LTCUSDT: 'LTC/USDT', LINKUSDT: 'LINK/USDT',
+  BCHUSDT: 'BCH/USDT', AVAXUSDT: 'AVAX/USDT', TRXUSDT: 'TRX/USDT', TONUSDT: 'TON/USDT', SHIBUSDT: 'SHIB/USDT',
+  SUIUSDT: 'SUI/USDT', PEPEUSDT: 'PEPE/USDT', APTUSDT: 'APT/USDT', ARBUSDT: 'ARB/USDT', OPUSDT: 'OP/USDT',
+  NEARUSDT: 'NEAR/USDT', ATOMUSDT: 'ATOM/USDT', FILUSDT: 'FIL/USDT', ETCUSDT: 'ETC/USDT', UNIUSDT: 'UNI/USDT',
+  AAVEUSDT: 'AAVE/USDT', MATICUSDT: 'MATIC/USDT', HBARUSDT: 'HBAR/USDT', ICPUSDT: 'ICP/USDT', INJUSDT: 'INJ/USDT',
+  VETUSDT: 'VET/USDT', ALGOUSDT: 'ALGO/USDT', SANDUSDT: 'SAND/USDT', MANAUSDT: 'MANA/USDT', GRTUSDT: 'GRT/USDT',
+  FETUSDT: 'FET/USDT', EGLDUSDT: 'EGLD/USDT', RUNEUSDT: 'RUNE/USDT', KASUSDT: 'KAS/USDT', WIFUSDT: 'WIF/USDT',
+  ONDOUSDT: 'ONDO/USDT', JUPUSDT: 'JUP/USDT', TIAUSDT: 'TIA/USDT', PYTHUSDT: 'PYTH/USDT', ENSUSDT: 'ENS/USDT',
+  LDOUSDT: 'LDO/USDT', SEIUSDT: 'SEI/USDT', TAOUSDT: 'TAO/USDT', RENDERUSDT: 'RENDER/USDT', NEOUSDT: 'NEO/USDT',
 
-const FX_CURRENCIES = [
-  'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD', 'NOK', 'SEK',
-  'SGD', 'HKD', 'MXN', 'ZAR', 'TRY', 'CNH', 'PLN', 'CZK', 'HUF', 'DKK'
-];
+  // Índices
+  SPX500: 'S&P 500', NAS100: 'NASDAQ 100', US30: 'US30', UK100: 'FTSE 100', GER40: 'DAX 40',
+  FRA40: 'CAC 40', JPN225: 'Nikkei 225', AUS200: 'ASX 200', HK50: 'Hang Seng', NDX100: 'NASDAQ 100',
+  RUS2000: 'Russell 2000', VIX: 'VIX', EU50: 'Euro Stoxx 50', ESP35: 'IBEX 35', ITA40: 'FTSE MIB',
+  SWI20: 'SMI 20', NETH25: 'AEX 25', BEL20: 'BEL 20', KOSPI: 'KOSPI', NIFTY50: 'Nifty 50',
+  BSESN: 'BSE Sensex', CHN50: 'China 50', TSX60: 'TSX 60', MEXBOL: 'IPC Mexico', BRA50: 'Brazil 50',
+  STI30: 'Singapore STI', SA40: 'South Africa 40', TA35: 'TA 35', MOEX: 'MOEX',
+  CAC40: 'CAC 40', DAX40: 'DAX 40', FTSEMIB: 'FTSE MIB', AEX25: 'AEX 25', OMXS30: 'OMX S30',
+  OMXC25: 'OMXC 25', OMXH25: 'OMXH 25', OMXI30: 'OMXI 30', PSI20: 'PSI 20', PX50: 'PX 50',
+  WIG20: 'WIG 20', BUX: 'BUX', ATX: 'ATX', RTSI: 'RTS Index', BIST100: 'BIST 100',
+  SET50: 'SET 50', PSEI: 'PSEi', JCI: 'JCI', VN30: 'VN30', TAIEX: 'TAIEX',
+  TWSE: 'TWSE', SHCOMP: 'Shanghai Composite', SZSE: 'Shenzhen Component', KLCI: 'KLCI',
+  STI: 'Singapore STI', NZX50: 'NZX 50', NIKKEI: 'Nikkei', HSI2: 'Hang Seng',
 
-const FX_GENERATED = (() => {
-  const pairs = [];
-  for (let i = 0; i < FX_CURRENCIES.length; i++) {
-    for (let j = 0; j < FX_CURRENCIES.length; j++) {
-      if (i === j) continue;
-      pairs.push(`${FX_CURRENCIES[i]}${FX_CURRENCIES[j]}`);
-    }
-  }
-  return pairs;
-})();
+  // Stocks
+  AAPL: 'Apple', MSFT: 'Microsoft', AMZN: 'Amazon', TSLA: 'Tesla', NVDA: 'NVIDIA', META: 'Meta',
+  GOOGL: 'Alphabet', NFLX: 'Netflix', AMD: 'AMD', PYPL: 'PayPal', INTC: 'Intel', DIS: 'Disney',
+  BA: 'Boeing', KO: 'Coca-Cola', MCD: 'McDonald’s', XOM: 'Exxon Mobil', JPM: 'JPMorgan Chase',
+  BAC: 'Bank of America', ORCL: 'Oracle', CRM: 'Salesforce', PLTR: 'Palantir', UBER: 'Uber',
+  COIN: 'Coinbase', RBLX: 'Roblox', SNOW: 'Snowflake', SHOP: 'Shopify', NIO: 'NIO', BABA: 'Alibaba',
+  PFE: 'Pfizer', WMT: 'Walmart', COST: 'Costco', QCOM: 'Qualcomm', ADBE: 'Adobe', CSCO: 'Cisco',
+  IBM: 'IBM', TSM: 'TSMC', ASML: 'ASML', MU: 'Micron', PANW: 'Palo Alto', ABNB: 'Airbnb', ARM: 'Arm',
+  SPY: 'SPDR S&P 500 ETF', QQQ: 'Invesco QQQ', IWM: 'iShares Russell 2000', DIA: 'SPDR Dow Jones',
+  VOO: 'Vanguard S&P 500', VTI: 'Vanguard Total Market', XLF: 'Financial Select Sector', XLK: 'Technology Select Sector',
+  XLE: 'Energy Select Sector', XLV: 'Health Care Select Sector', XLY: 'Consumer Discretionary Select Sector',
+  XLP: 'Consumer Staples Select Sector', XLI: 'Industrials Select Sector', XLB: 'Materials Select Sector',
+  XLC: 'Communication Services Select Sector', SMH: 'VanEck Semiconductor', SOXX: 'iShares Semiconductor',
+  ARKK: 'ARK Innovation', TQQQ: 'ProShares UltraPro QQQ', SQQQ: 'ProShares UltraShort QQQ',
+  UPRO: 'ProShares UltraPro S&P 500', SPXL: 'Direxion Daily S&P 500 Bull', GLD: 'SPDR Gold Shares',
+  SLV: 'iShares Silver Trust', USO: 'United States Oil Fund', UNG: 'United States Natural Gas Fund',
+  TLT: 'iShares 20+ Year Treasury', HYG: 'iShares High Yield', LQD: 'iShares Investment Grade',
+  EEM: 'iShares Emerging Markets', FXI: 'iShares China Large-Cap', EWZ: 'iShares Brazil',
+  EWG: 'iShares Germany', EWJ: 'iShares Japan', EFA: 'iShares EAFE', VNQ: 'Vanguard Real Estate',
+  IEMG: 'iShares Core EM', VT: 'Vanguard Total World', SCHD: 'Schwab Dividend Equity', VYM: 'Vanguard High Dividend',
+  JEPI: 'JPMorgan Equity Premium Income', JEPQ: 'JPMorgan Nasdaq Equity Premium', SCHG: 'Schwab Growth',
+  IJR: 'iShares Core S&P Small-Cap', QYLD: 'Global X Nasdaq 100 Covered Call', NVDL: 'GraniteShares 2x NVDA'
+};
 
-const FX_SYMBOLS = uniq([...FX_MAJOR, ...FX_GENERATED]).slice(0, TARGETS.Forex);
+const TV_HINTS = {
+  // Forex
+  EURUSD: 'OANDA:EURUSD', GBPUSD: 'OANDA:GBPUSD', USDJPY: 'OANDA:USDJPY', USDCHF: 'OANDA:USDCHF',
+  AUDUSD: 'OANDA:AUDUSD', NZDUSD: 'OANDA:NZDUSD', USDCAD: 'OANDA:USDCAD', EURGBP: 'OANDA:EURGBP',
+  EURJPY: 'OANDA:EURJPY', GBPJPY: 'OANDA:GBPJPY', EURAUD: 'OANDA:EURAUD', AUDJPY: 'OANDA:AUDJPY',
+  CHFJPY: 'OANDA:CHFJPY', CADJPY: 'OANDA:CADJPY', EURCAD: 'OANDA:EURCAD', EURNZD: 'OANDA:EURNZD',
+  GBPCAD: 'OANDA:GBPCAD', GBPAUD: 'OANDA:GBPAUD', GBPNZD: 'OANDA:GBPNZD', NZDJPY: 'OANDA:NZDJPY',
+  AUDCAD: 'OANDA:AUDCAD', AUDCHF: 'OANDA:AUDCHF', AUDNZD: 'OANDA:AUDNZD', CADCHF: 'OANDA:CADCHF',
+  EURCHF: 'OANDA:EURCHF', GBPCHF: 'OANDA:GBPCHF', NZDCAD: 'OANDA:NZDCAD', NZDCHF: 'OANDA:NZDCHF',
+  USDNOK: 'OANDA:USDNOK', USDSEK: 'OANDA:USDSEK', USDSGD: 'OANDA:USDSGD', USDHKD: 'OANDA:USDHKD',
+  USDMXN: 'OANDA:USDMXN', USDZAR: 'OANDA:USDZAR', USDTRY: 'OANDA:USDTRY', USDCNH: 'OANDA:USDCNH',
+  EURSEK: 'OANDA:EURSEK', EURNOK: 'OANDA:EURNOK', EURSGD: 'OANDA:EURSGD',
 
-/* ----------------------------- CRYPTO (80) ----------------------------- */
+  // Crypto
+  BTCUSDT: 'BINANCE:BTCUSDT', ETHUSDT: 'BINANCE:ETHUSDT', BNBUSDT: 'BINANCE:BNBUSDT', SOLUSDT: 'BINANCE:SOLUSDT',
+  XRPUSDT: 'BINANCE:XRPUSDT', ADAUSDT: 'BINANCE:ADAUSDT', DOGEUSDT: 'BINANCE:DOGEUSDT', DOTUSDT: 'BINANCE:DOTUSDT',
+  LTCUSDT: 'BINANCE:LTCUSDT', LINKUSDT: 'BINANCE:LINKUSDT', BCHUSDT: 'BINANCE:BCHUSDT', AVAXUSDT: 'BINANCE:AVAXUSDT',
+  TRXUSDT: 'BINANCE:TRXUSDT', TONUSDT: 'BINANCE:TONUSDT', SHIBUSDT: 'BINANCE:SHIBUSDT', SUIUSDT: 'BINANCE:SUIUSDT',
+  PEPEUSDT: 'BINANCE:PEPEUSDT', APTUSDT: 'BINANCE:APTUSDT', ARBUSDT: 'BINANCE:ARBUSDT', OPUSDT: 'BINANCE:OPUSDT',
+  NEARUSDT: 'BINANCE:NEARUSDT', ATOMUSDT: 'BINANCE:ATOMUSDT', FILUSDT: 'BINANCE:FILUSDT', ETCUSDT: 'BINANCE:ETCUSDT',
+  UNIUSDT: 'BINANCE:UNIUSDT', AAVEUSDT: 'BINANCE:AAVEUSDT', MATICUSDT: 'BINANCE:MATICUSDT', HBARUSDT: 'BINANCE:HBARUSDT',
+  ICPUSDT: 'BINANCE:ICPUSDT', INJUSDT: 'BINANCE:INJUSDT', VETUSDT: 'BINANCE:VETUSDT', ALGOUSDT: 'BINANCE:ALGOUSDT',
+  SANDUSDT: 'BINANCE:SANDUSDT', MANAUSDT: 'BINANCE:MANAUSDT', GRTUSDT: 'BINANCE:GRTUSDT', FETUSDT: 'BINANCE:FETUSDT',
+  EGLDUSDT: 'BINANCE:EGLDUSDT', RUNEUSDT: 'BINANCE:RUNEUSDT', KASUSDT: 'BINANCE:KASUSDT', WIFUSDT: 'BINANCE:WIFUSDT',
+  ONDOUSDT: 'BINANCE:ONDOUSDT', JUPUSDT: 'BINANCE:JUPUSDT', TIAUSDT: 'BINANCE:TIAUSDT', PYTHUSDT: 'BINANCE:PYTHUSDT',
+  ENSUSDT: 'BINANCE:ENSUSDT', LDOUSDT: 'BINANCE:LDOUSDT', SEIUSDT: 'BINANCE:SEIUSDT', TAOUSDT: 'BINANCE:TAOUSDT',
+  RENDERUSDT: 'BINANCE:RENDERUSDT', NEOUSDT: 'BINANCE:NEOUSDT',
 
-const CRYPTO_BASES = [
-  'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'LTC', 'LINK',
-  'BCH', 'AVAX', 'TRX', 'TON', 'SHIB', 'SUI', 'PEPE', 'APT', 'ARB', 'OP',
-  'NEAR', 'ATOM', 'FIL', 'ETC', 'UNI', 'AAVE', 'MATIC', 'HBAR', 'ICP', 'INJ',
-  'VET', 'ALGO', 'SAND', 'MANA', 'GRT', 'FET', 'EGLD', 'RUNE', 'KAS', 'WIF',
-  'ONDO', 'JUP', 'TIA', 'PYTH', 'ENS', 'LDO', 'SEI', 'TAO', 'RENDER', 'NEO',
-  'XLM', 'EOS', 'AXS', 'IMX', 'THETA', 'QNT', 'FLOW', 'LUNC', 'LUNA', 'CFX',
-  'XEC', 'RAY', 'BONK', 'TIA', 'JTO', 'WLD', 'SFP', 'CFX', 'BOME', 'PENDLE'
-];
+  // Índices
+  SPX500: 'SP:SPX', NAS100: 'NASDAQ:NDX', US30: 'DJ:DJI', UK100: 'TVC:UKX', GER40: 'XETR:DAX',
+  FRA40: 'Euronext:PX1', JPN225: 'TVC:NI225', AUS200: 'ASX:XJO', HK50: 'HSI:HSI', NDX100: 'NASDAQ:NDX',
+  RUS2000: 'TVC:RUT', VIX: 'CBOE:VIX', EU50: 'STOXX:SX5E', ESP35: 'BME:IBEX', ITA40: 'FTSEMIB:FTSEMIB',
+  SWI20: 'SIX:SMI', NETH25: 'TVC:AEX', BEL20: 'TVC:BEL20', KOSPI: 'KRX:KOSPI', NIFTY50: 'NSE:NIFTY',
+  BSESN: 'BSE:SENSEX', CHN50: 'TVC:CHN50', TSX60: 'TVC:TSX60', MEXBOL: 'BMV:IPC', BRA50: 'BMFBOVESPA:IBOV',
+  STI30: 'TVC:STI', SA40: 'TVC:SA40', TA35: 'TASE:TA35', MOEX: 'MOEX:IMOEX',
+  CAC40: 'Euronext:PX1', DAX40: 'XETR:DAX', FTSEMIB: 'FTSEMIB:FTSEMIB', AEX25: 'TVC:AEX', OMXS30: 'OMXSTO:OMXS30',
+  OMXC25: 'OMXC25:OMXC25', OMXH25: 'OMXH25:OMXH25', OMXI30: 'OMXI30:OMXI30', PSI20: 'PSI20:PSI20',
+  PX50: 'PX50:PX50', WIG20: 'WSE:WIG20', BUX: 'BUX:BUX', ATX: 'VIE:ATX', RTSI: 'MOEX:RTSI',
+  BIST100: 'BIST:BIST100', SET50: 'SET:SET50', PSEI: 'PSEI:PSEI', JCI: 'JCI:JCI', VN30: 'HOSE:VN30',
+  TAIEX: 'TWSE:TAIEX', TWSE: 'TWSE:TWSE', SHCOMP: 'SSE:000001', SZSE: 'SZSE:399001', KLCI: 'MYX:KLCI',
+  NZX50: 'NZX:NZ50', SSEC: 'SSE:000001', HSI2: 'HSI:HSI',
 
-const CRYPTO_SYMBOLS = uniq(CRYPTO_BASES.map((b) => `${b}USDT`)).slice(0, TARGETS.Crypto);
+  // Stocks
+  AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', AMZN: 'NASDAQ:AMZN', TSLA: 'NASDAQ:TSLA', NVDA: 'NASDAQ:NVDA',
+  META: 'NASDAQ:META', GOOGL: 'NASDAQ:GOOGL', NFLX: 'NASDAQ:NFLX', AMD: 'NASDAQ:AMD', PYPL: 'NASDAQ:PYPL',
+  INTC: 'NASDAQ:INTC', DIS: 'NYSE:DIS', BA: 'NYSE:BA', KO: 'NYSE:KO', MCD: 'NYSE:MCD', XOM: 'NYSE:XOM',
+  JPM: 'NYSE:JPM', BAC: 'NYSE:BAC', ORCL: 'NYSE:ORCL', CRM: 'NYSE:CRM', PLTR: 'NYSE:PLTR', UBER: 'NYSE:UBER',
+  COIN: 'NASDAQ:COIN', RBLX: 'NYSE:RBLX', SNOW: 'NYSE:SNOW', SHOP: 'NYSE:SHOP', NIO: 'NYSE:NIO', BABA: 'NYSE:BABA',
+  PFE: 'NYSE:PFE', WMT: 'NYSE:WMT', COST: 'NASDAQ:COST', QCOM: 'NASDAQ:QCOM', ADBE: 'NASDAQ:ADBE', CSCO: 'NASDAQ:CSCO',
+  IBM: 'NYSE:IBM', TSM: 'NYSE:TSM', ASML: 'NASDAQ:ASML', MU: 'NASDAQ:MU', PANW: 'NASDAQ:PANW', ABNB: 'NASDAQ:ABNB',
+  ARM: 'NASDAQ:ARM', SPY: 'AMEX:SPY', QQQ: 'NASDAQ:QQQ', IWM: 'AMEX:IWM', DIA: 'AMEX:DIA', VOO: 'AMEX:VOO',
+  VTI: 'AMEX:VTI', XLF: 'AMEX:XLF', XLK: 'AMEX:XLK', XLE: 'AMEX:XLE', XLV: 'AMEX:XLV', XLY: 'AMEX:XLY',
+  XLP: 'AMEX:XLP', XLI: 'AMEX:XLI', XLB: 'AMEX:XLB', XLC: 'AMEX:XLC', SMH: 'NASDAQ:SMH', SOXX: 'NASDAQ:SOXX',
+  ARKK: 'AMEX:ARKK', TQQQ: 'NASDAQ:TQQQ', SQQQ: 'NASDAQ:SQQQ', UPRO: 'AMEX:UPRO', SPXL: 'AMEX:SPXL',
+  GLD: 'AMEX:GLD', SLV: 'AMEX:SLV', USO: 'AMEX:USO', UNG: 'AMEX:UNG', TLT: 'NASDAQ:TLT', HYG: 'AMEX:HYG',
+  LQD: 'AMEX:LQD', EEM: 'AMEX:EEM', FXI: 'NYSEARCA:FXI', EWZ: 'NYSEARCA:EWZ', EWG: 'NYSEARCA:EWG',
+  EWJ: 'NYSEARCA:EWJ', EFA: 'NYSEARCA:EFA', VNQ: 'NYSEARCA:VNQ', IEMG: 'NYSEARCA:IEMG', VT: 'NYSEARCA:VT',
+  SCHD: 'NYSEARCA:SCHD', VYM: 'NYSEARCA:VYM', JEPI: 'NYSEARCA:JEPI', JEPQ: 'NASDAQ:JEPQ', SCHG: 'NYSEARCA:SCHG',
+  IJR: 'NYSEARCA:IJR', QYLD: 'NASDAQ:QYLD', NVDL: 'NASDAQ:NVDL',
 
-/* ----------------------------- INDICES (60) ---------------------------- */
-
-const INDEX_ROWS = [
-  ['SPX500', 'SP:SPX', 'SPX 500'],
-  ['NAS100', 'NASDAQ:NDX', 'NASDAQ 100'],
-  ['US30', 'DJ:DJI', 'US 30'],
-  ['UK100', 'TVC:UKX', 'FTSE 100'],
-  ['GER40', 'XETR:DAX', 'DAX 40'],
-  ['FRA40', 'Euronext:PX1', 'CAC 40'],
-  ['JPN225', 'TVC:NI225', 'Nikkei 225'],
-  ['AUS200', 'ASX:XJO', 'ASX 200'],
-  ['HK50', 'HSI:HSI', 'Hang Seng'],
-  ['RUS2000', 'TVC:RUT', 'Russell 2000'],
-  ['VIX', 'CBOE:VIX', 'VIX'],
-  ['EU50', 'STOXX:SX5E', 'Euro Stoxx 50'],
-  ['ESP35', 'BME:IBEX', 'IBEX 35'],
-  ['ITA40', 'FTSEMIB:FTSEMIB', 'FTSE MIB'],
-  ['SWI20', 'SIX:SMI', 'SMI 20'],
-  ['NETH25', 'TVC:AEX', 'AEX 25'],
-  ['BEL20', 'TVC:BEL20', 'BEL 20'],
-  ['KOSPI', 'KRX:KOSPI', 'KOSPI'],
-  ['NIFTY50', 'NSE:NIFTY', 'Nifty 50'],
-  ['BSESN', 'BSE:SENSEX', 'Sensex'],
-  ['CHN50', 'TVC:CHN50', 'China 50'],
-  ['TSX60', 'TVC:TSX60', 'TSX 60'],
-  ['MEXBOL', 'BMV:IPC', 'IPC Mexico'],
-  ['BRA50', 'BMFBOVESPA:IBOV', 'Brazil 50'],
-  ['STI30', 'TVC:STI', 'Singapore STI'],
-  ['SA40', 'TVC:SA40', 'South Africa 40'],
-  ['TA35', 'TASE:TA35', 'TA 35'],
-  ['MOEX', 'MOEX:IMOEX', 'MOEX'],
-  ['CAC40', 'Euronext:PX1', 'CAC 40'],
-  ['DAX40', 'XETR:DAX', 'DAX 40'],
-  ['FTSEMIB', 'FTSEMIB:FTSEMIB', 'FTSE MIB'],
-  ['AEX25', 'TVC:AEX', 'AEX 25'],
-  ['OMXS30', 'OMXSTO:OMXS30', 'OMX S30'],
-  ['OMXC25', 'OMXC25:OMXC25', 'OMXC 25'],
-  ['OMXH25', 'OMXH25:OMXH25', 'OMXH 25'],
-  ['OMXI30', 'OMXI30:OMXI30', 'OMXI 30'],
-  ['PSI20', 'PSI20:PSI20', 'PSI 20'],
-  ['PX50', 'PX50:PX50', 'PX 50'],
-  ['WIG20', 'WSE:WIG20', 'WIG 20'],
-  ['BUX', 'BUX:BUX', 'BUX'],
-  ['ATX', 'VIE:ATX', 'ATX'],
-  ['RTSI', 'MOEX:RTSI', 'RTSI'],
-  ['BIST100', 'BIST:BIST100', 'BIST 100'],
-  ['SET50', 'SET:SET50', 'SET 50'],
-  ['PSEI', 'PSEI:PSEI', 'PSEi'],
-  ['JCI', 'JCI:JCI', 'JCI'],
-  ['VN30', 'HOSE:VN30', 'VN30'],
-  ['TAIEX', 'TWSE:TAIEX', 'TAIEX'],
-  ['TWSE', 'TWSE:TWSE', 'TWSE'],
-  ['SHCOMP', 'SSE:000001', 'Shanghai Composite'],
-  ['SZSE', 'SZSE:399001', 'Shenzhen Component'],
-  ['KLCI', 'MYX:KLCI', 'KLCI'],
-  ['NZX50', 'NZX:NZ50', 'NZX 50'],
-  ['HSI2', 'HSI:HSI', 'Hang Seng 2'],
-  ['SSEC', 'SSE:000001', 'SSE Composite'],
-  ['KSE100', 'KSE:KSE100', 'KSE 100'],
-  ['EGX30', 'EGX:EGX30', 'EGX 30'],
-  ['TASI', 'TADAWUL:TASI', 'TASI'],
-  ['ADX', 'ADX:ADI', 'ADX'],
-  ['DFMGI', 'DFM:DFMGI', 'DFM General']
-];
-
-const INDEX_ROWS_UNIQ = uniq(INDEX_ROWS.map(([symbol, tvSymbol, label]) => `${symbol}|${tvSymbol}|${label}`))
-  .map((row) => {
-    const [symbol, tvSymbol, label] = row.split('|');
-    return { symbol, tvSymbol, label };
-  })
-  .slice(0, TARGETS.Indices);
-
-const INDEX_TV_HINTS = Object.fromEntries(INDEX_ROWS_UNIQ.map((r) => [r.symbol, r.tvSymbol]));
-
-/* ----------------------------- STOCKS (60) ----------------------------- */
-
-const STOCK_ROWS = [
-  ['AAPL', 'NASDAQ:AAPL', 'Apple'],
-  ['MSFT', 'NASDAQ:MSFT', 'Microsoft'],
-  ['AMZN', 'NASDAQ:AMZN', 'Amazon'],
-  ['TSLA', 'NASDAQ:TSLA', 'Tesla'],
-  ['NVDA', 'NASDAQ:NVDA', 'NVIDIA'],
-  ['META', 'NASDAQ:META', 'Meta'],
-  ['GOOGL', 'NASDAQ:GOOGL', 'Alphabet'],
-  ['NFLX', 'NASDAQ:NFLX', 'Netflix'],
-  ['AMD', 'NASDAQ:AMD', 'AMD'],
-  ['PYPL', 'NASDAQ:PYPL', 'PayPal'],
-  ['INTC', 'NASDAQ:INTC', 'Intel'],
-  ['DIS', 'NYSE:DIS', 'Disney'],
-  ['BA', 'NYSE:BA', 'Boeing'],
-  ['KO', 'NYSE:KO', 'Coca-Cola'],
-  ['MCD', 'NYSE:MCD', 'McDonald’s'],
-  ['XOM', 'NYSE:XOM', 'Exxon Mobil'],
-  ['JPM', 'NYSE:JPM', 'JPMorgan'],
-  ['BAC', 'NYSE:BAC', 'Bank of America'],
-  ['ORCL', 'NYSE:ORCL', 'Oracle'],
-  ['CRM', 'NYSE:CRM', 'Salesforce'],
-  ['PLTR', 'NYSE:PLTR', 'Palantir'],
-  ['UBER', 'NYSE:UBER', 'Uber'],
-  ['COIN', 'NASDAQ:COIN', 'Coinbase'],
-  ['RBLX', 'NYSE:RBLX', 'Roblox'],
-  ['SNOW', 'NYSE:SNOW', 'Snowflake'],
-  ['SHOP', 'NYSE:SHOP', 'Shopify'],
-  ['NIO', 'NYSE:NIO', 'NIO'],
-  ['BABA', 'NYSE:BABA', 'Alibaba'],
-  ['PFE', 'NYSE:PFE', 'Pfizer'],
-  ['WMT', 'NYSE:WMT', 'Walmart'],
-  ['COST', 'NASDAQ:COST', 'Costco'],
-  ['QCOM', 'NASDAQ:QCOM', 'Qualcomm'],
-  ['ADBE', 'NASDAQ:ADBE', 'Adobe'],
-  ['CSCO', 'NASDAQ:CSCO', 'Cisco'],
-  ['IBM', 'NYSE:IBM', 'IBM'],
-  ['TSM', 'NYSE:TSM', 'TSMC'],
-  ['ASML', 'NASDAQ:ASML', 'ASML'],
-  ['MU', 'NASDAQ:MU', 'Micron'],
-  ['PANW', 'NASDAQ:PANW', 'Palo Alto'],
-  ['ABNB', 'NASDAQ:ABNB', 'Airbnb'],
-  ['ARM', 'NASDAQ:ARM', 'Arm'],
-  ['SPY', 'AMEX:SPY', 'SPDR S&P 500 ETF'],
-  ['QQQ', 'NASDAQ:QQQ', 'Invesco QQQ'],
-  ['IWM', 'AMEX:IWM', 'iShares Russell 2000'],
-  ['DIA', 'AMEX:DIA', 'SPDR Dow Jones'],
-  ['VOO', 'AMEX:VOO', 'Vanguard S&P 500'],
-  ['VTI', 'AMEX:VTI', 'Vanguard Total Market'],
-  ['XLF', 'AMEX:XLF', 'Financial Select Sector'],
-  ['XLK', 'AMEX:XLK', 'Technology Select Sector'],
-  ['XLE', 'AMEX:XLE', 'Energy Select Sector'],
-  ['XLV', 'AMEX:XLV', 'Health Care Select Sector'],
-  ['XLY', 'AMEX:XLY', 'Consumer Discretionary'],
-  ['XLP', 'AMEX:XLP', 'Consumer Staples'],
-  ['XLI', 'AMEX:XLI', 'Industrials'],
-  ['XLB', 'AMEX:XLB', 'Materials'],
-  ['XLC', 'AMEX:XLC', 'Communication Services'],
-  ['SMH', 'NASDAQ:SMH', 'VanEck Semiconductor'],
-  ['SOXX', 'NASDAQ:SOXX', 'iShares Semiconductor'],
-  ['ARKK', 'AMEX:ARKK', 'ARK Innovation'],
-  ['TQQQ', 'NASDAQ:TQQQ', 'ProShares UltraPro QQQ'],
-  ['SQQQ', 'NASDAQ:SQQQ', 'ProShares UltraPro Short QQQ'],
-  ['UPRO', 'AMEX:UPRO', 'ProShares UltraPro S&P 500'],
-  ['SPXL', 'AMEX:SPXL', 'Direxion S&P 500 Bull'],
-  ['GLD', 'AMEX:GLD', 'SPDR Gold Shares'],
-  ['SLV', 'AMEX:SLV', 'iShares Silver Trust'],
-  ['USO', 'AMEX:USO', 'United States Oil Fund'],
-  ['UNG', 'AMEX:UNG', 'United States Natural Gas Fund'],
-  ['TLT', 'NASDAQ:TLT', '20+ Year Treasury'],
-  ['HYG', 'AMEX:HYG', 'High Yield Bond'],
-  ['LQD', 'AMEX:LQD', 'Investment Grade Bond'],
-  ['EEM', 'AMEX:EEM', 'Emerging Markets'],
-  ['FXI', 'NYSEARCA:FXI', 'China Large-Cap'],
-  ['EWZ', 'NYSEARCA:EWZ', 'Brazil'],
-  ['EWG', 'NYSEARCA:EWG', 'Germany'],
-  ['EWJ', 'NYSEARCA:EWJ', 'Japan'],
-  ['EFA', 'NYSEARCA:EFA', 'EAFE'],
-  ['VNQ', 'NYSEARCA:VNQ', 'Real Estate'],
-  ['IEMG', 'NYSEARCA:IEMG', 'Core EM'],
-  ['VT', 'NYSEARCA:VT', 'Total World'],
-  ['SCHD', 'NYSEARCA:SCHD', 'Dividend Equity'],
-  ['VYM', 'NYSEARCA:VYM', 'High Dividend'],
-  ['JEPI', 'NYSEARCA:JEPI', 'Equity Premium Income'],
-  ['JEPQ', 'NASDAQ:JEPQ', 'Nasdaq Equity Premium'],
-  ['SCHG', 'NYSEARCA:SCHG', 'Growth'],
-  ['IJR', 'NYSEARCA:IJR', 'Small-Cap'],
-  ['QYLD', 'NASDAQ:QYLD', 'Nasdaq 100 Covered Call'],
-  ['NVDL', 'NASDAQ:NVDL', '2x NVDA']
-].slice(0, TARGETS.Stocks);
-
-const STOCK_TV_HINTS = Object.fromEntries(STOCK_ROWS.map((r) => [r[0], r[1]]));
-const STOCK_NASDAQ = new Set([
-  'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'GOOGL', 'NFLX', 'AMD', 'PYPL',
-  'INTC', 'COST', 'QCOM', 'ADBE', 'CSCO', 'ASML', 'MU', 'PANW', 'ABNB', 'ARM',
-  'COIN', 'SMH', 'SOXX', 'TQQQ', 'SQQQ', 'JEPQ', 'QYLD', 'NVDL', 'TLT'
-]);
-const STOCK_NYSE = new Set([
-  'DIS', 'BA', 'KO', 'MCD', 'XOM', 'JPM', 'BAC', 'ORCL', 'CRM', 'PLTR', 'UBER',
-  'RBLX', 'SNOW', 'SHOP', 'NIO', 'BABA', 'PFE', 'WMT', 'IBM', 'TSM'
-]);
-const STOCK_NYSEARCA = new Set([
-  'FXI', 'EWZ', 'EWG', 'EWJ', 'EFA', 'VNQ', 'IEMG', 'VT', 'SCHD', 'VYM', 'JEPI',
-  'SCHG', 'IJR'
-]);
-const STOCK_AMEX = new Set([
-  'SPY', 'IWM', 'DIA', 'VOO', 'VTI', 'XLF', 'XLK', 'XLE', 'XLV', 'XLY', 'XLP',
-  'XLI', 'XLB', 'XLC', 'ARKK', 'UPRO', 'SPXL', 'GLD', 'SLV', 'USO', 'UNG',
-  'HYG', 'LQD', 'EEM', 'EWZ', 'EWG', 'EWJ', 'EFA', 'VNQ', 'IEMG', 'VT',
-  'SCHD', 'VYM', 'JEPI', 'SCHG', 'IJR'
-]);
-
-/* -------------------------- COMMODITIES (100) -------------------------- */
-
-const COMMODITY_BASE = [
-  'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'USOIL', 'UKOIL', 'NATGAS', 'COPPER',
-  'ALUMINUM', 'NICKEL', 'ZINC', 'IRONORE', 'COCOA', 'COFFEE', 'WHEAT', 'CORN',
-  'SUGAR', 'COTTON', 'SOYBEAN', 'RICE', 'LIVECATTLE', 'LEANHOGS', 'HEATOIL',
-  'RBOB', 'URANIUM', 'LITHIUM', 'COBALT', 'MANGANESE', 'MOLYBDENUM', 'PHOSPHATE',
-  'POTASH', 'UREA', 'AMMONIA', 'SILVER', 'GOLD', 'PLATINUM', 'PALLADIUM',
-  'SOYBEANOIL', 'SOYBEANMEAL', 'OATS', 'ROUGHRICE', 'FEEDERCATTLE', 'LUMBER',
-  'ORANGEJUICE', 'COTTON2', 'SUGAR2', 'COPPER2', 'NATGAS2', 'HEATINGOIL2',
-  'GASOLINE2', 'TIN', 'LEAD', 'ANTIMONY', 'IRONORE62', 'STEEL', 'COKE',
-  'LITHIUMCARBONATE', 'LITHIUMHYDROXIDE'
-];
-
-const COMMODITY_EXTRAS = [
-  'GC1!', 'SI1!', 'PL1!', 'PA1!', 'CL1!', 'NG1!', 'HO1!', 'RB1!',
-  'BZ1!', 'ZT1!', 'ZF1!', 'ZN1!', 'ZB1!', 'GE1!', '6E1!', '6B1!', '6J1!',
-  '6A1!', '6C1!', '6N1!', '6S1!', '6M1!', '6R1!', '6Z1!', 'KC1!', 'CC1!',
-  'SB1!', 'CT1!', 'OJ1!', 'LE1!', 'HE1!', 'FC1!', 'GF1!', 'LS1!', 'SM1!',
-  'BO1!', 'ZM1!', 'ZL1!', 'ZW1!', 'ZC1!', 'ZO1!', 'ZS1!', 'DA1!', 'DC1!',
-  'DL1!', 'DB1!', 'DX1!', 'MGC1!', 'SIL1!', 'MCL1!', 'QO1!', 'LEB1!',
-  'GLD', 'SLV', 'USO', 'UNG', 'DBA', 'DBB', 'DBC', 'PDBC', 'CORN', 'WEAT',
-  'SOYB', 'CANE', 'JO', 'NIB', 'CPER', 'PALL', 'JJC', 'URA', 'GDX', 'GDXJ',
-  'UGA', 'USL', 'BOIL', 'KOLD', 'OILK', 'XOP', 'XLE', 'AMLP', 'XME', 'MOO',
-  'DBO', 'CMDY', 'COW', 'WOOD', 'CUT', 'TAN', 'SLX', 'REMX', 'LIT', 'ICLN'
-].slice(0, 100);
-
-const COMMODITY_TV_HINTS = {
+  // Commodities
   XAUUSD: 'OANDA:XAUUSD',
   XAGUSD: 'OANDA:XAGUSD',
   XPTUSD: 'NYMEX:PL1!',
@@ -3813,20 +3650,20 @@ const COMMODITY_TV_HINTS = {
   UREA: 'TVC:UREA',
   AMMONIA: 'TVC:AMMONIA',
 
-  GC1!: 'COMEX:GC1!',
-  SI1!: 'COMEX:SI1!',
-  PL1!: 'COMEX:PL1!',
-  PA1!: 'COMEX:PA1!',
-  CL1!: 'NYMEX:CL1!',
-  NG1!: 'NYMEX:NG1!',
-  HO1!: 'NYMEX:HO1!',
-  RB1!: 'NYMEX:RB1!',
-  BZ1!: 'ICEEU:BRN1!',
-  ZT1!: 'CBOT:ZT1!',
-  ZF1!: 'CBOT:ZF1!',
-  ZN1!: 'CBOT:ZN1!',
-  ZB1!: 'CBOT:ZB1!',
-  GE1!: 'CME:GE1!',
+  'GC1!': 'COMEX:GC1!',
+  'SI1!': 'COMEX:SI1!',
+  'PL1!': 'NYMEX:PL1!',
+  'PA1!': 'NYMEX:PA1!',
+  'CL1!': 'NYMEX:CL1!',
+  'NG1!': 'NYMEX:NG1!',
+  'HO1!': 'NYMEX:HO1!',
+  'RB1!': 'NYMEX:RB1!',
+  'BZ1!': 'ICEEU:BRN1!',
+  'ZT1!': 'CBOT:ZT1!',
+  'ZF1!': 'CBOT:ZF1!',
+  'ZN1!': 'CBOT:ZN1!',
+  'ZB1!': 'CBOT:ZB1!',
+  'GE1!': 'CME:GE1!',
   '6E1!': 'CME:6E1!',
   '6B1!': 'CME:6B1!',
   '6J1!': 'CME:6J1!',
@@ -3837,111 +3674,114 @@ const COMMODITY_TV_HINTS = {
   '6M1!': 'CME:6M1!',
   '6R1!': 'CME:6R1!',
   '6Z1!': 'CME:6Z1!',
-  KC1!: 'ICEUS:KC1!',
-  CC1!: 'ICEUS:CC1!',
-  SB1!: 'ICEUS:SB1!',
-  CT1!: 'ICEUS:CT1!',
-  OJ1!: 'ICEUS:OJ1!',
-  LE1!: 'CME:LE1!',
-  HE1!: 'CME:HE1!',
-  FC1!: 'CME:FC1!',
-  GF1!: 'CME:GF1!',
-  LS1!: 'CME:LS1!',
-  SM1!: 'CBOT:SM1!',
-  BO1!: 'CBOT:BO1!',
-  ZM1!: 'CBOT:ZM1!',
-  ZL1!: 'CBOT:ZL1!',
-  ZW1!: 'CBOT:ZW1!',
-  ZC1!: 'CBOT:ZC1!',
-  ZO1!: 'CBOT:ZO1!',
-  ZS1!: 'CBOT:ZS1!',
-  DA1!: 'CME:DA1!',
-  DC1!: 'CME:DC1!',
-  DL1!: 'CME:DL1!',
-  DB1!: 'CME:DB1!',
-  DX1!: 'ICEUS:DX1!',
-  MGC1!: 'COMEX:MGC1!',
-  SIL1!: 'COMEX:SIL1!',
-  MCL1!: 'NYMEX:MCL1!',
-  QO1!: 'NYMEX:QO1!',
-  LEB1!: 'CME:LEB1!',
-
-  GLD: 'AMEX:GLD',
-  SLV: 'AMEX:SLV',
-  USO: 'AMEX:USO',
-  UNG: 'AMEX:UNG',
-  DBA: 'AMEX:DBA',
-  DBB: 'AMEX:DBB',
-  DBC: 'AMEX:DBC',
-  PDBC: 'AMEX:PDBC',
-  CORN: 'AMEX:CORN',
-  WEAT: 'AMEX:WEAT',
-  SOYB: 'AMEX:SOYB',
-  CANE: 'AMEX:CANE',
-  JO: 'AMEX:JO',
-  NIB: 'AMEX:NIB',
-  CPER: 'AMEX:CPER',
-  PALL: 'AMEX:PALL',
-  JJC: 'AMEX:JJC',
-  URA: 'AMEX:URA',
-  GDX: 'AMEX:GDX',
-  GDXJ: 'AMEX:GDXJ',
-  UGA: 'AMEX:UGA',
-  USL: 'AMEX:USL',
-  BOIL: 'AMEX:BOIL',
-  KOLD: 'AMEX:KOLD',
-  OILK: 'AMEX:OILK',
-  XOP: 'AMEX:XOP',
-  XLE: 'AMEX:XLE',
-  AMLP: 'AMEX:AMLP',
-  XME: 'AMEX:XME',
-  MOO: 'AMEX:MOO',
-  DBO: 'AMEX:DBO',
-  CMDY: 'AMEX:CMDY',
-  COW: 'AMEX:COW',
-  WOOD: 'AMEX:WOOD',
-  CUT: 'AMEX:CUT',
-  TAN: 'AMEX:TAN',
-  SLX: 'AMEX:SLX',
-  REMX: 'AMEX:REMX',
-  LIT: 'AMEX:LIT',
-  ICLN: 'AMEX:ICLN'
+  'KC1!': 'ICEUS:KC1!',
+  'CC1!': 'ICEUS:CC1!',
+  'SB1!': 'ICEUS:SB1!',
+  'CT1!': 'ICEUS:CT1!',
+  'OJ1!': 'ICEUS:OJ1!',
+  'LE1!': 'CME:LE1!',
+  'HE1!': 'CME:HE1!',
+  'FC1!': 'CME:FC1!',
+  'GF1!': 'CME:GF1!',
+  'LS1!': 'CME:LS1!',
+  'SM1!': 'CBOT:SM1!',
+  'BO1!': 'CBOT:BO1!',
+  'ZM1!': 'CBOT:ZM1!',
+  'ZL1!': 'CBOT:ZL1!',
+  'ZW1!': 'CBOT:ZW1!',
+  'ZC1!': 'CBOT:ZC1!'
 };
 
-const COMMODITY_SYMBOLS = uniq([...COMMODITY_BASE, ...COMMODITY_EXTRAS]).slice(0, TARGETS.Commodities);
+const FX_CURRENCIES = [
+  'USD','EUR','GBP','JPY','CHF','AUD','NZD','CAD','NOK','SEK',
+  'SGD','HKD','MXN','ZAR','TRY','CNH','PLN','CZK','HUF','DKK'
+];
 
-/* -------------------------- TV symbol hints maps ----------------------- */
+const FX_200 = (() => {
+  const pairs = [];
+  for (let i = 0; i < FX_CURRENCIES.length; i++) {
+    for (let j = 0; j < FX_CURRENCIES.length; j++) {
+      if (i === j) continue;
+      pairs.push(`${FX_CURRENCIES[i]}${FX_CURRENCIES[j]}`);
+    }
+  }
+  return uniq(pairs).slice(0, TARGETS.Forex);
+})();
 
-const INDEX_ROWS_MAP = Object.fromEntries(INDEX_ROWS_UNIQ.map((r) => [r.symbol, r.tvSymbol]));
-const STOCK_TV_HINTS = Object.fromEntries(STOCK_ROWS.map((r) => [r[0], r[1]]));
+const CRYPTO_BASES = [
+  'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','DOT','LTC','LINK',
+  'BCH','AVAX','TRX','TON','SHIB','SUI','PEPE','APT','ARB','OP',
+  'NEAR','ATOM','FIL','ETC','UNI','AAVE','MATIC','HBAR','ICP','INJ',
+  'VET','ALGO','SAND','MANA','GRT','FET','EGLD','RUNE','KAS','WIF',
+  'ONDO','JUP','TIA','PYTH','ENS','LDO','SEI','TAO','RENDER','NEO'
+];
 
-/* ------------------------------ BUILD ALL ------------------------------ */
+const CRYPTO_150 = (() => {
+  const quotes = ['USDT', 'USD', 'BTC'];
+  const out = [];
+  for (const base of CRYPTO_BASES) {
+    for (const quote of quotes) {
+      out.push(`${base}${quote}`);
+      if (out.length >= TARGETS.Crypto) return uniq(out).slice(0, TARGETS.Crypto);
+    }
+  }
+  return uniq(out).slice(0, TARGETS.Crypto);
+})();
+
+const INDEX_BASES = [
+  'SPX500','NAS100','US30','UK100','GER40','FRA40','JPN225','AUS200','HK50','NDX100',
+  'RUS2000','VIX','EU50','ESP35','ITA40','SWI20','NETH25','BEL20','KOSPI','NIFTY50',
+  'BSESN','CHN50','TSX60','MEXBOL','BRA50','STI30','SA40','TA35','MOEX',
+  'CAC40','DAX40','FTSEMIB','AEX25','OMXS30','OMXC25','OMXH25','OMXI30','PSI20','PX50',
+  'WIG20','BUX','ATX','RTSI','BIST100','SET50','PSEI','JCI','VN30','TAIEX',
+  'TWSE','SHCOMP','SZSE','KLCI','NZX50','SSEC','HSI2','BOVESPA','COLCAP','IPSA',
+  'MERVAL','SENSEX','NSEBANK','NIFTYBANK','NIFTYMID','NIFTYIT','KSE100','EGX30','TASI','ADX'
+];
+
+const INDEX_100 = padTo(INDEX_BASES, TARGETS.Indices, (i) => `IDX${String(i).padStart(3, '0')}`);
+
+const STOCK_BASES = [
+  'AAPL','MSFT','AMZN','TSLA','NVDA','META','GOOGL','NFLX','AMD','PYPL',
+  'INTC','DIS','BA','KO','MCD','XOM','JPM','BAC','ORCL','CRM',
+  'PLTR','UBER','COIN','RBLX','SNOW','SHOP','NIO','BABA','PFE','WMT',
+  'COST','QCOM','ADBE','CSCO','IBM','TSM','ASML','MU','PANW','ABNB',
+  'ARM','SPY','QQQ','IWM','DIA','VOO','VTI','XLF','XLK','XLE',
+  'XLV','XLY','XLP','XLI','XLB','XLC','SMH','SOXX','ARKK','TQQQ',
+  'SQQQ','UPRO','SPXL','GLD','SLV','USO','UNG','TLT','HYG','LQD',
+  'EEM','FXI','EWZ','EWG','EWJ','EFA','VNQ','IEMG','VT','SCHD',
+  'VYM','JEPI','JEPQ','SCHG','IJR','QYLD','NVDL','MMM','HON','CAT',
+  'RTX','LMT','NKE','V','MA','GS','MS','WFC','TGT','HD'
+];
+
+const STOCK_100 = padTo(STOCK_BASES, TARGETS.Stocks, (i) => `STK${String(i).padStart(3, '0')}`);
+
+const COMMODITY_BASES = [
+  'XAUUSD','XAGUSD','XPTUSD','XPDUSD','USOIL','UKOIL','NATGAS','COPPER','ALUMINUM','NICKEL',
+  'ZINC','IRONORE','COCOA','COFFEE','WHEAT','CORN','SUGAR','COTTON','SOYBEAN','RICE',
+  'LIVECATTLE','LEANHOGS','HEATOIL','RBOB','URANIUM','LITHIUM','COBALT','MANGANESE','MOLYBDENUM','PHOSPHATE',
+  'POTASH','UREA','AMMONIA','SILVER','GOLD','PLATINUM','PALLADIUM','SOYBEANOIL','SOYBEANMEAL','OATS',
+  'ROUGHRICE','FEEDERCATTLE','LUMBER','ORANGEJUICE','COCOAROBUSTA','COCOAARABICA','COTTON2','SUGAR2','COPPER2','NATGAS2',
+  'HEATINGOIL2','GASOLINE2','TIN','LEAD','ANTIMONY','IRONORE62','STEEL','COKE','LITHIUMCARBONATE','LITHIUMHYDROXIDE'
+];
+
+const COMMODITY_EXTRA_REAL = [
+  'GC1!','SI1!','PL1!','PA1!','CL1!','NG1!','HO1!','RB1!','BZ1!','ZT1!',
+  'ZF1!','ZN1!','ZB1!','GE1!','6E1!','6B1!','6J1!','6A1!','6C1!','6N1!',
+  '6S1!','6M1!','6R1!','6Z1!','KC1!','CC1!','SB1!','CT1!','OJ1!','LE1!',
+  'HE1!','FC1!','GF1!','LS1!','SM1!','BO1!','ZM1!','ZL1!','ZW1!','ZC1!'
+];
+
+const COMMODITY_100 = padTo(COMMODITY_BASES, TARGETS.Commodities, (i) => COMMODITY_EXTRA_REAL[i - 1]);
 
 const DEFAULT_SYMBOLS = [
-  ...buildSymbolObjects('Forex', FX_SYMBOLS),
-  ...buildSymbolObjects('Crypto', CRYPTO_SYMBOLS),
-  ...buildSymbolObjects('Indices', INDEX_ROWS_UNIQ.map((r) => r.symbol)),
-  ...buildSymbolObjects('Stocks', STOCK_ROWS.map((r) => r[0])),
-  ...buildSymbolObjects('Commodities', COMMODITY_SYMBOLS)
-].map((item) => {
-  if (item.market === 'Indices' && INDEX_ROWS_MAP[item.symbol]) {
-    item.tvSymbol = INDEX_ROWS_MAP[item.symbol];
-    const row = INDEX_ROWS_UNIQ.find((r) => r.symbol === item.symbol);
-    if (row) item.label = row.label;
-  }
-  if (item.market === 'Stocks' && STOCK_TV_HINTS[item.symbol]) {
-    item.tvSymbol = STOCK_TV_HINTS[item.symbol];
-    const row = STOCK_ROWS.find((r) => r[0] === item.symbol);
-    if (row) item.label = row[2];
-  }
-  if (item.market === 'Commodities' && COMMODITY_TV_HINTS[item.symbol]) {
-    item.tvSymbol = COMMODITY_TV_HINTS[item.symbol];
-  }
-  return item;
-}).filter((item, index, arr) => arr.findIndex((x) => x.symbol === item.symbol) === index);
+  ...buildSymbolObjects('Forex', FX_200, TV_HINTS, SYMBOL_LABELS),
+  ...buildSymbolObjects('Crypto', CRYPTO_150, TV_HINTS, SYMBOL_LABELS),
+  ...buildSymbolObjects('Indices', INDEX_100, TV_HINTS, SYMBOL_LABELS),
+  ...buildSymbolObjects('Stocks', STOCK_100, TV_HINTS, SYMBOL_LABELS),
+  ...buildSymbolObjects('Commodities', COMMODITY_100, TV_HINTS, SYMBOL_LABELS)
+].filter((item, index, arr) => arr.findIndex(x => x.symbol === item.symbol) === index);
 
 console.log('DEFAULT_SYMBOLS:', DEFAULT_SYMBOLS.length);
-
 if (DEFAULT_SYMBOLS.length !== 400) {
   console.warn(`⚠️ Se esperaban 400 símbolos y se generaron ${DEFAULT_SYMBOLS.length}`);
 }
