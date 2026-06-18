@@ -3454,360 +3454,496 @@ const TARGETS = {
 };
 
 const uniq = (arr) => [...new Set(arr)];
-const uniqBy = (arr, keyFn) => {
-  const seen = new Set();
-  return arr.filter((item) => {
-    const key = keyFn(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+
+const padTo = (arr, target, makeExtra) => {
+  const out = uniq(arr.slice());
+  let i = 1;
+  while (out.length < target) {
+    const next = makeExtra(i);
+    if (!out.includes(next)) out.push(next);
+    i += 1;
+  }
+  return out.slice(0, target);
 };
 
 const makeLabel = (sym) => {
-  if (sym.includes(':')) {
-    const raw = sym.split(':').pop().replace('1!', '').replace('!', '');
-    return raw
-      .replace(/_/g, ' ')
-      .replace(/([A-Z]+)(\d+)/g, '$1 $2')
-      .trim();
-  }
-  if (/^[A-Z]{6}USDT$/.test(sym)) return `${sym.slice(0, 3)}/USDT`;
-  if (/^[A-Z]{6}USD$/.test(sym)) return `${sym.slice(0, 3)}/USD`;
-  if (/^[A-Z]{6}BTC$/.test(sym)) return `${sym.slice(0, 3)}/BTC`;
-  if (/^[A-Z]{6}ETH$/.test(sym)) return `${sym.slice(0, 3)}/ETH`;
+  if (/^[A-Z]{3,5}USDT$/.test(sym)) return `${sym.replace(/USDT$/, '')}/USDT`;
+  if (/^[A-Z]{3,5}USDC$/.test(sym)) return `${sym.replace(/USDC$/, '')}/USDC`;
+  if (/^[A-Z]{3,5}USD$/.test(sym)) return `${sym.replace(/USD$/, '')}/USD`;
+  if (/^[A-Z]{3,5}BTC$/.test(sym)) return `${sym.replace(/BTC$/, '')}/BTC`;
+  if (/^[A-Z]{3,5}ETH$/.test(sym)) return `${sym.replace(/ETH$/, '')}/ETH`;
+  if (/^[A-Z]{3,6}1!$/.test(sym)) return sym.replace('1!', '');
   return sym;
 };
 
-const currencyPairs = [
-  'USD','EUR','GBP','JPY','CHF','AUD','NZD','CAD','NOK','SEK',
-  'SGD','HKD','MXN','ZAR','TRY','CNH','PLN','CZK','HUF','DKK'
-];
+const inferTvSymbol = (market, sym) => {
+  if (sym.includes(':')) return sym;
 
-const FX_100 = (() => {
-  const pairs = [];
-  for (let i = 0; i < currencyPairs.length; i++) {
-    for (let j = 0; j < currencyPairs.length; j++) {
-      if (i === j) continue;
-      pairs.push(`${currencyPairs[i]}${currencyPairs[j]}`);
-    }
+  if (market === 'Forex') return `OANDA:${sym}`;
+  if (market === 'Crypto') return `BINANCE:${sym}`;
+  if (market === 'Stocks') {
+    if (STOCK_TV_HINTS[sym]) return STOCK_TV_HINTS[sym];
+    if (STOCK_AMEX.has(sym)) return `AMEX:${sym}`;
+    if (STOCK_NYSE.has(sym)) return `NYSE:${sym}`;
+    if (STOCK_NASDAQ.has(sym)) return `NASDAQ:${sym}`;
+    if (STOCK_NYSEARCA.has(sym)) return `NYSEARCA:${sym}`;
+    return `NASDAQ:${sym}`;
   }
-  return uniq(pairs).slice(0, TARGETS.Forex);
-})();
-
-const CRYPTO_BASES = [
-  'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','DOT','LTC','LINK',
-  'BCH','AVAX','TRX','TON','SHIB','SUI','PEPE','APT','ARB','OP',
-  'NEAR','ATOM','FIL','ETC','UNI','AAVE','MATIC','HBAR','ICP','INJ',
-  'VET','ALGO','SAND','MANA','GRT','FET','EGLD','RUNE','KAS','WIF',
-  'ONDO','JUP','TIA','PYTH','ENS','LDO','SEI','TAO','RENDER','NEO'
-];
-
-const CRYPTO_80 = (() => {
-  const out = [];
-  const quotes = ['USDT', 'USD', 'BTC'];
-  for (const base of CRYPTO_BASES) {
-    for (const quote of quotes) {
-      out.push(`${base}${quote}`);
-      if (out.length >= TARGETS.Crypto) return uniq(out).slice(0, TARGETS.Crypto);
-    }
+  if (market === 'Indices') {
+    if (INDEX_TV_HINTS[sym]) return INDEX_TV_HINTS[sym];
+    return `TVC:${sym}`;
   }
-  return uniq(out).slice(0, TARGETS.Crypto);
-})();
+  if (market === 'Commodities') {
+    if (COMMODITY_TV_HINTS[sym]) return COMMODITY_TV_HINTS[sym];
+    return `TVC:${sym}`;
+  }
 
-const INDEX_ITEMS = [
-  { symbol: 'SPX500', tvSymbol: 'SP:SPX', label: 'S&P 500' },
-  { symbol: 'NAS100', tvSymbol: 'NASDAQ:NDX', label: 'NASDAQ 100' },
-  { symbol: 'US30', tvSymbol: 'DJ:DJI', label: 'US30' },
-  { symbol: 'UK100', tvSymbol: 'TVC:UKX', label: 'FTSE 100' },
-  { symbol: 'GER40', tvSymbol: 'XETR:DAX', label: 'DAX 40' },
-  { symbol: 'FRA40', tvSymbol: 'Euronext:PX1', label: 'CAC 40' },
-  { symbol: 'JPN225', tvSymbol: 'TVC:NI225', label: 'Nikkei 225' },
-  { symbol: 'AUS200', tvSymbol: 'ASX:XJO', label: 'ASX 200' },
-  { symbol: 'HK50', tvSymbol: 'HSI:HSI', label: 'Hang Seng' },
-  { symbol: 'NDX100', tvSymbol: 'NASDAQ:NDX', label: 'NASDAQ 100' },
-  { symbol: 'RUS2000', tvSymbol: 'TVC:RUT', label: 'Russell 2000' },
-  { symbol: 'VIX', tvSymbol: 'CBOE:VIX', label: 'VIX' },
-  { symbol: 'EU50', tvSymbol: 'STOXX:SX5E', label: 'Euro Stoxx 50' },
-  { symbol: 'ESP35', tvSymbol: 'BME:IBEX', label: 'IBEX 35' },
-  { symbol: 'ITA40', tvSymbol: 'FTSEMIB:FTSEMIB', label: 'FTSE MIB' },
-  { symbol: 'SWI20', tvSymbol: 'SIX:SMI', label: 'SMI 20' },
-  { symbol: 'NETH25', tvSymbol: 'TVC:AEX', label: 'AEX 25' },
-  { symbol: 'BEL20', tvSymbol: 'TVC:BEL20', label: 'BEL 20' },
-  { symbol: 'KOSPI', tvSymbol: 'KRX:KOSPI', label: 'KOSPI' },
-  { symbol: 'NIFTY50', tvSymbol: 'NSE:NIFTY', label: 'Nifty 50' },
-  { symbol: 'BSESN', tvSymbol: 'BSE:SENSEX', label: 'BSE Sensex' },
-  { symbol: 'CHN50', tvSymbol: 'TVC:CHN50', label: 'China 50' },
-  { symbol: 'TSX60', tvSymbol: 'TVC:TSX60', label: 'TSX 60' },
-  { symbol: 'MEXBOL', tvSymbol: 'BMV:IPC', label: 'IPC Mexico' },
-  { symbol: 'BRA50', tvSymbol: 'BMFBOVESPA:IBOV', label: 'Brazil 50' },
-  { symbol: 'STI30', tvSymbol: 'TVC:STI', label: 'Singapore STI' },
-  { symbol: 'SA40', tvSymbol: 'TVC:SA40', label: 'South Africa 40' },
-  { symbol: 'TA35', tvSymbol: 'TASE:TA35', label: 'TA 35' },
-  { symbol: 'MOEX', tvSymbol: 'MOEX:IMOEX', label: 'MOEX' },
-  { symbol: 'CAC40', tvSymbol: 'Euronext:PX1', label: 'CAC 40' },
-  { symbol: 'DAX40', tvSymbol: 'XETR:DAX', label: 'DAX 40' },
-  { symbol: 'FTSEMIB', tvSymbol: 'FTSEMIB:FTSEMIB', label: 'FTSE MIB' },
-  { symbol: 'AEX25', tvSymbol: 'TVC:AEX', label: 'AEX 25' },
-  { symbol: 'OMXS30', tvSymbol: 'OMXSTO:OMXS30', label: 'OMX S30' },
-  { symbol: 'OMXC25', tvSymbol: 'OMXC25:OMXC25', label: 'OMXC 25' },
-  { symbol: 'OMXH25', tvSymbol: 'OMXH25:OMXH25', label: 'OMXH 25' },
-  { symbol: 'OMXI30', tvSymbol: 'OMXI30:OMXI30', label: 'OMXI 30' },
-  { symbol: 'PSI20', tvSymbol: 'PSI20:PSI20', label: 'PSI 20' },
-  { symbol: 'PX50', tvSymbol: 'PX50:PX50', label: 'PX 50' },
-  { symbol: 'WIG20', tvSymbol: 'WSE:WIG20', label: 'WIG 20' },
-  { symbol: 'BUX', tvSymbol: 'BUX:BUX', label: 'BUX' },
-  { symbol: 'ATX', tvSymbol: 'VIE:ATX', label: 'ATX' },
-  { symbol: 'RTSI', tvSymbol: 'MOEX:RTSI', label: 'RTS Index' },
-  { symbol: 'BIST100', tvSymbol: 'BIST:BIST100', label: 'BIST 100' },
-  { symbol: 'SET50', tvSymbol: 'SET:SET50', label: 'SET 50' },
-  { symbol: 'PSEI', tvSymbol: 'PSEI:PSEI', label: 'PSEi' },
-  { symbol: 'JCI', tvSymbol: 'JCI:JCI', label: 'JCI' },
-  { symbol: 'VN30', tvSymbol: 'HOSE:VN30', label: 'VN30' },
-  { symbol: 'TAIEX', tvSymbol: 'TWSE:TAIEX', label: 'TAIEX' },
-  { symbol: 'TWSE', tvSymbol: 'TWSE:TWSE', label: 'TWSE' },
-  { symbol: 'SHCOMP', tvSymbol: 'SSE:000001', label: 'Shanghai Composite' },
-  { symbol: 'SZSE', tvSymbol: 'SZSE:399001', label: 'Shenzhen Component' },
-  { symbol: 'KLCI', tvSymbol: 'MYX:KLCI', label: 'KLCI' },
-  { symbol: 'NZX50', tvSymbol: 'NZX:NZ50', label: 'NZX 50' },
-  { symbol: 'SSEC', tvSymbol: 'SSE:000001', label: 'Shanghai Composite' },
-  { symbol: 'HSI2', tvSymbol: 'HSI:HSI', label: 'Hang Seng' }
-].slice(0, TARGETS.Indices);
+  return sym;
+};
 
-const STOCK_ITEMS = [
-  { symbol: 'AAPL', tvSymbol: 'NASDAQ:AAPL', label: 'Apple' },
-  { symbol: 'MSFT', tvSymbol: 'NASDAQ:MSFT', label: 'Microsoft' },
-  { symbol: 'AMZN', tvSymbol: 'NASDAQ:AMZN', label: 'Amazon' },
-  { symbol: 'TSLA', tvSymbol: 'NASDAQ:TSLA', label: 'Tesla' },
-  { symbol: 'NVDA', tvSymbol: 'NASDAQ:NVDA', label: 'NVIDIA' },
-  { symbol: 'META', tvSymbol: 'NASDAQ:META', label: 'Meta' },
-  { symbol: 'GOOGL', tvSymbol: 'NASDAQ:GOOGL', label: 'Alphabet' },
-  { symbol: 'NFLX', tvSymbol: 'NASDAQ:NFLX', label: 'Netflix' },
-  { symbol: 'AMD', tvSymbol: 'NASDAQ:AMD', label: 'AMD' },
-  { symbol: 'PYPL', tvSymbol: 'NASDAQ:PYPL', label: 'PayPal' },
-  { symbol: 'INTC', tvSymbol: 'NASDAQ:INTC', label: 'Intel' },
-  { symbol: 'DIS', tvSymbol: 'NYSE:DIS', label: 'Disney' },
-  { symbol: 'BA', tvSymbol: 'NYSE:BA', label: 'Boeing' },
-  { symbol: 'KO', tvSymbol: 'NYSE:KO', label: 'Coca-Cola' },
-  { symbol: 'MCD', tvSymbol: 'NYSE:MCD', label: 'McDonald’s' },
-  { symbol: 'XOM', tvSymbol: 'NYSE:XOM', label: 'Exxon Mobil' },
-  { symbol: 'JPM', tvSymbol: 'NYSE:JPM', label: 'JPMorgan' },
-  { symbol: 'BAC', tvSymbol: 'NYSE:BAC', label: 'Bank of America' },
-  { symbol: 'ORCL', tvSymbol: 'NYSE:ORCL', label: 'Oracle' },
-  { symbol: 'CRM', tvSymbol: 'NYSE:CRM', label: 'Salesforce' },
-  { symbol: 'PLTR', tvSymbol: 'NYSE:PLTR', label: 'Palantir' },
-  { symbol: 'UBER', tvSymbol: 'NYSE:UBER', label: 'Uber' },
-  { symbol: 'COIN', tvSymbol: 'NASDAQ:COIN', label: 'Coinbase' },
-  { symbol: 'RBLX', tvSymbol: 'NYSE:RBLX', label: 'Roblox' },
-  { symbol: 'SNOW', tvSymbol: 'NYSE:SNOW', label: 'Snowflake' },
-  { symbol: 'SHOP', tvSymbol: 'NYSE:SHOP', label: 'Shopify' },
-  { symbol: 'NIO', tvSymbol: 'NYSE:NIO', label: 'NIO' },
-  { symbol: 'BABA', tvSymbol: 'NYSE:BABA', label: 'Alibaba' },
-  { symbol: 'PFE', tvSymbol: 'NYSE:PFE', label: 'Pfizer' },
-  { symbol: 'WMT', tvSymbol: 'NYSE:WMT', label: 'Walmart' },
-  { symbol: 'COST', tvSymbol: 'NASDAQ:COST', label: 'Costco' },
-  { symbol: 'QCOM', tvSymbol: 'NASDAQ:QCOM', label: 'Qualcomm' },
-  { symbol: 'ADBE', tvSymbol: 'NASDAQ:ADBE', label: 'Adobe' },
-  { symbol: 'CSCO', tvSymbol: 'NASDAQ:CSCO', label: 'Cisco' },
-  { symbol: 'IBM', tvSymbol: 'NYSE:IBM', label: 'IBM' },
-  { symbol: 'TSM', tvSymbol: 'NYSE:TSM', label: 'TSMC' },
-  { symbol: 'ASML', tvSymbol: 'NASDAQ:ASML', label: 'ASML' },
-  { symbol: 'MU', tvSymbol: 'NASDAQ:MU', label: 'Micron' },
-  { symbol: 'PANW', tvSymbol: 'NASDAQ:PANW', label: 'Palo Alto' },
-  { symbol: 'ABNB', tvSymbol: 'NASDAQ:ABNB', label: 'Airbnb' },
-  { symbol: 'ARM', tvSymbol: 'NASDAQ:ARM', label: 'Arm' },
-  { symbol: 'SPY', tvSymbol: 'AMEX:SPY', label: 'SPDR S&P 500 ETF' },
-  { symbol: 'QQQ', tvSymbol: 'NASDAQ:QQQ', label: 'Invesco QQQ' },
-  { symbol: 'IWM', tvSymbol: 'AMEX:IWM', label: 'iShares Russell 2000' },
-  { symbol: 'DIA', tvSymbol: 'AMEX:DIA', label: 'SPDR Dow Jones' },
-  { symbol: 'VOO', tvSymbol: 'AMEX:VOO', label: 'Vanguard S&P 500' },
-  { symbol: 'VTI', tvSymbol: 'AMEX:VTI', label: 'Vanguard Total Market' },
-  { symbol: 'XLF', tvSymbol: 'AMEX:XLF', label: 'Financial Select Sector' },
-  { symbol: 'XLK', tvSymbol: 'AMEX:XLK', label: 'Technology Select Sector' },
-  { symbol: 'XLE', tvSymbol: 'AMEX:XLE', label: 'Energy Select Sector' },
-  { symbol: 'XLV', tvSymbol: 'AMEX:XLV', label: 'Health Care Select Sector' },
-  { symbol: 'XLY', tvSymbol: 'AMEX:XLY', label: 'Consumer Discretionary Select Sector' },
-  { symbol: 'XLP', tvSymbol: 'AMEX:XLP', label: 'Consumer Staples Select Sector' },
-  { symbol: 'XLI', tvSymbol: 'AMEX:XLI', label: 'Industrials Select Sector' },
-  { symbol: 'XLB', tvSymbol: 'AMEX:XLB', label: 'Materials Select Sector' },
-  { symbol: 'XLC', tvSymbol: 'AMEX:XLC', label: 'Communication Services Select Sector' },
-  { symbol: 'SMH', tvSymbol: 'NASDAQ:SMH', label: 'VanEck Semiconductor' },
-  { symbol: 'SOXX', tvSymbol: 'NASDAQ:SOXX', label: 'iShares Semiconductor' }
-].slice(0, TARGETS.Stocks);
-
-const COMMODITY_ITEMS = [
-  { symbol: 'COMEX:GC1!', tvSymbol: 'COMEX:GC1!', label: 'Gold Futures' },
-  { symbol: 'COMEX:SI1!', tvSymbol: 'COMEX:SI1!', label: 'Silver Futures' },
-  { symbol: 'COMEX:PL1!', tvSymbol: 'COMEX:PL1!', label: 'Platinum Futures' },
-  { symbol: 'COMEX:PA1!', tvSymbol: 'COMEX:PA1!', label: 'Palladium Futures' },
-  { symbol: 'NYMEX:CL1!', tvSymbol: 'NYMEX:CL1!', label: 'WTI Crude Oil' },
-  { symbol: 'TVC:UKOIL', tvSymbol: 'TVC:UKOIL', label: 'Brent Crude Oil' },
-  { symbol: 'NYMEX:NG1!', tvSymbol: 'NYMEX:NG1!', label: 'Natural Gas' },
-  { symbol: 'NYMEX:HO1!', tvSymbol: 'NYMEX:HO1!', label: 'Heating Oil' },
-  { symbol: 'NYMEX:RB1!', tvSymbol: 'NYMEX:RB1!', label: 'RBOB Gasoline' },
-  { symbol: 'COMEX:HG1!', tvSymbol: 'COMEX:HG1!', label: 'Copper Futures' },
-  { symbol: 'COMEX:ALI1!', tvSymbol: 'COMEX:ALI1!', label: 'Aluminum Futures' },
-  { symbol: 'LME:NICKEL', tvSymbol: 'LME:NICKEL', label: 'Nickel' },
-  { symbol: 'LME:ZINC', tvSymbol: 'LME:ZINC', label: 'Zinc' },
-  { symbol: 'TVC:IRONORE', tvSymbol: 'TVC:IRONORE', label: 'Iron Ore' },
-  { symbol: 'ICEUS:CC1!', tvSymbol: 'ICEUS:CC1!', label: 'Cocoa Futures' },
-  { symbol: 'ICEUS:KC1!', tvSymbol: 'ICEUS:KC1!', label: 'Coffee Futures' },
-  { symbol: 'CBOT:ZW1!', tvSymbol: 'CBOT:ZW1!', label: 'Wheat Futures' },
-  { symbol: 'CBOT:ZC1!', tvSymbol: 'CBOT:ZC1!', label: 'Corn Futures' },
-  { symbol: 'ICEUS:SB1!', tvSymbol: 'ICEUS:SB1!', label: 'Sugar Futures' },
-  { symbol: 'ICEUS:CT1!', tvSymbol: 'ICEUS:CT1!', label: 'Cotton Futures' },
-  { symbol: 'CBOT:ZS1!', tvSymbol: 'CBOT:ZS1!', label: 'Soybean Futures' },
-  { symbol: 'CBOT:ZL1!', tvSymbol: 'CBOT:ZL1!', label: 'Soybean Oil Futures' },
-  { symbol: 'CBOT:ZM1!', tvSymbol: 'CBOT:ZM1!', label: 'Soybean Meal Futures' },
-  { symbol: 'CBOT:ZR1!', tvSymbol: 'CBOT:ZR1!', label: 'Rough Rice Futures' },
-  { symbol: 'CME:LE1!', tvSymbol: 'CME:LE1!', label: 'Live Cattle Futures' },
-  { symbol: 'CME:HE1!', tvSymbol: 'CME:HE1!', label: 'Lean Hogs Futures' },
-  { symbol: 'CME:GF1!', tvSymbol: 'CME:GF1!', label: 'Feeder Cattle Futures' },
-  { symbol: 'CBOT:ZO1!', tvSymbol: 'CBOT:ZO1!', label: 'Oats Futures' },
-  { symbol: 'TVC:LITHIUM', tvSymbol: 'TVC:LITHIUM', label: 'Lithium' },
-  { symbol: 'COMEX:LTC1!', tvSymbol: 'COMEX:LTC1!', label: 'Lithium Carbonate' },
-  { symbol: 'COMEX:LTH1!', tvSymbol: 'COMEX:LTH1!', label: 'Lithium Hydroxide' },
-  { symbol: 'TVC:COBALT', tvSymbol: 'TVC:COBALT', label: 'Cobalt' },
-  { symbol: 'TVC:MANGANESE', tvSymbol: 'TVC:MANGANESE', label: 'Manganese' },
-  { symbol: 'TVC:MOLYBDENUM', tvSymbol: 'TVC:MOLYBDENUM', label: 'Molybdenum' },
-  { symbol: 'TVC:PHOSPHATE', tvSymbol: 'TVC:PHOSPHATE', label: 'Phosphate' },
-  { symbol: 'TVC:POTASH', tvSymbol: 'TVC:POTASH', label: 'Potash' },
-  { symbol: 'TVC:UREA', tvSymbol: 'TVC:UREA', label: 'Urea' },
-  { symbol: 'TVC:AMMONIA', tvSymbol: 'TVC:AMMONIA', label: 'Ammonia' },
-  { symbol: 'TVC:URANIUM', tvSymbol: 'TVC:URANIUM', label: 'Uranium' },
-  { symbol: 'NYSEARCA:GLD', tvSymbol: 'NYSEARCA:GLD', label: 'Gold ETF' },
-  { symbol: 'NYSEARCA:SLV', tvSymbol: 'NYSEARCA:SLV', label: 'Silver ETF' },
-  { symbol: 'AMEX:USO', tvSymbol: 'AMEX:USO', label: 'Oil ETF' },
-  { symbol: 'AMEX:UNG', tvSymbol: 'AMEX:UNG', label: 'Natural Gas ETF' },
-  { symbol: 'NYSEARCA:DBA', tvSymbol: 'NYSEARCA:DBA', label: 'Agriculture ETF' },
-  { symbol: 'NYSEARCA:DBC', tvSymbol: 'NYSEARCA:DBC', label: 'Commodities ETF' },
-  { symbol: 'NYSEARCA:PDBC', tvSymbol: 'NYSEARCA:PDBC', label: 'Broad Commodities ETF' },
-  { symbol: 'NYSEARCA:CPER', tvSymbol: 'NYSEARCA:CPER', label: 'Copper ETF' },
-  { symbol: 'NYSEARCA:WEAT', tvSymbol: 'NYSEARCA:WEAT', label: 'Wheat ETF' },
-  { symbol: 'NYSEARCA:CORN', tvSymbol: 'NYSEARCA:CORN', label: 'Corn ETF' },
-  { symbol: 'NYSEARCA:SOYB', tvSymbol: 'NYSEARCA:SOYB', label: 'Soybean ETF' },
-  { symbol: 'NYSEARCA:GDX', tvSymbol: 'NYSEARCA:GDX', label: 'Gold Miners ETF' },
-  { symbol: 'NYSEARCA:GDXJ', tvSymbol: 'NYSEARCA:GDXJ', label: 'Gold Miners Jr ETF' },
-  { symbol: 'NYSEARCA:SILJ', tvSymbol: 'NYSEARCA:SILJ', label: 'Silver Miners ETF' },
-  { symbol: 'NYSEARCA:XME', tvSymbol: 'NYSEARCA:XME', label: 'Metals & Mining ETF' },
-  { symbol: 'NYSEARCA:XLB', tvSymbol: 'NYSEARCA:XLB', label: 'Materials ETF' },
-  { symbol: 'NYSEARCA:OIH', tvSymbol: 'NYSEARCA:OIH', label: 'Oil Services ETF' },
-  { symbol: 'NYSEARCA:XOP', tvSymbol: 'NYSEARCA:XOP', label: 'Oil & Gas ETF' },
-  { symbol: 'NYSEARCA:COPX', tvSymbol: 'NYSEARCA:COPX', label: 'Copper Miners ETF' },
-  { symbol: 'NYSEARCA:ICLN', tvSymbol: 'NYSEARCA:ICLN', label: 'Clean Energy ETF' },
-  { symbol: 'NYSEARCA:TAN', tvSymbol: 'NYSEARCA:TAN', label: 'Solar ETF' },
-  { symbol: 'NYSEARCA:WOOD', tvSymbol: 'NYSEARCA:WOOD', label: 'Timber ETF' },
-  { symbol: 'NYSEARCA:LIT', tvSymbol: 'NYSEARCA:LIT', label: 'Lithium ETF' },
-  { symbol: 'NYSEARCA:URA', tvSymbol: 'NYSEARCA:URA', label: 'Uranium ETF' },
-  { symbol: 'NYSEARCA:REMX', tvSymbol: 'NYSEARCA:REMX', label: 'Rare Earth ETF' },
-  { symbol: 'NYSEARCA:KOL', tvSymbol: 'NYSEARCA:KOL', label: 'Coal ETF' },
-  { symbol: 'NYSEARCA:NLR', tvSymbol: 'NYSEARCA:NLR', label: 'Nuclear ETF' },
-  { symbol: 'NYSEARCA:PICK', tvSymbol: 'NYSEARCA:PICK', label: 'Mining ETF' },
-  { symbol: 'NYSEARCA:SLVP', tvSymbol: 'NYSEARCA:SLVP', label: 'Silver Miners ETF' },
-  { symbol: 'NYSE:SQM', tvSymbol: 'NYSE:SQM', label: 'SQM' },
-  { symbol: 'NYSE:ALB', tvSymbol: 'NYSE:ALB', label: 'Albemarle' },
-  { symbol: 'NYSE:LAC', tvSymbol: 'NYSE:LAC', label: 'Lithium Americas' },
-  { symbol: 'NYSE:PLL', tvSymbol: 'NYSE:PLL', label: 'Piedmont Lithium' },
-  { symbol: 'NYSE:MP', tvSymbol: 'NYSE:MP', label: 'MP Materials' },
-  { symbol: 'NYSE:FCX', tvSymbol: 'NYSE:FCX', label: 'Freeport-McMoRan' },
-  { symbol: 'NYSE:BHP', tvSymbol: 'NYSE:BHP', label: 'BHP' },
-  { symbol: 'NYSE:RIO', tvSymbol: 'NYSE:RIO', label: 'Rio Tinto' },
-  { symbol: 'NYSE:VALE', tvSymbol: 'NYSE:VALE', label: 'Vale' },
-  { symbol: 'NYSE:NEM', tvSymbol: 'NYSE:NEM', label: 'Newmont' },
-  { symbol: 'NYSE:AEM', tvSymbol: 'NYSE:AEM', label: 'Agnico Eagle' },
-  { symbol: 'NYSE:AG', tvSymbol: 'NYSE:AG', label: 'First Majestic Silver' },
-  { symbol: 'NYSE:PAAS', tvSymbol: 'NYSE:PAAS', label: 'Pan American Silver' },
-  { symbol: 'NYSE:HL', tvSymbol: 'NYSE:HL', label: 'Hecla Mining' },
-  { symbol: 'NASDAQ:CDE', tvSymbol: 'NASDAQ:CDE', label: 'Coeur Mining' },
-  { symbol: 'NYSE:EXK', tvSymbol: 'NYSE:EXK', label: 'Endeavour Silver' },
-  { symbol: 'NYSE:SCCO', tvSymbol: 'NYSE:SCCO', label: 'Southern Copper' },
-  { symbol: 'NYSE:TECK', tvSymbol: 'NYSE:TECK', label: 'Teck Resources' },
-  { symbol: 'NYSE:IPI', tvSymbol: 'NYSE:IPI', label: 'Intrepid Potash' },
-  { symbol: 'NYSE:CF', tvSymbol: 'NYSE:CF', label: 'CF Industries' },
-  { symbol: 'NYSE:MOS', tvSymbol: 'NYSE:MOS', label: 'Mosaic' },
-  { symbol: 'NYSE:UAN', tvSymbol: 'NYSE:UAN', label: 'CVR Partners' },
-  { symbol: 'NYSE:NUE', tvSymbol: 'NYSE:NUE', label: 'Nucor' },
-  { symbol: 'NYSE:STLD', tvSymbol: 'NYSE:STLD', label: 'Steel Dynamics' },
-  { symbol: 'NYSE:X', tvSymbol: 'NYSE:X', label: 'U.S. Steel' },
-  { symbol: 'NYSE:CE', tvSymbol: 'NYSE:CE', label: 'Celanese' },
-  { symbol: 'NYSE:DOW', tvSymbol: 'NYSE:DOW', label: 'Dow' },
-  { symbol: 'NYSE:CVX', tvSymbol: 'NYSE:CVX', label: 'Chevron' },
-  { symbol: 'NYSE:XOM', tvSymbol: 'NYSE:XOM', label: 'Exxon Mobil' },
-  { symbol: 'NYSE:COP', tvSymbol: 'NYSE:COP', label: 'ConocoPhillips' },
-  { symbol: 'NYSE:BP', tvSymbol: 'NYSE:BP', label: 'BP' },
-  { symbol: 'NYSE:SHEL', tvSymbol: 'NYSE:SHEL', label: 'Shell' },
-  { symbol: 'NYSE:TTE', tvSymbol: 'NYSE:TTE', label: 'TotalEnergies' },
-  { symbol: 'NYSE:OXY', tvSymbol: 'NYSE:OXY', label: 'Occidental' },
-  { symbol: 'NYSE:EOG', tvSymbol: 'NYSE:EOG', label: 'EOG Resources' },
-  { symbol: 'NYSE:SLB', tvSymbol: 'NYSE:SLB', label: 'SLB' },
-  { symbol: 'NYSE:HAL', tvSymbol: 'NYSE:HAL', label: 'Halliburton' },
-  { symbol: 'NYSE:KMI', tvSymbol: 'NYSE:KMI', label: 'Kinder Morgan' },
-  { symbol: 'NYSE:PAA', tvSymbol: 'NYSE:PAA', label: 'Plains All American' },
-  { symbol: 'NYSE:PSX', tvSymbol: 'NYSE:PSX', label: 'Phillips 66' },
-  { symbol: 'NYSE:VLO', tvSymbol: 'NYSE:VLO', label: 'Valero' },
-  { symbol: 'NYSE:MPC', tvSymbol: 'NYSE:MPC', label: 'Marathon Petroleum' },
-  { symbol: 'NYSE:ENB', tvSymbol: 'NYSE:ENB', label: 'Enbridge' },
-  { symbol: 'NYSE:SU', tvSymbol: 'NYSE:SU', label: 'Suncor' },
-  { symbol: 'NYSE:CNQ', tvSymbol: 'NYSE:CNQ', label: 'Canadian Natural' },
-  { symbol: 'NYSE:PBR', tvSymbol: 'NYSE:PBR', label: 'Petrobras' },
-  { symbol: 'NYSE:BKR', tvSymbol: 'NYSE:BKR', label: 'Baker Hughes' },
-  { symbol: 'NYSE:AR', tvSymbol: 'NYSE:AR', label: 'Antero Resources' },
-  { symbol: 'NYSE:CTRA', tvSymbol: 'NYSE:CTRA', label: 'Coterra Energy' },
-  { symbol: 'NYSE:FANG', tvSymbol: 'NYSE:FANG', label: 'Diamondback Energy' },
-  { symbol: 'NYSE:HES', tvSymbol: 'NYSE:HES', label: 'Hess' },
-  { symbol: 'NYSE:MRO', tvSymbol: 'NYSE:MRO', label: 'Marathon Oil' },
-  { symbol: 'NYSE:CHK', tvSymbol: 'NYSE:CHK', label: 'Chesapeake Energy' },
-  { symbol: 'NYSE:SWN', tvSymbol: 'NYSE:SWN', label: 'Southwestern Energy' },
-  { symbol: 'NYSE:EQT', tvSymbol: 'NYSE:EQT', label: 'EQT' },
-  { symbol: 'NYSE:DVN', tvSymbol: 'NYSE:DVN', label: 'Devon Energy' },
-  { symbol: 'NYSE:MPLX', tvSymbol: 'NYSE:MPLX', label: 'MPLX' },
-  { symbol: 'NYSE:WMB', tvSymbol: 'NYSE:WMB', label: 'Williams' },
-  { symbol: 'NYSE:OKE', tvSymbol: 'NYSE:OKE', label: 'ONEOK' },
-  { symbol: 'NYSE:TRP', tvSymbol: 'NYSE:TRP', label: 'TC Energy' }
-].slice(0, TARGETS.Commodities);
-
-const buildSymbolObjects = (market, items) =>
-  uniqBy(items, (x) => x.tvSymbol).map((item, idx) => ({
-    symbol: item.symbol,
-    tvSymbol: item.tvSymbol,
-    label: item.label || makeLabel(item.symbol),
+const buildSymbolObjects = (market, symbols) =>
+  uniq(symbols).map((sym, idx) => ({
+    symbol: sym,
+    tvSymbol: inferTvSymbol(market, sym),
+    label: makeLabel(sym),
     market,
     leverage: 'N/A',
     spread: 'Variable',
     hours: (market === 'Forex' || market === 'Crypto') ? '24/5' : 'N/A',
     contract: 'N/A',
     volatility: 'N/A',
-    source: 'catálogo',
+    source: 'TradingView',
     order: idx + 1
   }));
 
+/* ----------------------------- FOREX (100) ----------------------------- */
+
+const FX_MAJOR = [
+  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'NZDUSD', 'USDCAD',
+  'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CHFJPY', 'EURAUD', 'EURCAD',
+  'EURNZD', 'GBPCAD', 'GBPAUD', 'GBPNZD', 'NZDJPY', 'AUDCAD', 'AUDCHF',
+  'AUDNZD', 'CADCHF', 'EURCHF', 'GBPCHF', 'NZDCAD', 'NZDCHF', 'USDNOK',
+  'USDSEK', 'USDSGD', 'USDHKD', 'USDMXN', 'USDZAR', 'USDTRY', 'USDCNH',
+  'EURSEK', 'EURNOK', 'EURSGD', 'EURDKK', 'USDPLN', 'USDCZK', 'USDHUF',
+  'USDILS', 'USDTHB', 'USDINR', 'USDBRL', 'USDCOP', 'USDCLP', 'USDPEN',
+  'USDKRW', 'USDTWD', 'USDIDR', 'USDPHP', 'USDVND', 'EURPLN', 'EURCZK',
+  'EURHUF', 'EURTRY', 'EURZAR', 'GBPLN', 'GBPCZK', 'GBPHUF', 'AUDSGD',
+  'CADJPY', 'CHFSGD', 'SGDJPY', 'HKDJPY', 'MXNJPY', 'ZARJPY', 'TRYJPY',
+  'CNHJPY', 'PLNJPY', 'CZKJPY', 'HUFJPY', 'DKKJPY'
+];
+
+const FX_CURRENCIES = [
+  'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD', 'NOK', 'SEK',
+  'SGD', 'HKD', 'MXN', 'ZAR', 'TRY', 'CNH', 'PLN', 'CZK', 'HUF', 'DKK'
+];
+
+const FX_GENERATED = (() => {
+  const pairs = [];
+  for (let i = 0; i < FX_CURRENCIES.length; i++) {
+    for (let j = 0; j < FX_CURRENCIES.length; j++) {
+      if (i === j) continue;
+      pairs.push(`${FX_CURRENCIES[i]}${FX_CURRENCIES[j]}`);
+    }
+  }
+  return pairs;
+})();
+
+const FX_SYMBOLS = uniq([...FX_MAJOR, ...FX_GENERATED]).slice(0, TARGETS.Forex);
+
+/* ----------------------------- CRYPTO (80) ----------------------------- */
+
+const CRYPTO_BASES = [
+  'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'LTC', 'LINK',
+  'BCH', 'AVAX', 'TRX', 'TON', 'SHIB', 'SUI', 'PEPE', 'APT', 'ARB', 'OP',
+  'NEAR', 'ATOM', 'FIL', 'ETC', 'UNI', 'AAVE', 'MATIC', 'HBAR', 'ICP', 'INJ',
+  'VET', 'ALGO', 'SAND', 'MANA', 'GRT', 'FET', 'EGLD', 'RUNE', 'KAS', 'WIF',
+  'ONDO', 'JUP', 'TIA', 'PYTH', 'ENS', 'LDO', 'SEI', 'TAO', 'RENDER', 'NEO',
+  'XLM', 'EOS', 'AXS', 'IMX', 'THETA', 'QNT', 'FLOW', 'LUNC', 'LUNA', 'CFX',
+  'XEC', 'RAY', 'BONK', 'TIA', 'JTO', 'WLD', 'SFP', 'CFX', 'BOME', 'PENDLE'
+];
+
+const CRYPTO_SYMBOLS = uniq(CRYPTO_BASES.map((b) => `${b}USDT`)).slice(0, TARGETS.Crypto);
+
+/* ----------------------------- INDICES (60) ---------------------------- */
+
+const INDEX_ROWS = [
+  ['SPX500', 'SP:SPX', 'SPX 500'],
+  ['NAS100', 'NASDAQ:NDX', 'NASDAQ 100'],
+  ['US30', 'DJ:DJI', 'US 30'],
+  ['UK100', 'TVC:UKX', 'FTSE 100'],
+  ['GER40', 'XETR:DAX', 'DAX 40'],
+  ['FRA40', 'Euronext:PX1', 'CAC 40'],
+  ['JPN225', 'TVC:NI225', 'Nikkei 225'],
+  ['AUS200', 'ASX:XJO', 'ASX 200'],
+  ['HK50', 'HSI:HSI', 'Hang Seng'],
+  ['RUS2000', 'TVC:RUT', 'Russell 2000'],
+  ['VIX', 'CBOE:VIX', 'VIX'],
+  ['EU50', 'STOXX:SX5E', 'Euro Stoxx 50'],
+  ['ESP35', 'BME:IBEX', 'IBEX 35'],
+  ['ITA40', 'FTSEMIB:FTSEMIB', 'FTSE MIB'],
+  ['SWI20', 'SIX:SMI', 'SMI 20'],
+  ['NETH25', 'TVC:AEX', 'AEX 25'],
+  ['BEL20', 'TVC:BEL20', 'BEL 20'],
+  ['KOSPI', 'KRX:KOSPI', 'KOSPI'],
+  ['NIFTY50', 'NSE:NIFTY', 'Nifty 50'],
+  ['BSESN', 'BSE:SENSEX', 'Sensex'],
+  ['CHN50', 'TVC:CHN50', 'China 50'],
+  ['TSX60', 'TVC:TSX60', 'TSX 60'],
+  ['MEXBOL', 'BMV:IPC', 'IPC Mexico'],
+  ['BRA50', 'BMFBOVESPA:IBOV', 'Brazil 50'],
+  ['STI30', 'TVC:STI', 'Singapore STI'],
+  ['SA40', 'TVC:SA40', 'South Africa 40'],
+  ['TA35', 'TASE:TA35', 'TA 35'],
+  ['MOEX', 'MOEX:IMOEX', 'MOEX'],
+  ['CAC40', 'Euronext:PX1', 'CAC 40'],
+  ['DAX40', 'XETR:DAX', 'DAX 40'],
+  ['FTSEMIB', 'FTSEMIB:FTSEMIB', 'FTSE MIB'],
+  ['AEX25', 'TVC:AEX', 'AEX 25'],
+  ['OMXS30', 'OMXSTO:OMXS30', 'OMX S30'],
+  ['OMXC25', 'OMXC25:OMXC25', 'OMXC 25'],
+  ['OMXH25', 'OMXH25:OMXH25', 'OMXH 25'],
+  ['OMXI30', 'OMXI30:OMXI30', 'OMXI 30'],
+  ['PSI20', 'PSI20:PSI20', 'PSI 20'],
+  ['PX50', 'PX50:PX50', 'PX 50'],
+  ['WIG20', 'WSE:WIG20', 'WIG 20'],
+  ['BUX', 'BUX:BUX', 'BUX'],
+  ['ATX', 'VIE:ATX', 'ATX'],
+  ['RTSI', 'MOEX:RTSI', 'RTSI'],
+  ['BIST100', 'BIST:BIST100', 'BIST 100'],
+  ['SET50', 'SET:SET50', 'SET 50'],
+  ['PSEI', 'PSEI:PSEI', 'PSEi'],
+  ['JCI', 'JCI:JCI', 'JCI'],
+  ['VN30', 'HOSE:VN30', 'VN30'],
+  ['TAIEX', 'TWSE:TAIEX', 'TAIEX'],
+  ['TWSE', 'TWSE:TWSE', 'TWSE'],
+  ['SHCOMP', 'SSE:000001', 'Shanghai Composite'],
+  ['SZSE', 'SZSE:399001', 'Shenzhen Component'],
+  ['KLCI', 'MYX:KLCI', 'KLCI'],
+  ['NZX50', 'NZX:NZ50', 'NZX 50'],
+  ['HSI2', 'HSI:HSI', 'Hang Seng 2'],
+  ['SSEC', 'SSE:000001', 'SSE Composite'],
+  ['KSE100', 'KSE:KSE100', 'KSE 100'],
+  ['EGX30', 'EGX:EGX30', 'EGX 30'],
+  ['TASI', 'TADAWUL:TASI', 'TASI'],
+  ['ADX', 'ADX:ADI', 'ADX'],
+  ['DFMGI', 'DFM:DFMGI', 'DFM General']
+];
+
+const INDEX_ROWS_UNIQ = uniq(INDEX_ROWS.map(([symbol, tvSymbol, label]) => `${symbol}|${tvSymbol}|${label}`))
+  .map((row) => {
+    const [symbol, tvSymbol, label] = row.split('|');
+    return { symbol, tvSymbol, label };
+  })
+  .slice(0, TARGETS.Indices);
+
+const INDEX_TV_HINTS = Object.fromEntries(INDEX_ROWS_UNIQ.map((r) => [r.symbol, r.tvSymbol]));
+
+/* ----------------------------- STOCKS (60) ----------------------------- */
+
+const STOCK_ROWS = [
+  ['AAPL', 'NASDAQ:AAPL', 'Apple'],
+  ['MSFT', 'NASDAQ:MSFT', 'Microsoft'],
+  ['AMZN', 'NASDAQ:AMZN', 'Amazon'],
+  ['TSLA', 'NASDAQ:TSLA', 'Tesla'],
+  ['NVDA', 'NASDAQ:NVDA', 'NVIDIA'],
+  ['META', 'NASDAQ:META', 'Meta'],
+  ['GOOGL', 'NASDAQ:GOOGL', 'Alphabet'],
+  ['NFLX', 'NASDAQ:NFLX', 'Netflix'],
+  ['AMD', 'NASDAQ:AMD', 'AMD'],
+  ['PYPL', 'NASDAQ:PYPL', 'PayPal'],
+  ['INTC', 'NASDAQ:INTC', 'Intel'],
+  ['DIS', 'NYSE:DIS', 'Disney'],
+  ['BA', 'NYSE:BA', 'Boeing'],
+  ['KO', 'NYSE:KO', 'Coca-Cola'],
+  ['MCD', 'NYSE:MCD', 'McDonald’s'],
+  ['XOM', 'NYSE:XOM', 'Exxon Mobil'],
+  ['JPM', 'NYSE:JPM', 'JPMorgan'],
+  ['BAC', 'NYSE:BAC', 'Bank of America'],
+  ['ORCL', 'NYSE:ORCL', 'Oracle'],
+  ['CRM', 'NYSE:CRM', 'Salesforce'],
+  ['PLTR', 'NYSE:PLTR', 'Palantir'],
+  ['UBER', 'NYSE:UBER', 'Uber'],
+  ['COIN', 'NASDAQ:COIN', 'Coinbase'],
+  ['RBLX', 'NYSE:RBLX', 'Roblox'],
+  ['SNOW', 'NYSE:SNOW', 'Snowflake'],
+  ['SHOP', 'NYSE:SHOP', 'Shopify'],
+  ['NIO', 'NYSE:NIO', 'NIO'],
+  ['BABA', 'NYSE:BABA', 'Alibaba'],
+  ['PFE', 'NYSE:PFE', 'Pfizer'],
+  ['WMT', 'NYSE:WMT', 'Walmart'],
+  ['COST', 'NASDAQ:COST', 'Costco'],
+  ['QCOM', 'NASDAQ:QCOM', 'Qualcomm'],
+  ['ADBE', 'NASDAQ:ADBE', 'Adobe'],
+  ['CSCO', 'NASDAQ:CSCO', 'Cisco'],
+  ['IBM', 'NYSE:IBM', 'IBM'],
+  ['TSM', 'NYSE:TSM', 'TSMC'],
+  ['ASML', 'NASDAQ:ASML', 'ASML'],
+  ['MU', 'NASDAQ:MU', 'Micron'],
+  ['PANW', 'NASDAQ:PANW', 'Palo Alto'],
+  ['ABNB', 'NASDAQ:ABNB', 'Airbnb'],
+  ['ARM', 'NASDAQ:ARM', 'Arm'],
+  ['SPY', 'AMEX:SPY', 'SPDR S&P 500 ETF'],
+  ['QQQ', 'NASDAQ:QQQ', 'Invesco QQQ'],
+  ['IWM', 'AMEX:IWM', 'iShares Russell 2000'],
+  ['DIA', 'AMEX:DIA', 'SPDR Dow Jones'],
+  ['VOO', 'AMEX:VOO', 'Vanguard S&P 500'],
+  ['VTI', 'AMEX:VTI', 'Vanguard Total Market'],
+  ['XLF', 'AMEX:XLF', 'Financial Select Sector'],
+  ['XLK', 'AMEX:XLK', 'Technology Select Sector'],
+  ['XLE', 'AMEX:XLE', 'Energy Select Sector'],
+  ['XLV', 'AMEX:XLV', 'Health Care Select Sector'],
+  ['XLY', 'AMEX:XLY', 'Consumer Discretionary'],
+  ['XLP', 'AMEX:XLP', 'Consumer Staples'],
+  ['XLI', 'AMEX:XLI', 'Industrials'],
+  ['XLB', 'AMEX:XLB', 'Materials'],
+  ['XLC', 'AMEX:XLC', 'Communication Services'],
+  ['SMH', 'NASDAQ:SMH', 'VanEck Semiconductor'],
+  ['SOXX', 'NASDAQ:SOXX', 'iShares Semiconductor'],
+  ['ARKK', 'AMEX:ARKK', 'ARK Innovation'],
+  ['TQQQ', 'NASDAQ:TQQQ', 'ProShares UltraPro QQQ'],
+  ['SQQQ', 'NASDAQ:SQQQ', 'ProShares UltraPro Short QQQ'],
+  ['UPRO', 'AMEX:UPRO', 'ProShares UltraPro S&P 500'],
+  ['SPXL', 'AMEX:SPXL', 'Direxion S&P 500 Bull'],
+  ['GLD', 'AMEX:GLD', 'SPDR Gold Shares'],
+  ['SLV', 'AMEX:SLV', 'iShares Silver Trust'],
+  ['USO', 'AMEX:USO', 'United States Oil Fund'],
+  ['UNG', 'AMEX:UNG', 'United States Natural Gas Fund'],
+  ['TLT', 'NASDAQ:TLT', '20+ Year Treasury'],
+  ['HYG', 'AMEX:HYG', 'High Yield Bond'],
+  ['LQD', 'AMEX:LQD', 'Investment Grade Bond'],
+  ['EEM', 'AMEX:EEM', 'Emerging Markets'],
+  ['FXI', 'NYSEARCA:FXI', 'China Large-Cap'],
+  ['EWZ', 'NYSEARCA:EWZ', 'Brazil'],
+  ['EWG', 'NYSEARCA:EWG', 'Germany'],
+  ['EWJ', 'NYSEARCA:EWJ', 'Japan'],
+  ['EFA', 'NYSEARCA:EFA', 'EAFE'],
+  ['VNQ', 'NYSEARCA:VNQ', 'Real Estate'],
+  ['IEMG', 'NYSEARCA:IEMG', 'Core EM'],
+  ['VT', 'NYSEARCA:VT', 'Total World'],
+  ['SCHD', 'NYSEARCA:SCHD', 'Dividend Equity'],
+  ['VYM', 'NYSEARCA:VYM', 'High Dividend'],
+  ['JEPI', 'NYSEARCA:JEPI', 'Equity Premium Income'],
+  ['JEPQ', 'NASDAQ:JEPQ', 'Nasdaq Equity Premium'],
+  ['SCHG', 'NYSEARCA:SCHG', 'Growth'],
+  ['IJR', 'NYSEARCA:IJR', 'Small-Cap'],
+  ['QYLD', 'NASDAQ:QYLD', 'Nasdaq 100 Covered Call'],
+  ['NVDL', 'NASDAQ:NVDL', '2x NVDA']
+].slice(0, TARGETS.Stocks);
+
+const STOCK_TV_HINTS = Object.fromEntries(STOCK_ROWS.map((r) => [r[0], r[1]]));
+const STOCK_NASDAQ = new Set([
+  'AAPL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'GOOGL', 'NFLX', 'AMD', 'PYPL',
+  'INTC', 'COST', 'QCOM', 'ADBE', 'CSCO', 'ASML', 'MU', 'PANW', 'ABNB', 'ARM',
+  'COIN', 'SMH', 'SOXX', 'TQQQ', 'SQQQ', 'JEPQ', 'QYLD', 'NVDL', 'TLT'
+]);
+const STOCK_NYSE = new Set([
+  'DIS', 'BA', 'KO', 'MCD', 'XOM', 'JPM', 'BAC', 'ORCL', 'CRM', 'PLTR', 'UBER',
+  'RBLX', 'SNOW', 'SHOP', 'NIO', 'BABA', 'PFE', 'WMT', 'IBM', 'TSM'
+]);
+const STOCK_NYSEARCA = new Set([
+  'FXI', 'EWZ', 'EWG', 'EWJ', 'EFA', 'VNQ', 'IEMG', 'VT', 'SCHD', 'VYM', 'JEPI',
+  'SCHG', 'IJR'
+]);
+const STOCK_AMEX = new Set([
+  'SPY', 'IWM', 'DIA', 'VOO', 'VTI', 'XLF', 'XLK', 'XLE', 'XLV', 'XLY', 'XLP',
+  'XLI', 'XLB', 'XLC', 'ARKK', 'UPRO', 'SPXL', 'GLD', 'SLV', 'USO', 'UNG',
+  'HYG', 'LQD', 'EEM', 'EWZ', 'EWG', 'EWJ', 'EFA', 'VNQ', 'IEMG', 'VT',
+  'SCHD', 'VYM', 'JEPI', 'SCHG', 'IJR'
+]);
+
+/* -------------------------- COMMODITIES (100) -------------------------- */
+
+const COMMODITY_BASE = [
+  'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'USOIL', 'UKOIL', 'NATGAS', 'COPPER',
+  'ALUMINUM', 'NICKEL', 'ZINC', 'IRONORE', 'COCOA', 'COFFEE', 'WHEAT', 'CORN',
+  'SUGAR', 'COTTON', 'SOYBEAN', 'RICE', 'LIVECATTLE', 'LEANHOGS', 'HEATOIL',
+  'RBOB', 'URANIUM', 'LITHIUM', 'COBALT', 'MANGANESE', 'MOLYBDENUM', 'PHOSPHATE',
+  'POTASH', 'UREA', 'AMMONIA', 'SILVER', 'GOLD', 'PLATINUM', 'PALLADIUM',
+  'SOYBEANOIL', 'SOYBEANMEAL', 'OATS', 'ROUGHRICE', 'FEEDERCATTLE', 'LUMBER',
+  'ORANGEJUICE', 'COTTON2', 'SUGAR2', 'COPPER2', 'NATGAS2', 'HEATINGOIL2',
+  'GASOLINE2', 'TIN', 'LEAD', 'ANTIMONY', 'IRONORE62', 'STEEL', 'COKE',
+  'LITHIUMCARBONATE', 'LITHIUMHYDROXIDE'
+];
+
+const COMMODITY_EXTRAS = [
+  'GC1!', 'SI1!', 'PL1!', 'PA1!', 'CL1!', 'NG1!', 'HO1!', 'RB1!',
+  'BZ1!', 'ZT1!', 'ZF1!', 'ZN1!', 'ZB1!', 'GE1!', '6E1!', '6B1!', '6J1!',
+  '6A1!', '6C1!', '6N1!', '6S1!', '6M1!', '6R1!', '6Z1!', 'KC1!', 'CC1!',
+  'SB1!', 'CT1!', 'OJ1!', 'LE1!', 'HE1!', 'FC1!', 'GF1!', 'LS1!', 'SM1!',
+  'BO1!', 'ZM1!', 'ZL1!', 'ZW1!', 'ZC1!', 'ZO1!', 'ZS1!', 'DA1!', 'DC1!',
+  'DL1!', 'DB1!', 'DX1!', 'MGC1!', 'SIL1!', 'MCL1!', 'QO1!', 'LEB1!',
+  'GLD', 'SLV', 'USO', 'UNG', 'DBA', 'DBB', 'DBC', 'PDBC', 'CORN', 'WEAT',
+  'SOYB', 'CANE', 'JO', 'NIB', 'CPER', 'PALL', 'JJC', 'URA', 'GDX', 'GDXJ',
+  'UGA', 'USL', 'BOIL', 'KOLD', 'OILK', 'XOP', 'XLE', 'AMLP', 'XME', 'MOO',
+  'DBO', 'CMDY', 'COW', 'WOOD', 'CUT', 'TAN', 'SLX', 'REMX', 'LIT', 'ICLN'
+].slice(0, 100);
+
+const COMMODITY_TV_HINTS = {
+  XAUUSD: 'OANDA:XAUUSD',
+  XAGUSD: 'OANDA:XAGUSD',
+  XPTUSD: 'NYMEX:PL1!',
+  XPDUSD: 'NYMEX:PA1!',
+  USOIL: 'NYMEX:CL1!',
+  UKOIL: 'TVC:UKOIL',
+  NATGAS: 'NYMEX:NG1!',
+  COPPER: 'COMEX:HG1!',
+  ALUMINUM: 'COMEX:ALI1!',
+  NICKEL: 'LME:NICKEL',
+  ZINC: 'LME:ZINC',
+  IRONORE: 'TVC:IRONORE',
+  COCOA: 'ICEUS:CC1!',
+  COFFEE: 'ICEUS:KC1!',
+  WHEAT: 'CBOT:ZW1!',
+  CORN: 'CBOT:ZC1!',
+  SUGAR: 'ICEUS:SB1!',
+  COTTON: 'ICEUS:CT1!',
+  SOYBEAN: 'CBOT:ZS1!',
+  RICE: 'CBOT:ZR1!',
+  LIVECATTLE: 'CME:LE1!',
+  LEANHOGS: 'CME:HE1!',
+  HEATOIL: 'NYMEX:HO1!',
+  RBOB: 'NYMEX:RB1!',
+  URANIUM: 'TVC:URA',
+  LITHIUM: 'TVC:LITHIUM',
+  COBALT: 'TVC:COBALT',
+  MANGANESE: 'TVC:MANGANESE',
+  MOLYBDENUM: 'TVC:MOLYBDENUM',
+  PHOSPHATE: 'TVC:PHOSPHATE',
+  POTASH: 'TVC:POTASH',
+  UREA: 'TVC:UREA',
+  AMMONIA: 'TVC:AMMONIA',
+
+  GC1!: 'COMEX:GC1!',
+  SI1!: 'COMEX:SI1!',
+  PL1!: 'COMEX:PL1!',
+  PA1!: 'COMEX:PA1!',
+  CL1!: 'NYMEX:CL1!',
+  NG1!: 'NYMEX:NG1!',
+  HO1!: 'NYMEX:HO1!',
+  RB1!: 'NYMEX:RB1!',
+  BZ1!: 'ICEEU:BRN1!',
+  ZT1!: 'CBOT:ZT1!',
+  ZF1!: 'CBOT:ZF1!',
+  ZN1!: 'CBOT:ZN1!',
+  ZB1!: 'CBOT:ZB1!',
+  GE1!: 'CME:GE1!',
+  '6E1!': 'CME:6E1!',
+  '6B1!': 'CME:6B1!',
+  '6J1!': 'CME:6J1!',
+  '6A1!': 'CME:6A1!',
+  '6C1!': 'CME:6C1!',
+  '6N1!': 'CME:6N1!',
+  '6S1!': 'CME:6S1!',
+  '6M1!': 'CME:6M1!',
+  '6R1!': 'CME:6R1!',
+  '6Z1!': 'CME:6Z1!',
+  KC1!: 'ICEUS:KC1!',
+  CC1!: 'ICEUS:CC1!',
+  SB1!: 'ICEUS:SB1!',
+  CT1!: 'ICEUS:CT1!',
+  OJ1!: 'ICEUS:OJ1!',
+  LE1!: 'CME:LE1!',
+  HE1!: 'CME:HE1!',
+  FC1!: 'CME:FC1!',
+  GF1!: 'CME:GF1!',
+  LS1!: 'CME:LS1!',
+  SM1!: 'CBOT:SM1!',
+  BO1!: 'CBOT:BO1!',
+  ZM1!: 'CBOT:ZM1!',
+  ZL1!: 'CBOT:ZL1!',
+  ZW1!: 'CBOT:ZW1!',
+  ZC1!: 'CBOT:ZC1!',
+  ZO1!: 'CBOT:ZO1!',
+  ZS1!: 'CBOT:ZS1!',
+  DA1!: 'CME:DA1!',
+  DC1!: 'CME:DC1!',
+  DL1!: 'CME:DL1!',
+  DB1!: 'CME:DB1!',
+  DX1!: 'ICEUS:DX1!',
+  MGC1!: 'COMEX:MGC1!',
+  SIL1!: 'COMEX:SIL1!',
+  MCL1!: 'NYMEX:MCL1!',
+  QO1!: 'NYMEX:QO1!',
+  LEB1!: 'CME:LEB1!',
+
+  GLD: 'AMEX:GLD',
+  SLV: 'AMEX:SLV',
+  USO: 'AMEX:USO',
+  UNG: 'AMEX:UNG',
+  DBA: 'AMEX:DBA',
+  DBB: 'AMEX:DBB',
+  DBC: 'AMEX:DBC',
+  PDBC: 'AMEX:PDBC',
+  CORN: 'AMEX:CORN',
+  WEAT: 'AMEX:WEAT',
+  SOYB: 'AMEX:SOYB',
+  CANE: 'AMEX:CANE',
+  JO: 'AMEX:JO',
+  NIB: 'AMEX:NIB',
+  CPER: 'AMEX:CPER',
+  PALL: 'AMEX:PALL',
+  JJC: 'AMEX:JJC',
+  URA: 'AMEX:URA',
+  GDX: 'AMEX:GDX',
+  GDXJ: 'AMEX:GDXJ',
+  UGA: 'AMEX:UGA',
+  USL: 'AMEX:USL',
+  BOIL: 'AMEX:BOIL',
+  KOLD: 'AMEX:KOLD',
+  OILK: 'AMEX:OILK',
+  XOP: 'AMEX:XOP',
+  XLE: 'AMEX:XLE',
+  AMLP: 'AMEX:AMLP',
+  XME: 'AMEX:XME',
+  MOO: 'AMEX:MOO',
+  DBO: 'AMEX:DBO',
+  CMDY: 'AMEX:CMDY',
+  COW: 'AMEX:COW',
+  WOOD: 'AMEX:WOOD',
+  CUT: 'AMEX:CUT',
+  TAN: 'AMEX:TAN',
+  SLX: 'AMEX:SLX',
+  REMX: 'AMEX:REMX',
+  LIT: 'AMEX:LIT',
+  ICLN: 'AMEX:ICLN'
+};
+
+const COMMODITY_SYMBOLS = uniq([...COMMODITY_BASE, ...COMMODITY_EXTRAS]).slice(0, TARGETS.Commodities);
+
+/* -------------------------- TV symbol hints maps ----------------------- */
+
+const INDEX_ROWS_MAP = Object.fromEntries(INDEX_ROWS_UNIQ.map((r) => [r.symbol, r.tvSymbol]));
+const STOCK_TV_HINTS = Object.fromEntries(STOCK_ROWS.map((r) => [r[0], r[1]]));
+
+/* ------------------------------ BUILD ALL ------------------------------ */
+
 const DEFAULT_SYMBOLS = [
-  ...buildSymbolObjects('Forex', FX_100.map((sym) => ({
-    symbol: sym,
-    tvSymbol: `OANDA:${sym}`,
-    label: makeLabel(sym)
-  }))),
-  ...buildSymbolObjects('Crypto', CRYPTO_80.map((sym) => ({
-    symbol: sym,
-    tvSymbol: `BINANCE:${sym}`,
-    label: makeLabel(sym)
-  }))),
-  ...buildSymbolObjects('Indices', INDEX_ITEMS),
-  ...buildSymbolObjects('Stocks', STOCK_ITEMS),
-  ...buildSymbolObjects('Commodities', COMMODITY_ITEMS)
-].slice(0, 400);
+  ...buildSymbolObjects('Forex', FX_SYMBOLS),
+  ...buildSymbolObjects('Crypto', CRYPTO_SYMBOLS),
+  ...buildSymbolObjects('Indices', INDEX_ROWS_UNIQ.map((r) => r.symbol)),
+  ...buildSymbolObjects('Stocks', STOCK_ROWS.map((r) => r[0])),
+  ...buildSymbolObjects('Commodities', COMMODITY_SYMBOLS)
+].map((item) => {
+  if (item.market === 'Indices' && INDEX_ROWS_MAP[item.symbol]) {
+    item.tvSymbol = INDEX_ROWS_MAP[item.symbol];
+    const row = INDEX_ROWS_UNIQ.find((r) => r.symbol === item.symbol);
+    if (row) item.label = row.label;
+  }
+  if (item.market === 'Stocks' && STOCK_TV_HINTS[item.symbol]) {
+    item.tvSymbol = STOCK_TV_HINTS[item.symbol];
+    const row = STOCK_ROWS.find((r) => r[0] === item.symbol);
+    if (row) item.label = row[2];
+  }
+  if (item.market === 'Commodities' && COMMODITY_TV_HINTS[item.symbol]) {
+    item.tvSymbol = COMMODITY_TV_HINTS[item.symbol];
+  }
+  return item;
+}).filter((item, index, arr) => arr.findIndex((x) => x.symbol === item.symbol) === index);
 
 console.log('DEFAULT_SYMBOLS:', DEFAULT_SYMBOLS.length);
+
 if (DEFAULT_SYMBOLS.length !== 400) {
   console.warn(`⚠️ Se esperaban 400 símbolos y se generaron ${DEFAULT_SYMBOLS.length}`);
-}
-
-function openTradingViewSymbol(item) {
-  const tv = item?.tvSymbol || item?.symbol;
-  if (!tv) return;
-
-  const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`;
-  window.open(url, '_blank', 'noopener,noreferrer');
 }
   const state = {
     started: false,
