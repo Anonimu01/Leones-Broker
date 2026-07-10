@@ -87,7 +87,6 @@ const allowedOrigins = new Set(
     "http://127.0.0.1:3000",
     "http://localhost:4000",
     "http://127.0.0.1:4000",
-    "https://leones-broker.onrender.com",
     "https://leones-broker-production.up.railway.app",
     "https://leonesbr.pro",
   ].filter(Boolean)
