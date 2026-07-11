@@ -9,7 +9,7 @@ import sendEmail from "../utils/sendEmail.js";
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const BASE_URL_RAW = process.env.BASE_URL || process.env.CLIENT_URL || "";
-const BASE_URL = (BASE_URL_RAW || "leones-broker-production.up.railway.app").replace(/\/+$/, "");
+const BASE_URL = (BASE_URL_RAW || "https://leones-broker-production.up.railway.app").replace(/\/+$/, "");
 const REQUIRE_EMAIL_VERIFICATION =
   (process.env.ENFORCE_EMAIL_VERIFICATION || "false").toLowerCase() === "true";
 
