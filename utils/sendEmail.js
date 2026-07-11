@@ -23,7 +23,7 @@
  */
 
 import nodemailer from "nodemailer";
-
+import { Resend } from "resend";
 const {
   SMTP_HOST,
   SMTP_PORT,
@@ -40,6 +40,15 @@ const {
 const SMTP_USER_FINAL = SMTP_USER || EMAIL_USER || "";
 const SMTP_PASS_FINAL = SMTP_PASS || EMAIL_PASS || "";
 
+const {
+  RESEND_API_KEY,
+  EMAIL_FROM,
+} = process.env;
+
+const resend = RESEND_API_KEY
+  ? new Resend(RESEND_API_KEY)
+  : null;
+
 console.log("[MAIL CONFIG]", {
  host: SMTP_HOST,
  port: SMTP_PORT,
@@ -54,6 +63,23 @@ let transporter = null;
 let transporterVerifyPromise = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function sendWithResend({ toArr, subject, html, text }) {
+
+  if (!resend) {
+    throw new Error("RESEND_NOT_CONFIGURED");
+  }
+
+  const result = await resend.emails.send({
+    from: EMAIL_FROM || "Leones Broker <onboarding@resend.dev>",
+    to: toArr,
+    subject,
+    html,
+    text,
+  });
+
+  return result;
+}
 
 function normalizeRecipients(to) {
   if (!to) return [];
@@ -192,6 +218,42 @@ export const sendEmail = async (...args) => {
     const subject = payload.subject || "Notificación";
     const html = payload.html || payload.body || "";
     const text = payload.text || stripHtml(html);
+    // Intentar Resend primero
+if (resend) {
+
+  try {
+
+    console.log("[MAIL] Enviando con Resend...");
+
+    const info = await sendWithResend({
+      toArr,
+      subject,
+      html,
+      text,
+    });
+
+    console.log("[MAIL] ✅ Resend enviado");
+
+    return {
+      ok: true,
+      provider: "resend",
+      response: info,
+    };
+
+  } catch (err) {
+
+    console.error(
+      "[MAIL] Resend falló:",
+      err.message
+    );
+
+    console.log(
+      "[MAIL] Intentando SMTP..."
+    );
+
+  }
+
+}
 
     if (!SMTP_USER_FINAL || !SMTP_PASS_FINAL) {
       console.error(
