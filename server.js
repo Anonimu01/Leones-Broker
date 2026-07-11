@@ -1275,44 +1275,270 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     env: process.env.NODE_ENV || "dev",
-    emailProvider: process.env.RESEND_API_KEY ? "resend" : process.env.EMAIL_USER || process.env.SMTP_USER ? "smtp" : "none",
+    emailProvider:
+      process.env.SMTP_USER || process.env.EMAIL_USER
+        ? "smtp"
+        : process.env.RESEND_API_KEY
+        ? "resend"
+        : "none",
+    smtpConfigured: !!(
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASS
+    ),
+    resendConfigured: !!process.env.RESEND_API_KEY,
     db: mongoose.connection.name || null,
     adminApiKeyConfigured: !!process.env.ADMIN_API_KEY,
   });
 });
 
+
 app.locals.sendVerificationEmail = async ({ user, verificationLink }) => {
   try {
+
     const to = user?.email || user?.address || user;
-    if (!to) return { ok: false, error: "missing_recipient" };
-    if (!verificationLink) return { ok: false, error: "missing_verification_link" };
+
+    if (!to) {
+      return {
+        ok: false,
+        error: "missing_recipient"
+      };
+    }
+
+    if (!verificationLink) {
+      return {
+        ok: false,
+        error: "missing_verification_link"
+      };
+    }
+
+
     const name = user?.name || "usuario";
-    return await sendEmail({
+
+
+    const emailData = {
       to,
-      subject: "Verifica tu cuenta - Leones Broker",
-      html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#111"><h2>Hola ${name}, verifica tu cuenta</h2><p>Haz clic en el botón de abajo para activar tu cuenta:</p><p><a href="${verificationLink}" style="display:inline-block;background:#d4af37;color:#000;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">Verificar cuenta</a></p><p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p><p>${verificationLink}</p></div>`,
-    });
+
+      subject:
+        "Verifica tu cuenta - Leones Broker",
+
+      html:
+      `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
+
+      <h2>Hola ${name}, verifica tu cuenta</h2>
+
+      <p>
+      Haz clic en el botón de abajo para activar tu cuenta:
+      </p>
+
+      <p>
+      <a href="${verificationLink}" 
+      style="
+      display:inline-block;
+      background:#d4af37;
+      color:#000;
+      text-decoration:none;
+      padding:12px 18px;
+      border-radius:8px;
+      font-weight:bold">
+      Verificar cuenta
+      </a>
+      </p>
+
+      <p>
+      Si el botón no funciona, copia y pega este enlace en tu navegador:
+      </p>
+
+      <p>
+      ${verificationLink}
+      </p>
+
+      </div>`
+    };
+
+
+    try {
+
+      // PRIMERO SMTP
+      const smtpResult =
+        await sendEmail(emailData);
+
+
+      if (smtpResult?.ok) {
+
+        console.log(
+          "[MAIL] ✅ enviado por SMTP"
+        );
+
+        return smtpResult;
+
+      }
+
+
+      throw new Error(
+        smtpResult?.error ||
+        "SMTP_FAILED"
+      );
+
+
+    } catch (smtpError) {
+
+
+      console.warn(
+        "[MAIL] ⚠️ SMTP fallo, intentando Resend:",
+        smtpError?.message || smtpError
+      );
+
+
+      // FALLBACK RESEND
+      if (process.env.RESEND_API_KEY) {
+
+        const resendResult =
+          await sendEmail({
+            ...emailData,
+            provider: "resend"
+          });
+
+
+        return resendResult;
+
+      }
+
+
+      throw smtpError;
+
+    }
+
+
   } catch (err) {
-    console.error("[MAIL] sendVerificationEmail error:", err?.message || err);
-    return { ok: false, error: err?.message || String(err) };
+
+    console.error(
+      "[MAIL] sendVerificationEmail error:",
+      err?.message || err
+    );
+
+
+    return {
+      ok: false,
+      error:
+        err?.message ||
+        String(err)
+    };
+
   }
 };
 
-app.post("/api/_send_test_email", async (req, res) => {
-  const to = (req.body && req.body.to) || process.env.SENDER_EMAIL;
-  if (!to) return res.status(400).json({ ok: false, message: "Necesitas enviar 'to' en el body o configurar SENDER_EMAIL" });
-  const subject = req.body.subject || "Prueba de correo - Leones Broker";
-  const html = req.body.html || `<p>Esto es una prueba desde el servidor de Leones Broker. Si recibes este correo, Resend/SMTP está funcionando.</p>`;
-  try {
-    const r = await sendEmail({ to, subject, html });
-    if (r.ok) return res.json({ ok: true, message: "Correo enviado", provider: r.provider, result: r.result || r.info || r.resp });
-    return res.status(500).json({ ok: false, message: "No se pudo enviar correo", error: r.error });
-  } catch (err) {
-    console.error("test email error:", err);
-    return res.status(500).json({ ok: false, message: "Error interno enviando correo", error: err && err.message ? err.message : String(err) });
-  }
-});
 
+
+app.post("/api/_send_test_email", async (req, res) => {
+
+  const to =
+    (req.body && req.body.to) ||
+    process.env.SMTP_USER ||
+    process.env.EMAIL_USER;
+
+
+  if (!to) {
+
+    return res.status(400).json({
+
+      ok: false,
+
+      message:
+      "Necesitas enviar 'to' en el body o configurar EMAIL_USER"
+
+    });
+
+  }
+
+
+  const subject =
+    req.body.subject ||
+    "Prueba de correo - Leones Broker";
+
+
+  const html =
+    req.body.html ||
+    `<p>
+    Esto es una prueba desde el servidor de Leones Broker.
+    SMTP es principal y Resend queda como respaldo.
+    </p>`;
+
+
+  try {
+
+
+    const r =
+      await sendEmail({
+        to,
+        subject,
+        html
+      });
+
+
+
+    if (r.ok) {
+
+      return res.json({
+
+        ok: true,
+
+        message:
+        "Correo enviado",
+
+        provider:
+        r.provider,
+
+        result:
+        r.result ||
+        r.info ||
+        r.resp
+
+      });
+
+    }
+
+
+
+    return res.status(500).json({
+
+      ok: false,
+
+      message:
+      "No se pudo enviar correo",
+
+      error:
+      r.error
+
+    });
+
+
+
+  } catch (err) {
+
+
+    console.error(
+      "test email error:",
+      err
+    );
+
+
+    return res.status(500).json({
+
+      ok:false,
+
+      message:
+      "Error interno enviando correo",
+
+      error:
+      err && err.message
+      ? err.message
+      : String(err)
+
+    });
+
+  }
+
+});
 /* ======================================================
    MARKET ROUTES
    ====================================================== */
