@@ -40,6 +40,14 @@ const {
 const SMTP_USER_FINAL = SMTP_USER || EMAIL_USER || "";
 const SMTP_PASS_FINAL = SMTP_PASS || EMAIL_PASS || "";
 
+console.log("[MAIL CONFIG]", {
+ host: SMTP_HOST,
+ port: SMTP_PORT,
+ secure: SMTP_SECURE,
+ user: SMTP_USER_FINAL,
+ passExists: !!SMTP_PASS_FINAL
+});
+
 const DEFAULT_FROM_NAME = SENDER_NAME || "Leones Broker";
 
 let transporter = null;
