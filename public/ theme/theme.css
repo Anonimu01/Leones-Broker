@@ -1,58 +1,121 @@
 /*==========================================
+      LEONES BROKER
       BOTÓN TEMA FLOTANTE MOVIBLE
 ==========================================*/
 
 #themeToggle{
 
-    position:fixed;
+    position:fixed !important;
 
-    top:80px;
-    left:20px;
+    top:80px !important;
 
-    width:58px;
+    left:20px !important;
 
-    height:58px;
+    width:65px !important;
 
-    border:none;
+    height:65px !important;
 
-    border-radius:50%;
+    display:flex !important;
 
-    background:#d4af37;
+    align-items:center !important;
 
-    color:#111;
+    justify-content:center !important;
 
-    font-size:26px;
+    visibility:visible !important;
 
-    cursor:grab;
+    opacity:1 !important;
 
-    z-index:99999999;
+    background:#d4af37 !important;
 
-    display:flex;
+    color:#111111 !important;
 
-    align-items:center;
+    border:2px solid #ffffff !important;
 
-    justify-content:center;
+    border-radius:50% !important;
 
-    box-shadow:0 5px 20px rgba(0,0,0,.35);
+    font-size:30px !important;
 
-    user-select:none;
+    font-weight:bold !important;
 
-    touch-action:none;
+    cursor:grab !important;
+
+    z-index:2147483647 !important;
+
+    box-shadow:
+        0 0 15px rgba(212,175,55,.8),
+        0 5px 25px rgba(0,0,0,.5) !important;
+
+    user-select:none !important;
+
+    -webkit-user-select:none !important;
+
+    touch-action:none !important;
+
+    pointer-events:auto !important;
+
+    transition:
+        transform .25s ease,
+        box-shadow .25s ease !important;
 
 }
 
+
+/* Cuando lo presionan */
 
 #themeToggle:active{
 
-    cursor:grabbing;
+    cursor:grabbing !important;
 
-    transform:scale(1.10);
+    transform:scale(1.15) !important;
 
 }
 
 
+/* Cuando pasa el mouse */
+
 #themeToggle:hover{
 
-    transform:scale(1.08);
+    transform:scale(1.10) !important;
+
+    box-shadow:
+        0 0 25px rgba(212,175,55,1),
+        0 5px 30px rgba(0,0,0,.6) !important;
+
+}
+
+
+/* Animación para llamar la atención */
+
+@keyframes themePulse{
+
+    0%{
+
+        box-shadow:
+        0 0 10px rgba(212,175,55,.5);
+
+    }
+
+
+    50%{
+
+        box-shadow:
+        0 0 30px rgba(212,175,55,1);
+
+    }
+
+
+    100%{
+
+        box-shadow:
+        0 0 10px rgba(212,175,55,.5);
+
+    }
+
+}
+
+
+#themeToggle{
+
+    animation:themePulse 2s infinite !important;
 
 }
